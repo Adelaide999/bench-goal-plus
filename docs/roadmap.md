@@ -10,6 +10,7 @@
 
 - [x] 建立中央仓库、状态 registry 与 fork/upstream/commit 映射。
 - [x] 建立非交互 Codex runner，保留 JSONL、thread id、usage、stderr、最终消息和 manifest。
+- [x] 为 6 套 active benchmark 建立统一导读，记录规模、时间与代表 case 的 I/O/verifier 契约。
 - [ ] 定义统一 benchmark adapter 接口：`materialize -> prompt -> evaluate -> parse -> archive`。
 - [ ] 定义统一 run manifest 扩展：task commit、image digest、model/provider、seed、预算和网络策略。
 - [ ] 定义 evaluator-call ledger；不能用“iteration”代替真实验证次数。
