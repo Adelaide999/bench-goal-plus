@@ -1,0 +1,55 @@
+2026-07-20 03:56:07,659 - skydiscover.search.utils.logging_utils - INFO - Logging to /path/to/bench-goal-plus/evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/logs/evox_20260720_035607.log
+2026-07-20 03:56:07,663 - skydiscover.runner - INFO - Runner ready: search=evox, program=benchmarks/math/circle_packing/initial_program.py
+2026-07-20 03:56:07,960 - skydiscover.llm - INFO - DeepSeek LLM: deepseek-v4-flash
+2026-07-20 03:56:10,724 - skydiscover.evaluation.evaluator - INFO - Initialized evaluator with benchmarks/math/circle_packing/evaluator.py
+2026-07-20 03:56:10,724 - skydiscover.search.default_discovery_controller - INFO - DiscoveryController initialized: num_context_programs=4
+2026-07-20 03:56:11,261 - skydiscover.context_builder.evox.builder - INFO - Initialized guide LLM inside EvoxContextBuilder: deepseek-v4-flash
+2026-07-20 03:56:11,261 - skydiscover.context_builder.default.builder - INFO - Templates set: system=None, user=search_evolution_user_message
+2026-07-20 03:56:11,272 - skydiscover.evaluation.evaluator - INFO - Initialized evaluator with /path/to/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+2026-07-20 03:56:11,272 - skydiscover.search.default_discovery_controller - INFO - DiscoveryController initialized: num_context_programs=2
+2026-07-20 03:56:11,272 - skydiscover.search.evox.controller - INFO - ======================================================================
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO - [EVOX CO-EVOLUTION SETUP]
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO - ----------------------------------------------------------------------
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO -   [SOLUTION EVOLUTION]
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO -     Initial search strategy file : /path/to/skydiscover/skydiscover/search/evox/database/initial_search_strategy.py
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO -     Solution database class      : EvolvedProgramDatabase
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO -   [META EVOLUTION OF SEARCH STRATEGY]
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO -     Search strategy database class: SearchStrategyDatabase
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO -     Search strategy evaluator     : /path/to/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO -     Search strategy config        : /path/to/skydiscover/skydiscover/search/evox/config/search.yaml
+2026-07-20 03:56:11,273 - skydiscover.search.evox.controller - INFO - ======================================================================
+2026-07-20 03:56:11,274 - skydiscover.runner - INFO - Adding initial program to database
+2026-07-20 03:56:11,652 - skydiscover.evaluation.evaluator - INFO - Evaluated program c66bf67c-ef8f-42af-93d4-7a5d7e37cc93 in 0.38s: validity=1.0000, sum_radii=0.9598, target_ratio=0.3642, combined_score=0.3642, eval_time=0.1827
+2026-07-20 03:56:11,652 - skydiscover.search.registry - INFO - Using search strategy from: /path/to/skydiscover/skydiscover/search/evox/database/initial_search_strategy.py
+2026-07-20 03:56:11,653 - skydiscover.search.base_database - INFO - Database has 1 programs, best program score is validity=1.0000, sum_radii=0.9598, target_ratio=0.3642, combined_score=0.3642, eval_time=0.1827
+2026-07-20 03:56:11,664 - skydiscover.search.evox.controller - INFO - Label generation: using guide_model = [deepseek-v4-flash]
+2026-07-20 03:56:11,665 - skydiscover.search.evox.utils.variation_operator_generator - INFO - Read 2 packages from benchmarks/math/circle_packing/requirements.txt
+2026-07-20 03:56:13,716 - httpx - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-07-20 03:56:36,342 - skydiscover.search.evox.controller - INFO - Generated variation operator labels (2946/2799 chars)
+2026-07-20 03:56:36,471 - httpx - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-07-20 03:57:37,087 - skydiscover.evaluation.evaluator - INFO - Evaluated program 39bedf5d-34e0-4fe0-8259-ec5b5e0d80f9 in 0.26s: validity=0.0000, sum_radii=0.0000, target_ratio=0.0000, combined_score=0.0000
+2026-07-20 03:57:37,088 - skydiscover.search.default_discovery_controller - WARNING - Evaluation failed (attempt 1/3): validity=0.0, error=Evaluation failed (validity=0)
+2026-07-20 03:57:37,088 - skydiscover.search.default_discovery_controller - INFO - Retry 2/3: rebuilding prompt with 1 failed attempt(s)
+2026-07-20 03:57:37,172 - httpx - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-07-20 03:58:14,209 - skydiscover.evaluation.evaluator - INFO - Evaluated program 17cb862e-3e12-4434-86c0-5d57cf2ba47e in 0.18s: validity=0.0000, sum_radii=0.0000, target_ratio=0.0000, combined_score=0.0000
+2026-07-20 03:58:14,210 - skydiscover.search.default_discovery_controller - WARNING - Evaluation failed (attempt 2/3): validity=0.0, error=Evaluation failed (validity=0)
+2026-07-20 03:58:14,210 - skydiscover.search.default_discovery_controller - INFO - Retry 3/3: rebuilding prompt with 2 failed attempt(s)
+2026-07-20 03:58:14,296 - httpx - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-07-20 03:59:30,882 - skydiscover.evaluation.evaluator - INFO - Evaluated program 22a62f43-96ae-458d-a8a1-8049a8b71684 in 0.37s: validity=1.0000, sum_radii=1.5635, target_ratio=0.5934, combined_score=0.5934, eval_time=0.1809
+2026-07-20 03:59:30,883 - skydiscover.search.default_discovery_controller - INFO - Iteration 1: Program 22a62f43-96ae-458d-a8a1-8049a8b71684 (parent: c66bf67c-ef8f-42af-93d4-7a5d7e37cc93) completed in 174.54s (llm: 76.30s, eval: 0.37s)
+2026-07-20 03:59:30,883 - skydiscover.search.default_discovery_controller - INFO - [CHECKPOINT] Checkpoint interval reached at iteration 1
+2026-07-20 03:59:30,883 - skydiscover.search.base_database - INFO - Database has 2 programs, best program score is validity=1.0000, sum_radii=1.5635, target_ratio=0.5934, combined_score=0.5934, eval_time=0.1809
+2026-07-20 03:59:30,886 - skydiscover.search.utils.checkpoint_manager - INFO - [CHECKPOINT] Saved database with 2 programs to /path/to/bench-goal-plus/evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1
+2026-07-20 03:59:30,887 - skydiscover.runner - INFO - Checkpoint 1: best=validity=1.0000, sum_radii=1.5635, target_ratio=0.5934, combined_score=0.5934, eval_time=0.1809
+2026-07-20 03:59:30,887 - skydiscover.runner - INFO - Checkpoint saved to /path/to/bench-goal-plus/evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1
+2026-07-20 03:59:30,887 - skydiscover.search.default_discovery_controller - INFO - Metrics: validity=1.0000, sum_radii=1.5635, target_ratio=0.5934, combined_score=0.5934, eval_time=0.1809
+2026-07-20 03:59:30,887 - skydiscover.search.default_discovery_controller - INFO - 🌟 New best solution found at iteration 1
+2026-07-20 03:59:30,887 - skydiscover.search.evox.controller - INFO - [SOLUTION EVOLUTION] Evolution completed: evox
+2026-07-20 03:59:30,889 - skydiscover.search.utils.checkpoint_manager - INFO - [CHECKPOINT] Saved database with 2 programs to /path/to/bench-goal-plus/evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1
+2026-07-20 03:59:30,890 - skydiscover.runner - INFO - Checkpoint 1: best=validity=1.0000, sum_radii=1.5635, target_ratio=0.5934, combined_score=0.5934, eval_time=0.1809
+2026-07-20 03:59:30,890 - skydiscover.runner - INFO - Checkpoint saved to /path/to/bench-goal-plus/evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1
+2026-07-20 03:59:31,258 - skydiscover.evaluation.evaluator - INFO - Evaluated program 22a62f43-96ae-458d-a8a1-8049a8b71684 in 0.37s: validity=1.0000, sum_radii=1.5635, target_ratio=0.5934, combined_score=0.5934, eval_time=0.1790
+2026-07-20 03:59:31,258 - skydiscover.runner - INFO - Test evaluation for best program: validity=1.0000, sum_radii=1.5635, target_ratio=0.5934, combined_score=0.5934, eval_time=0.1790
+2026-07-20 03:59:31,260 - skydiscover.runner - INFO - Best program saved to /path/to/bench-goal-plus/evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/best
+2026-07-20 03:59:31,282 - skydiscover.runner - INFO - Discovery completed. Best: validity=1.0000, sum_radii=1.5635, target_ratio=0.5934, combined_score=0.5934, eval_time=0.1809, test_validity=1.0000, test_sum_radii=1.5635, test_target_ratio=0.5934, test_combined_score=0.5934, test_eval_time=0.1790
+2026-07-20 03:59:31,283 - skydiscover.runner - INFO - Best program saved to /path/to/bench-goal-plus/evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/best

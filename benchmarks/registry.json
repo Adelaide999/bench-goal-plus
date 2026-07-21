@@ -51,6 +51,7 @@
       },
       "evidence": [
         "evidence/legacy-smokes/2026-07-20-summary.json",
+        "evidence/legacy-smokes/source-smoke-results.json",
         "evidence/legacy-smokes/ale-ahc027-valid-baseline.json",
         "evidence/runs/2026-07-21-ale-ahc027-plain-codex/summary.json",
         "evidence/runs/2026-07-21-ale-ahc027-plain-codex/codex-run-manifest.json",
@@ -90,6 +91,7 @@
       },
       "evidence": [
         "evidence/legacy-smokes/2026-07-20-summary.json",
+        "evidence/legacy-smokes/source-smoke-results.json",
         "evidence/legacy-smokes/heurigym-operator-scheduling-demo.output"
       ],
       "next_action": "Move the macOS/data-download compatibility patch into the fork, then expose operator_scheduling as an isolated Codex workspace.",
@@ -159,6 +161,7 @@
       },
       "evidence": [
         "evidence/legacy-smokes/2026-07-20-summary.json",
+        "evidence/legacy-smokes/source-smoke-results.json",
         "evidence/legacy-smokes/autolab-toy-isa-reward.json"
       ],
       "next_action": "Add a Codex agent profile for toy_isa_opt without the NVIDIA-only Harbor patch and preserve Harbor reward artifacts.",
@@ -297,7 +300,14 @@
       },
       "evidence": [
         "evidence/legacy-smokes/2026-07-20-summary.json",
-        "evidence/legacy-smokes/skydiscover-best-program-info.json"
+        "evidence/legacy-smokes/source-smoke-results.json",
+        "evidence/legacy-smokes/skydiscover-best-program-info.json",
+        "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/best/best_program.py",
+        "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/best/best_program_info.json",
+        "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1/metadata.json",
+        "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1/programs/22a62f43-96ae-458d-a8a1-8049a8b71684.json",
+        "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1/programs/c66bf67c-ef8f-42af-93d4-7a5d7e37cc93.json",
+        "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/logs/evox_20260720_035607.log.txt"
       ],
       "next_action": "Add response-usage capture, then implement the Swarm task-eval workspace adapter.",
       "blockers": [

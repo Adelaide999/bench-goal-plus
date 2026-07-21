@@ -50,8 +50,10 @@ docs/roadmap.md                分 benchmark 的推进计划与完成定义
 docs/codex-run-contract.md     所有 benchmark 共用的 Codex 执行/证据契约
 scripts/run_codex.py           通用非交互 Codex runner，保存 JSONL、usage 与 manifest
 scripts/status.py              校验 registry 并打印状态矩阵
-evidence/legacy-smokes/        迁入的已验证 smoke 摘要和小型结果
+evidence/legacy-smokes/        迁入的摘要、结果及 SkyDiscover 完整 checkpoint
 legacy/direct-api/             原有 direct-API smoke 辅助脚本，作为环境基线
+docs/legacy-smoke-runbook.md   已去除机器路径的旧实验复现说明
+scripts/verify_legacy_smokes.py 迁移证据与可选上游 raw artifact 交叉验证
 tests/                         不调用真实模型的 runner/registry 测试
 ```
 
@@ -78,4 +80,4 @@ runner 不保存环境变量值；模型/provider、任务 commit 和 evaluator 
 
 ## 旧资料边界
 
-`mythink/agentic-scaling/benchmark-smoke` 暂时保留为只读历史来源，避免误删尚未纳入父仓的实验。已迁移的摘要见 [legacy smoke 说明](evidence/legacy-smokes/README.md)。后续状态只在本仓更新。
+`mythink/agentic-scaling/benchmark-smoke` 的逻辑、复现说明和有价值的运行证据已全部迁移；旧目录可以删除。逐文件映射和删除门禁见 [迁移完成说明](docs/legacy-smoke-migration.md)，复现命令见 [legacy smoke runbook](docs/legacy-smoke-runbook.md)。后续状态和新实验只在本仓更新。
