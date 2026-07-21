@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-07-22T00:02:00+08:00",
+  "host": {
+    "architecture": "x86_64",
+    "physical_memory_bytes": 17179869184,
+    "logical_cpus": 12,
+    "disk_free_bytes_after_builds": 130191872000,
+    "docker_engine": "OrbStack",
+    "docker_architecture": "x86_64",
+    "docker_vm_memory_bytes": 8400662528,
+    "docker_vm_cpus": 12
+  },
+  "measurement_notes": [
+    "image_size_bytes is Docker's logical image size; shared layers mean incremental local use may be smaller",
+    "checkout_size_bytes includes the currently installed virtual environment when present",
+    "no credentials, model API values, local usernames, absolute paths, or machine identifiers are recorded"
+  ],
+  "benchmarks": [
+    {
+      "id": "ale-bench-lite",
+      "source_commit": "f7d927906dc1dcd860ee086e4560d576438b1354",
+      "checkout_size_bytes": 911450112,
+      "representative_case": "ahc027",
+      "images": [
+        {
+          "tag": "ale-bench:cpp20-202301",
+          "image_id": "sha256:35cd525e74e56a6959ed41f33b87c37af88bf63dfa8e7c529edd6ee674b5e6ed",
+          "image_size_bytes": 2729823739
+        },
+        {
+          "tag": "rust:1.79.0-buster",
+          "image_id": "sha256:52dde130826010179eb37d57d937cfa090f4989eb0f58e05a42449d8764a07b4",
+          "image_size_bytes": 1298509186
+        },
+        {
+          "tag": "ale-bench:rust-202301",
+          "image_id": "sha256:74bbc8bd6c2de3076e3c808d019be386d1e1fa9dbfecd92dad8814e06f45b708",
+          "image_size_bytes": 2289472545,
+          "optional_for_cpp_only_smoke": true
+        }
+      ],
+      "cpp_only_required_image_bytes": 4028332925,
+      "cpp_and_rust_image_bytes": 6317805470,
+      "flow_result": "official public/private evaluator path already passed"
+    },
+    {
+      "id": "heurigym",
+      "source_commit": "a4cf0460152eb798f1b3a797ef22a08192661bf5",
+      "checkout_size_bytes": 369750016,
+      "docker_required": false,
+      "representative_case": "operator_scheduling",
+      "flow_result": {
+        "valid": true,
+        "cost": 7
+      }
+    },
+    {
+      "id": "frontier-engineering-lite",
+      "source_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+      "checkout_size_bytes": 33882112,
+      "docker_required_for_v1_lite": false,
+      "representative_case": "ComputerSystems/MallocLab",
+      "flow_result": {
+        "mdriver_returncode": 0,
+        "combined_score": 28.0,
+        "valid": 1.0,
+        "testcases_passed": 6,
+        "testcases_total": 11,
+        "testcase_pass_rate": 0.5454545454545454
+      }
+    },
+    {
+      "id": "autolab-cpu",
+      "source_commit": "7aff5fe71dfbe152fb0b8e8ac8087210b4bc27d5",
+      "checkout_size_bytes": 751923200,
+      "representative_case": "toy_isa_opt",
+      "image": {
+        "tag": "bench-goal-plus/autolab-toy-isa-opt:7aff5fe",
+        "image_id": "sha256:2bf7fcb3f75092d7c83d536154246e56c1afd641e49c054c13f706f119315f1e",
+        "image_size_bytes": 277471623,
+        "observed_unique_size_bytes": 199400000
+      },
+      "flow_result": {
+        "cycles": 9220,
+        "verify": "ok"
+      },
+      "task_dockerfiles": 36,
+      "cuda_based_task_dockerfiles": 11
+    },
+    {
+      "id": "swarmresearch-15",
+      "source_commit": "e848d8d5760065714c38fa7558f0298573db17ab",
+      "checkout_size_bytes": 1252143104,
+      "representative_case": "math/circle_packing",
+      "images": [
+        {
+          "role": "host-agent evaluator only",
+          "tag": "bench-goal-plus/swarm-circle-evaluator-minimal:e848d8d",
+          "image_id": "sha256:29c2a2443e370dabede3219bcc51f05b2873b5ab18753aa9f7def655eacd6a7c",
+          "image_size_bytes": 196219928
+        },
+        {
+          "role": "paper-style task image with agent CLIs",
+          "tag": "prompt-eval-circle_packing:latest",
+          "image_id": "sha256:81f8216cab122fdb53b915019f7759139ad87a9897d2dee3860e72c5c64e4741",
+          "image_size_bytes": 2096623882,
+          "shared_base_tag": "swarmresearch-task-base:py312",
+          "shared_base_size_bytes": 2027667509
+        }
+      ],
+      "flow_result": {
+        "status": "success",
+        "combined_score": 0.9597642169962064,
+        "sum_radii": 0.9597642169962064,
+        "validity": 1.0,
+        "evaluator_time_seconds": 0.005068302154541016
+      },
+      "evaluator_dockerfiles": 26
+    },
+    {
+      "id": "frontier-cs",
+      "source_commit": "07500f9e5751ddf86ef2760e0d35ff93e6a96a29",
+      "checkout_size_bytes": 22740992,
+      "representative_case": "algorithmic/problem-0",
+      "image": {
+        "tag": "bench-goal-plus/frontier-cs-judge:07500f9",
+        "image_id": "sha256:155819203551a3a15d03e6e12264451e557f3323c5a7af3d4b75dd2a78ae3a14",
+        "image_size_bytes": 1270184456,
+        "go_judge_version": "1.11.1",
+        "npm_version": "10.8.2"
+      },
+      "runtime": {
+        "privileged": true,
+        "shm_bytes": 4294967296,
+        "judge_workers": 1,
+        "go_judge_parallelism": 1
+      },
+      "flow_result": {
+        "status": "done",
+        "score": 93.089935,
+        "score_unbounded": 93.089935,
+        "checker_ratio": 0.93089935,
+        "upstream_passed_field": false,
+        "interpretation": "the output passed validity checks and emitted a partial optimization score; upstream labels every non-perfect ratio as Wrong Answer"
+      }
+    },
+    {
+      "id": "perfopt-bench",
+      "docker_status": "unavailable",
+      "reason": "no executable public artifact or image was available at audit time"
+    }
+  ]
+}

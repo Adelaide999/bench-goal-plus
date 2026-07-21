@@ -39,7 +39,7 @@
 
 完成定义：
 
-- [ ] 在 Linux/OrbStack 选择最轻一题，记录首次 build、镜像和 verifier 时间。
+- [x] sparse checkout `ComputerSystems/MallocLab`，在 Mac 原生运行官方 verifier；确认 v1-lite 本身不要求 Docker，并记录 raw 28/100、6/11 cases。
 - [ ] 冻结 raw score parser；不先做跨任务归一化。
 - [ ] plain Codex 与 Goal Plus + Codex 都通过同一个只读 verifier。
 - [ ] 20–30 evaluator calls 做策略筛选；只让前两名进入官方 100 calls × 3 seeds。
@@ -57,8 +57,9 @@
 
 完成定义：
 
-- [ ] 修复复现仓 package/import/bootstrap，冻结依赖和 evaluator image digest。
-- [ ] Math `circle_packing`、ADRS `eplb`、ALE `ahc015` 各跑通一次 `task-eval`。
+- [ ] 修复复现仓 package/import/bootstrap，冻结完整 15-task 依赖和 evaluator image digest。
+- [x] Math `circle_packing` 的 evaluator-only 与论文式 task image 均构建，官方 evaluator score 0.9597642169962064。
+- [ ] ADRS `eplb`、ALE `ahc015` 各跑通一次 `task-eval`；先补齐上游缺失的共享 worker build context。
 - [ ] 建立 `optimization score -> task-native metric -> paper metric` 映射。
 - [ ] plain Codex、Goal Plus + Codex、fixed parallel 与 EvoX 使用统一 evaluator-call ledger。
 - [ ] 5-task pilot 后才进入 15 tasks × methods × seeds 最终实验。
@@ -67,8 +68,9 @@
 
 完成定义：
 
-- [ ] sparse checkout 一个轻量 deterministic task。
-- [ ] 先建立官方 evaluator + plain Codex smoke，再选择 5 high/5 low Pass@1 子集。
+- [x] sparse checkout `algorithmic/problem-0`，固定 Node/npm/go-judge，构建 1.27 GB judge image 并获得 raw score 93.089935。
+- [ ] 建立 plain Codex smoke，并显式处理“有效部分分数仍被上游标为 Wrong Answer”的语义。
+- [ ] 再选择 5 high/5 low Pass@1 子集。
 - [ ] systems/GPU tasks 转移到 Linux 32 GB+ / GPU 节点，不在当前 Mac 强行 campaign。
 
 ### P7：PERFOPT-Bench

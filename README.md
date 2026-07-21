@@ -11,6 +11,7 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 - ALE-Bench Lite、HeuriGym、AutoLab 已有本机官方 verifier / 远端模型 smoke 证据。
 - ALE-Bench Lite `ahc027` 已完成首个真实 plain Codex smoke：`gpt-5.4-mini` 改写候选后 5/5 public-lite cases accepted，raw score 从 61,302,533 降到 55,181,186（该题越低越好，改善 9.99%）。
 - SkyDiscover/EvoX 已完成 DeepSeek OpenAI-compatible 的 1 iteration smoke，但还不是论文可比实验。
+- 已在当前 Mac 为所有可执行 benchmark 建立代表 case 的环境证据：ALE、AutoLab、SwarmResearch、Frontier-CS 使用镜像，HeuriGym 与 Frontier-Engineering v1-lite 使用 host 环境；完整空间表见 [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
 - Goal Plus + Codex 与其余 benchmark 的 plain Codex 尚未验收；这是本仓接下来逐项完成的主线。
 
 ## 固定验收门禁
@@ -48,6 +49,7 @@ SkyDiscover/EvoX 与 OpenEvolve 是 search backend，不与 benchmark 混为一�
 benchmarks/registry.json       唯一状态源：上游、fork、commit、门禁、证据、下一步
 docs/roadmap.md                分 benchmark 的推进计划与完成定义
 docs/codex-run-contract.md     所有 benchmark 共用的 Codex 执行/证据契约
+docs/docker-storage-plan.md    单 case 实测镜像、全量空间预算与 Linux campaign 规划
 scripts/run_codex.py           通用非交互 Codex runner，保存 JSONL、usage 与 manifest
 scripts/status.py              校验 registry 并打印状态矩阵
 evidence/legacy-smokes/        迁入的摘要、结果及 SkyDiscover 完整 checkpoint

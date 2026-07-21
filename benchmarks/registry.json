@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-07-21",
+  "checked_at": "2026-07-22",
   "status_values": ["pass", "partial", "todo", "blocked", "n/a"],
   "gate_sets": {
     "benchmark": [
@@ -57,7 +57,8 @@
         "evidence/runs/2026-07-21-ale-ahc027-plain-codex/codex-run-manifest.json",
         "evidence/runs/2026-07-21-ale-ahc027-plain-codex/public-eval.json",
         "evidence/runs/2026-07-21-ale-ahc027-plain-codex/solution.cpp",
-        "evidence/runs/2026-07-21-ale-ahc027-plain-codex/events.jsonl"
+        "evidence/runs/2026-07-21-ale-ahc027-plain-codex/events.jsonl",
+        "evidence/environment/2026-07-21-mac-representative-smokes.json"
       ],
       "next_action": "Wrap the same ahc027 workspace/evaluator contract with Goal Plus + Codex for a 2-lineage, 3-evaluator-call smoke.",
       "blockers": []
@@ -92,7 +93,8 @@
       "evidence": [
         "evidence/legacy-smokes/2026-07-20-summary.json",
         "evidence/legacy-smokes/source-smoke-results.json",
-        "evidence/legacy-smokes/heurigym-operator-scheduling-demo.output"
+        "evidence/legacy-smokes/heurigym-operator-scheduling-demo.output",
+        "evidence/environment/2026-07-21-mac-representative-smokes.json"
       ],
       "next_action": "Move the macOS/data-download compatibility patch into the fork, then expose operator_scheduling as an isolated Codex workspace.",
       "blockers": [
@@ -115,21 +117,23 @@
         }
       ],
       "data_url": "https://github.com/EinsiaLab/Frontier-Engineering",
-      "local_path": null,
+      "local_path": "../Frontier-Engineering",
       "stages": {
         "source_forked": "pass",
         "environment": "partial",
-        "official_verifier": "todo",
+        "official_verifier": "pass",
         "legacy_agent_smoke": "todo",
         "plain_codex": "todo",
         "goal_plus_codex": "todo",
         "matched_baseline": "todo",
         "campaign_ready": "todo"
       },
-      "evidence": [],
-      "next_action": "Choose the lightest v1-lite task, build it in a Linux/OrbStack environment, and freeze raw-score parsing before any model run.",
+      "evidence": [
+        "evidence/environment/2026-07-21-mac-representative-smokes.json"
+      ],
+      "next_action": "Materialize MallocLab as an isolated Codex workspace and preserve the same raw 0-100 score parser before expanding to the other nine v1-lite tasks.",
       "blockers": [
-        "Upstream host bootstrap assumes Debian/Ubuntu; the 16 GB Intel Mac is suitable only for a light smoke."
+        "Only MallocLab has been environment-tested; the remaining nine v1-lite tasks use task-local Python runtimes and assets that must be frozen on Linux."
       ]
     },
     {
@@ -162,7 +166,8 @@
       "evidence": [
         "evidence/legacy-smokes/2026-07-20-summary.json",
         "evidence/legacy-smokes/source-smoke-results.json",
-        "evidence/legacy-smokes/autolab-toy-isa-reward.json"
+        "evidence/legacy-smokes/autolab-toy-isa-reward.json",
+        "evidence/environment/2026-07-21-mac-representative-smokes.json"
       ],
       "next_action": "Add a Codex agent profile for toy_isa_opt without the NVIDIA-only Harbor patch and preserve Harbor reward artifacts.",
       "blockers": []
@@ -194,17 +199,20 @@
       "stages": {
         "source_forked": "pass",
         "environment": "partial",
-        "official_verifier": "todo",
+        "official_verifier": "pass",
         "legacy_agent_smoke": "partial",
         "plain_codex": "partial",
         "goal_plus_codex": "todo",
         "matched_baseline": "todo",
         "campaign_ready": "todo"
       },
-      "evidence": [],
-      "next_action": "Fix package/import/bootstrap reproducibility in the fork and pass task-eval for circle_packing before running Codex.",
+      "evidence": [
+        "evidence/environment/2026-07-21-mac-representative-smokes.json"
+      ],
+      "next_action": "Wrap the verified circle_packing evaluator-only image around an isolated host Codex workspace, then repair the ADRS/ALE worker image layout before the 5-task pilot.",
       "blockers": [
         "The paper reproduction checkout has a package-name/import mismatch and no frozen root dependency file.",
+        "The ADRS/ALE shared worker image build context referenced by the reproduction tasks is absent from the published layout.",
         "The runner recognizes Codex state, but no paper-ready Codex loop configuration has been published.",
         "No license is declared in either upstream repository."
       ]
@@ -225,20 +233,23 @@
         }
       ],
       "data_url": "https://github.com/FrontierCS/Frontier-CS",
-      "local_path": null,
+      "local_path": "../Frontier-CS",
       "stages": {
         "source_forked": "pass",
-        "environment": "todo",
-        "official_verifier": "todo",
+        "environment": "partial",
+        "official_verifier": "pass",
         "legacy_agent_smoke": "todo",
         "plain_codex": "todo",
         "goal_plus_codex": "todo",
         "matched_baseline": "todo",
         "campaign_ready": "todo"
       },
-      "evidence": [],
-      "next_action": "Create a sparse checkout for one lightweight deterministic task, then measure disk/build/verifier cost before selecting the 10-task slice.",
+      "evidence": [
+        "evidence/environment/2026-07-21-mac-representative-smokes.json"
+      ],
+      "next_action": "Expose algorithmic/problem-0 as a plain Codex workspace and parse its native partial score; select the 5-high/5-low slice only after the algorithmic adapter is repeatable.",
       "blockers": [
+        "The algorithmic server calls every non-perfect optimization ratio Wrong Answer even when the checker emits a valid partial score; the adapter must not treat passed=false as zero.",
         "The full checkout and FrontierCS 2.0 systems tasks are too heavy for the current Mac; several tasks require 16-32 GB RAM or H100-class GPUs."
       ]
     },
@@ -269,7 +280,9 @@
         "matched_baseline": "blocked",
         "campaign_ready": "blocked"
       },
-      "evidence": [],
+      "evidence": [
+        "evidence/environment/2026-07-21-mac-representative-smokes.json"
+      ],
       "next_action": "Recheck the executable artifact URL; fork the real benchmark only after an authoritative GitHub repository appears.",
       "blockers": [
         "No executable GitHub benchmark repository is currently public; AllenPiaoHong/perfopt-bench-site is only a promotional website."
