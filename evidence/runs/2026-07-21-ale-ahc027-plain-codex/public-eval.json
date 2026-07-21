@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "benchmark": "ale-bench-lite",
+  "problem_id": "ahc027",
+  "split": "public-lite",
+  "score_type": "minimize",
+  "evaluator_calls": 1,
+  "code_sha256": "a9f882ef5c69933d89f8aed7630e8ced7ab3160ee3cfbfb4eaecd4cab72318dd",
+  "overall_judge_result": "ACCEPTED",
+  "overall_absolute_score": 55181186,
+  "overall_relative_score": null,
+  "elapsed_seconds": 108.72958454599984,
+  "cases": [
+    {
+      "judge_result": "ACCEPTED",
+      "absolute_score": 4119587,
+      "relative_score": null,
+      "execution_time": 0.06,
+      "memory_usage": 4034560,
+      "message": ""
+    },
+    {
+      "judge_result": "ACCEPTED",
+      "absolute_score": 15835398,
+      "relative_score": null,
+      "execution_time": 0.06,
+      "memory_usage": 5357568,
+      "message": ""
+    },
+    {
+      "judge_result": "ACCEPTED",
+      "absolute_score": 3816099,
+      "relative_score": null,
+      "execution_time": 0.07,
+      "memory_usage": 4177920,
+      "message": ""
+    },
+    {
+      "judge_result": "ACCEPTED",
+      "absolute_score": 11371410,
+      "relative_score": null,
+      "execution_time": 0.11,
+      "memory_usage": 8183808,
+      "message": ""
+    },
+    {
+      "judge_result": "ACCEPTED",
+      "absolute_score": 20038692,
+      "relative_score": null,
+      "execution_time": 0.06,
+      "memory_usage": 7368704,
+      "message": ""
+    }
+  ]
+}

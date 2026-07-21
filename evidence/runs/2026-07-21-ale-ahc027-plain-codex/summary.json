@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-21",
+  "benchmark": "ale-bench-lite",
+  "problem_id": "ahc027",
+  "split": "public-lite",
+  "host": "plain-codex",
+  "codex_version": "codex-cli 0.144.6",
+  "model": "gpt-5.4-mini",
+  "sandbox": "workspace-write",
+  "user_config_loaded": false,
+  "starter": {
+    "provenance": "legacy-deepseek-smoke-with-optional-unbounded-loop-disabled",
+    "public_absolute_score": 61302533
+  },
+  "candidate": {
+    "sha256": "a9f882ef5c69933d89f8aed7630e8ced7ab3160ee3cfbfb4eaecd4cab72318dd",
+    "official_public_judge_result": "ACCEPTED",
+    "official_public_absolute_score": 55181186,
+    "relative_improvement_percent": 9.985471562814542,
+    "evaluator_calls": 1
+  },
+  "codex": {
+    "thread_id": "redacted-local-thread",
+    "duration_seconds": 305.2883499909999,
+    "input_tokens": 465166,
+    "cached_input_tokens": 391424,
+    "output_tokens": 13333,
+    "reasoning_output_tokens": 8130
+  },
+  "evaluator": {
+    "duration_seconds": 108.72958454599984,
+    "cases": 5,
+    "accepted_cases": 5
+  },
+  "claim_boundary": "Connectivity smoke from a pre-existing valid starter; not a paper-comparable or matched-budget baseline. Private-lite was not evaluated."
+}

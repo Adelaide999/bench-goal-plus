@@ -1,0 +1,11 @@
+{
+  "problem_id": "ahc027",
+  "public_cases": 5,
+  "public_score": 61302533,
+  "private_cases": 200,
+  "private_score": 8602247700,
+  "rank": 932,
+  "performance": 583,
+  "change": "disabled the generated candidate's optional unbounded local-search loop"
+}
+

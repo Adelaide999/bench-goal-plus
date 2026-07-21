@@ -1,0 +1,60 @@
+{
+  "date": "2026-07-18",
+  "updated": "2026-07-20",
+  "machine": {
+    "cpu": "Intel Core i7-9750H, 6C/12T",
+    "memory_gb": 16,
+    "docker_memory_bytes": 8400658432
+  },
+  "benchmarks": {
+    "ale_bench_lite": {
+      "case": "ahc027",
+      "runner_completed": true,
+      "valid_smoke_public_cases": 5,
+      "valid_smoke_private_cases": 200,
+      "valid_smoke_public_score": 61302533,
+      "valid_smoke_private_score": 8602247700,
+      "valid_smoke_rank": 932,
+      "tokens": 32742,
+      "elapsed_seconds": 1042.32
+    },
+    "heurigym": {
+      "case": "operator_scheduling/demo/demo.json",
+      "model_request_completed": true,
+      "model_program_valid": false,
+      "deterministic_smoke_valid": true,
+      "deterministic_smoke_cost": 7,
+      "api_call_seconds": 146.31,
+      "prompt_tokens": 1319,
+      "completion_tokens": 17885
+    },
+    "autolab": {
+      "case": "toy_isa_opt",
+      "runner_completed": true,
+      "episodes": 9,
+      "correctness": true,
+      "cycles": 2194,
+      "reward": 0.9154,
+      "elapsed_seconds": 399.73
+    },
+    "skydiscover_evox": {
+      "case": "math/circle_packing",
+      "framework_commit": "4734f324c4c3909eb3c8a4bc72a4ca34e6e679ed",
+      "model": "deepseek-v4-flash",
+      "api_protocol": "openai-compatible",
+      "max_iterations": 1,
+      "variation_operator_requests": 1,
+      "candidate_generation_attempts": 3,
+      "model_requests_inferred": 4,
+      "strategy_hot_swap_triggered": false,
+      "initial_combined_score": 0.36423689449571395,
+      "final_combined_score": 0.5933715799355435,
+      "independent_rescore_combined_score": 0.5933715799355435,
+      "elapsed_seconds": 203.32,
+      "tokens": null,
+      "prompt_fidelity": "shortened connectivity-smoke prompt; not paper-comparable"
+    }
+  },
+  "credentials_persisted": false
+}
+

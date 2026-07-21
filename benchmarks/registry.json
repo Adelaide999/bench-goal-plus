@@ -1,0 +1,335 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-07-21",
+  "status_values": ["pass", "partial", "todo", "blocked", "n/a"],
+  "gate_sets": {
+    "benchmark": [
+      "source_forked",
+      "environment",
+      "official_verifier",
+      "legacy_agent_smoke",
+      "plain_codex",
+      "goal_plus_codex",
+      "matched_baseline",
+      "campaign_ready"
+    ],
+    "search_backend": [
+      "source_forked",
+      "native_smoke",
+      "benchmark_adapter",
+      "usage_telemetry",
+      "matched_baseline"
+    ]
+  },
+  "items": [
+    {
+      "id": "ale-bench-lite",
+      "display_name": "ALE-Bench Lite",
+      "kind": "benchmark",
+      "gate_set": "benchmark",
+      "priority": 1,
+      "repositories": [
+        {
+          "role": "benchmark",
+          "upstream_url": "https://github.com/SakanaAI/ALE-Bench",
+          "fork_url": "https://github.com/ck0123/ALE-Bench",
+          "pinned_commit": "f7d927906dc1dcd860ee086e4560d576438b1354",
+          "license": "Apache-2.0"
+        }
+      ],
+      "data_url": "https://huggingface.co/datasets/SakanaAI/ALE-Bench",
+      "local_path": "../ALE-Bench",
+      "stages": {
+        "source_forked": "pass",
+        "environment": "pass",
+        "official_verifier": "pass",
+        "legacy_agent_smoke": "pass",
+        "plain_codex": "pass",
+        "goal_plus_codex": "todo",
+        "matched_baseline": "todo",
+        "campaign_ready": "todo"
+      },
+      "evidence": [
+        "evidence/legacy-smokes/2026-07-20-summary.json",
+        "evidence/legacy-smokes/ale-ahc027-valid-baseline.json",
+        "evidence/runs/2026-07-21-ale-ahc027-plain-codex/summary.json",
+        "evidence/runs/2026-07-21-ale-ahc027-plain-codex/codex-run-manifest.json",
+        "evidence/runs/2026-07-21-ale-ahc027-plain-codex/public-eval.json",
+        "evidence/runs/2026-07-21-ale-ahc027-plain-codex/solution.cpp",
+        "evidence/runs/2026-07-21-ale-ahc027-plain-codex/events.jsonl"
+      ],
+      "next_action": "Wrap the same ahc027 workspace/evaluator contract with Goal Plus + Codex for a 2-lineage, 3-evaluator-call smoke.",
+      "blockers": []
+    },
+    {
+      "id": "heurigym",
+      "display_name": "HeuriGym",
+      "kind": "benchmark",
+      "gate_set": "benchmark",
+      "priority": 2,
+      "repositories": [
+        {
+          "role": "benchmark",
+          "upstream_url": "https://github.com/cornell-zhang/heurigym",
+          "fork_url": "https://github.com/ck0123/heurigym",
+          "pinned_commit": "a4cf0460152eb798f1b3a797ef22a08192661bf5",
+          "license": "Apache-2.0"
+        }
+      ],
+      "data_url": "https://huggingface.co/datasets/heurigen/heurigen-data",
+      "local_path": "../HeuriGym",
+      "stages": {
+        "source_forked": "pass",
+        "environment": "pass",
+        "official_verifier": "pass",
+        "legacy_agent_smoke": "pass",
+        "plain_codex": "todo",
+        "goal_plus_codex": "todo",
+        "matched_baseline": "todo",
+        "campaign_ready": "todo"
+      },
+      "evidence": [
+        "evidence/legacy-smokes/2026-07-20-summary.json",
+        "evidence/legacy-smokes/heurigym-operator-scheduling-demo.output"
+      ],
+      "next_action": "Move the macOS/data-download compatibility patch into the fork, then expose operator_scheduling as an isolated Codex workspace.",
+      "blockers": [
+        "The current local checkout contains uncommitted compatibility edits; they are not yet present in the fork."
+      ]
+    },
+    {
+      "id": "frontier-engineering-lite",
+      "display_name": "Frontier-Engineering v1-lite",
+      "kind": "benchmark",
+      "gate_set": "benchmark",
+      "priority": 3,
+      "repositories": [
+        {
+          "role": "benchmark-and-data",
+          "upstream_url": "https://github.com/EinsiaLab/Frontier-Engineering",
+          "fork_url": "https://github.com/ck0123/Frontier-Engineering",
+          "pinned_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+          "license": "NOASSERTION"
+        }
+      ],
+      "data_url": "https://github.com/EinsiaLab/Frontier-Engineering",
+      "local_path": null,
+      "stages": {
+        "source_forked": "pass",
+        "environment": "partial",
+        "official_verifier": "todo",
+        "legacy_agent_smoke": "todo",
+        "plain_codex": "todo",
+        "goal_plus_codex": "todo",
+        "matched_baseline": "todo",
+        "campaign_ready": "todo"
+      },
+      "evidence": [],
+      "next_action": "Choose the lightest v1-lite task, build it in a Linux/OrbStack environment, and freeze raw-score parsing before any model run.",
+      "blockers": [
+        "Upstream host bootstrap assumes Debian/Ubuntu; the 16 GB Intel Mac is suitable only for a light smoke."
+      ]
+    },
+    {
+      "id": "autolab-cpu",
+      "display_name": "AutoLab CPU subset",
+      "kind": "benchmark",
+      "gate_set": "benchmark",
+      "priority": 4,
+      "repositories": [
+        {
+          "role": "benchmark",
+          "upstream_url": "https://github.com/autolabhq/autolab",
+          "fork_url": "https://github.com/ck0123/autolab",
+          "pinned_commit": "7aff5fe71dfbe152fb0b8e8ac8087210b4bc27d5",
+          "license": "NOASSERTION"
+        }
+      ],
+      "data_url": "https://github.com/autolabhq/autolab/tree/main/tasks",
+      "local_path": "../AutoLab",
+      "stages": {
+        "source_forked": "pass",
+        "environment": "pass",
+        "official_verifier": "pass",
+        "legacy_agent_smoke": "pass",
+        "plain_codex": "todo",
+        "goal_plus_codex": "todo",
+        "matched_baseline": "todo",
+        "campaign_ready": "todo"
+      },
+      "evidence": [
+        "evidence/legacy-smokes/2026-07-20-summary.json",
+        "evidence/legacy-smokes/autolab-toy-isa-reward.json"
+      ],
+      "next_action": "Add a Codex agent profile for toy_isa_opt without the NVIDIA-only Harbor patch and preserve Harbor reward artifacts.",
+      "blockers": []
+    },
+    {
+      "id": "swarmresearch-15",
+      "display_name": "SwarmResearch 15-task substrate",
+      "kind": "benchmark_substrate",
+      "gate_set": "benchmark",
+      "priority": 5,
+      "repositories": [
+        {
+          "role": "method-and-skills",
+          "upstream_url": "https://github.com/SwarmResearch/SwarmResearch",
+          "fork_url": "https://github.com/ck0123/SwarmResearch",
+          "pinned_commit": "cfdcb71c85ed16e05536a8fce083b075a5e17b3c",
+          "license": "NOASSERTION"
+        },
+        {
+          "role": "paper-reproduction-and-tasks",
+          "upstream_url": "https://github.com/SwarmResearch/swarmresearch-paper-reproduce",
+          "fork_url": "https://github.com/ck0123/swarmresearch-paper-reproduce",
+          "pinned_commit": "e848d8d5760065714c38fa7558f0298573db17ab",
+          "license": "NOASSERTION"
+        }
+      ],
+      "data_url": "https://github.com/SwarmResearch/swarmresearch-paper-reproduce",
+      "local_path": "../swarmresearch-paper-reproduce",
+      "stages": {
+        "source_forked": "pass",
+        "environment": "partial",
+        "official_verifier": "todo",
+        "legacy_agent_smoke": "partial",
+        "plain_codex": "partial",
+        "goal_plus_codex": "todo",
+        "matched_baseline": "todo",
+        "campaign_ready": "todo"
+      },
+      "evidence": [],
+      "next_action": "Fix package/import/bootstrap reproducibility in the fork and pass task-eval for circle_packing before running Codex.",
+      "blockers": [
+        "The paper reproduction checkout has a package-name/import mismatch and no frozen root dependency file.",
+        "The runner recognizes Codex state, but no paper-ready Codex loop configuration has been published.",
+        "No license is declared in either upstream repository."
+      ]
+    },
+    {
+      "id": "frontier-cs",
+      "display_name": "Frontier-CS",
+      "kind": "benchmark",
+      "gate_set": "benchmark",
+      "priority": 6,
+      "repositories": [
+        {
+          "role": "benchmark-and-data",
+          "upstream_url": "https://github.com/FrontierCS/Frontier-CS",
+          "fork_url": "https://github.com/ck0123/Frontier-CS",
+          "pinned_commit": "07500f9e5751ddf86ef2760e0d35ff93e6a96a29",
+          "license": "MIT"
+        }
+      ],
+      "data_url": "https://github.com/FrontierCS/Frontier-CS",
+      "local_path": null,
+      "stages": {
+        "source_forked": "pass",
+        "environment": "todo",
+        "official_verifier": "todo",
+        "legacy_agent_smoke": "todo",
+        "plain_codex": "todo",
+        "goal_plus_codex": "todo",
+        "matched_baseline": "todo",
+        "campaign_ready": "todo"
+      },
+      "evidence": [],
+      "next_action": "Create a sparse checkout for one lightweight deterministic task, then measure disk/build/verifier cost before selecting the 10-task slice.",
+      "blockers": [
+        "The full checkout and FrontierCS 2.0 systems tasks are too heavy for the current Mac; several tasks require 16-32 GB RAM or H100-class GPUs."
+      ]
+    },
+    {
+      "id": "perfopt-bench",
+      "display_name": "PERFOPT-Bench",
+      "kind": "benchmark",
+      "gate_set": "benchmark",
+      "priority": 7,
+      "repositories": [
+        {
+          "role": "artifact",
+          "upstream_url": "https://anonymous.4open.science/r/Dataset-D3CC",
+          "fork_url": null,
+          "pinned_commit": null,
+          "license": "UNKNOWN"
+        }
+      ],
+      "data_url": "https://anonymous.4open.science/r/Dataset-D3CC",
+      "local_path": null,
+      "stages": {
+        "source_forked": "blocked",
+        "environment": "blocked",
+        "official_verifier": "blocked",
+        "legacy_agent_smoke": "blocked",
+        "plain_codex": "blocked",
+        "goal_plus_codex": "blocked",
+        "matched_baseline": "blocked",
+        "campaign_ready": "blocked"
+      },
+      "evidence": [],
+      "next_action": "Recheck the executable artifact URL; fork the real benchmark only after an authoritative GitHub repository appears.",
+      "blockers": [
+        "No executable GitHub benchmark repository is currently public; AllenPiaoHong/perfopt-bench-site is only a promotional website."
+      ]
+    },
+    {
+      "id": "skydiscover-evox",
+      "display_name": "SkyDiscover / EvoX",
+      "kind": "search_backend",
+      "gate_set": "search_backend",
+      "priority": 1,
+      "repositories": [
+        {
+          "role": "search-backend",
+          "upstream_url": "https://github.com/skydiscover-ai/skydiscover",
+          "fork_url": "https://github.com/ck0123/skydiscover",
+          "pinned_commit": "4734f324c4c3909eb3c8a4bc72a4ca34e6e679ed",
+          "license": "Apache-2.0"
+        }
+      ],
+      "local_path": "../skydiscover",
+      "stages": {
+        "source_forked": "pass",
+        "native_smoke": "pass",
+        "benchmark_adapter": "todo",
+        "usage_telemetry": "blocked",
+        "matched_baseline": "todo"
+      },
+      "evidence": [
+        "evidence/legacy-smokes/2026-07-20-summary.json",
+        "evidence/legacy-smokes/skydiscover-best-program-info.json"
+      ],
+      "next_action": "Add response-usage capture, then implement the Swarm task-eval workspace adapter.",
+      "blockers": [
+        "The current OpenAI-compatible client path discards response usage metadata."
+      ]
+    },
+    {
+      "id": "openevolve",
+      "display_name": "OpenEvolve",
+      "kind": "search_backend",
+      "gate_set": "search_backend",
+      "priority": 2,
+      "repositories": [
+        {
+          "role": "search-backend",
+          "upstream_url": "https://github.com/algorithmicsuperintelligence/openevolve",
+          "fork_url": "https://github.com/ck0123/openevolve",
+          "pinned_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2",
+          "license": "Apache-2.0"
+        }
+      ],
+      "local_path": "../openevolve",
+      "stages": {
+        "source_forked": "pass",
+        "native_smoke": "todo",
+        "benchmark_adapter": "todo",
+        "usage_telemetry": "todo",
+        "matched_baseline": "todo"
+      },
+      "evidence": [],
+      "next_action": "Do not start until the EvoX matched adapter works; reuse the same candidate workspace and score-direction contract.",
+      "blockers": []
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-07-21T14:31:29.696757+00:00",
+  "finished_at": "2026-07-21T14:36:34.990664+00:00",
+  "duration_seconds": 305.2883499909999,
+  "exit_code": 0,
+  "timed_out": false,
+  "terminal_event": "turn.completed",
+  "thread_id": "redacted-local-thread",
+  "usage": {
+    "input_tokens": 465166,
+    "cached_input_tokens": 391424,
+    "output_tokens": 13333,
+    "reasoning_output_tokens": 8130
+  },
+  "codex_version": "codex-cli 0.144.6",
+  "model": "gpt-5.4-mini",
+  "sandbox": "workspace-write",
+  "load_user_config": false,
+  "ephemeral": false,
+  "workspace": "/path/to/bench-goal-plus/runs/ale-ahc027-codex-smoke-20260721/workspace",
+  "workspace_commit": "a187b739be3491aee121cf873fb03e34e89d1164",
+  "prompt_file": "/path/to/bench-goal-plus/runs/ale-ahc027-codex-smoke-20260721/workspace/TASK.md",
+  "prompt_sha256": "2ea7925b6e4a103d303df59f793e0dd684d2e30b4227efccb2dce374a75bcdf5",
+  "evidence": {
+    "events": "events.jsonl",
+    "stderr": "stderr.log",
+    "final_message": "final-message.txt"
+  }
+}

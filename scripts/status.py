@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Validate and print the benchmark integration registry."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+REGISTRY = ROOT / "benchmarks/registry.json"
+
+
+def load_registry() -> dict:
+    return json.loads(REGISTRY.read_text())
+
+
+def validate(data: dict) -> list[str]:
+    errors: list[str] = []
+    allowed = set(data.get("status_values", []))
+    gate_sets = data.get("gate_sets", {})
+    seen_ids: set[str] = set()
+
+    if data.get("schema_version") != 1:
+        errors.append("schema_version must be 1")
+
+    for item in data.get("items", []):
+        item_id = item.get("id", "<missing>")
+        if item_id in seen_ids:
+            errors.append(f"duplicate item id: {item_id}")
+        seen_ids.add(item_id)
+
+        gate_set = item.get("gate_set")
+        expected = set(gate_sets.get(gate_set, []))
+        actual = set(item.get("stages", {}))
+        if expected != actual:
+            errors.append(
+                f"{item_id}: stage keys differ; missing={sorted(expected - actual)}, "
+                f"extra={sorted(actual - expected)}"
+            )
+
+        for gate, status in item.get("stages", {}).items():
+            if status not in allowed:
+                errors.append(f"{item_id}.{gate}: invalid status {status!r}")
+
+        if item.get("stages", {}).get("source_forked") == "pass":
+            for repository in item.get("repositories", []):
+                if repository.get("upstream_url", "").startswith("https://github.com/"):
+                    if not repository.get("fork_url"):
+                        errors.append(f"{item_id}: fork_url missing for GitHub upstream")
+                commit = repository.get("pinned_commit")
+                if not isinstance(commit, str) or len(commit) != 40:
+                    errors.append(f"{item_id}: pinned_commit must be a 40-character SHA")
+
+        for evidence in item.get("evidence", []):
+            if not (ROOT / evidence).is_file():
+                errors.append(f"{item_id}: missing evidence file {evidence}")
+
+    return errors
+
+
+def compact(status: str) -> str:
+    return {
+        "pass": "PASS",
+        "partial": "PART",
+        "todo": "TODO",
+        "blocked": "BLOCK",
+        "n/a": "N/A",
+    }[status]
+
+
+def print_table(data: dict) -> None:
+    benchmark_gates = data["gate_sets"]["benchmark"]
+    print("# Benchmarks")
+    print("| Priority | Benchmark | " + " | ".join(benchmark_gates) + " |")
+    print("|---:|---|" + "---|" * len(benchmark_gates))
+    benchmarks = [item for item in data["items"] if item["gate_set"] == "benchmark"]
+    for item in sorted(benchmarks, key=lambda value: value["priority"]):
+        values = [compact(item["stages"][gate]) for gate in benchmark_gates]
+        print(f"| {item['priority']} | {item['display_name']} | " + " | ".join(values) + " |")
+
+    search_gates = data["gate_sets"]["search_backend"]
+    print("\n# Search backends")
+    print("| Priority | Backend | " + " | ".join(search_gates) + " |")
+    print("|---:|---|" + "---|" * len(search_gates))
+    backends = [item for item in data["items"] if item["gate_set"] == "search_backend"]
+    for item in sorted(backends, key=lambda value: value["priority"]):
+        values = [compact(item["stages"][gate]) for gate in search_gates]
+        print(f"| {item['priority']} | {item['display_name']} | " + " | ".join(values) + " |")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check", action="store_true", help="validate without printing the matrix")
+    args = parser.parse_args()
+
+    data = load_registry()
+    errors = validate(data)
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
+    if args.check:
+        print(f"OK: {len(data['items'])} registry items validated")
+    else:
+        print_table(data)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

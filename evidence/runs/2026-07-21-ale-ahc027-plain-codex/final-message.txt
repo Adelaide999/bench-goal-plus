@@ -1,0 +1,9 @@
+Implemented a stronger deterministic heuristic in [solution.cpp](/path/to/bench-goal-plus/runs/ale-ahc027-codex-smoke-20260721/workspace/solution.cpp).
+
+- Replaced the starter DFS-only route with a weighted Euler tour over a BFS spanning tree, ordering subtrees by dirtiness density so high-value regions are visited earlier ([solution.cpp](/path/to/bench-goal-plus/runs/ale-ahc027-codex-smoke-20260721/workspace/solution.cpp#L63-L103)).
+- Added a bounded greedy detour loop that inserts shortest-path out-and-back excursions toward high-dirt cells when the local split of visit intervals looks beneficial, while enforcing the `100000` move cap and a time guard ([solution.cpp](/path/to/bench-goal-plus/runs/ale-ahc027-codex-smoke-20260721/workspace/solution.cpp#L177-L243)).
+- Kept the output legal and deterministic; the program still returns to `(0,0)` and visits every cell.
+
+Verification:
+- Compiled successfully with `-std=c++20`.
+- Ran a synthetic open 20x20 sanity check: route length was valid, ended at `(0,0)`, and visited all 400 cells.
