@@ -115,11 +115,28 @@ class BenchmarkDocsTest(unittest.TestCase):
             "benchmark / fork 要改什么",
             "`bench-goal-plus` 要新增什么",
             "`goal-plus` core 要改什么",
-            "OpenEvolve CPU examples（基线）",
+            "OpenEvolve CPU examples（任务包 + 原生基线）",
             "Plain Codex 仅 ALE 1 题已形成做题闭环",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, protocol)
+
+    def test_openevolve_tasks_are_separate_from_search_runners(self):
+        audit = (ROOT / "docs" / "openevolve-cpu-examples.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "共同 task/evaluator substrate",
+            "三套独立入口",
+            "原生 OpenEvolve",
+            "Plain Codex",
+            "Goal Plus",
+            "不需要增加 Codex provider",
+            "通用 `openevolve_task` adapter",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, audit)
+        self.assertNotIn("固定 fork 需增加 `codex_cli` provider", audit)
 
 
 if __name__ == "__main__":
