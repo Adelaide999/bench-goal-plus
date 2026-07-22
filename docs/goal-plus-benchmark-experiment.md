@@ -1,0 +1,196 @@
+# Goal Plus benchmark 接入与并发实验协议
+
+## 结论先行
+
+这 6 套 benchmark 与 Goal Plus 的总体方向是匹配的，但目前还不能直接组成公平大实验。真正缺的不是再写一个 prompt，而是把 **artifact 型任务、并发控制、全局 evaluator 配额、Codex 总控成本和原始分数轨迹** 接入同一控制面。
+
+优先级如下：
+
+| 优先级 | Benchmark | 匹配度 | 原因 |
+|---|---|---|---|
+| P0 | Frontier-Engineering v1-lite | 很高 | 原生就是固定预算下的连续工程优化，且已内置 OpenEvolve/AB-MCTS adapter |
+| P0 | HeuriGym | 很高 | 9 题 CPU 可跑，合法性和 cost 分离，适合看反馈利用与搜索效率 |
+| P0 | OpenEvolve CPU examples | 很高 | 可直接固定相同 evaluator，对 Goal Plus 与 OpenEvolve 做方法级比较 |
+| P1 | ALE-Bench Lite | 高 | 10 题有连续 raw score 和 public/private 边界，适合验证 generalization |
+| P1 | SwarmResearch 15 | 很高但工程未齐 | 最接近“并发研究是否真的有价值”的最终对手与任务集 |
+| P2 | AutoLab CPU subset | 高但昂贵 | 最能验证长时 persistence，但预算应按 agent-hours 而非 iteration 对齐 |
+| P2 | Frontier-CS Algorithmic | 中高但昂贵 | partial score 有搜索梯度，但 188 题和 judge 资源不适合先全量跑 |
+
+核心 claim 不能写成“4 个并发 worker 比 1 个更容易撞到好答案”。那只是 agent 版 Pass@4。应该写成：
+
+> 在相同模型、任务、并发槽、evaluator calls 和已知推理开销下，Goal Plus 通过跨 lineage 的 Search Evidence、可修订 Search Schema、去重/准入和同 worker 延续，获得高于独立并发与 OpenEvolve 的 best-score AUC，并减少重复探索、提高停滞后的逃逸率。
+
+---
+
+## 先把三种“并发”分开
+
+| 维度 | 记号 | 含义 | 是否属于方法能力 |
+|---|---:|---|---|
+| Agent 并发 | `K` | 同一题同时思考、改 artifact 的 lineage 数 | 是，Goal Plus/Swarm/OpenEvolve 的核心比较维度 |
+| Evaluator 并发 | `E` | 同时运行多少个官方 verifier | 通常不是；会影响 CPU、内存和 timing 噪声 |
+| Task 并发 | `Q` | 同时跑多少道不同任务 | 不是；只是缩短 campaign wall time |
+
+正式报告必须分别记录 `K/E/Q`。例如 Frontier-Engineering 官方 `v1_lite.yaml` 的 `run.max_parallel=4` 是**四道任务并发**，并不等价于每道题内部有四条搜索 lineage。
+
+对计时型任务使用：
+
+```text
+K = 4 agent lanes
+E = 1 serialized verifier
+Q = 1 task
+```
+
+这样 agent 可以并行形成假设和候选，但 MallocLab throughput、AutoLab system task、Background Blur 等 wall-clock fitness 不会被并发评测污染。
+
+---
+
+## Goal Plus 当前已有能力与必须整改项
+
+当前固定版本 `goal-plus@05626b1` 已有 Codex/Pi `parallel_loops`、`max_candidates/max_parallel`、同 native worker continuation、verifier-backed best、Search Evidence/Schema、worker min/max runtime 和 usage report。
+
+但用于这批 benchmark 仍缺 6 项：
+
+1. **通用 artifact adapter**：现有 `goal_plus.benchmarking` 只 materialize MCQ/numeric 的 `answer.json`；要扩为 `materialize → prompt → evaluate → parse → archive`，允许 C++、Python、Rust、配置和多文件 artifact。
+2. **批处理 Codex controller**：当前通用 benchmark runner 只有 `fixed`/`pi-rpc` backend。Codex 真 E2E 由顶层 `codex exec` 驱动 `spawn_agent/wait_agent/followup_task`，需要把 ST runner 方式产品化并保存总控 transcript。
+3. **多次 verifier 闭环**：当前 benchmark runner 每个 candidate 最后只验证一次；这些任务要求同一 lineage 多轮验证、继续和 best-local 回滚。
+4. **全局 evaluator gate**：增加原子 ticket ledger 与 semaphore。所有 worker 在运行 verifier 前先占用 call ticket，达到全局预算后拒绝新评测；否则 `K` 个并发 lane 会最多超预算 `K` 次。
+5. **预算强制与成本覆盖**：`Budget.max_tokens` 当前只有 schema 字段，没有运行时强制。正式实验以 evaluator-call gate 和 runtime watchdog 做硬预算，同时记录 worker + Codex 总控的 tokens/cost；缺字段必须标记 coverage，不可当作 0。
+6. **统一轨迹导出**：每次 evaluation 保存 `candidate/parent/artifact hash/raw metric/direction/validity/call index/wall time/model usage`，才能计算 AUC、重复率和跨 lineage transfer。
+
+这些改动优先放在本仓。只有 task 自身 evaluator 或 runner 必须变更时，才改对应 fork。
+
+---
+
+## 不是 Pass@4 的实验设计
+
+### 必跑方法
+
+| 方法 | 并发 | 共享信息 | 作用 |
+|---|---:|---|---|
+| Single AutoResearch | 1 | 自己的历史 | 长链 baseline |
+| Independent Parallel | `K` | 无 | 精确控制“只是多抽 K 次”的收益 |
+| Shared Raw History | `K` | 最近原始日志 | 判断结构化 Evidence/Schema 是否有额外价值 |
+| OpenEvolve | `K` 个 process workers | population、islands、migration、artifacts | 主要 evolutionary baseline |
+| Goal Plus | `K` 条长期 lane | Evidence、Schema、coverage/reservation、continuation | 完整方法 |
+
+SwarmResearch 15 上再加入论文原生 Swarm；Frontier-Engineering 上再加入仓库原生 AB-MCTS。消融可以后补，但 Independent Parallel 和 OpenEvolve 不能省。
+
+### 两套预算视图
+
+不可能同时严格匹配 wall time、tokens 和 evaluator calls，因此同一 run 输出两套视图：
+
+1. **Work-matched**：相同 `B` 个 evaluator tickets、相同模型、相同 `K`；比较 final best 和 best-score AUC。tokens/cost 作为效率分母和 coverage 门禁。
+2. **Time-matched**：相同 wall deadline、`K/E/Q` 和硬件；比较 time-to-target、deadline best 和实际 calls/cost。
+
+主结论以 work-matched 为准，time-matched 用于证明并发是否真正缩短找到好结果的时间。仅比较“同样 1 小时，4 个 worker 比 1 个 worker 好”不能证明搜索效率，因为前者用了约 4 倍 agent compute。
+
+### 主要指标
+
+- task-native final best，保留原始方向；
+- normalized gain 与 best-score AUC（分别按 evaluator calls、wall time、known cost）；
+- time/calls/cost-to-threshold；
+- valid candidate rate、编译/运行/约束失败分解；
+- declared/realized overlap、active collision、重复 diff/机制比例；
+- post-stagnation improvement、escape rate；
+- cross-lineage transfer：一个 lane 采用其他 lane 的 verified evidence 后产生的增量。
+
+`pass@K` 只在本来就是二元任务时作为辅助指标。对于连续优化题，主要结果不能退化成“是否有任一候选超过阈值”。
+
+### Goal Plus 必须满足的 go/no-go 条件
+
+要声称并发协调有价值，至少要同时看到：
+
+1. 相同 `B/K/model` 下，Goal Plus 对 Independent Parallel 的 paired best-score AUC 差值为正；
+2. 对 OpenEvolve 的 final best 或 AUC 有稳定优势，而不是只赢一题；
+3. 重复/碰撞下降，或 post-stagnation escape / cross-lineage transfer 上升，给出机制证据；
+4. 把总控 agent 的 tokens/cost 算入后，单位成本收益仍成立；
+5. 至少 3 seeds，并报告 task-level win/tie/loss 与 paired bootstrap CI。
+
+如果只满足“最终 best 略高”，但 calls、总控成本或重复率没对齐，应归类为更多采样或方差，不是 Goal Plus 的结构性收益。
+
+---
+
+## 逐 benchmark 整改与对标
+
+| Benchmark | Pilot `K/E/Q` | Work-matched 主预算 | 原生/论文坐标 | 最终主结果 |
+|---|---:|---:|---|---|
+| ALE Lite | `4/1/1` | 20 public calls/题 | iterative public refine；private final | private raw score + public-call AUC |
+| HeuriGym | `4/1/1` | 12 calls/题 | 原生 3 iterations | valid + native cost/AUC |
+| Frontier-Eng lite | `4/1/1` | 20 pilot、100 formal | OpenEvolve/AB-MCTS；100 iterations | raw score + Medal + AUC |
+| AutoLab CPU | Mac `2/1/1`；Linux `4/1/1` | equal agent-hours；另报 equal wall | 单 agent 1–12h、anchored reward | native metric + reward + time/cost curve |
+| SwarmResearch 15 | `4–8/1/1` pilot；最终对齐公开轨迹的 peak live agents | calls + known cost；另报 3h slice | 50 美元 cutoff、约 100 美元轨迹、50-agent 总规模参考 | native score/AUC + collision/transfer |
+| Frontier-CS 10 | `4/1/1` | 20 calls/题 | high/low Pass@1 分层 | checker raw partial score + AUC |
+
+### ALE-Bench Lite
+
+**整改**：复用现有 `adapters/ale`，补 SearchSpec 生成器、官方 public-eval process verifier、lower-is-better raw parser、每题全局 call gate，以及 final private-lite 一次性提交。每条 lane 必须从相同 starter 独立 materialize，private data 不进入 workspace。
+
+**建议并发/预算**：pilot 用 `K=4, E=1, Q=1, B=20 public calls/题`；evaluator 内部可用 4 case workers。10 题筛选后只对 frozen best 做一次 private-lite。
+
+**与官方工作对应**：官方示例是 initial generation + public feedback iterative refinement，private 最终一次；因此 Goal Plus 的每个 verifier ticket 对应一次 `public_eval`，不能拿 Codex turn 当 iteration。官方 rank/performance 和现有模型结果只做外部坐标，主因果比较需重跑相同 Codex 模型。
+
+**是否匹配**：匹配。它能区分“4 个独立程序”与“4 条 lane 利用共享路线/失败证据后继续优化”，而且 raw score 提供比 Pass@4 更强的梯度。
+
+### HeuriGym
+
+**整改**：为 9 题做统一 materializer，固定 train/demo/eval 数据边界；solver 为唯一可编辑面；包装每题 `verify()` + `evaluate()`，输出 `valid/cost/runtime`，并保留最小化方向。下载和固定 Hugging Face 数据 digest。
+
+**建议并发/预算**：smoke 使用官方 `3 iterations` 口径；主实验用 `K=4, E=1, B=12 calls/题`。官方执行默认 8 cores、10 秒 timeout；当前 Mac 不应并行跑 4 个 8-core evaluator。
+
+**与官方工作对应**：先复现原生 LLM Solver Agent 的 3 轮结果，再跑相同模型的 independent/OpenEvolve/Goal Plus。跨题主指标保留 native cost，并附 expert-relative quality；不要只比较 valid/pass rate。
+
+**是否匹配**：高度匹配，且最适合做第一套完整 9 题实验。失败类型明确、反馈可归因，Goal Plus 是否避免重复无效 solver 很容易观测。
+
+### Frontier-Engineering v1-lite
+
+**整改**：最少的 benchmark-specific 工作。直接在 `frontier_eval.algorithms` 新增 `goal_plus` Algorithm，复用 unified task 的 `initial_program/eval_command/metrics.json/artifacts.json`；不要为 10 题各写 judge。增加 Goal Plus history exporter，与 OpenEvolve 的 `history/index.jsonl` 对齐。
+
+**建议并发/预算**：pilot `20 calls/题`，正式与 v1-lite 对齐为 `100 calls/题`。方法并发用 `K=4`；计时型 evaluator 设 `E=1`。batch 的 `run.max_parallel` 固定为 `Q=1` 做方法学实验，campaign 吞吐测试可另设 `Q=4`。
+
+**与官方工作对应**：上游已经提供 OpenEvolve、AB-MCTS、ShinkaEvolve 和 frozen v1/v1-lite leaderboard。Goal Plus 应成为同一 `frontier_eval` algorithm entry，使用相同 task runtime 和 raw `combined_score`；final 同时报 raw、Medal Score 和 100-call curve。
+
+**是否匹配**：当前最强的 head-to-head substrate。它原生强调 fixed interaction budget 与 best design，并且 v1-lite 专门挑了随预算渐进提升的题。
+
+### AutoLab CPU subset
+
+**整改**：写 Harbor agent adapter，把 Goal Plus 控制状态放在容器外；每条 lane 拥有独立 task filesystem，只有 task.toml 允许文件可编辑；`tests/test.sh` 的 reward/正确性作为 process verifier。增加 container CPU/memory、硬件 fingerprint 和反 shortcut 证据。
+
+**建议并发/预算**：Mac 先 `K=2, E=1`，只跑 puzzle/challenge；Linux 64 GB 再用 `K=4`。正式同时做：`1×2h` 对 `4×30m` 的 equal-agent-hours，以及 `4×2h` 的 equal-wall-time scaling。不能把后者直接说成效率提升。
+
+**与官方工作对应**：官方任务预算是 1–12 小时，CPU system leaderboard 推荐 Ryzen 9 9950X/64 GB。Mac 可做同机方法比较，但 system task 的绝对 speedup 不与 leaderboard 混用；最先选 Toy ISA、VLIW、stack machine、sorting network 等硬件不敏感题。
+
+**是否匹配**：适合验证 persistence 和“并发宽度 vs 单链深度”，但不是第一套全量实验。OpenEvolve 对比需按实际 evaluator calls/model calls 和 agent-hours重算，不能按 iteration 名称对齐。
+
+### SwarmResearch 15
+
+**整改**：先修复复现仓 bootstrap/import 和 ADRS/ALE 共享 worker build context；建立 15 题统一 `task-eval → native metric` adapter。Goal Plus 必须记录 orchestrator + workers 全部 usage，并允许固定 lane 长期 continuation；Swarm 轨迹则统一还原 agent session、commit、evaluator calls 和 50 美元 cutoff。
+
+**建议并发/预算**：5-task pilot 用 `K=4/8`；最终实验先从公开轨迹重建 peak live agents，再匹配实际 `K`，同时向 README 提到的 50-agent **累计规模**扩展。不能把“50 agent run”未经证据解释为 50 个同时在线。work-matched 优先按 evaluator calls + known cost，另给 3 小时 wall slice。Goal Plus 的 `max_candidates` 是固定 lane 数，不应与 Swarm 累计 spawn 的 agent budget 直接画等号。
+
+**与论文工作对应**：公开任务轨迹约 100 美元/题，论文报告 50 美元 cutoff；README 另给出 50 agents、约 3 小时 Codex 运行的成本参考。外部论文分数只能做 reference；要归因于方法，必须用同一 Codex 版本重跑原生 Swarm 与 Goal Plus。
+
+**是否匹配**：最适合最终大实验。这里 Goal Plus 必须证明它比 Swarm 的 population steering 和 OpenEvolve/SkyDiscover 更早发现高价值、低重叠方向，而不是仅仅多开 agent。
+
+### Frontier-CS Algorithmic
+
+**整改**：materialize 冻结的 10 题子集；每题生成通用程序 workspace；judge 运行在 controller-owned container。parser 必须接受“合法 partial score 但 upstream `passed=false`”的结果，并保存 checker-native score、合法性和错误消息。
+
+**建议并发/预算**：`K=4, E=1, Q=1, B=20 calls/题`。当前 Mac 的 8.4 GB Docker VM 不能并发启动多个 4 GiB shm judge；agent 可以并行，judge 必须排队。正式 10 题 campaign 放到 32 GB+ Linux。
+
+**与官方工作对应**：用公开 Pass@1 分布只做 5 high/5 low 的分层抽样；最后比较 partial raw score/AUC，而不是再次报告 pass@4。188 题只用于 verifier sweep 和后续扩展。
+
+**是否匹配**：方法上匹配、资源上偏重。必须先证明 10 题有连续 gradient，剔除只有 0/满分的硬门槛题。
+
+---
+
+## 推荐实施顺序
+
+1. 完成通用 artifact contract、evaluator ticket gate、轨迹 schema 和 Codex 总控 usage。
+2. 在 Frontier-Engineering MallocLab 同时接通 Independent/OpenEvolve/Goal Plus。
+3. 完成 HeuriGym 9 题，验证跨题汇总和失败分类。
+4. 接入 OpenEvolve CPU 五题包，做 Goal Plus vs OpenEvolve 的第一版方法结论。
+5. 扩展 ALE Lite 10 与 Frontier-Engineering v1-lite 10。
+6. Linux 上完成 AutoLab hard subset、Frontier-CS 10 和 Swarm 5-task pilot。
+7. 最后冻结 SwarmResearch 15-task 大实验。
+
+OpenEvolve 自带 CPU 示例的具体筛选见 [OpenEvolve CPU 示例审计](openevolve-cpu-examples.md)。

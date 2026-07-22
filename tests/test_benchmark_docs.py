@@ -41,9 +41,14 @@ class BenchmarkDocsTest(unittest.TestCase):
                     self.assertIn(heading, text)
 
     def test_local_markdown_links_resolve(self):
-        markdown_files = [DOCS_DIR / "README.md"] + [
-            DOCS_DIR / filename for filename in BENCHMARK_DOCS
-        ]
+        markdown_files = (
+            [DOCS_DIR / "README.md"]
+            + [DOCS_DIR / filename for filename in BENCHMARK_DOCS]
+            + [
+                ROOT / "docs" / "goal-plus-benchmark-experiment.md",
+                ROOT / "docs" / "openevolve-cpu-examples.md",
+            ]
+        )
         link_pattern = re.compile(r"\[[^]]+\]\(([^)]+)\)")
         for markdown_file in markdown_files:
             text = markdown_file.read_text(encoding="utf-8")
@@ -55,13 +60,49 @@ class BenchmarkDocsTest(unittest.TestCase):
                     self.assertTrue(resolved.exists(), str(resolved))
 
     def test_docs_do_not_contain_local_identity_or_api_keys(self):
+        extra_docs = [
+            ROOT / "docs" / "goal-plus-benchmark-experiment.md",
+            ROOT / "docs" / "openevolve-cpu-examples.md",
+        ]
         combined = "\n".join(
             path.read_text(encoding="utf-8")
             for path in [DOCS_DIR / "README.md"]
             + [DOCS_DIR / filename for filename in BENCHMARK_DOCS]
+            + extra_docs
         )
         self.assertNotRegex(combined, r"/Users/[^/\s]+")
         self.assertNotRegex(combined, r"\bsk-[A-Za-z0-9_-]{16,}\b")
+
+    def test_experiment_protocol_covers_non_pass_at_k_claim(self):
+        protocol = (ROOT / "docs" / "goal-plus-benchmark-experiment.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "Agent 并发",
+            "Evaluator 并发",
+            "Task 并发",
+            "Independent Parallel",
+            "OpenEvolve",
+            "best-score AUC",
+            "cross-lineage transfer",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, protocol)
+
+    def test_protocol_has_every_active_benchmark(self):
+        protocol = (ROOT / "docs" / "goal-plus-benchmark-experiment.md").read_text(
+            encoding="utf-8"
+        )
+        for benchmark_name in (
+            "ALE-Bench Lite",
+            "HeuriGym",
+            "Frontier-Engineering v1-lite",
+            "AutoLab CPU subset",
+            "SwarmResearch 15",
+            "Frontier-CS Algorithmic",
+        ):
+            with self.subTest(benchmark=benchmark_name):
+                self.assertIn(f"### {benchmark_name}", protocol)
 
 
 if __name__ == "__main__":

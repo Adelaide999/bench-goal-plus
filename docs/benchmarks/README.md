@@ -24,6 +24,8 @@
 
 这些数字不应直接拿来横向比较方法速度：ALE 的一次 candidate 会跑多个 generated cases，AutoLab 的“2 小时”是长时 agent budget，Swarm 的公开 wall span包含并行研究者，而 Frontier-CS 的题量远大于其他集合。公平实验最终应以 **evaluator calls + wall time + model calls/tokens** 三组预算同时报告。
 
+Goal Plus 的逐项接入改造、`K/E/Q` 三层并发和 matched-budget baseline 见 [Goal Plus benchmark 接入与并发实验协议](../goal-plus-benchmark-experiment.md)。OpenEvolve 自带的无特殊硬件任务见 [OpenEvolve CPU 示例审计](../openevolve-cpu-examples.md)。
+
 ---
 
 ## 快速导读

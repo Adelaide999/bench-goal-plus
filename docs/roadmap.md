@@ -11,7 +11,11 @@
 - [x] 建立中央仓库、状态 registry 与 fork/upstream/commit 映射。
 - [x] 建立非交互 Codex runner，保留 JSONL、thread id、usage、stderr、最终消息和 manifest。
 - [x] 为 6 套 active benchmark 建立统一导读，记录规模、时间与代表 case 的 I/O/verifier 契约。
+- [x] 定义 Goal Plus 的逐 benchmark 接入改造、三层并发、matched-budget baseline 与非 Pass@K 验收协议。
 - [ ] 定义统一 benchmark adapter 接口：`materialize -> prompt -> evaluate -> parse -> archive`。
+- [ ] 实现全局 evaluator ticket gate，分离 agent/task/evaluator concurrency 并防止并发超预算。
+- [ ] 将 Codex ST controller 产品化为 batch runner，计入 main-agent 与 worker usage。
+- [ ] 为 OpenEvolve 增加 usage/cost instrumentation 和 Codex-compatible provider。
 - [ ] 定义统一 run manifest 扩展：task commit、image digest、model/provider、seed、预算和网络策略。
 - [ ] 定义 evaluator-call ledger；不能用“iteration”代替真实验证次数。
 

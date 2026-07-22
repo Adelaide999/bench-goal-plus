@@ -351,8 +351,11 @@
         "matched_baseline": "todo"
       },
       "evidence": [],
-      "next_action": "Do not start until the EvoX matched adapter works; reuse the same candidate workspace and score-direction contract.",
-      "blockers": []
+      "next_action": "Add response-usage telemetry and a Codex-compatible provider, then run evaluator-only/native smokes for function_minimization, background_blur, and circle_packing_with_artifacts before the five-task matched campaign.",
+      "blockers": [
+        "The OpenAI-compatible client returns only response text and does not persist token/cost usage.",
+        "OpenEvolve has OpenAI-compatible and Claude Code providers but no Codex CLI provider for same-host comparison."
+      ]
     }
   ]
 }

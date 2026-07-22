@@ -13,6 +13,7 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 - SkyDiscover/EvoX 已完成 DeepSeek OpenAI-compatible 的 1 iteration smoke，但还不是论文可比实验。
 - 已在当前 Mac 为所有可执行 benchmark 建立代表 case 的环境证据：ALE、AutoLab、SwarmResearch、Frontier-CS 使用镜像，HeuriGym 与 Frontier-Engineering v1-lite 使用 host 环境；完整空间表见 [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
 - 已建立 [Benchmark 快速导读](docs/benchmarks/README.md)：记录当前可跑题数、coverage/campaign 时间，并为 6 套 active benchmark 展开一个真实 case 的输入、agent 动作、期望输出和 verifier。
+- 已建立 [Goal Plus 接入与并发实验协议](docs/goal-plus-benchmark-experiment.md)：区分 agent/evaluator/task 三层并发，定义 matched-budget baseline、逐 benchmark 整改和非 Pass@K 的验收门槛；OpenEvolve 自带 CPU 任务见 [示例审计](docs/openevolve-cpu-examples.md)。
 - Goal Plus + Codex 与其余 benchmark 的 plain Codex 尚未验收；这是本仓接下来逐项完成的主线。
 
 ## 固定验收门禁
@@ -52,6 +53,8 @@ docs/roadmap.md                分 benchmark 的推进计划与完成定义
 docs/codex-run-contract.md     所有 benchmark 共用的 Codex 执行/证据契约
 docs/docker-storage-plan.md    单 case 实测镜像、全量空间预算与 Linux campaign 规划
 docs/benchmarks/               规模/时间总览与每套 benchmark 的代表 case 导读
+docs/goal-plus-benchmark-experiment.md  Goal Plus 接入、并发、公平预算与逐 benchmark 对标协议
+docs/openevolve-cpu-examples.md         OpenEvolve 无特殊硬件示例的主实验/诊断/暂缓分级
 scripts/run_codex.py           通用非交互 Codex runner，保存 JSONL、usage 与 manifest
 scripts/status.py              校验 registry 并打印状态矩阵
 evidence/legacy-smokes/        迁入的摘要、结果及 SkyDiscover 完整 checkpoint
