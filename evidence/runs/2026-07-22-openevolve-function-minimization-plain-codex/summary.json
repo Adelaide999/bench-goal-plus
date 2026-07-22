@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "benchmark": "openevolve-examples",
+  "task_id": "function_minimization",
+  "method": "plain-codex",
+  "upstream_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2",
+  "workspace_initial_commit": "a298d07542dd85a6c02be359833e6740040a3874",
+  "prompt_sha256": "c1be92901eb38dad4560f9312341f9610d7d538e16a71512bfd95f0e448f7512",
+  "primary_metric": "combined_score",
+  "direction": "maximize",
+  "seed_score": 1.2147685971231066,
+  "best_public_score": 1.4997641483797082,
+  "final_score": 1.4997641483797082,
+  "absolute_gain": 0.2849955512566016,
+  "relative_gain": 0.23460892216965967,
+  "valid": true,
+  "candidate_sha256": "ba9018ddbd616924c7283b641c816525efc7799087368168cbfc1ed1c285343e",
+  "evaluator_calls": {
+    "schema_version": 1,
+    "max_evaluator_calls": 7,
+    "reserved_final_calls": 1,
+    "total_claimed": 5,
+    "public_claimed": 4,
+    "final_claimed": 1
+  },
+  "codex": {
+    "version": "codex-cli 0.144.6",
+    "model": null,
+    "model_identity_coverage": "missing",
+    "duration_seconds": 110.43895026599967,
+    "usage": {
+      "input_tokens": 200450,
+      "cached_input_tokens": 169472,
+      "output_tokens": 3280,
+      "reasoning_output_tokens": 858
+    }
+  },
+  "environment": {
+    "runtime_python": "Python 3.12.9"
+  },
+  "evidence": {
+    "candidate": "candidate.py",
+    "evaluation_history": "evaluation-history.jsonl",
+    "final_evaluation": "final-eval.json",
+    "codex_manifest": "run-manifest.json",
+    "codex_events": "events.jsonl",
+    "codex_final_message": "final-message.txt"
+  }
+}

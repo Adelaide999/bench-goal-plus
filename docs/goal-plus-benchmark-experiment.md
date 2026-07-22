@@ -73,7 +73,7 @@ Q = 1 task
 | AutoLab CPU subset | 官方 verifier smoke 已验证；Codex agent 尚未跑通 | 未接通 | 通常不改任务；若 Harbor agent discovery 要求注册，只加薄 agent shim | Harbor workspace/container bridge、允许文件白名单、reward parser、CPU/内存/硬件指纹采集 | 无 benchmark-specific 改动 | 先通 1 个 puzzle/challenge 的 `K=2,E=1` 长时 run，并能恢复/保留 best artifact |
 | SwarmResearch 15 | 只验证过 circle-packing evaluator；Codex 全链未通 | 未接通 | **需要修固定 fork**：bootstrap/import 与 ADRS/ALE worker build context；不改评分语义 | 15 题 `task-eval → native metric` adapter、session/commit/call/cost 轨迹转换、长期 lane controller | 无 benchmark-specific 改动 | 先通 1 题，再做 5-task `K=4/8` pilot；能与公开 Swarm 轨迹按 calls/cost 对齐 |
 | Frontier-CS Algorithmic | 只验证过 problem 0 judge；Codex 全链未通 | 未接通 | 不改上游 judge | 10 题 materializer、controller-owned 容器池、partial-score parser、串行 evaluator gate | 无 benchmark-specific 改动 | 单题 20-call 闭环能接受“合法 partial score 但 `passed=false`”，再扩到冻结 10 题 |
-| OpenEvolve CPU examples（任务包 + 原生基线） | 尚未接入；可直接复用单文件 seed、prompt 和 evaluator | 尚未接入 | 不改 OpenEvolve controller/provider；原生 OpenEvolve 保持自己的搜索入口 | 新增通用 `openevolve_task` TaskSpec/materializer/evaluator wrapper；分别提供 OpenEvolve、Plain Codex、Goal Plus 三套 runner 入口 | 不需要 | 同一 Function Minimization task 能由三套独立 runner 评分；随后扩到 Background Blur、Circle Packing 和两道 JAX 数学题 |
+| OpenEvolve CPU examples（任务包 + 原生基线） | **已通 1 题**：Function Minimization 由通用 adapter materialize，Plain Codex 将 raw score 提升 23.46%，4 public + 1 final calls | 未接通 | 不改 OpenEvolve controller/provider；原生 OpenEvolve 保持自己的搜索入口 | 已有 task catalog、materializer、原生 evaluator wrapper、原子 ticket gate、trajectory/archive；待增加 native 与 Goal Plus runner | 不需要 | 在同一 Function Minimization ticket budget 下补原生 OpenEvolve 与 Goal Plus；随后扩到 Background Blur、Circle Packing 和两道 JAX 数学题 |
 
 ### 表格结论
 
@@ -81,7 +81,7 @@ Q = 1 task
 - **Goal Plus 已经能把 Codex 当 native worker 使用**；当前缺口是把已在 ST 中验证过的 Codex 总控方式产品化为批量实验 runner，而不是再做一套模型 API client。
 - 绝大多数整改应落在 `bench-goal-plus`。需要改固定 fork 的固有接口主要是 Frontier-Engineering 的 algorithm plugin 和 Swarm 的复现基础设施问题；OpenEvolve examples 只抽取 task/evaluator contract，不修改其 controller 或 provider。
 - `goal-plus` core 不需要为六套 benchmark 各写逻辑。公平实验所需的 evaluator ticket gate、预算 watchdog、总控 usage 与统一轨迹可以先在本仓实现；验证稳定后再决定哪些通用能力上收 core。
-- 因此当前真实状态是：**Plain Codex 仅 ALE 1 题已形成做题闭环；其余多数只是 evaluator smoke；Goal Plus + Codex 六套 benchmark 均尚未达到完成门槛。**
+- 因此当前真实状态是：**Plain Codex 已在 ALE 与 OpenEvolve Function Minimization 各形成 1 题做题闭环；其余多数只是 evaluator smoke；Goal Plus + Codex 六套 benchmark 均尚未达到完成门槛。**
 
 ---
 

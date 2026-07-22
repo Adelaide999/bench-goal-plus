@@ -15,7 +15,9 @@
 - [ ] 定义统一 benchmark adapter 接口：`materialize -> prompt -> evaluate -> parse -> archive`。
 - [ ] 实现全局 evaluator ticket gate，分离 agent/task/evaluator concurrency 并防止并发超预算。
 - [ ] 将 Codex ST controller 产品化为 batch runner，计入 main-agent 与 worker usage。
-- [ ] 为 OpenEvolve 增加 usage/cost instrumentation 和 Codex-compatible provider。
+- [x] 为 OpenEvolve examples 实现 catalog/materialize/evaluate/archive adapter、原子 evaluator ticket 和 Plain Codex Function Minimization smoke。
+- [ ] 在相同 task/ticket budget 下补 OpenEvolve native smoke 与 Goal Plus runner；OpenEvolve 内部不增加 Codex provider。
+- [ ] 为 OpenEvolve 原生 OpenAI-compatible 路径增加 usage/cost instrumentation。
 - [ ] 定义统一 run manifest 扩展：task commit、image digest、model/provider、seed、预算和网络策略。
 - [ ] 定义 evaluator-call ledger；不能用“iteration”代替真实验证次数。
 

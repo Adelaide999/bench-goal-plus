@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "repository": "https://github.com/algorithmicsuperintelligence/openevolve",
+    "pinned_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2"
+  },
+  "tasks": {
+    "function_minimization": {
+      "source_dir": "examples/function_minimization",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py"
+    }
+  }
+}

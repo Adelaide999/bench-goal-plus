@@ -346,15 +346,22 @@
       "stages": {
         "source_forked": "pass",
         "native_smoke": "todo",
-        "benchmark_adapter": "todo",
+        "benchmark_adapter": "pass",
         "usage_telemetry": "todo",
         "matched_baseline": "todo"
       },
-      "evidence": [],
-      "next_action": "Add response-usage telemetry and a Codex-compatible provider, then run evaluator-only/native smokes for function_minimization, background_blur, and circle_packing_with_artifacts before the five-task matched campaign.",
+      "evidence": [
+        "evidence/runs/2026-07-22-openevolve-function-minimization-plain-codex/summary.json",
+        "evidence/runs/2026-07-22-openevolve-function-minimization-plain-codex/final-eval.json",
+        "evidence/runs/2026-07-22-openevolve-function-minimization-plain-codex/candidate.py",
+        "evidence/runs/2026-07-22-openevolve-function-minimization-plain-codex/evaluation-history.jsonl",
+        "evidence/runs/2026-07-22-openevolve-function-minimization-plain-codex/run-manifest.json",
+        "evidence/runs/2026-07-22-openevolve-function-minimization-plain-codex/events.jsonl"
+      ],
+      "next_action": "Run native OpenEvolve on function_minimization with the same evaluator-ticket budget, then connect Goal Plus to the existing task adapter before expanding to background_blur and circle_packing_with_artifacts.",
       "blockers": [
         "The OpenAI-compatible client returns only response text and does not persist token/cost usage.",
-        "OpenEvolve has OpenAI-compatible and Claude Code providers but no Codex CLI provider for same-host comparison."
+        "The first Plain Codex smoke used the CLI default model, whose identity was not exposed in the saved run manifest; formal runs must pass an explicit model."
       ]
     }
   ]

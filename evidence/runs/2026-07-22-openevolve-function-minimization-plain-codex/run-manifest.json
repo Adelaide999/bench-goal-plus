@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-07-22T04:28:38.522344+00:00",
+  "finished_at": "2026-07-22T04:30:28.961601+00:00",
+  "duration_seconds": 110.43895026599967,
+  "exit_code": 0,
+  "timed_out": false,
+  "terminal_event": "turn.completed",
+  "thread_id": "019f8815-34b3-7a71-b73b-88f7f13d890c",
+  "usage": {
+    "input_tokens": 200450,
+    "cached_input_tokens": 169472,
+    "output_tokens": 3280,
+    "reasoning_output_tokens": 858
+  },
+  "codex_version": "codex-cli 0.144.6",
+  "model": null,
+  "sandbox": "workspace-write",
+  "load_user_config": false,
+  "ephemeral": true,
+  "workspace": "/private/tmp/bench-goal-plus-openevolve-function-20260722",
+  "workspace_commit": "a298d07542dd85a6c02be359833e6740040a3874",
+  "prompt_file": "/private/tmp/bench-goal-plus-openevolve-function-20260722/TASK.md",
+  "prompt_sha256": "beafd091950a8857a8cd9ea7d675e7fe077d0c9d607858ba582cfe4da764a5d7",
+  "evidence": {
+    "events": "events.jsonl",
+    "stderr": "stderr.log",
+    "final_message": "final-message.txt"
+  }
+}

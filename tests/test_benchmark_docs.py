@@ -116,7 +116,7 @@ class BenchmarkDocsTest(unittest.TestCase):
             "`bench-goal-plus` 要新增什么",
             "`goal-plus` core 要改什么",
             "OpenEvolve CPU examples（任务包 + 原生基线）",
-            "Plain Codex 仅 ALE 1 题已形成做题闭环",
+            "Plain Codex 已在 ALE 与 OpenEvolve Function Minimization 各形成 1 题做题闭环",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, protocol)

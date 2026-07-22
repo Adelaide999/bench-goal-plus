@@ -158,3 +158,28 @@ OpenEvolve 保持自己的 population、islands、prompt sampler 和模型 API�
 2. **Background Blur**：OpenEvolve 报告 62× 相对故意写慢的 seed，但只有 2.6× 相对 competent expert。Goal Plus 的结果也必须同时对 seed、expert 和质量门禁报告，防止靠挑弱 baseline 讲故事。
 
 这两个例子正好规定了实验叙事：并发不是目标，**并发条件下更少重复、更快形成可归因知识、在同样工作量下找到更好的 artifact** 才是目标。
+
+---
+
+## 2026-07-22 首个 Plain Codex 闭环
+
+已在 `bench-goal-plus` 实现第一版 `openevolve_task` 通用适配器，并用 `function_minimization` 完成真实闭环。适配器没有修改 OpenEvolve provider 或搜索器，而是直接复用固定提交的 `Config`、`Evaluator`、`EVOLVE-BLOCK` 和 raw metrics：
+
+```text
+tasks.json -> materialize isolated workspace -> public evaluator tickets
+           -> Plain Codex edits candidate.py -> reserved final evaluation -> archive
+```
+
+| 项目 | 实测结果 |
+|---|---:|
+| OpenEvolve commit | `411fb59c886c18704caaffb611e17cf9e7d824d2` |
+| Seed `combined_score` | 1.2147685971 |
+| Final `combined_score` | 1.4997641484 |
+| 相对提升 | 23.46% |
+| Evaluator calls | 4 public + 1 final |
+| Codex wall time | 110.44 s |
+| Codex usage | 200,450 input（169,472 cached）/ 3,280 output / 858 reasoning |
+
+最终候选通过 OpenEvolve evaluator 的 10/10 trials，`distance_score=1.0`、`reliability_score=1.0`。完整候选、原始 metrics、调用轨迹和 Codex JSONL 见 [run summary](../evidence/runs/2026-07-22-openevolve-function-minimization-plain-codex/summary.json)。
+
+这个结果只把“同一 OpenEvolve task/evaluator 可供 Plain Codex 消费”从设计变成了实证。它还不能用于宣称优于 OpenEvolve：本次没有跑 matched native search，Function Minimization 偏 toy，而且 Codex 默认模型身份没有被 CLI 证据显式记录。下一步是在相同 ticket budget 下补原生 OpenEvolve，然后把同一 adapter 交给 Goal Plus。

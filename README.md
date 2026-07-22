@@ -10,6 +10,7 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 - PERFOPT-Bench 当前没有可 fork 的公开可执行 GitHub 仓库，只有 4open.science artifact 与宣传站，因此明确标为 `blocked`，不拿网站仓冒充 benchmark。
 - ALE-Bench Lite、HeuriGym、AutoLab 已有本机官方 verifier / 远端模型 smoke 证据。
 - ALE-Bench Lite `ahc027` 已完成首个真实 plain Codex smoke：`gpt-5.4-mini` 改写候选后 5/5 public-lite cases accepted，raw score 从 61,302,533 降到 55,181,186（该题越低越好，改善 9.99%）。
+- OpenEvolve `function_minimization` 已通过通用 task adapter 完成 Plain Codex 闭环：复用原生 evaluator，`combined_score` 从 1.2147685971 提升到 1.4997641484（+23.46%），共 4 public + 1 final calls；这是接线 smoke，不是 matched OpenEvolve baseline。
 - SkyDiscover/EvoX 已完成 DeepSeek OpenAI-compatible 的 1 iteration smoke，但还不是论文可比实验。
 - 已在当前 Mac 为所有可执行 benchmark 建立代表 case 的环境证据：ALE、AutoLab、SwarmResearch、Frontier-CS 使用镜像，HeuriGym 与 Frontier-Engineering v1-lite 使用 host 环境；完整空间表见 [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
 - 已建立 [Benchmark 快速导读](docs/benchmarks/README.md)：记录当前可跑题数、coverage/campaign 时间，并为 6 套 active benchmark 展开一个真实 case 的输入、agent 动作、期望输出和 verifier。
@@ -55,7 +56,9 @@ docs/docker-storage-plan.md    单 case 实测镜像、全量空间预算与 Lin
 docs/benchmarks/               规模/时间总览与每套 benchmark 的代表 case 导读
 docs/goal-plus-benchmark-experiment.md  Goal Plus 接入、并发、公平预算与逐 benchmark 对标协议
 docs/openevolve-cpu-examples.md         OpenEvolve 无特殊硬件示例的主实验/诊断/暂缓分级
+adapters/openevolve_examples/           OpenEvolve example catalog、workspace/evaluator/ticket/archive contract
 scripts/run_codex.py           通用非交互 Codex runner，保存 JSONL、usage 与 manifest
+scripts/openevolve_task.py     materialize/evaluate/archive OpenEvolve example task
 scripts/status.py              校验 registry 并打印状态矩阵
 evidence/legacy-smokes/        迁入的摘要、结果及 SkyDiscover 完整 checkpoint
 legacy/direct-api/             原有 direct-API smoke 辅助脚本，作为环境基线

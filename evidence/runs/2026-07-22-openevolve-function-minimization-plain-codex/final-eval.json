@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "benchmark": "openevolve-examples",
+  "task_id": "function_minimization",
+  "mode": "final",
+  "call_index": 5,
+  "budget": {
+    "schema_version": 1,
+    "max_evaluator_calls": 7,
+    "reserved_final_calls": 1,
+    "total_claimed": 5,
+    "public_claimed": 4,
+    "final_claimed": 1
+  },
+  "candidate_sha256": "ba9018ddbd616924c7283b641c816525efc7799087368168cbfc1ed1c285343e",
+  "upstream_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2",
+  "evaluated_at": "2026-07-22T04:30:55.696978+00:00",
+  "valid": true,
+  "primary_metric": {
+    "name": "combined_score",
+    "value": 1.4997641483797082,
+    "direction": "maximize"
+  },
+  "raw_metrics": {
+    "runs_successfully": 1.0,
+    "value_score": 0.9996855311729445,
+    "distance_score": 1.0,
+    "combined_score": 1.4997641483797082,
+    "reliability_score": 1.0
+  },
+  "artifacts": {
+    "stage1_result": "Found solution at x=-1.7040, y=0.6780 with value=-1.5187",
+    "distance_to_global": "0.0000",
+    "solution_quality": "Distance < 0.5: Very close",
+    "convergence_info": "Converged in 10 trials with 10 successes",
+    "best_position": "Final position: x=-1.7040, y=0.6780",
+    "average_distance_to_global": "0.0000",
+    "search_efficiency": "Success rate: 100.00%"
+  },
+  "elapsed_seconds": 0.53388872999858
+}
