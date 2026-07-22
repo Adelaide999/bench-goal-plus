@@ -2,7 +2,7 @@
 
 ## 结论先行
 
-这 6 套 benchmark 与 Goal Plus 的总体方向是匹配的，但目前还不能直接组成公平大实验。真正缺的不是再写一个 prompt，而是把 **artifact 型任务、并发控制、全局 evaluator 配额、Codex 总控成本和原始分数轨迹** 接入同一控制面。
+这 6 套 benchmark 与 Goal Plus 的总体方向是匹配的，但目前还不能直接组成公平大实验。真正缺的不是再写一个 prompt，而是把 **artifact 型任务、并发控制、统一 wall deadline、Codex 总控成本和原始分数轨迹** 接入同一控制面。
 
 优先级如下：
 
@@ -18,7 +18,7 @@
 
 核心 claim 不能写成“4 个并发 worker 比 1 个更容易撞到好答案”。那只是 agent 版 Pass@4。应该写成：
 
-> 在相同模型、任务、并发槽、evaluator calls 和已知推理开销下，Goal Plus 通过跨 lineage 的 Search Evidence、可修订 Search Schema、去重/准入和同 worker 延续，获得高于独立并发与 OpenEvolve 的 best-score AUC，并减少重复探索、提高停滞后的逃逸率。
+> 在相同模型、任务、总 wall budget 与并发槽下，Goal Plus 通过跨 lineage 的 Search Evidence、可修订 Search Schema、去重/准入和同 worker 延续，获得高于独立并发与 OpenEvolve 的 deadline best / best-score AUC；实际 evaluator calls、tokens 与成本同时报告，优势不能只由更多采样解释。
 
 ---
 
@@ -53,8 +53,8 @@ Q = 1 task
 1. **通用 artifact adapter**：现有 `goal_plus.benchmarking` 只 materialize MCQ/numeric 的 `answer.json`；要扩为 `materialize → prompt → evaluate → parse → archive`，允许 C++、Python、Rust、配置和多文件 artifact。
 2. **批处理 Codex controller**：当前通用 benchmark runner 只有 `fixed`/`pi-rpc` backend。Codex 真 E2E 由顶层 `codex exec` 驱动 `spawn_agent/wait_agent/followup_task`，需要把 ST runner 方式产品化并保存总控 transcript。
 3. **多次 verifier 闭环**：当前 benchmark runner 每个 candidate 最后只验证一次；这些任务要求同一 lineage 多轮验证、继续和 best-local 回滚。
-4. **全局 evaluator gate**：增加原子 ticket ledger 与 semaphore。所有 worker 在运行 verifier 前先占用 call ticket，达到全局预算后拒绝新评测；否则 `K` 个并发 lane 会最多超预算 `K` 次。
-5. **预算强制与成本覆盖**：`Budget.max_tokens` 当前只有 schema 字段，没有运行时强制。正式实验以 evaluator-call gate 和 runtime watchdog 做硬预算，同时记录 worker + Codex 总控的 tokens/cost；缺字段必须标记 coverage，不可当作 0。
+4. **统一 wall controller 与 evaluator ledger**：正式系统对比由外层 controller 固定 `T/K`，每次 verifier 仍原子记账但不拒绝调用。只有明确标为 mechanism ablation 时才启用 hard ticket cap。
+5. **预算强制与成本覆盖**：不为了模仿 OpenEvolve round 改 Goal Plus core。正式实验以 outer wall deadline 做硬边界，同时记录 worker + Codex 总控的 tokens/cost；缺字段必须标记 coverage，不可当作 0。
 6. **统一轨迹导出**：每次 evaluation 保存 `candidate/parent/artifact hash/raw metric/direction/validity/call index/wall time/model usage`，才能计算 AUC、重复率和跨 lineage transfer。
 
 这些改动优先放在本仓。只有 task 自身 evaluator 或 runner 必须变更时，才改对应 fork。
@@ -73,14 +73,14 @@ Q = 1 task
 | AutoLab CPU subset | 官方 verifier smoke 已验证；Codex agent 尚未跑通 | 未接通 | 通常不改任务；若 Harbor agent discovery 要求注册，只加薄 agent shim | Harbor workspace/container bridge、允许文件白名单、reward parser、CPU/内存/硬件指纹采集 | 无 benchmark-specific 改动 | 先通 1 个 puzzle/challenge 的 `K=2,E=1` 长时 run，并能恢复/保留 best artifact |
 | SwarmResearch 15 | 只验证过 circle-packing evaluator；Codex 全链未通 | 未接通 | **需要修固定 fork**：bootstrap/import 与 ADRS/ALE worker build context；不改评分语义 | 15 题 `task-eval → native metric` adapter、session/commit/call/cost 轨迹转换、长期 lane controller | 无 benchmark-specific 改动 | 先通 1 题，再做 5-task `K=4/8` pilot；能与公开 Swarm 轨迹按 calls/cost 对齐 |
 | Frontier-CS Algorithmic | 只验证过 problem 0 judge；Codex 全链未通 | 未接通 | 不改上游 judge | 10 题 materializer、controller-owned 容器池、partial-score parser、串行 evaluator gate | 无 benchmark-specific 改动 | 单题 20-call 闭环能接受“合法 partial score 但 `passed=false`”，再扩到冻结 10 题 |
-| OpenEvolve CPU examples（任务包 + 原生基线） | **已通 1 题**：Function Minimization 由通用 adapter materialize，Plain Codex 将 raw score 提升 23.46%，4 public + 1 final calls | 未接通 | 不改 OpenEvolve controller/provider；原生 OpenEvolve 保持自己的搜索入口 | 已有 task catalog、materializer、原生 evaluator wrapper、原子 ticket gate、trajectory/archive；待增加 native 与 Goal Plus runner | 不需要 | 在同一 Function Minimization ticket budget 下补原生 OpenEvolve 与 Goal Plus；随后扩到 Background Blur、Circle Packing 和两道 JAX 数学题 |
+| OpenEvolve CPU examples（任务包 + 原生基线） | **已通 1 题**：Function Minimization 由通用 adapter materialize，Plain Codex 将 raw score 提升 23.46%，4 public + 1 final calls | runner 已实现、真实模型 run 待验收 | 不改 OpenEvolve controller/provider；原生 OpenEvolve 保持自己的搜索入口 | 已有 task catalog、materializer、原生 evaluator wrapper，以及 `T/K` 外层控制的 native/Plain/Goal Plus 三入口；待补真实三方法证据与 usage coverage | 不需要 | 在同一 Function Minimization wall budget 与并发下补原生 OpenEvolve 与 Goal Plus；随后扩到 Background Blur、Circle Packing 和两道 JAX 数学题 |
 
 ### 表格结论
 
 - **不需要把每个 benchmark 都改造成“支持 Codex API”**。Codex 本身通过 CLI 在隔离 workspace 中读题、改文件、跑测试；benchmark 侧只需稳定的 materializer 和 evaluator adapter。
 - **Goal Plus 已经能把 Codex 当 native worker 使用**；当前缺口是把已在 ST 中验证过的 Codex 总控方式产品化为批量实验 runner，而不是再做一套模型 API client。
 - 绝大多数整改应落在 `bench-goal-plus`。需要改固定 fork 的固有接口主要是 Frontier-Engineering 的 algorithm plugin 和 Swarm 的复现基础设施问题；OpenEvolve examples 只抽取 task/evaluator contract，不修改其 controller 或 provider。
-- `goal-plus` core 不需要为六套 benchmark 各写逻辑。公平实验所需的 evaluator ticket gate、预算 watchdog、总控 usage 与统一轨迹可以先在本仓实现；验证稳定后再决定哪些通用能力上收 core。
+- `goal-plus` core 不需要为六套 benchmark 各写逻辑，也不需要加入 OpenEvolve round/call 模拟器。外层 wall controller、evaluator ledger、总控 usage 与统一轨迹都留在本仓。
 - 因此当前真实状态是：**Plain Codex 已在 ALE 与 OpenEvolve Function Minimization 各形成 1 题做题闭环；其余多数只是 evaluator smoke；Goal Plus + Codex 六套 benchmark 均尚未达到完成门槛。**
 
 ---
@@ -99,14 +99,14 @@ Q = 1 task
 
 SwarmResearch 15 上再加入论文原生 Swarm；Frontier-Engineering 上再加入仓库原生 AB-MCTS。消融可以后补，但 Independent Parallel 和 OpenEvolve 不能省。
 
-### 两套预算视图
+### 主预算与机制消融
 
 不可能同时严格匹配 wall time、tokens 和 evaluator calls，因此同一 run 输出两套视图：
 
-1. **Work-matched**：相同 `B` 个 evaluator tickets、相同模型、相同 `K`；比较 final best 和 best-score AUC。tokens/cost 作为效率分母和 coverage 门禁。
-2. **Time-matched**：相同 wall deadline、`K/E/Q` 和硬件；比较 time-to-target、deadline best 和实际 calls/cost。
+1. **系统级主结果**：相同 wall deadline、`K/E/Q` 和硬件；比较 time-to-target、deadline best 和 wall-time AUC，并把实际 calls/tokens/cost 作为效率与解释变量。
+2. **机制消融（可选）**：相同 `B` 个 evaluator tickets、相同模型和 `K`；只在需要隔离 feedback 数量时比较 final best 与 call-index AUC。它不能要求改坏 Goal Plus 的原生调度。
 
-主结论以 work-matched 为准，time-matched 用于证明并发是否真正缩短找到好结果的时间。仅比较“同样 1 小时，4 个 worker 比 1 个 worker 好”不能证明搜索效率，因为前者用了约 4 倍 agent compute。
+主结论以系统级 `T/K` 对比为准，同时用 actual tokens/cost 和 evaluator calls 排除“只是用了更多 compute”的替代解释。`K=4` 与 `K=1` 的 scaling slice 必须明确 agent compute 不同，不能直接写成算法效率提升。
 
 ### 主要指标
 
@@ -124,7 +124,7 @@ SwarmResearch 15 上再加入论文原生 Swarm；Frontier-Engineering 上再加
 
 要声称并发协调有价值，至少要同时看到：
 
-1. 相同 `B/K/model` 下，Goal Plus 对 Independent Parallel 的 paired best-score AUC 差值为正；
+1. 相同 `T/K/model/host` 下，Goal Plus 对 Independent Parallel 的 paired deadline best 或 wall-time AUC 差值为正；
 2. 对 OpenEvolve 的 final best 或 AUC 有稳定优势，而不是只赢一题；
 3. 重复/碰撞下降，或 post-stagnation escape / cross-lineage transfer 上升，给出机制证据；
 4. 把总控 agent 的 tokens/cost 算入后，单位成本收益仍成立；

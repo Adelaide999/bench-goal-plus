@@ -9,6 +9,40 @@ This repository is the control plane for Goal Plus benchmark integrations.
 - A status can become `pass` only when a reproducible command and evidence file exist. Repository support or an unexecuted code path is at most `partial`.
 - Keep three claims separate: official verifier works, plain Codex works, and Goal Plus + Codex works.
 - Preserve raw benchmark metrics and direction. Any normalized aggregate must be an additional field, not a replacement.
-- Match evaluator calls first; record model calls, tokens, cost, wall time, host, commit, and environment as secondary budgets.
+- For full-system comparisons, fix the task/evaluator, total wall-clock budget `T`, and live search concurrency `K`. Preserve each method's native control flow; report evaluator calls, iterations, tokens, cost coverage, and actual wall time after the run. Hard-match evaluator calls only in an explicitly labeled mechanism ablation.
+- Never add benchmark-specific stopping logic to Goal Plus core just to mimic another method's rounds. OpenEvolve may use a very large iteration ceiling and an outer `SIGTERM` deadline.
+- Never run Goal Plus from an upstream or benchmark source checkout. Materialize a disposable Git workspace under ignored `runs/`; keep its `.gp/` state inside that workspace.
+- Do not delete local workspaces or caches automatically. If a conflicting path must be preserved, rename it with a `_bak` suffix and report it.
 - Run `python3 scripts/status.py --check` and `python3 -m unittest discover -s tests -v` before committing.
 
+## Fresh-host bootstrap
+
+Host prerequisites are `git`, a Python `3.10+` launcher, `uv`, and Codex CLI `0.144.1+`. Credentials stay in the host environment or Codex auth store; never write them into this repository.
+
+```bash
+cd bench-goal-plus
+python3 scripts/repro_env.py bootstrap
+python3 scripts/repro_env.py doctor
+```
+
+`bootstrap` creates the disposable `.bench-env/venv`, clones missing pinned OpenEvolve and Goal Plus checkouts as siblings, installs the locked Python environment, and refuses to rewrite an existing checkout at another commit. On another machine, recreate `.bench-env`; do not copy a virtualenv between hosts.
+
+Prepare and verify a model-free Goal Plus task workspace:
+
+```bash
+.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
+  --method goal-plus --task-id function_minimization \
+  --wall-time-seconds 600 --concurrency 3 --seed 1
+
+.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py seed-smoke \
+  --run-dir runs/openevolve-compare/<run-id>
+```
+
+Execute that prepared run with existing Codex authentication:
+
+```bash
+.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py run \
+  --run-dir runs/openevolve-compare/<run-id> --model <codex-model>
+```
+
+For native OpenEvolve, prepare with `--method openevolve`, export `OPENAI_API_KEY` only in the shell, then pass `--model` and `--api-base` to `run`. See `docs/reproducible-environment.md` for Mac/Linux details and failure semantics.

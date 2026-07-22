@@ -2,7 +2,7 @@
 
 ## 目标 claim
 
-固定模型、任务初始状态、官方 evaluator 和 evaluator-call 预算时，Goal Plus + Codex 相比 plain Codex、固定并行 lineages 与进化搜索 baseline，获得更高的 best-seen score / AUC；提升不能由更多 token、更多验证次数或不同 host 解释。
+固定模型、任务初始状态、官方 evaluator、总 wall budget `T` 和并发 `K` 时，Goal Plus + Codex 相比 plain Codex、固定并行 lineages 与进化搜索 baseline，获得更高的 deadline best / best-seen AUC；实际 tokens、验证次数、成本与 host 同时报告，提升不能只由更多 compute 解释。
 
 ## 全局工作分解
 
@@ -13,10 +13,11 @@
 - [x] 为 6 套 active benchmark 建立统一导读，记录规模、时间与代表 case 的 I/O/verifier 契约。
 - [x] 定义 Goal Plus 的逐 benchmark 接入改造、三层并发、matched-budget baseline 与非 Pass@K 验收协议。
 - [ ] 定义统一 benchmark adapter 接口：`materialize -> prompt -> evaluate -> parse -> archive`。
-- [ ] 实现全局 evaluator ticket gate，分离 agent/task/evaluator concurrency 并防止并发超预算。
+- [x] OpenEvolve example adapter 支持原子 evaluator ledger；显式 hard cap 只用于 mechanism ablation，系统级主实验按 outer wall deadline 运行。
 - [ ] 将 Codex ST controller 产品化为 batch runner，计入 main-agent 与 worker usage。
 - [x] 为 OpenEvolve examples 实现 catalog/materialize/evaluate/archive adapter、原子 evaluator ticket 和 Plain Codex Function Minimization smoke。
-- [ ] 在相同 task/ticket budget 下补 OpenEvolve native smoke 与 Goal Plus runner；OpenEvolve 内部不增加 Codex provider。
+- [x] 实现相同 task/evaluator、`T/K` 外层控制的 OpenEvolve native / Plain Codex / Goal Plus runner；真实 native 与 Goal Plus 模型 run 尚待验收，OpenEvolve 内部不增加 Codex provider。
+- [x] 固定 OpenEvolve/Goal Plus commit 与 Python lock，提供 fresh-host bootstrap/doctor 和 run-local Goal Plus workspace。
 - [ ] 为 OpenEvolve 原生 OpenAI-compatible 路径增加 usage/cost instrumentation。
 - [ ] 定义统一 run manifest 扩展：task commit、image digest、model/provider、seed、预算和网络策略。
 - [ ] 定义 evaluator-call ledger；不能用“iteration”代替真实验证次数。

@@ -30,7 +30,11 @@ def main() -> int:
     materialize_parser.add_argument("--upstream-root", type=Path, required=True)
     materialize_parser.add_argument("--workspace", type=Path, required=True)
     materialize_parser.add_argument("--runtime-python", type=Path, required=True)
-    materialize_parser.add_argument("--max-evaluator-calls", type=int, default=7)
+    materialize_parser.add_argument(
+        "--max-evaluator-calls",
+        type=int,
+        help="optional hard cap; omit for wall-clock-budget experiments",
+    )
     materialize_parser.add_argument("--reserved-final-calls", type=int, default=1)
 
     evaluate_parser = subparsers.add_parser("evaluate")

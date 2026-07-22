@@ -68,8 +68,7 @@ run-dir/
 ## 公平性边界
 
 - plain Codex 和 Goal Plus + Codex 必须使用同一 Codex model/provider 身份。
-- 主预算是 evaluator calls，不是 Codex turns 或 Goal Plus iterations。
+- 系统级主预算是相同 wall deadline `T` 和 live concurrency `K`，不是 Codex turns、Goal Plus rounds 或 OpenEvolve iterations；evaluator calls 全量记录。显式 hard call cap 只属于另行标注的机制消融。
 - Codex host 与 Pi/直接 LLM API 的结果不能混合归因；跨 host 只能做 portability slice。
 - private/held-out evaluator 不暴露给 Codex；正式提交后才运行。
 - upstream 自带的 API agent smoke 只证明环境和 evaluator，不是 Codex baseline。
-

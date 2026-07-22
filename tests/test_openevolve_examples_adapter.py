@@ -90,15 +90,29 @@ class OpenEvolveExamplesAdapterTest(unittest.TestCase):
             )
             metadata = json.loads((workspace / "task.json").read_text())
             self.assertEqual(metadata["runtime_python"], str(Path(sys.executable).absolute()))
+            self.assertEqual(
+                metadata["controller_runtime_dir"],
+                str(workspace.resolve() / ".bench-runtime"),
+            )
             metadata["runtime_python"] = sys.executable
             (workspace / "task.json").write_text(json.dumps(metadata))
+            subprocess.run(
+                ["git", "clone", str(workspace), str(temp / "candidate-worktree")],
+                check=True,
+                capture_output=True,
+            )
+            candidate_workspace = temp / "candidate-worktree"
+            candidate_metadata = json.loads((candidate_workspace / "task.json").read_text())
+            candidate_metadata["runtime_python"] = sys.executable
+            (candidate_workspace / "task.json").write_text(json.dumps(candidate_metadata))
 
             original_worker = adapter.WORKER_PATH
             try:
                 adapter.WORKER_PATH = fake_worker
-                public = adapter.evaluate_workspace(workspace, "public")
+                public = adapter.evaluate_workspace(candidate_workspace, "public")
                 self.assertEqual(public["call_index"], 1)
                 self.assertEqual(public["primary_metric"]["value"], 1.0)
+                self.assertEqual(public["combined_score"], 1.0)
                 with self.assertRaises(adapter.BudgetExhausted):
                     adapter.evaluate_workspace(workspace, "public")
                 final = adapter.evaluate_workspace(workspace, "final")
@@ -140,6 +154,29 @@ class OpenEvolveExamplesAdapterTest(unittest.TestCase):
             adapter.validate_candidate(changed, metadata),
             "content after EVOLVE-BLOCK changed",
         )
+
+    def test_unlimited_public_budget_still_reserves_final(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime = Path(temp_dir)
+            (runtime / "budget.lock").touch()
+            (runtime / "budget.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "max_evaluator_calls": None,
+                        "reserved_final_calls": 1,
+                        "total_claimed": 0,
+                        "public_claimed": 0,
+                        "final_claimed": 0,
+                    }
+                )
+            )
+            adapter.claim_ticket(runtime, "public")
+            _, budget = adapter.claim_ticket(runtime, "public")
+            self.assertEqual(budget["public_claimed"], 2)
+            adapter.claim_ticket(runtime, "final")
+            with self.assertRaises(adapter.BudgetExhausted):
+                adapter.claim_ticket(runtime, "final")
 
     def test_sanitizes_home_from_evidence(self) -> None:
         text = f"path={Path.home()}/private/file"

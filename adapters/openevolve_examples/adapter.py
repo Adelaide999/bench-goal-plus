@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import math
 import subprocess
 import tempfile
 import time
@@ -193,11 +194,13 @@ def materialize_workspace(
     task: ResolvedTask,
     workspace: Path,
     runtime_python: Path,
-    max_evaluator_calls: int,
+    max_evaluator_calls: int | None,
     reserved_final_calls: int,
     description: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if max_evaluator_calls <= reserved_final_calls or reserved_final_calls < 1:
+    if reserved_final_calls < 1:
+        raise ValueError("at least one final evaluator call must be reserved")
+    if max_evaluator_calls is not None and max_evaluator_calls <= reserved_final_calls:
         raise ValueError("max evaluator calls must leave at least one public and one final call")
     # Keep the venv launcher path intact. Path.resolve() follows its symlink to the
     # base interpreter and silently drops the venv's site-packages.
@@ -209,6 +212,18 @@ def materialize_workspace(
     prefix, _, suffix = split_evolve_block(seed)
     system_message = description["prompt"]["system_message"]
     evaluation = description["evaluation"]
+    if max_evaluator_calls is None:
+        evaluation_budget = (
+            "Run `python3 evaluate.py` for public feedback. Public evaluator calls are not "
+            "hard-capped; work within the experiment controller's wall-clock deadline. "
+            f"The controller reserves {reserved_final_calls} final evaluator call."
+        )
+    else:
+        evaluation_budget = (
+            "Run `python3 evaluate.py` for public feedback. At most "
+            f"{max_evaluator_calls - reserved_final_calls} public evaluator calls are available; "
+            f"{reserved_final_calls} call is reserved for the controller's final evaluation."
+        )
 
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=False)
@@ -223,9 +238,7 @@ def materialize_workspace(
         f"- Only edit `{task.artifact_name}`, and only inside its single `EVOLVE-BLOCK`.\n"
         "- Do not modify the evaluator helper, task metadata, Git configuration, or files outside this workspace.\n"
         "- Do not use the network.\n"
-        f"- Run `python3 evaluate.py` for public feedback. At most "
-        f"{max_evaluator_calls - reserved_final_calls} public evaluator calls are available; "
-        f"{reserved_final_calls} call is reserved for the controller's final evaluation.\n"
+        f"- {evaluation_budget}\n"
         "- Stop with the best verified candidate left in the artifact file.\n"
     )
     (workspace / "AGENTS.md").write_text(
@@ -250,6 +263,9 @@ def materialize_workspace(
         "evaluator_path": str(task.evaluator),
         "requirements_path": str(task.requirements),
         "runtime_python": str(runtime_python),
+        # Candidate Git worktrees do not contain ignored runtime state. Keep every
+        # lineage on one controller-owned ledger in the materialized source workspace.
+        "controller_runtime_dir": str(workspace / ".bench-runtime"),
         "primary_metric": evaluation["primary_metric"],
         "direction": evaluation["direction"],
         "timeout_seconds": evaluation["timeout_seconds"],
@@ -289,9 +305,14 @@ def claim_ticket(runtime_dir: Path, mode: str) -> tuple[int, dict[str, Any]]:
     with lock_path.open("r+") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         budget = json.loads(budget_path.read_text())
-        public_limit = budget["max_evaluator_calls"] - budget["reserved_final_calls"]
         if mode == "public":
-            if budget["public_claimed"] >= public_limit:
+            maximum = budget["max_evaluator_calls"]
+            public_limit = (
+                maximum - budget["reserved_final_calls"]
+                if maximum is not None
+                else None
+            )
+            if public_limit is not None and budget["public_claimed"] >= public_limit:
                 raise BudgetExhausted("public evaluator budget exhausted")
             budget["public_claimed"] += 1
         elif mode == "final":
@@ -331,7 +352,9 @@ def append_history(runtime_dir: Path, payload: dict[str, Any]) -> None:
 def evaluate_workspace(workspace: Path, mode: str) -> dict[str, Any]:
     workspace = workspace.resolve()
     metadata = json.loads((workspace / "task.json").read_text())
-    runtime_dir = workspace / ".bench-runtime"
+    runtime_dir = Path(
+        metadata.get("controller_runtime_dir", workspace / ".bench-runtime")
+    )
     call_index, budget = claim_ticket(runtime_dir, mode)
     artifact = workspace / metadata["artifact_name"]
     candidate = artifact.read_text()
@@ -368,6 +391,13 @@ def evaluate_workspace(workspace: Path, mode: str) -> dict[str, Any]:
             ],
         )
 
+    primary_value = result["primary_metric"].get("value")
+    if (
+        isinstance(primary_value, bool)
+        or not isinstance(primary_value, (int, float))
+        or not math.isfinite(primary_value)
+    ):
+        primary_value = -1e300 if metadata["direction"] == "maximize" else 1e300
     payload = {
         "schema_version": 1,
         "benchmark": "openevolve-examples",
@@ -379,6 +409,9 @@ def evaluate_workspace(workspace: Path, mode: str) -> dict[str, Any]:
         "upstream_commit": metadata["upstream_commit"],
         "evaluated_at": utc_now(),
         **result,
+        # Goal Plus ranking verifiers require a finite top-level metric in the
+        # final JSON object; raw/native metrics remain preserved above.
+        metadata["primary_metric"]: primary_value,
     }
     append_history(runtime_dir, payload)
     return payload

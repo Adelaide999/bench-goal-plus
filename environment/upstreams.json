@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "python": "3.12",
+  "codex_min_version": "0.144.1",
+  "upstreams": {
+    "openevolve": {
+      "repository": "https://github.com/algorithmicsuperintelligence/openevolve.git",
+      "checkout_dir": "openevolve",
+      "pinned_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2"
+    },
+    "goal_plus": {
+      "repository": "https://github.com/ck0123/goal-plus.git",
+      "checkout_dir": "goal-plus",
+      "pinned_commit": "05626b18b23bbd2ec97713246de989c07be1f842"
+    }
+  }
+}

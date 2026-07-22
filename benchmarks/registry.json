@@ -358,10 +358,10 @@
         "evidence/runs/2026-07-22-openevolve-function-minimization-plain-codex/run-manifest.json",
         "evidence/runs/2026-07-22-openevolve-function-minimization-plain-codex/events.jsonl"
       ],
-      "next_action": "Run native OpenEvolve on function_minimization with the same evaluator-ticket budget, then connect Goal Plus to the existing task adapter before expanding to background_blur and circle_packing_with_artifacts.",
+      "next_action": "Use experiments/openevolve_compare to run native OpenEvolve and Goal Plus on function_minimization with the same wall deadline and live concurrency, then expand the pinned task catalog to background_blur and circle_packing_with_artifacts.",
       "blockers": [
         "The OpenAI-compatible client returns only response text and does not persist token/cost usage.",
-        "The first Plain Codex smoke used the CLI default model, whose identity was not exposed in the saved run manifest; formal runs must pass an explicit model."
+        "No real-model native OpenEvolve versus Goal Plus pair has been archived yet; the new runner is implemented but remains unverified beyond model-free smoke."
       ]
     }
   ]

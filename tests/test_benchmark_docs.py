@@ -47,6 +47,7 @@ class BenchmarkDocsTest(unittest.TestCase):
             + [
                 ROOT / "docs" / "goal-plus-benchmark-experiment.md",
                 ROOT / "docs" / "openevolve-cpu-examples.md",
+                ROOT / "docs" / "reproducible-environment.md",
             ]
         )
         link_pattern = re.compile(r"\[[^]]+\]\(([^)]+)\)")
@@ -63,6 +64,7 @@ class BenchmarkDocsTest(unittest.TestCase):
         extra_docs = [
             ROOT / "docs" / "goal-plus-benchmark-experiment.md",
             ROOT / "docs" / "openevolve-cpu-examples.md",
+            ROOT / "docs" / "reproducible-environment.md",
         ]
         combined = "\n".join(
             path.read_text(encoding="utf-8")
