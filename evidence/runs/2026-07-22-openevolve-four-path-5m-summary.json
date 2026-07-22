@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-07-22",
+  "superseded_for_goal_plus_acceptance_by": "2026-07-22-goal-plus-codex-pi-strict-rerun.json",
   "claim": "The same OpenEvolve function_minimization task completed a real five-minute run through native OpenEvolve, plain Codex, Goal Plus hosted by Codex, and Goal Plus hosted by Pi.",
   "protocol": {
     "task_id": "function_minimization",

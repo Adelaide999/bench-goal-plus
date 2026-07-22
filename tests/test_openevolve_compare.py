@@ -119,6 +119,70 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("goal_plus_id=gp_0001", prompt)
         self.assertIn("run_id=run_test", prompt)
         self.assertIn("Do not create another Goal Plus record", prompt)
+        self.assertIn("do not call `goal_plus_status` or `search_status`", prompt)
+        self.assertIn("`search_start_agent_session` exactly once", prompt)
+        self.assertIn(
+            "An unbound or duplicate session makes this benchmark run incomplete",
+            prompt,
+        )
+
+    def test_goal_plus_completion_requires_bound_workers_for_every_candidate(
+        self,
+    ) -> None:
+        base_state = {
+            "goals": [
+                {
+                    "goal_plus_id": "gp_0001",
+                    "status": "complete",
+                    "linked_run_id": "run_test",
+                }
+            ],
+            "runs": [
+                {
+                    "run_id": "run_test",
+                    "candidate_count": 2,
+                    "bound_candidate_count": 2,
+                    "unbound_agent_session_count": 0,
+                    "session_counts_by_candidate": {"c001": 1, "c002": 1},
+                }
+            ],
+        }
+        kwargs = {
+            "expected_concurrency": 2,
+            "expected_goal_plus_id": "gp_0001",
+            "expected_run_id": "run_test",
+        }
+        self.assertIsNone(experiment.goal_plus_incomplete_reason(base_state, **kwargs))
+
+        unbound = json.loads(json.dumps(base_state))
+        unbound["runs"][0]["unbound_agent_session_count"] = 1
+        self.assertIn(
+            "unbound agent sessions",
+            experiment.goal_plus_incomplete_reason(unbound, **kwargs),
+        )
+
+        duplicate_session = json.loads(json.dumps(base_state))
+        duplicate_session["runs"][0]["session_counts_by_candidate"] = {
+            "c001": 2,
+            "c002": 2,
+        }
+        self.assertIn(
+            "exactly one session per candidate",
+            experiment.goal_plus_incomplete_reason(duplicate_session, **kwargs),
+        )
+
+        duplicate_goal = json.loads(json.dumps(base_state))
+        duplicate_goal["goals"].append(
+            {
+                "goal_plus_id": "gp_0002",
+                "status": "complete",
+                "linked_run_id": "run_test",
+            }
+        )
+        self.assertIn(
+            "duplicate Goal Plus records",
+            experiment.goal_plus_incomplete_reason(duplicate_goal, **kwargs),
+        )
 
     def test_controller_prepared_spec_keeps_runtime_files_outside_edit_surface(
         self,
@@ -138,7 +202,28 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertEqual(spec["budget"], {"max_candidates": 2, "max_parallel": 2})
         self.assertEqual(spec["edit_surface"]["allow"], ["candidate.py"])
         self.assertNotIn(".bench-runtime/**", spec["edit_surface"]["allow"])
-        self.assertEqual(spec["strategy"]["worker_budget"]["max_runtime_seconds"], 120)
+        self.assertEqual(spec["strategy"]["worker_budget"]["max_runtime_seconds"], 60)
+
+    def test_goal_plus_no_target_run_cannot_exit_before_exploration_minimum(
+        self,
+    ) -> None:
+        budget = {"wall_time_seconds": 300, "soft_closeout_seconds": 60}
+        self.assertIsNone(
+            experiment.goal_plus_timing_incomplete_reason(
+                {"duration_seconds": 300.0, "deadline_reached": True}, budget
+            )
+        )
+        self.assertIn(
+            "before the no-target exploration minimum",
+            experiment.goal_plus_timing_incomplete_reason(
+                {"duration_seconds": 176.0, "deadline_reached": False}, budget
+            ),
+        )
+        self.assertIsNone(
+            experiment.goal_plus_timing_incomplete_reason(
+                {"duration_seconds": 238.0, "deadline_reached": False}, budget
+            )
+        )
 
     def test_promotion_patch_is_applied_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

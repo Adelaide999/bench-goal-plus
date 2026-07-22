@@ -10,6 +10,7 @@ This repository is the control plane for Goal Plus benchmark integrations.
 - Keep five claims separate: official verifier works, native OpenEvolve works, plain Codex works, Goal Plus + Codex works, and Goal Plus + Pi works.
 - Preserve raw benchmark metrics and direction. Any normalized aggregate must be an additional field, not a replacement.
 - For full-system comparisons, fix the task/evaluator, total wall-clock budget `T`, and live search concurrency `K`. Preserve each method's native control flow; report evaluator calls, iterations, tokens, cost coverage, and actual wall time after the run. Hard-match evaluator calls only in an explicitly labeled mechanism ablation.
+- A Goal Plus result is not complete merely because controller closeout can evaluate seed candidates. Require exactly `K` materialized candidates, a bound native worker for every candidate, no unbound/duplicate sessions, the expected prepared Goal/run IDs, and no early exit before the no-target exploration minimum.
 - Never add benchmark-specific stopping logic to Goal Plus core just to mimic another method's rounds. OpenEvolve may use a very large iteration ceiling and an outer `SIGTERM` deadline.
 - Never run Goal Plus from an upstream or benchmark source checkout. Materialize a disposable Git workspace under ignored `runs/`; keep its `.gp/` state inside that workspace.
 - Do not delete local workspaces or caches automatically. If a conflicting path must be preserved, rename it with a `_bak` suffix and report it.

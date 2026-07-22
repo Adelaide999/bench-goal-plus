@@ -145,7 +145,7 @@ def render_goal(
     prepared_search: dict[str, Any] | None = None,
 ) -> str:
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
-    dispatch_seconds = max(30, min(120, exploration_seconds // 2))
+    dispatch_seconds = max(30, min(60, exploration_seconds // 3))
     launch_lines = [
         f'- Freeze `strategy.worker_host="{worker_host}"` and '
         '`strategy.orchestration_mode="parallel_loops"`.',
@@ -173,8 +173,22 @@ def render_goal(
             f"- Resume `frozen_spec_id={prepared_search['frozen_spec_id']}`.\n"
             f"- Drive `run_id={prepared_search['run_id']}`.\n"
             "- Do not create another Goal Plus record, freeze another spec, or create another run. "
-            "Start by reading those exact durable IDs, then immediately plan the one initial batch, "
-            "materialize exactly K candidates, and launch the fixed parallel workers.\n\n"
+            "The controller validated these IDs immediately before launch, so do not call "
+            "`goal_plus_status` or `search_status`; immediately plan the one initial batch.\n"
+            "- Call `search_plan_next` exactly once. Call `search_start_batch` exactly once "
+            "successfully, using exactly K proposals shaped only as "
+            '`{"intent": "distinct hypothesis"}`; do not pass `direction`, `seed`, or other '
+            "proposal fields.\n"
+            "- For each returned candidate, call `search_start_agent_session` exactly once and "
+            "without a `directive`. Immediately invoke the returned launch tool/payload exactly "
+            "once. Never create another session for that candidate merely because launch has not "
+            "yet completed. An unbound or duplicate session makes this benchmark run incomplete.\n"
+            "- Materialize exactly K candidates and launch all fixed parallel workers before doing "
+            "any monitoring or commentary.\n"
+            "- This benchmark has no early success target. Do not select, promote, report, or "
+            "complete the Goal Plus record yourself. Whenever a worker finishes before the "
+            "exploration cutoff, validate it and continue that same worker with a budget fitted to "
+            "the remaining time. The external controller owns deadline closeout and finalization.\n\n"
         )
     return (
         f"{entrypoint}\n\n"
@@ -217,7 +231,7 @@ def build_goal_plus_search_spec(
 ) -> dict[str, Any]:
     """Build the adapter-owned frozen task contract used by timed Search runs."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
-    dispatch_seconds = max(30, min(120, exploration_seconds // 2))
+    dispatch_seconds = max(30, min(60, exploration_seconds // 3))
     verifier = {
         "name": "primary_metric",
         "role": "ranking_signal",
@@ -789,6 +803,9 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
         iteration_count = 0
         best_scores: list[float] = []
         hosts: set[str] = set()
+        bound_candidate_ids: set[str] = set()
+        unbound_agent_session_count = 0
+        session_counts_by_candidate: dict[str, int] = {}
         for candidate_path in candidate_paths:
             candidate = load_json(candidate_path)
             iterations = candidate.get("iterations")
@@ -804,12 +821,32 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
             session = load_json(session_path)
             if isinstance(session.get("host"), str):
                 hosts.add(session["host"])
+            candidate_id = session.get("candidate_id")
+            if isinstance(candidate_id, str):
+                session_counts_by_candidate[candidate_id] = (
+                    session_counts_by_candidate.get(candidate_id, 0) + 1
+                )
+            external_id = (session.get("host_handle") or {}).get("external_id")
+            if (
+                isinstance(candidate_id, str)
+                and isinstance(external_id, str)
+                and external_id
+            ):
+                bound_candidate_ids.add(candidate_id)
+            else:
+                unbound_agent_session_count += 1
         runs.append(
             {
                 "run_id": payload.get("run_id"),
                 "status": payload.get("state", payload.get("status")),
                 "candidate_count": len(candidate_paths),
                 "agent_session_count": len(session_paths),
+                "bound_agent_session_count": (
+                    len(session_paths) - unbound_agent_session_count
+                ),
+                "bound_candidate_count": len(bound_candidate_ids),
+                "unbound_agent_session_count": unbound_agent_session_count,
+                "session_counts_by_candidate": session_counts_by_candidate,
                 "iteration_count": iteration_count,
                 "best_recorded_score": max(best_scores) if best_scores else None,
                 "hosts": sorted(hosts),
@@ -824,7 +861,13 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
     }
 
 
-def goal_plus_incomplete_reason(state: dict[str, Any]) -> str | None:
+def goal_plus_incomplete_reason(
+    state: dict[str, Any],
+    *,
+    expected_concurrency: int | None = None,
+    expected_goal_plus_id: str | None = None,
+    expected_run_id: str | None = None,
+) -> str | None:
     goals = state.get("goals") or []
     if not goals:
         return "Goal Plus did not create a durable goal record"
@@ -835,6 +878,75 @@ def goal_plus_incomplete_reason(state: dict[str, Any]) -> str | None:
     ]
     if noncomplete:
         return "Goal Plus did not finish cleanly: " + ", ".join(noncomplete)
+    if expected_goal_plus_id is not None:
+        matching = [
+            item for item in goals if item.get("goal_plus_id") == expected_goal_plus_id
+        ]
+        if len(matching) != 1:
+            return f"expected exactly one prepared goal {expected_goal_plus_id}"
+        duplicates = [
+            item.get("goal_plus_id")
+            for item in goals
+            if item.get("goal_plus_id") != expected_goal_plus_id
+            and item.get("linked_run_id") == expected_run_id
+        ]
+        if duplicates:
+            return (
+                "duplicate Goal Plus records linked to the prepared run: "
+                + ", ".join(str(item) for item in duplicates)
+            )
+    runs = state.get("runs") or []
+    if expected_run_id is not None:
+        runs = [item for item in runs if item.get("run_id") == expected_run_id]
+        if len(runs) != 1:
+            return f"expected exactly one prepared Search run {expected_run_id}"
+    if expected_concurrency is not None:
+        for run in runs:
+            if run.get("candidate_count") != expected_concurrency:
+                return (
+                    f"Search run {run.get('run_id')} materialized "
+                    f"{run.get('candidate_count')} candidates; expected {expected_concurrency}"
+                )
+            session_counts = run.get("session_counts_by_candidate") or {}
+            duplicate_sessions = {
+                candidate_id: count
+                for candidate_id, count in session_counts.items()
+                if count != 1
+            }
+            if len(session_counts) != expected_concurrency or duplicate_sessions:
+                return (
+                    f"Search run {run.get('run_id')} did not keep exactly one session per "
+                    f"candidate: {session_counts}"
+                )
+            if run.get("bound_candidate_count") != expected_concurrency:
+                return (
+                    f"Search run {run.get('run_id')} launched workers for "
+                    f"{run.get('bound_candidate_count')} candidates; expected {expected_concurrency}"
+                )
+            if run.get("unbound_agent_session_count"):
+                return (
+                    f"Search run {run.get('run_id')} left "
+                    f"{run.get('unbound_agent_session_count')} unbound agent sessions"
+                )
+    return None
+
+
+def goal_plus_timing_incomplete_reason(
+    control: dict[str, Any], budget: dict[str, Any]
+) -> str | None:
+    """Reject early Goal Plus exits when the protocol has no success target."""
+    if control.get("deadline_reached"):
+        return None
+    duration = control.get("duration_seconds")
+    if not isinstance(duration, (int, float)):
+        return "Goal Plus execution duration is unavailable"
+    minimum = budget["wall_time_seconds"] - budget["soft_closeout_seconds"]
+    tolerance_seconds = 5
+    if duration + tolerance_seconds < minimum:
+        return (
+            f"Goal Plus exited after {duration:.3f}s before the no-target exploration "
+            f"minimum of {minimum}s"
+        )
     return None
 
 
@@ -1552,9 +1664,17 @@ def execute(args: argparse.Namespace) -> int:
             control["result_incomplete_reason"] = (
                 f"{method} process group exceeded the shutdown grace"
             )
-        goal_reason = goal_plus_incomplete_reason(control["goal_plus"])
+        goal_reason = goal_plus_incomplete_reason(
+            control["goal_plus"],
+            expected_concurrency=budget["concurrency"],
+            expected_goal_plus_id=(prepared_search or {}).get("goal_plus_id"),
+            expected_run_id=(prepared_search or {}).get("run_id"),
+        )
         if goal_reason and not control.get("result_incomplete_reason"):
             control["result_incomplete_reason"] = goal_reason
+        timing_reason = goal_plus_timing_incomplete_reason(control, budget)
+        if timing_reason and not control.get("result_incomplete_reason"):
+            control["result_incomplete_reason"] = timing_reason
         if not control["goal_plus_controller_closeout"].get("completed"):
             control["result_incomplete_reason"] = (
                 "Goal Plus controller closeout failed: "
@@ -1643,7 +1763,15 @@ def repair_closeout(args: argparse.Namespace) -> int:
         workspace
     )
     control["goal_plus"] = collect_goal_plus_state(workspace)
-    reason = goal_plus_incomplete_reason(control["goal_plus"])
+    prepared_search = manifest.get("goal_plus_prepared") or {}
+    reason = goal_plus_incomplete_reason(
+        control["goal_plus"],
+        expected_concurrency=manifest["budget"]["concurrency"],
+        expected_goal_plus_id=prepared_search.get("goal_plus_id"),
+        expected_run_id=prepared_search.get("run_id"),
+    )
+    timing_reason = goal_plus_timing_incomplete_reason(control, manifest["budget"])
+    reason = reason or timing_reason
     if reason is None and not control.get("hard_killed"):
         control.pop("result_incomplete_reason", None)
         manifest["status"] = "finished"

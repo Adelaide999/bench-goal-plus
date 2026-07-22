@@ -1,5 +1,7 @@
 # OpenEvolve example: four-path 5-minute E2E
 
+> The native OpenEvolve/plain Codex measurements remain the first four-path smoke. Goal Plus acceptance has been superseded by the [strict current-code rerun](2026-07-22-goal-plus-codex-pi-strict-rerun.md), which requires bound workers and rejects early no-target exit.
+
 This evidence promotes only sanitized facts from ignored raw run directories. No API credential, endpoint, absolute home path, or raw transcript is included.
 
 ## Protocol

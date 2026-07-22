@@ -9,6 +9,8 @@ This harness runs one pinned OpenEvolve example through four independent paths w
 
 Defaults are `T=300s`, `K=2`, model `gpt-5.6-luna`, and reasoning `high`. All four paths require the same explicit OpenAI-compatible `--api-base` and inherit `OPENAI_API_KEY`; the key is never serialized.
 
+For a no-target Goal Plus run, `T` is a cap and `T-closeout` is a minimum exploration duration. The default five-minute protocol therefore requires at least 240 seconds of live orchestration/search and uses 60-second worker dispatches so the same lineage can continue within the remaining budget.
+
 ## What is outside and inside T
 
 `prepare` performs task materialization for every method. For Goal Plus it also creates the goal/triage record, freezes the adapter-owned verifier contract, and creates an empty Search run. This mirrors OpenEvolve config preparation and makes the timed region measure search orchestration and workers instead of repeatedly spending most of a five-minute run reconstructing benchmark plumbing.
@@ -63,6 +65,16 @@ export OPENAI_API_KEY='<secret>'
 Codex uses an explicit run-local custom provider over the Responses wire API. Headless Goal Plus MCP tools are registered explicitly with server-level tool approval; no user `config.toml` provider redirect is required. Pi receives a run-local `models.json` whose credential field is only `$OPENAI_API_KEY`.
 
 The outer controller sends `SIGTERM` at `T`, allows a fixed grace period, and marks a hard kill incomplete. A normal deadline signal is accepted only after deterministic closeout succeeds. `experiment.json`, `final-eval.json`, event logs, Goal Plus state, selected artifact, evaluator call counts, and available usage telemetry remain in the ignored run directory.
+
+Goal Plus completion also requires all of the following:
+
+- exactly the prepared Goal Plus ID and linked Search run, with no duplicate Goal;
+- exactly `K` candidates and a bound native worker for every candidate;
+- zero unbound sessions (controller-created sessions are not proof that workers launched);
+- no no-target exit before `T-closeout`;
+- successful controller closeout, promotion/report, and common final evaluation.
+
+These gates were exercised by the [strict Codex/Pi rerun](../../evidence/runs/2026-07-22-goal-plus-codex-pi-strict-rerun.md), including diagnostic runs that are intentionally retained as `incomplete`.
 
 If the host process is interrupted after workers finish but before Goal Plus selection/reporting completes, recover the same directory without starting another model run:
 

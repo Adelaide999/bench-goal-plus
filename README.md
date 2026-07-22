@@ -11,13 +11,14 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 - ALE-Bench Lite、HeuriGym、AutoLab 已有本机官方 verifier / 远端模型 smoke 证据。
 - ALE-Bench Lite `ahc027` 已完成首个真实 plain Codex smoke：`gpt-5.4-mini` 改写候选后 5/5 public-lite cases accepted，raw score 从 61,302,533 降到 55,181,186（该题越低越好，改善 9.99%）。
 - OpenEvolve `function_minimization` 已通过通用 task adapter 完成 Plain Codex 闭环：复用原生 evaluator，`combined_score` 从 1.2147685971 提升到 1.4997641484（+23.46%），共 4 public + 1 final calls；这是接线 smoke，不是 matched OpenEvolve baseline。
-- OpenEvolve `function_minimization` 已进一步打通 [四条真实 5 分钟路径](evidence/runs/2026-07-22-openevolve-four-path-5m-summary.md)：统一 `gpt-5.6-luna/high`、`T=300s`、`K=2`，native OpenEvolve / plain Codex / Goal Plus + Codex / Goal Plus + Pi 均得到 durable final result。单 seed 分数依次为 `1.499540 / 1.500000 / 1.428646 / 1.428646`；这证明 E2E 接线，不代表 Goal Plus 已有性能优势。
+- OpenEvolve `function_minimization` 已完成 [四路径首轮 smoke](evidence/runs/2026-07-22-openevolve-four-path-5m-summary.md)：统一 `gpt-5.6-luna/high`、`T=300s`、`K=2`。该轮保留 native OpenEvolve / plain Codex 结果，并暴露出 Goal Plus 仅靠 controller closeout 也可能误报完成的问题。
+- Goal Plus + Codex/Pi 随后完成 [当前代码严格重跑](evidence/runs/2026-07-22-goal-plus-codex-pi-strict-rerun.md)：Codex 绑定 2/2 workers、两条 lineage 均有 verifier feedback、非空 promotion patch 落盘，最终 `1.496981`；Pi 绑定 2/2 workers、完成 9 个 pool jobs / 10 iterations，最终 `1.427440`。重复/unbound session、重复 Goal 和无目标提前退出现在都会使实验 `incomplete`。
 - SkyDiscover/EvoX 已完成 DeepSeek OpenAI-compatible 的 1 iteration smoke，但还不是论文可比实验。
 - 已在当前 Mac 为所有可执行 benchmark 建立代表 case 的环境证据：ALE、AutoLab、SwarmResearch、Frontier-CS 使用镜像，HeuriGym 与 Frontier-Engineering v1-lite 使用 host 环境；完整空间表见 [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
 - 已建立 [Benchmark 快速导读](docs/benchmarks/README.md)：记录当前可跑题数、coverage/campaign 时间，并为 6 套 active benchmark 展开一个真实 case 的输入、agent 动作、期望输出和 verifier。
 - 已建立 [Goal Plus 接入与并发实验协议](docs/goal-plus-benchmark-experiment.md)：区分 agent/evaluator/task 三层并发，定义 matched-budget baseline、逐 benchmark 整改和非 Pass@K 的验收门槛；OpenEvolve 自带 CPU 任务见 [示例审计](docs/openevolve-cpu-examples.md)。
 - 已建立 [可移植复现环境](docs/reproducible-environment.md)：固定 Python 依赖及 OpenEvolve/Goal Plus commit，自动 bootstrap/doctor，并为四条独立路径生成隔离实验目录。Goal Plus 的 `.gp` 只存在于临时 task workspace。
-- Goal Plus + Codex/Pi 已在 OpenEvolve example 上验收；ALE-Bench Lite、HeuriGym、AutoLab 等 benchmark 的同口径接入仍是接下来逐项完成的主线。
+- Goal Plus + Codex/Pi 已按严格 worker/时限/closeout 门禁在 OpenEvolve example 上验收；ALE-Bench Lite、HeuriGym、AutoLab 等 benchmark 的同口径接入仍是接下来逐项完成的主线。
 
 ## 固定验收门禁
 

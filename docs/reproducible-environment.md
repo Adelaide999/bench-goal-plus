@@ -127,6 +127,8 @@ run manifest 只记录 model/api base 和 credential policy，不记录任何环
 
 主对比固定：同一 task/seed/evaluator/model、总 wall deadline `T`、live search concurrency `K`。OpenEvolve 的 `iterations` 被设为很大的安全天花板；到 `T` 时外层 controller 发 `SIGTERM`，利用其原生 graceful-shutdown 保存 best，超过 grace 才 kill process group。Goal Plus 收到同一 `GOAL_PLUS_OUTER_DEADLINE_AT`；到期后 controller drain/关闭 host pool，并在 `T` 外执行确定性的最终 verifier、selection 和 promotion，和 plain lane 的最终选择同口径。closeout 用时单独记录，不算搜索时间。
 
+Goal Plus 的 `finished` 不是“最终 evaluator 能算出分数”就算通过。controller 还会检查：恰好使用 prepared Goal/run、候选数为 `K`、每个候选都有绑定的原生 worker、没有 unbound/重复 session；无显式 target 时，主进程不得在 `T-soft_closeout` 之前退出。五分钟默认配置因此至少搜索 240 秒，worker 单次 dispatch 最多 60 秒，允许在剩余预算内继续同一 lineage。
+
 这不是 token-或 evaluator-call-matched 因果消融。主结果必须同时报告 actual evaluator calls、iterations、tokens、known cost、wall time 和 coverage。需要更严格地隔离 search strategy 时，再单独运行显式 evaluator-call cap 的 ablation；不要把这种约束写进 Goal Plus core。
 
 任何 hard kill 都将 run 标记为 `incomplete`。这种结果可用于诊断，不能进入可比主表。

@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-22",
+  "claim": "The current benchmark controller completed strict end-to-end Goal Plus Search runs through both Codex and Pi, including bound parallel workers, worker feedback, continuation, deterministic controller closeout, promotion, and the common final evaluator.",
+  "protocol": {
+    "task_id": "function_minimization",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "high",
+    "seed": 4,
+    "wall_time_cap_seconds": 300,
+    "exploration_minimum_seconds": 240,
+    "live_concurrency": 2,
+    "worker_dispatch_max_seconds": 60,
+    "primary_metric": "combined_score",
+    "direction": "maximize",
+    "credential_policy": "OPENAI_API_KEY inherited from the shell and unset after the runs; no credential or endpoint is retained in this evidence"
+  },
+  "acceptance_gates": [
+    "exactly one prepared Goal Plus record and one linked Search run",
+    "exactly K materialized candidates",
+    "a bound native worker for every candidate and zero unbound sessions",
+    "no early exit before the no-target exploration minimum",
+    "controller closeout completed",
+    "Search run promoted and report persisted",
+    "selected artifact evaluated by the common final evaluator",
+    "setup and timed-plus-closeout evaluator calls reported separately"
+  ],
+  "accepted_runs": [
+    {
+      "method": "goal-plus-codex",
+      "raw_run_label": "20260722-strict-rerun-goal-plus-codex-seed4",
+      "status": "finished",
+      "duration_seconds": 290.4516885089979,
+      "deadline_reached": false,
+      "returncode": 0,
+      "hard_killed": false,
+      "goals": 1,
+      "candidates": 2,
+      "agent_sessions": 2,
+      "bound_candidates": 2,
+      "unbound_agent_sessions": 0,
+      "worker_verifier_runs_by_candidate": {
+        "c001": 1,
+        "c002": 1
+      },
+      "recorded_iterations": 3,
+      "selected_candidate": "c002",
+      "selected_score": 1.4969813302778114,
+      "final_score": 1.4969813302778114,
+      "promotion_patch_status": "applied",
+      "controller_closeout_seconds": 16.72123401099816,
+      "evaluator_calls": {
+        "total": 11,
+        "setup_before_t": 2,
+        "timed_plus_closeout": 9,
+        "final": 1
+      },
+      "usage_coverage": "top-level Codex terminal usage unavailable; durable worker session counters and Search state retained in the ignored raw run"
+    },
+    {
+      "method": "goal-plus-pi",
+      "raw_run_label": "20260722-strict-rerun-goal-plus-pi-seed4",
+      "status": "finished",
+      "duration_seconds": 250.91557625099813,
+      "deadline_reached": false,
+      "returncode": 0,
+      "hard_killed": false,
+      "goals": 1,
+      "candidates": 2,
+      "agent_sessions": 2,
+      "bound_candidates": 2,
+      "unbound_agent_sessions": 0,
+      "recorded_iterations": 10,
+      "pi_pool_terminal_jobs": 9,
+      "pi_pool_active_after_close": 0,
+      "selected_candidate": "c001",
+      "selected_score": 1.4274404583290197,
+      "final_score": 1.4274404583290197,
+      "promotion_patch_status": "empty_patch",
+      "controller_closeout_seconds": 9.064993155003322,
+      "evaluator_calls": {
+        "total": 14,
+        "setup_before_t": 2,
+        "timed_plus_closeout": 12,
+        "final": 1
+      },
+      "usage": {
+        "assistant_messages": 19,
+        "input_tokens": 115561,
+        "output_tokens": 2275,
+        "cache_read_tokens": 627200,
+        "cache_write_tokens": 0,
+        "reported_cost": 0.0
+      }
+    }
+  ],
+  "diagnostic_runs_rejected_by_new_gates": [
+    {
+      "raw_run_label": "20260722-current-code-rerun-goal-plus-codex-seed2",
+      "reason": "The parent created two sessions per candidate but bound none before deadline. Controller closeout alone previously made this look finished; the strict validator now marks it incomplete."
+    },
+    {
+      "raw_run_label": "20260722-current-code-rerun-goal-plus-pi-seed2",
+      "reason": "Workers and continuations ran, but the no-target search exited after 176.659 seconds, below the 240-second exploration minimum. The strict validator now marks it incomplete."
+    }
+  ],
+  "fixes_validated": [
+    "prepared-run prompt skips redundant large status calls",
+    "CandidateProposal uses the exact intent-only schema",
+    "one start_agent_session and one native launch per candidate",
+    "duplicate or unbound sessions fail the run",
+    "duplicate Goal Plus records linked to the prepared run fail the run",
+    "60-second worker dispatches allow same-lineage continuations within a five-minute cap",
+    "early no-target completion fails below the exploration minimum",
+    "controller closeout applies a non-empty promotion patch before final evaluation"
+  ],
+  "interpretation": "This validates the control flow on one easy task. It is not evidence that Goal Plus beats OpenEvolve or plain Codex; a benchmark campaign still needs multiple tasks, seeds, and symmetric usage telemetry."
+}
