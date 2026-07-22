@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-22",
+  "claim": "The same OpenEvolve function_minimization task completed a real five-minute run through native OpenEvolve, plain Codex, Goal Plus hosted by Codex, and Goal Plus hosted by Pi.",
+  "protocol": {
+    "task_id": "function_minimization",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "high",
+    "seed": 1,
+    "wall_time_seconds": 300,
+    "live_concurrency": 2,
+    "primary_metric": "combined_score",
+    "direction": "maximize",
+    "seed_score": 1.4286455109142118,
+    "credential_policy": "OPENAI_API_KEY inherited from the shell; no credential or endpoint is retained in this promoted evidence"
+  },
+  "canonical_runs": [
+    {
+      "method": "openevolve",
+      "raw_run_label": "20260722-unified-5m-openevolve",
+      "status": "finished",
+      "duration_seconds": 300.277730591999,
+      "deadline_reached": true,
+      "returncode": 0,
+      "hard_killed": false,
+      "final_score": 1.4995399683081911,
+      "native_best_iteration": 3,
+      "evaluator_calls": null,
+      "usage": null,
+      "coverage_note": "The upstream runner persisted best iteration but not an exact evaluator-call ledger or API usage."
+    },
+    {
+      "method": "plain-codex",
+      "raw_run_label": "20260722-unified-5m-plain-codex",
+      "status": "finished",
+      "duration_seconds": 300.20796740600053,
+      "deadline_reached": true,
+      "returncode": null,
+      "hard_killed": false,
+      "final_score": 1.5,
+      "selected_lane": "lane-01",
+      "evaluator_calls": {
+        "total": 11,
+        "public": 9,
+        "final": 2,
+        "setup_before_t": 2,
+        "timed_plus_closeout": 9
+      },
+      "usage": {
+        "coverage": "one of two lanes; the deadline-stopped lane did not emit terminal usage",
+        "input_tokens": 378028,
+        "cached_input_tokens": 342784,
+        "output_tokens": 6832,
+        "reasoning_output_tokens": 2989
+      }
+    },
+    {
+      "method": "goal-plus-codex",
+      "raw_run_label": "20260722-final-5m-goal-plus-codex",
+      "status": "finished",
+      "duration_seconds": 300.0443109700027,
+      "deadline_reached": true,
+      "returncode": 0,
+      "hard_killed": false,
+      "final_score": 1.4286455109142118,
+      "search": {
+        "goals": 1,
+        "candidates": 2,
+        "agent_sessions": 2,
+        "iterations": 3,
+        "worker_host": "codex",
+        "terminal_run_state": "promoted",
+        "controller_closeout_seconds": 14.39222506599981,
+        "promotion_patch_status": "empty_patch"
+      },
+      "evaluator_calls": {
+        "total": 7,
+        "setup_before_t": 2,
+        "timed_plus_closeout": 5,
+        "final": 1
+      },
+      "usage": null,
+      "coverage_note": "The top-level Codex process was stopped at the deadline before emitting terminal usage; durable worker/session state is retained in the ignored raw run."
+    },
+    {
+      "method": "goal-plus-pi",
+      "raw_run_label": "20260722-prepared-search-goal-plus-pi",
+      "status": "finished_after_idempotent_closeout",
+      "duration_seconds": 300.04795028399894,
+      "deadline_reached": true,
+      "returncode": 143,
+      "hard_killed": false,
+      "final_score": 1.4286455109142118,
+      "search": {
+        "candidates": 2,
+        "agent_sessions": 2,
+        "iterations": 4,
+        "worker_host": "pi-rpc",
+        "terminal_jobs": 3,
+        "terminal_run_state": "promoted"
+      },
+      "evaluator_calls": {
+        "total": 8,
+        "setup_before_t": 2,
+        "timed_plus_closeout": 6,
+        "final": 1
+      },
+      "usage": {
+        "assistant_messages": 20,
+        "input_tokens": 121979,
+        "output_tokens": 3998,
+        "cache_read_tokens": 750592,
+        "cache_write_tokens": 0,
+        "reported_cost": 0.0
+      },
+      "coverage_note": "This raw run exposed a Pi slash-command parsing edge case that created a duplicate goal linked to the same Search run. Idempotent closeout repaired it; the current natural-language resume prompt prevents that duplicate and is regression-tested."
+    }
+  ],
+  "supplementary_validation": {
+    "raw_run_label": "20260722-prepared-search-smoke-codex",
+    "purpose": "Validate a non-empty Goal Plus promotion, because the final canonical Codex run selected an empty seed patch.",
+    "duration_seconds": 300.0560889289991,
+    "selected_score": 1.4995399972059986,
+    "candidates": 2,
+    "agent_sessions": 2,
+    "iterations": 3,
+    "evaluator_calls_total": 8,
+    "evaluator_calls_setup_before_t": 2,
+    "evaluator_calls_timed_plus_closeout": 6,
+    "promotion_patch_repair_status": "applied",
+    "post_repair_native_score": 1.4995399972059986,
+    "note": "The direct post-repair native evaluation is validation-only and is not included in the run's original evaluator-call budget."
+  },
+  "diagnostic": {
+    "finding": "A separate unprepared Goal Plus Codex run spent nearly the whole 300-second budget on generic intake/spec setup and materialized zero candidates.",
+    "decision": "Comparable search-stage runs therefore prepare goal, triage, frozen verifier spec, and an empty Search run before T; all candidate creation and model search remain inside T."
+  },
+  "telemetry_correction": "The raw Goal Plus manifests captured the prepare-time verifier call but not the second seed evaluation immediately before T when labeling setup calls. The promoted counts above correct setup_before_t to 2; the current harness snapshots the controller ledger at T0 and regression tests cover the accounting helper.",
+  "interpretation": "This is E2E wiring evidence, not a scientific ranking: it covers one task and one seed, evaluator-call and usage coverage differ by upstream runner, and neither Goal Plus host improved over the seed in the canonical run."
+}

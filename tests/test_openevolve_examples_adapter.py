@@ -25,6 +25,30 @@ def fixed():
 
 
 class OpenEvolveExamplesAdapterTest(unittest.TestCase):
+    def test_goal_plus_verifier_converts_full_evaluator_report_to_one_line_metric(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            (temp / "evaluate.py").write_text(
+                "import json\n"
+                "print(json.dumps({'valid': True, 'primary_metric': "
+                "{'name': 'combined_score', 'value': 1.25}}, indent=2))\n"
+            )
+            verifier = temp / "primary_metric.py"
+            verifier.write_text(adapter.render_goal_plus_verifier("combined_score"))
+            completed = subprocess.run(
+                [sys.executable, str(verifier)],
+                cwd=temp,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertEqual(
+                json.loads(completed.stdout),
+                {"combined_score": 1.25, "valid": True},
+            )
+
     def test_split_evolve_block_requires_exactly_one_block(self) -> None:
         prefix, block, suffix = adapter.split_evolve_block(SEED)
         self.assertIn("EVOLVE-BLOCK-START", prefix)
@@ -80,6 +104,7 @@ class OpenEvolveExamplesAdapterTest(unittest.TestCase):
                 },
             }
             workspace = temp / "workspace"
+            controller_runtime = temp / "controller-runtime"
             adapter.materialize_workspace(
                 task,
                 workspace,
@@ -87,13 +112,24 @@ class OpenEvolveExamplesAdapterTest(unittest.TestCase):
                 max_evaluator_calls=2,
                 reserved_final_calls=1,
                 description=description,
+                controller_runtime_dir=controller_runtime,
             )
             metadata = json.loads((workspace / "task.json").read_text())
-            self.assertEqual(metadata["runtime_python"], str(Path(sys.executable).absolute()))
+            self.assertEqual(
+                metadata["goal_plus_verifier"],
+                ".goal-plus-verifiers/primary_metric.py",
+            )
+            self.assertTrue(
+                (workspace / ".goal-plus-verifiers/primary_metric.py").is_file()
+            )
+            self.assertEqual(
+                metadata["runtime_python"], str(Path(sys.executable).absolute())
+            )
             self.assertEqual(
                 metadata["controller_runtime_dir"],
-                str(workspace.resolve() / ".bench-runtime"),
+                str(controller_runtime.absolute()),
             )
+            self.assertFalse((workspace / ".bench-runtime").exists())
             metadata["runtime_python"] = sys.executable
             (workspace / "task.json").write_text(json.dumps(metadata))
             subprocess.run(
@@ -102,9 +138,13 @@ class OpenEvolveExamplesAdapterTest(unittest.TestCase):
                 capture_output=True,
             )
             candidate_workspace = temp / "candidate-worktree"
-            candidate_metadata = json.loads((candidate_workspace / "task.json").read_text())
+            candidate_metadata = json.loads(
+                (candidate_workspace / "task.json").read_text()
+            )
             candidate_metadata["runtime_python"] = sys.executable
-            (candidate_workspace / "task.json").write_text(json.dumps(candidate_metadata))
+            (candidate_workspace / "task.json").write_text(
+                json.dumps(candidate_metadata)
+            )
 
             original_worker = adapter.WORKER_PATH
             try:
@@ -120,7 +160,7 @@ class OpenEvolveExamplesAdapterTest(unittest.TestCase):
             finally:
                 adapter.WORKER_PATH = original_worker
 
-            history = (workspace / ".bench-runtime/history.jsonl").read_text().splitlines()
+            history = (controller_runtime / "history.jsonl").read_text().splitlines()
             self.assertEqual(len(history), 2)
 
             run_dir = temp / "run"

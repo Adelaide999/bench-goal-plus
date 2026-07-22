@@ -169,7 +169,13 @@ def collect_doctor(
             }
         )
 
-    for executable in ("openevolve-run", "goal-plus"):
+    for executable in (
+        "openevolve-run",
+        "goal-plus",
+        "goal-plus-pi-tool",
+        "goal-plus-pi-worker",
+        "goal-plus-pi-pool",
+    ):
         path = venv_bin(venv) / executable
         result = run([str(path), "--help"], check=False) if path.is_file() else None
         checks.append(
@@ -193,6 +199,23 @@ def collect_doctor(
             "passed": bool(codex_version and codex_version >= minimum),
             "version": codex_text,
             "minimum": manifest["codex_min_version"],
+        }
+    )
+
+    pi_path = shutil.which("pi")
+    pi_text = None
+    pi_version = None
+    if pi_path:
+        result = run([pi_path, "--version"], check=False)
+        pi_text = (result.stdout or result.stderr).strip()
+        pi_version = parse_codex_version(pi_text)
+    pi_minimum = tuple(int(part) for part in manifest["pi_min_version"].split("."))
+    checks.append(
+        {
+            "name": "host:pi",
+            "passed": bool(pi_version and pi_version >= pi_minimum),
+            "version": pi_text,
+            "minimum": manifest["pi_min_version"],
         }
     )
 

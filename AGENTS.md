@@ -7,7 +7,7 @@ This repository is the control plane for Goal Plus benchmark integrations.
 - Put cross-benchmark orchestration and adapters here; patch a benchmark fork only when the change is intrinsically benchmark-specific.
 - Never persist API keys, auth files, cookies, provider headers, or secret-bearing command lines.
 - A status can become `pass` only when a reproducible command and evidence file exist. Repository support or an unexecuted code path is at most `partial`.
-- Keep three claims separate: official verifier works, plain Codex works, and Goal Plus + Codex works.
+- Keep five claims separate: official verifier works, native OpenEvolve works, plain Codex works, Goal Plus + Codex works, and Goal Plus + Pi works.
 - Preserve raw benchmark metrics and direction. Any normalized aggregate must be an additional field, not a replacement.
 - For full-system comparisons, fix the task/evaluator, total wall-clock budget `T`, and live search concurrency `K`. Preserve each method's native control flow; report evaluator calls, iterations, tokens, cost coverage, and actual wall time after the run. Hard-match evaluator calls only in an explicitly labeled mechanism ablation.
 - Never add benchmark-specific stopping logic to Goal Plus core just to mimic another method's rounds. OpenEvolve may use a very large iteration ceiling and an outer `SIGTERM` deadline.
@@ -31,18 +31,20 @@ Prepare and verify a model-free Goal Plus task workspace:
 
 ```bash
 .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
-  --method goal-plus --task-id function_minimization \
-  --wall-time-seconds 600 --concurrency 3 --seed 1
+  --method goal-plus-codex --task-id function_minimization \
+  --wall-time-seconds 300 --concurrency 2 --model gpt-5.6-luna --seed 1
 
 .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py seed-smoke \
   --run-dir runs/openevolve-compare/<run-id>
 ```
 
-Execute that prepared run with existing Codex authentication:
+Execute that prepared run with one explicit OpenAI-compatible provider. Keep the key only in the shell:
 
 ```bash
+export OPENAI_API_KEY='<secret>'
 .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py run \
-  --run-dir runs/openevolve-compare/<run-id> --model <codex-model>
+  --run-dir runs/openevolve-compare/<run-id> \
+  --model gpt-5.6-luna --api-base https://api.example.com/v1
 ```
 
-For native OpenEvolve, prepare with `--method openevolve`, export `OPENAI_API_KEY` only in the shell, then pass `--model` and `--api-base` to `run`. See `docs/reproducible-environment.md` for Mac/Linux details and failure semantics.
+Prepare `openevolve`, `plain-codex`, `goal-plus-codex`, and `goal-plus-pi` separately. Goal Plus prepare freezes only task plumbing and an empty Search run outside `T`; candidates and workers belong to the timed region. See `docs/reproducible-environment.md` for Mac/Linux details and failure semantics.

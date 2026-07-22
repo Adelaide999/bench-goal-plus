@@ -2,6 +2,7 @@
   "schema_version": 1,
   "python": "3.12",
   "codex_min_version": "0.144.1",
+  "pi_min_version": "0.80.6",
   "upstreams": {
     "openevolve": {
       "repository": "https://github.com/algorithmicsuperintelligence/openevolve.git",

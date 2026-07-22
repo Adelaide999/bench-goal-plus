@@ -160,9 +160,18 @@ def describe_task(task: ResolvedTask, runtime_python: Path) -> dict[str, Any]:
 
 
 def init_git(workspace: Path) -> str:
-    subprocess.run(["git", "init", "-b", "main", str(workspace)], check=True, capture_output=True)
     subprocess.run(
-        ["git", "-C", str(workspace), "config", "user.email", "bench-goal-plus@example.invalid"],
+        ["git", "init", "-b", "main", str(workspace)], check=True, capture_output=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "config",
+            "user.email",
+            "bench-goal-plus@example.invalid",
+        ],
         check=True,
     )
     subprocess.run(
@@ -190,6 +199,32 @@ def render_evaluate_wrapper() -> str:
     )
 
 
+def render_goal_plus_verifier(primary_metric: str) -> str:
+    return (
+        "#!/usr/bin/env python3\n"
+        '"""Controller-owned Goal Plus ranking wrapper; do not edit."""\n'
+        "import json\n"
+        "import math\n"
+        "import subprocess\n"
+        "import sys\n\n"
+        "completed = subprocess.run(\n"
+        "    [sys.executable, 'evaluate.py'], capture_output=True, text=True\n"
+        ")\n"
+        "if completed.returncode != 0:\n"
+        "    sys.stderr.write(completed.stderr)\n"
+        "    raise SystemExit(completed.returncode)\n"
+        "report = json.loads(completed.stdout)\n"
+        "metric = report.get('primary_metric') or {}\n"
+        "value = metric.get('value')\n"
+        "if report.get('valid') is not True or not isinstance(value, (int, float)):\n"
+        "    raise SystemExit('official evaluator returned no valid numeric primary metric')\n"
+        "value = float(value)\n"
+        "if not math.isfinite(value):\n"
+        "    raise SystemExit('official evaluator returned a non-finite primary metric')\n"
+        f"print(json.dumps({{{primary_metric!r}: value, 'valid': True}}))\n"
+    )
+
+
 def materialize_workspace(
     task: ResolvedTask,
     workspace: Path,
@@ -197,11 +232,14 @@ def materialize_workspace(
     max_evaluator_calls: int | None,
     reserved_final_calls: int,
     description: dict[str, Any] | None = None,
+    controller_runtime_dir: Path | None = None,
 ) -> dict[str, Any]:
     if reserved_final_calls < 1:
         raise ValueError("at least one final evaluator call must be reserved")
     if max_evaluator_calls is not None and max_evaluator_calls <= reserved_final_calls:
-        raise ValueError("max evaluator calls must leave at least one public and one final call")
+        raise ValueError(
+            "max evaluator calls must leave at least one public and one final call"
+        )
     # Keep the venv launcher path intact. Path.resolve() follows its symlink to the
     # base interpreter and silently drops the venv's site-packages.
     runtime_python = runtime_python.expanduser().absolute()
@@ -227,6 +265,12 @@ def materialize_workspace(
 
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=False)
+    runtime_dir = (
+        controller_runtime_dir.expanduser().absolute()
+        if controller_runtime_dir is not None
+        else workspace / ".bench-runtime"
+    )
+    runtime_dir.mkdir(parents=True, exist_ok=False)
     (workspace / task.artifact_name).write_text(seed)
     (workspace / "TASK.md").write_text(
         "# Objective\n\n"
@@ -236,7 +280,7 @@ def materialize_workspace(
         "Preserve correctness and make a concrete improvement over the seed.\n\n"
         "# Hard constraints\n\n"
         f"- Only edit `{task.artifact_name}`, and only inside its single `EVOLVE-BLOCK`.\n"
-        "- Do not modify the evaluator helper, task metadata, Git configuration, or files outside this workspace.\n"
+        "- Do not modify the evaluator helper, Goal Plus verifier wrapper, task metadata, Git configuration, or files outside this workspace.\n"
         "- Do not use the network.\n"
         f"- {evaluation_budget}\n"
         "- Stop with the best verified candidate left in the artifact file.\n"
@@ -245,11 +289,15 @@ def materialize_workspace(
         "# OpenEvolve example task rules\n\n"
         f"- Only edit `{task.artifact_name}` inside `EVOLVE-BLOCK-START/END`.\n"
         "- Run `python3 evaluate.py` to obtain official public feedback.\n"
-        "- Do not edit `evaluate.py`, `task.json`, `TASK.md`, `AGENTS.md`, or `.gitignore`.\n"
+        "- Do not edit `evaluate.py`, `.goal-plus-verifiers/`, `task.json`, `TASK.md`, `AGENTS.md`, or `.gitignore`.\n"
         "- Do not inspect parent directories, evaluator source, credentials, or network resources.\n"
         "- Leave the best verified candidate in the artifact file.\n"
     )
     (workspace / "evaluate.py").write_text(render_evaluate_wrapper())
+    verifier_dir = workspace / ".goal-plus-verifiers"
+    verifier_dir.mkdir()
+    verifier_path = verifier_dir / "primary_metric.py"
+    verifier_path.write_text(render_goal_plus_verifier(evaluation["primary_metric"]))
     (workspace / ".gitignore").write_text(".bench-runtime/\n__pycache__/\n")
 
     task_metadata = {
@@ -265,12 +313,13 @@ def materialize_workspace(
         "runtime_python": str(runtime_python),
         # Candidate Git worktrees do not contain ignored runtime state. Keep every
         # lineage on one controller-owned ledger in the materialized source workspace.
-        "controller_runtime_dir": str(workspace / ".bench-runtime"),
+        "controller_runtime_dir": str(runtime_dir),
         "primary_metric": evaluation["primary_metric"],
         "direction": evaluation["direction"],
         "timeout_seconds": evaluation["timeout_seconds"],
         "cascade_evaluation": evaluation["cascade_evaluation"],
         "parallel_evaluations": evaluation["parallel_evaluations"],
+        "goal_plus_verifier": str(verifier_path.relative_to(workspace)),
         "prompt_sha256": sha256_text(system_message),
         "fixed_prefix_sha256": sha256_text(prefix),
         "fixed_suffix_sha256": sha256_text(suffix),
@@ -279,8 +328,6 @@ def materialize_workspace(
     }
     (workspace / "task.json").write_text(json.dumps(task_metadata, indent=2) + "\n")
 
-    runtime_dir = workspace / ".bench-runtime"
-    runtime_dir.mkdir()
     budget = {
         "schema_version": 1,
         "max_evaluator_calls": max_evaluator_calls,
@@ -426,10 +473,17 @@ def archive_workspace(workspace: Path, run_dir: Path) -> dict[str, Any]:
     workspace = workspace.resolve()
     run_dir = run_dir.resolve()
     metadata = json.loads((workspace / "task.json").read_text())
-    history_path = workspace / ".bench-runtime/history.jsonl"
-    history = [json.loads(line) for line in history_path.read_text().splitlines() if line]
+    history_path = (
+        Path(metadata.get("controller_runtime_dir", workspace / ".bench-runtime"))
+        / "history.jsonl"
+    )
+    history = [
+        json.loads(line) for line in history_path.read_text().splitlines() if line
+    ]
     if not history:
-        raise RuntimeError("cannot archive an OpenEvolve task without evaluator history")
+        raise RuntimeError(
+            "cannot archive an OpenEvolve task without evaluator history"
+        )
     final_results = [item for item in history if item["mode"] == "final"]
     if len(final_results) != 1:
         raise RuntimeError("archive requires exactly one controller final evaluation")
@@ -469,7 +523,8 @@ def archive_workspace(workspace: Path, run_dir: Path) -> dict[str, Any]:
     final_score = final_result["primary_metric"]["value"]
     score_gain = (
         final_score - initial_score
-        if isinstance(initial_score, (int, float)) and isinstance(final_score, (int, float))
+        if isinstance(initial_score, (int, float))
+        and isinstance(final_score, (int, float))
         else None
     )
     runtime_version = subprocess.run(
@@ -489,22 +544,32 @@ def archive_workspace(workspace: Path, run_dir: Path) -> dict[str, Any]:
         "primary_metric": metadata["primary_metric"],
         "direction": metadata["direction"],
         "seed_score": initial_score,
-        "best_public_score": max(numeric_public_scores) if numeric_public_scores else None,
+        "best_public_score": (
+            max(numeric_public_scores) if numeric_public_scores else None
+        ),
         "final_score": final_score,
         "absolute_gain": score_gain,
-        "relative_gain": score_gain / abs(initial_score) if score_gain is not None and initial_score else None,
+        "relative_gain": (
+            score_gain / abs(initial_score)
+            if score_gain is not None and initial_score
+            else None
+        ),
         "valid": final_result["valid"],
         "candidate_sha256": final_result["candidate_sha256"],
         "evaluator_calls": final_result["budget"],
         "codex": {
             "version": manifest.get("codex_version"),
             "model": manifest.get("model"),
-            "model_identity_coverage": "missing" if manifest.get("model") is None else "explicit",
+            "model_identity_coverage": (
+                "missing" if manifest.get("model") is None else "explicit"
+            ),
             "duration_seconds": manifest.get("duration_seconds"),
             "usage": manifest.get("usage"),
         },
         "environment": {
-            "runtime_python": (runtime_version.stdout or runtime_version.stderr).strip(),
+            "runtime_python": (
+                runtime_version.stdout or runtime_version.stderr
+            ).strip(),
         },
         "evidence": {
             "candidate": "candidate.py",

@@ -16,6 +16,7 @@ class ReproEnvironmentTest(unittest.TestCase):
     def test_manifest_pins_portable_upstreams(self) -> None:
         manifest = repro_env.load_manifest(ROOT / "environment/upstreams.json")
         self.assertEqual(manifest["python"], "3.12")
+        self.assertEqual(manifest["pi_min_version"], "0.80.6")
         self.assertEqual(set(manifest["upstreams"]), {"openevolve", "goal_plus"})
         for upstream in manifest["upstreams"].values():
             self.assertRegex(upstream["pinned_commit"], r"^[0-9a-f]{40}$")
@@ -44,7 +45,9 @@ class ReproEnvironmentTest(unittest.TestCase):
         self.assertIn("openai==", text)
 
     def test_codex_version_parser(self) -> None:
-        self.assertEqual(repro_env.parse_codex_version("codex-cli 0.144.6"), (0, 144, 6))
+        self.assertEqual(
+            repro_env.parse_codex_version("codex-cli 0.144.6"), (0, 144, 6)
+        )
         self.assertIsNone(repro_env.parse_codex_version("unknown"))
 
     def test_missing_git_checkout_is_reported_without_mutation(self) -> None:

@@ -1,53 +1,89 @@
-# OpenEvolve task system comparison
+# OpenEvolve task four-path comparison
 
-This harness runs one pinned OpenEvolve example through three independent systems while sharing the seed and official evaluator:
+This harness runs one pinned OpenEvolve example through four independent paths while sharing the seed, official evaluator, model identity, wall-clock budget `T`, and live concurrency `K`:
 
-- `openevolve`: native OpenEvolve population/island search and OpenAI-compatible API;
-- `plain-codex`: one Codex process in an isolated task workspace;
-- `goal-plus`: Codex plus pinned Goal Plus project assets in an isolated task workspace.
+- `openevolve`: native OpenEvolve population/island search;
+- `plain-codex`: `K` independent Codex lanes, followed by controller selection;
+- `goal-plus-codex`: Goal Plus fixed parallel lineages hosted by Codex;
+- `goal-plus-pi`: the same Goal Plus contract hosted by Pi RPC workers.
 
-The primary comparison fixes task/evaluator, total wall-clock budget `T`, and live search concurrency `K`. OpenEvolve receives a deliberately unreachable iteration ceiling and the outer controller sends `SIGTERM` at `T`; Goal Plus receives the same deadline through `GOAL_PLUS_OUTER_DEADLINE_AT`. Evaluator calls, iterations, tokens, and cost coverage are reported after the run rather than hard-capped. Use evaluator-call matching only for separately labeled mechanism ablations.
+Defaults are `T=300s`, `K=2`, model `gpt-5.6-luna`, and reasoning `high`. All four paths require the same explicit OpenAI-compatible `--api-base` and inherit `OPENAI_API_KEY`; the key is never serialized.
+
+## What is outside and inside T
+
+`prepare` performs task materialization for every method. For Goal Plus it also creates the goal/triage record, freezes the adapter-owned verifier contract, and creates an empty Search run. This mirrors OpenEvolve config preparation and makes the timed region measure search orchestration and workers instead of repeatedly spending most of a five-minute run reconstructing benchmark plumbing.
+
+The prepared Goal Plus state contains no candidates or model output. Inside `T`, the main agent must plan exactly one initial batch, materialize `K` candidates, and launch the fixed lineages. At `T`, the controller stops/drains the host; outside `T` it performs the same kind of deterministic final evaluation/selection already required by the other paths. The manifest reports setup calls separately from timed-plus-closeout calls.
+
+An end-to-end intake-overhead study should be labeled separately and must not be mixed into this search-stage table.
 
 ## Prepare
 
-Run the repository bootstrap first, then create one persistent but Git-ignored run directory:
+Bootstrap first, then prepare one persistent but Git-ignored directory per method:
 
 ```bash
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
-  --method goal-plus \
-  --task-id function_minimization \
-  --wall-time-seconds 600 \
-  --concurrency 3 \
-  --seed 1
+python3 scripts/repro_env.py bootstrap
+python3 scripts/repro_env.py doctor
+
+for method in openevolve plain-codex goal-plus-codex goal-plus-pi; do
+  .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
+    --method "$method" \
+    --task-id function_minimization \
+    --wall-time-seconds 300 \
+    --concurrency 2 \
+    --model gpt-5.6-luna \
+    --seed 1
+done
 ```
 
-The command prints `runs/openevolve-compare/<run-id>`. Goal Plus state is confined to `<run-id>/workspace/.gp`; the pinned upstream checkout remains untouched. Run directories are never automatically deleted.
+Each command prints `runs/openevolve-compare/<run-id>`. Run directories are never automatically deleted. Goal Plus state stays under that run's `workspace/.gp`; evaluator tickets stay in the controller-owned run directory rather than candidate workspaces.
 
-Before spending model budget, verify the evaluator path:
+Before spending model budget, the optional seed check is:
 
 ```bash
 .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py seed-smoke \
   --run-dir runs/openevolve-compare/<run-id>
 ```
 
+Do not run `seed-smoke` on the same directory intended for a later capped campaign unless that extra evaluator call is explicitly part of the protocol.
+
 ## Execute
 
-Goal Plus or plain Codex uses existing Codex authentication:
-
-```bash
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py run \
-  --run-dir runs/openevolve-compare/<run-id> \
-  --model <codex-model>
-```
-
-Native OpenEvolve uses an OpenAI-compatible key only from the environment:
+Set the key only in the shell and run each prepared directory with the same endpoint/model:
 
 ```bash
 export OPENAI_API_KEY='<secret>'
+
 .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py run \
   --run-dir runs/openevolve-compare/<run-id> \
-  --model <api-model> \
+  --model gpt-5.6-luna \
   --api-base https://api.example.com/v1
 ```
 
-No credential value is written to the run manifest. A hard-killed run is marked `incomplete`, not silently accepted as a comparable result.
+Codex uses an explicit run-local custom provider over the Responses wire API. Headless Goal Plus MCP tools are registered explicitly with server-level tool approval; no user `config.toml` provider redirect is required. Pi receives a run-local `models.json` whose credential field is only `$OPENAI_API_KEY`.
+
+The outer controller sends `SIGTERM` at `T`, allows a fixed grace period, and marks a hard kill incomplete. A normal deadline signal is accepted only after deterministic closeout succeeds. `experiment.json`, `final-eval.json`, event logs, Goal Plus state, selected artifact, evaluator call counts, and available usage telemetry remain in the ignored run directory.
+
+If the host process is interrupted after workers finish but before Goal Plus selection/reporting completes, recover the same directory without starting another model run:
+
+```bash
+.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py closeout \
+  --run-dir runs/openevolve-compare/<run-id>
+```
+
+Closeout is idempotent: it reuses an existing promotion, applies its patch to the task source at most once, and completes linked Goal Plus records/reporting.
+
+The first real four-path smoke and its telemetry limitations are recorded in [the sanitized evidence summary](../../evidence/runs/2026-07-22-openevolve-four-path-5m-summary.md).
+
+## Interpretation
+
+This is a wall-time/concurrency comparison, not a token-matched causal ablation. Always report:
+
+- final raw benchmark metric and direction;
+- actual wall time and whether the deadline fired;
+- candidate/iteration/evaluator-call counts;
+- top-level and worker token/cost coverage;
+- setup exclusions and controller closeout time;
+- any retry, incomplete state, or missing telemetry.
+
+Use evaluator-call matching only in a separately labeled mechanism ablation.
