@@ -7,17 +7,15 @@ This harness runs one pinned OpenEvolve example through four independent paths w
 - `goal-plus-codex`: Goal Plus fixed parallel lineages hosted by Codex;
 - `goal-plus-pi`: the same Goal Plus contract hosted by Pi RPC workers.
 
-Defaults are `T=300s`, `K=2`, model `gpt-5.6-luna`, and reasoning `high`. All four paths require the same explicit OpenAI-compatible `--api-base` and inherit `OPENAI_API_KEY`; the key is never serialized.
+Defaults are `T=300s`, `K=2`, model `gpt-5.6-luna`, and reasoning `high`. OpenEvolve and Pi require an explicit OpenAI-compatible `--api-base` and inherit `OPENAI_API_KEY`; the key is never serialized. Codex paths can omit `--api-base` and use the machine's native Codex login, or use the same explicit endpoint as the other paths.
 
-For a no-target Goal Plus run, `T` is a cap and `T-closeout` is a minimum exploration duration. The default five-minute protocol therefore requires at least 240 seconds of live orchestration/search and uses 60-second worker dispatches so the same lineage can continue within the remaining budget.
+`T` is a total cap, not a minimum duration or success criterion. The default prompt asks all paths to reserve the final 60 seconds for making the best verified artifact ready; a method may finish earlier when it has satisfied the objective.
 
 ## What is outside and inside T
 
-`prepare` performs task materialization for every method. For Goal Plus it also creates the goal/triage record, freezes the adapter-owned verifier contract, and creates an empty Search run. This mirrors OpenEvolve config preparation and makes the timed region measure search orchestration and workers instead of repeatedly spending most of a five-minute run reconstructing benchmark plumbing.
+`prepare` performs only task/config/workspace materialization. For Goal Plus it copies the portable project hook, skill, and MCP assets, but it does not create `.gp`, a Goal record, a frozen SearchSpec, a Search run, candidates, or sessions.
 
-The prepared Goal Plus state contains no candidates or model output. Inside `T`, the main agent must plan exactly one initial batch, materialize `K` candidates, and launch the fixed lineages. At `T`, the controller stops/drains the host; outside `T` it performs the same kind of deterministic final evaluation/selection already required by the other paths. The manifest reports setup calls separately from timed-plus-closeout calls.
-
-An end-to-end intake-overhead study should be labeled separately and must not be mixed into this search-stage table.
+Plain Codex receives one common task prompt. Codex + Goal Plus receives exactly the same common prompt with `/goal-plus mode=autonomous` prepended and a complete Goal Plus configuration appended. Goal intake, triage, spec discovery/freezing, candidate creation, worker inference, selection, and promotion therefore all happen inside `T`. Outside `T`, the controller may perform only deterministic process cleanup, idempotent closeout, and the common final evaluator. The manifest stores the common-prompt hash and Goal Plus transformation for audit.
 
 ## Prepare
 
@@ -62,19 +60,18 @@ export OPENAI_API_KEY='<secret>'
   --api-base https://api.example.com/v1
 ```
 
-Codex uses an explicit run-local custom provider over the Responses wire API. Headless Goal Plus MCP tools are registered explicitly with server-level tool approval; no user `config.toml` provider redirect is required. Pi receives a run-local `models.json` whose credential field is only `$OPENAI_API_KEY`.
+When `--api-base` is provided, Codex uses an explicit run-local custom provider over the Responses wire API. When it is omitted, Codex uses native login/auth while the benchmark still injects all Goal Plus MCP and headless-tool configuration explicitly. Pi receives a run-local `models.json` whose credential field is only `$OPENAI_API_KEY`.
 
 The outer controller sends `SIGTERM` at `T`, allows a fixed grace period, and marks a hard kill incomplete. A normal deadline signal is accepted only after deterministic closeout succeeds. `experiment.json`, `final-eval.json`, event logs, Goal Plus state, selected artifact, evaluator call counts, and available usage telemetry remain in the ignored run directory.
 
-Goal Plus completion also requires all of the following:
+Goal Plus completion records all of the following:
 
-- exactly the prepared Goal Plus ID and linked Search run, with no duplicate Goal;
-- exactly `K` candidates and a bound native worker for every candidate;
-- zero unbound sessions (controller-created sessions are not proof that workers launched);
-- no no-target exit before `T-closeout`;
+- one naturally created, complete Goal Plus record linked to the promoted Search run;
+- exactly `K` candidate workspaces and one session per candidate;
+- completed worker verifier evidence for every candidate;
 - successful controller closeout, promotion/report, and common final evaluation.
 
-These gates were exercised by the [strict Codex/Pi rerun](../../evidence/runs/2026-07-22-goal-plus-codex-pi-strict-rerun.md), including diagnostic runs that are intentionally retained as `incomplete`.
+The natural Codex path is exercised by the [standard-prompt end-to-end run](../../evidence/runs/2026-07-22-goal-plus-codex-natural-prompt.md). The older [controller-prepared strict rerun](../../evidence/runs/2026-07-22-goal-plus-codex-pi-strict-rerun.md) remains historical diagnostic evidence, not the standard experiment entrypoint.
 
 If the host process is interrupted after workers finish but before Goal Plus selection/reporting completes, recover the same directory without starting another model run:
 

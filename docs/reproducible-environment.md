@@ -68,7 +68,7 @@ python3 scripts/repro_env.py --checkout-root /path/to/clean/checkouts bootstrap
   --run-dir runs/openevolve-compare/<run-id>
 ```
 
-这一步复用 pinned OpenEvolve evaluator，不调用模型。Goal Plus 的 project `.codex` assets 会从固定 checkout 复制到 run-local workspace，`.gp/` 也只会在该 workspace 内生成。脚本不会自动删除 run directory。
+这一步复用 pinned OpenEvolve evaluator，不调用模型。Goal Plus 的 project `.codex` assets 会从固定 checkout 复制到 run-local workspace；prepare 完成时 `.gp/` 尚不存在，只有真正发送自然 `/goal-plus` prompt 后才会在该 workspace 内生成。脚本不会自动删除 run directory。
 
 ## 跑四条路径
 
@@ -106,7 +106,9 @@ export OPENAI_API_KEY='<secret>'
   --api-base https://api.example.com/v1
 ```
 
-Plain Codex 使用 `K` 个 ephemeral lane。Goal Plus + Codex 保留原生 session provenance；Goal Plus + Pi 写入 ignored 的 run-local `pi-home/models.json`，其中只引用 `$OPENAI_API_KEY`。Codex 的自定义 provider、Responses wire API、Goal Plus MCP 注册及 headless tool approval 全由命令行显式注入，不依赖另一台机器上的个人 `config.toml`。
+Plain Codex 使用 `K` 个 ephemeral lane。每个 lane 接收同一份 common task prompt；Goal Plus + Codex 接收该 prompt 的严格超集：只在开头增加 `/goal-plus mode=autonomous`，并在末尾附加完整的 Goal Plus 并发、host/model、metric/verifier、edit surface 和预算配置。Goal Plus + Codex 保留原生 session provenance；Goal Plus + Pi 写入 ignored 的 run-local `pi-home/models.json`，其中只引用 `$OPENAI_API_KEY`。Codex 的自定义 provider、Responses wire API、Goal Plus MCP 注册及 headless tool approval 全由命令行显式注入，不依赖另一台机器上的个人 `config.toml`。
+
+Goal Plus 配置还明确 process-verifier 的所有权：每个 candidate worker 提交自己的最终 process result；parent 等全部 workers 返回后直接 selection，由 promotion verifier 做最终 gate。不要让 parent 在 worker closeout 同时重复 process verification，否则会制造无意义的 evaluator call，并可能与 runtime-owned `results.tsv` 提交竞争。
 
 run manifest 只记录 model/api base 和 credential policy，不记录任何环境变量值。
 
@@ -117,17 +119,15 @@ run manifest 只记录 model/api base 和 credential policy，不记录任何环
   --run-dir runs/openevolve-compare/<run-id>
 ```
 
-### 为什么 Goal Plus 在 prepare 阶段先冻结空 Search run
+### 为什么 Goal Plus 必须从自然 prompt 开始
 
-这套主协议比较 search stage。`prepare` 对所有方法都完成 task/config/workspace materialization；对 Goal Plus 额外完成 goal/triage、controller-owned verifier freeze 和**空** Search run 创建。它不会创建候选、调用搜索模型或产生搜索结果。候选规划、`K` 个 lineage、worker 推理和 verifier iterations 全部计入 `T`。
+这套主协议比较完整系统，而不是只比较预构建后的 search stage。`prepare` 对所有方法只完成 task/config/workspace materialization；Goal Plus 不预创建 goal、triage、frozen spec、Search run、candidate 或 session。计时开始后，Codex 收到 `/goal-plus + common task prompt + Goal Plus configuration`，由 Goal Plus 自己完成 intake、spec discovery/freeze、并发 worker 启动和最终选择。
 
-实测表明，如果把 Goal Plus 的通用 intake/spec discovery 也塞入五分钟窗口，高推理模型可能用掉绝大多数时间而来不及启动 worker；这种结果应作为 end-to-end overhead 诊断单列，不能与 search-stage 主表混在一起。
+这样 Plain Codex 与 Codex + Goal Plus 的任务正文保持一致，唯一实验干预就是 Goal Plus。Goal Plus 的控制开销也属于完整系统成本，必须计入 `T`；如果后续需要排除 intake/spec discovery 开销，应另做明确标注的 engine-only 消融，而不是改变主实验入口。
 
 ## 公平预算与停止语义
 
-主对比固定：同一 task/seed/evaluator/model、总 wall deadline `T`、live search concurrency `K`。OpenEvolve 的 `iterations` 被设为很大的安全天花板；到 `T` 时外层 controller 发 `SIGTERM`，利用其原生 graceful-shutdown 保存 best，超过 grace 才 kill process group。Goal Plus 收到同一 `GOAL_PLUS_OUTER_DEADLINE_AT`；到期后 controller drain/关闭 host pool，并在 `T` 外执行确定性的最终 verifier、selection 和 promotion，和 plain lane 的最终选择同口径。closeout 用时单独记录，不算搜索时间。
-
-Goal Plus 的 `finished` 不是“最终 evaluator 能算出分数”就算通过。controller 还会检查：恰好使用 prepared Goal/run、候选数为 `K`、每个候选都有绑定的原生 worker、没有 unbound/重复 session；无显式 target 时，主进程不得在 `T-soft_closeout` 之前退出。五分钟默认配置因此至少搜索 240 秒，worker 单次 dispatch 最多 60 秒，允许在剩余预算内继续同一 lineage。
+主对比固定：同一 task/seed/evaluator/model、总 wall deadline `T`、live search concurrency `K`。OpenEvolve 的 `iterations` 被设为很大的安全天花板；到 `T` 时外层 controller 发 `SIGTERM`，利用其原生 graceful-shutdown 保存 best，超过 grace 才 kill process group。Goal Plus 收到同一 `GOAL_PLUS_OUTER_DEADLINE_AT`；其自然流程可以在目标满足时提前完成，也可以运行到预算上限。模型结束或到达 `T` 后，controller 只做进程清理、幂等 closeout 和同口径 final evaluator。closeout 用时单独记录。
 
 这不是 token-或 evaluator-call-matched 因果消融。主结果必须同时报告 actual evaluator calls、iterations、tokens、known cost、wall time 和 coverage。需要更严格地隔离 search strategy 时，再单独运行显式 evaluator-call cap 的 ablation；不要把这种约束写进 Goal Plus core。
 

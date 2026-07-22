@@ -79,54 +79,63 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 (workspace / ".pi/prompts/search-candidate-worker.md").is_file()
             )
 
-    def test_goal_prompt_freezes_outer_budget_without_call_cap(self) -> None:
+    def test_goal_prompt_uses_natural_entry_and_complete_configuration(self) -> None:
         prompt = experiment.render_goal(
-            "# Objective\nImprove it.",
-            300,
-            60,
-            2,
+            task_text="# Objective\nImprove it.",
+            artifact_name="candidate.py",
+            metric_name="combined_score",
+            metric_direction="maximize",
+            wall_seconds=300,
+            closeout_seconds=60,
+            concurrency=2,
             worker_host="pi-rpc",
             worker_model="bench-openai/gpt-5.6-luna",
         )
         self.assertTrue(prompt.startswith("/goal-plus mode=autonomous"))
-        self.assertIn("max_candidates=2", prompt)
-        self.assertIn("max_parallel=2", prompt)
+        self.assertIn("budget.max_candidates=2", prompt)
+        self.assertIn("budget.max_parallel=2", prompt)
         self.assertIn("240 seconds", prompt)
         self.assertIn("not hard-capped", prompt)
         self.assertIn("GOAL_PLUS_OUTER_DEADLINE_AT", prompt)
-        self.assertIn('worker_host="pi-rpc"', prompt)
-        self.assertIn('worker_launch.model="bench-openai/gpt-5.6-luna"', prompt)
-        self.assertIn('worker_launch.reasoning_effort="high"', prompt)
+        self.assertIn('strategy.worker_host="pi-rpc"', prompt)
+        self.assertIn('strategy.name="agent_guided"', prompt)
+        self.assertIn(
+            'strategy.worker_launch.model="bench-openai/gpt-5.6-luna"', prompt
+        )
+        self.assertIn('strategy.worker_launch.reasoning_effort="high"', prompt)
+        self.assertIn("Metric: `combined_score` with direction `maximize`", prompt)
+        self.assertIn("python3 .goal-plus-verifiers/primary_metric.py", prompt)
+        self.assertIn("do not run a duplicate parent-side process verification", prompt)
+        self.assertIn("allow only `candidate.py`", prompt)
+        self.assertNotIn("goal_plus_id=", prompt)
+        self.assertNotIn("search_start_agent_session", prompt)
 
-    def test_prepared_goal_prompt_resumes_exact_search_ids(self) -> None:
+    def test_plain_and_goal_plus_prompts_share_exact_common_body(self) -> None:
+        task = "# Objective\nImprove it."
+        common = experiment.render_plain_prompt(task, 300, 60)
         prompt = experiment.render_goal(
-            "# Objective\nImprove it.",
-            300,
-            60,
-            2,
+            task_text=task,
+            artifact_name="candidate.py",
+            metric_name="combined_score",
+            metric_direction="maximize",
+            wall_seconds=300,
+            closeout_seconds=60,
+            concurrency=2,
             worker_host="codex",
             worker_model="gpt-5.6-luna",
-            prepared_search={
-                "goal_plus_id": "gp_0001",
-                "frozen_spec_id": "spec_test",
-                "run_id": "run_test",
-            },
         )
         self.assertTrue(
-            prompt.startswith("Resume the controller-prepared Goal Plus Search state")
+            prompt.startswith(
+                "/goal-plus mode=autonomous\n\n"
+                + common.rstrip()
+                + "\n\n# Goal Plus configuration"
+            )
         )
-        self.assertNotIn("/goal-plus", prompt.splitlines()[0])
-        self.assertIn("goal_plus_id=gp_0001", prompt)
-        self.assertIn("run_id=run_test", prompt)
-        self.assertIn("Do not create another Goal Plus record", prompt)
-        self.assertIn("do not call `goal_plus_status` or `search_status`", prompt)
-        self.assertIn("`search_start_agent_session` exactly once", prompt)
-        self.assertIn(
-            "An unbound or duplicate session makes this benchmark run incomplete",
-            prompt,
-        )
+        self.assertEqual(common, experiment.render_plain_prompt(task, 300, 60))
+        self.assertNotIn("independent lane", common)
+        self.assertNotIn("controller-prepared", prompt)
 
-    def test_goal_plus_completion_requires_bound_workers_for_every_candidate(
+    def test_goal_plus_completion_requires_worker_verifier_evidence_for_every_candidate(
         self,
     ) -> None:
         base_state = {
@@ -142,6 +151,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                     "run_id": "run_test",
                     "candidate_count": 2,
                     "bound_candidate_count": 2,
+                    "worker_verified_candidate_count": 2,
                     "unbound_agent_session_count": 0,
                     "session_counts_by_candidate": {"c001": 1, "c002": 1},
                 }
@@ -154,11 +164,11 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         }
         self.assertIsNone(experiment.goal_plus_incomplete_reason(base_state, **kwargs))
 
-        unbound = json.loads(json.dumps(base_state))
-        unbound["runs"][0]["unbound_agent_session_count"] = 1
+        missing_worker_evidence = json.loads(json.dumps(base_state))
+        missing_worker_evidence["runs"][0]["worker_verified_candidate_count"] = 1
         self.assertIn(
-            "unbound agent sessions",
-            experiment.goal_plus_incomplete_reason(unbound, **kwargs),
+            "completed worker verifier evidence",
+            experiment.goal_plus_incomplete_reason(missing_worker_evidence, **kwargs),
         )
 
         duplicate_session = json.loads(json.dumps(base_state))
@@ -184,11 +194,49 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             experiment.goal_plus_incomplete_reason(duplicate_goal, **kwargs),
         )
 
-    def test_controller_prepared_spec_keeps_runtime_files_outside_edit_surface(
+    def test_natural_goal_plus_completion_ignores_aborted_search_history(
         self,
     ) -> None:
-        spec = experiment.build_goal_plus_search_spec(
-            workspace=Path("/tmp/example-workspace"),
+        state = {
+            "goals": [
+                {
+                    "goal_plus_id": "gp_0001",
+                    "status": "complete",
+                    "linked_run_id": "run_final",
+                }
+            ],
+            "runs": [
+                {
+                    "run_id": "run_aborted",
+                    "status": "aborted",
+                    "candidate_count": 0,
+                    "bound_candidate_count": 0,
+                    "worker_verified_candidate_count": 0,
+                    "unbound_agent_session_count": 0,
+                    "session_counts_by_candidate": {},
+                },
+                {
+                    "run_id": "run_final",
+                    "status": "completed",
+                    "candidate_count": 2,
+                    "bound_candidate_count": 2,
+                    "worker_verified_candidate_count": 2,
+                    "unbound_agent_session_count": 0,
+                    "session_counts_by_candidate": {"c001": 1, "c002": 1},
+                },
+            ],
+        }
+        self.assertIsNone(
+            experiment.goal_plus_incomplete_reason(
+                state,
+                expected_concurrency=2,
+            )
+        )
+
+    def test_goal_plus_configuration_keeps_runtime_files_outside_edit_surface(
+        self,
+    ) -> None:
+        prompt = experiment.render_goal(
             task_text="# Objective\nImprove it.",
             artifact_name="candidate.py",
             metric_name="combined_score",
@@ -199,31 +247,13 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             worker_host="pi-rpc",
             worker_model="bench-openai/gpt-5.6-luna",
         )
-        self.assertEqual(spec["budget"], {"max_candidates": 2, "max_parallel": 2})
-        self.assertEqual(spec["edit_surface"]["allow"], ["candidate.py"])
-        self.assertNotIn(".bench-runtime/**", spec["edit_surface"]["allow"])
-        self.assertEqual(spec["strategy"]["worker_budget"]["max_runtime_seconds"], 60)
-
-    def test_goal_plus_no_target_run_cannot_exit_before_exploration_minimum(
-        self,
-    ) -> None:
-        budget = {"wall_time_seconds": 300, "soft_closeout_seconds": 60}
-        self.assertIsNone(
-            experiment.goal_plus_timing_incomplete_reason(
-                {"duration_seconds": 300.0, "deadline_reached": True}, budget
-            )
-        )
-        self.assertIn(
-            "before the no-target exploration minimum",
-            experiment.goal_plus_timing_incomplete_reason(
-                {"duration_seconds": 176.0, "deadline_reached": False}, budget
-            ),
-        )
-        self.assertIsNone(
-            experiment.goal_plus_timing_incomplete_reason(
-                {"duration_seconds": 238.0, "deadline_reached": False}, budget
-            )
-        )
+        self.assertIn("allow only `candidate.py`", prompt)
+        self.assertIn("deny `evaluate.py`", prompt)
+        self.assertIn("`.goal-plus-verifiers/**`", prompt)
+        self.assertIn("allow at most one changed file", prompt)
+        self.assertIn('workspace.backend="copy"', prompt)
+        self.assertIn("strategy.worker_budget.max_runtime_seconds=60", prompt)
+        self.assertIn("total budget, not a success criterion", prompt)
 
     def test_promotion_patch_is_applied_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

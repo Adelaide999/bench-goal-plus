@@ -52,6 +52,10 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
@@ -133,92 +137,31 @@ def commit_workspace(workspace: Path, message: str) -> str:
     return git_commit(workspace)
 
 
-def render_goal(
+def render_common_task_prompt(
     task_text: str,
     wall_seconds: int,
     closeout_seconds: int,
-    concurrency: int,
-    *,
-    worker_host: str = "codex",
-    worker_model: str | None = None,
-    reasoning_effort: str = DEFAULT_REASONING_EFFORT,
-    prepared_search: dict[str, Any] | None = None,
 ) -> str:
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
-    dispatch_seconds = max(30, min(60, exploration_seconds // 3))
-    launch_lines = [
-        f'- Freeze `strategy.worker_host="{worker_host}"` and '
-        '`strategy.orchestration_mode="parallel_loops"`.',
-        f"- Freeze `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
-        '`strategy.worker_budget.on_exceed="interrupt"`; continuations must fit the '
-        "remaining outer time.",
-    ]
-    if worker_model:
-        launch_lines.append(
-            f'- Freeze `strategy.worker_launch.model="{worker_model}"` and '
-            f'`strategy.worker_launch.reasoning_effort="{reasoning_effort}"`.'
-        )
-    prepared_section = ""
-    entrypoint = "/goal-plus mode=autonomous"
-    if prepared_search is not None:
-        # The run-local Goal Plus/Pi hooks treat slash commands as new intake.
-        # Prepared search state is already durable, so avoid creating a duplicate
-        # goal and resume only through the explicit IDs below.
-        entrypoint = "Resume the controller-prepared Goal Plus Search state below."
-        prepared_section = (
-            "# Controller-prepared Search state\n\n"
-            "Task materialization, verifier freeze, and empty Search-run creation were completed "
-            "before the timed search budget, just like the OpenEvolve config/workspace setup.\n\n"
-            f"- Resume `goal_plus_id={prepared_search['goal_plus_id']}`.\n"
-            f"- Resume `frozen_spec_id={prepared_search['frozen_spec_id']}`.\n"
-            f"- Drive `run_id={prepared_search['run_id']}`.\n"
-            "- Do not create another Goal Plus record, freeze another spec, or create another run. "
-            "The controller validated these IDs immediately before launch, so do not call "
-            "`goal_plus_status` or `search_status`; immediately plan the one initial batch.\n"
-            "- Call `search_plan_next` exactly once. Call `search_start_batch` exactly once "
-            "successfully, using exactly K proposals shaped only as "
-            '`{"intent": "distinct hypothesis"}`; do not pass `direction`, `seed`, or other '
-            "proposal fields.\n"
-            "- For each returned candidate, call `search_start_agent_session` exactly once and "
-            "without a `directive`. Immediately invoke the returned launch tool/payload exactly "
-            "once. Never create another session for that candidate merely because launch has not "
-            "yet completed. An unbound or duplicate session makes this benchmark run incomplete.\n"
-            "- Materialize exactly K candidates and launch all fixed parallel workers before doing "
-            "any monitoring or commentary.\n"
-            "- This benchmark has no early success target. Do not select, promote, report, or "
-            "complete the Goal Plus record yourself. Whenever a worker finishes before the "
-            "exploration cutoff, validate it and continue that same worker with a budget fitted to "
-            "the remaining time. The external controller owns deadline closeout and finalization.\n\n"
-        )
     return (
-        f"{entrypoint}\n\n"
-        + prepared_section
-        + "Run this measurable optimization task with Goal Plus Search while preserving Goal Plus's "
-        "native fixed parallel-loop design.\n\n"
         f"{task_text.strip()}\n\n"
-        "# System-level experiment budget\n\n"
+        "# Common experiment contract\n\n"
         f"- Total outer wall-clock budget: {wall_seconds} seconds.\n"
-        f"- Stop new exploration after about {exploration_seconds} seconds and reserve "
-        f"{closeout_seconds} seconds for final verification, selection, promotion, and shutdown.\n"
-        f"- Freeze exactly {concurrency} candidates with `max_candidates={concurrency}` and "
-        f"`max_parallel={concurrency}`. Keep those same autonomous lineages alive.\n"
-        + "\n".join(launch_lines)
-        + "\n"
-        "- Public evaluator calls are not hard-capped. The outer controller will report the actual "
-        "calls, tokens, cost coverage, and wall time after the run.\n"
-        "- Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as authoritative. Finish and drain every "
-        "worker before it.\n"
-        "- Freeze the existing controller-owned `.goal-plus-verifiers/primary_metric.py` as "
-        "the sole process and promotion verifier artifact, with command "
-        "`python3 .goal-plus-verifiers/primary_metric.py`. Do not create or modify verifier files.\n"
-        "- Use only `python3 evaluate.py` for task feedback and leave the selected, promoted best "
-        "candidate in the task artifact.\n"
+        f"- Use about {exploration_seconds} seconds for exploration and reserve "
+        f"{closeout_seconds} seconds to make the best evaluator-verified artifact ready for "
+        "final evaluation.\n"
+        "- Use only `python3 evaluate.py` for public task feedback. Do not modify the evaluator "
+        "or any controller-owned verifier.\n"
+        "- Public evaluator calls are not hard-capped. The experiment records actual calls, "
+        "tokens, cost coverage, and wall time after the run.\n"
+        "- The wall-clock value is the total budget, not a success criterion. Stop when the "
+        "objective is satisfied or the budget is exhausted, leaving or promoting the best "
+        "verified artifact for the experiment controller.\n"
     )
 
 
-def build_goal_plus_search_spec(
+def render_goal(
     *,
-    workspace: Path,
     task_text: str,
     artifact_name: str,
     metric_name: str,
@@ -228,195 +171,60 @@ def build_goal_plus_search_spec(
     concurrency: int,
     worker_host: str,
     worker_model: str,
-) -> dict[str, Any]:
-    """Build the adapter-owned frozen task contract used by timed Search runs."""
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+) -> str:
+    """Add the natural Goal Plus entrypoint and config to the common Codex prompt."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
     dispatch_seconds = max(30, min(60, exploration_seconds // 3))
-    verifier = {
-        "name": "primary_metric",
-        "role": "ranking_signal",
-        "command": ["python3", ".goal-plus-verifiers/primary_metric.py"],
-        "cwd": ".",
-        "feedback_policy": "summary_only",
-        "timeout_seconds": 60,
-        "expected_outputs": [],
-    }
-    promotion_verifier = {
-        **verifier,
-        "name": "primary_metric_promotion",
-        "role": "promotion_gate",
-        "feedback_policy": "final_only",
-    }
-    return {
-        "objective": task_text.strip(),
-        "metric_name": metric_name,
-        "metric_direction": metric_direction,
-        "source_path": str(workspace.absolute()),
-        "budget": {"max_candidates": concurrency, "max_parallel": concurrency},
-        "edit_surface": {
-            "allow": [artifact_name],
-            "deny": [
-                "evaluate.py",
-                ".goal-plus-verifiers/**",
-                "task.json",
-                "TASK.md",
-                "AGENTS.md",
-                "GOAL.md",
-            ],
-            "max_file_changes": 1,
-        },
-        "process_verifiers": [verifier],
-        "promotion_verifiers": [promotion_verifier],
-        "constraints": {
-            "no_network": True,
-            "artifact_fixed_regions_checked_by_controller": True,
-            "outer_deadline_env": "GOAL_PLUS_OUTER_DEADLINE_AT",
-            "exploration_stop_seconds": exploration_seconds,
-            "final_reserve_seconds": closeout_seconds,
-        },
-        "root_hypotheses": [
-            "Improve global exploration while preserving the task's fixed interface.",
-            "Use a structurally different search or refinement schedule and verify it.",
-        ],
-        "strategy": {
-            "name": "agent_guided",
-            "orchestration_mode": "parallel_loops",
-            "worker_host": worker_host,
-            "worker_budget": {
-                "max_runtime_seconds": dispatch_seconds,
-                "on_exceed": "interrupt",
-            },
-            "worker_launch": {
-                "model": worker_model,
-                "reasoning_effort": DEFAULT_REASONING_EFFORT,
-            },
-            "config": {},
-        },
-        "workspace": {"backend": "copy"},
-    }
-
-
-def prepare_goal_plus_search(
-    *,
-    workspace: Path,
-    task_text: str,
-    artifact_name: str,
-    metric_name: str,
-    metric_direction: str,
-    wall_seconds: int,
-    closeout_seconds: int,
-    concurrency: int,
-    worker_host: str,
-    worker_model: str,
-    base_model: str,
-) -> dict[str, Any]:
-    """Freeze task plumbing outside T so T measures the actual Search stage."""
-    from goal_plus.goal_plus import FileGoalPlusRuntime
-    from goal_plus.models import SearchSpec
-    from goal_plus.runtime import FileSearchRuntime
-
-    root = workspace / ".gp"
-    goal_runtime = FileGoalPlusRuntime(root)
-    search_runtime = FileSearchRuntime(root)
-    spec_data = build_goal_plus_search_spec(
-        workspace=workspace,
-        task_text=task_text,
-        artifact_name=artifact_name,
-        metric_name=metric_name,
-        metric_direction=metric_direction,
-        wall_seconds=wall_seconds,
-        closeout_seconds=closeout_seconds,
-        concurrency=concurrency,
-        worker_host=worker_host,
-        worker_model=worker_model,
-    )
-    prompt = render_goal(
+    common_prompt = render_common_task_prompt(
         task_text,
         wall_seconds,
         closeout_seconds,
-        concurrency,
-        worker_host=worker_host,
-        worker_model=worker_model,
     )
-    raw_goal = (
-        "mode=autonomous " + prompt.removeprefix("/goal-plus mode=autonomous").strip()
+    return (
+        "/goal-plus mode=autonomous\n\n"
+        f"{common_prompt.rstrip()}\n\n"
+        "# Goal Plus configuration\n\n"
+        "Use the current workspace and construct the verifier-backed Goal Plus search from "
+        "the configuration below. Goal Plus owns intake, triage, SearchSpec freezing, candidate "
+        "workspaces, selection, promotion, and final reporting.\n\n"
+        f"- `budget.max_candidates={concurrency}` and `budget.max_parallel={concurrency}`.\n"
+        f"- `strategy.name=\"agent_guided\"`, `strategy.worker_host=\"{worker_host}\"`, "
+        "and `strategy.orchestration_mode=\"parallel_loops\"`.\n"
+        f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
+        "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "
+        "lineages while useful work and outer time remain.\n"
+        f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
+        f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
+        f"- Metric: `{metric_name}` with direction `{metric_direction}`.\n"
+        "- Process verifier: `python3 .goal-plus-verifiers/primary_metric.py`, role "
+        "`ranking_signal`, feedback policy `summary_only`, timeout 60 seconds.\n"
+        "- Promotion verifier: the same command, role `promotion_gate`, feedback policy "
+        "`final_only`, timeout 60 seconds. The verifier is controller-owned and immutable.\n"
+        "- Each candidate worker must submit its own final process verifier result. After a "
+        "worker returns with that durable result, do not run a duplicate parent-side process "
+        "verification for the same candidate; wait for all workers, then select and let the "
+        "promotion verifier perform the final gate.\n"
+        f"- Edit surface: allow only `{artifact_name}`; deny `evaluate.py`, "
+        "`.goal-plus-verifiers/**`, `task.json`, `TASK.md`, `AGENTS.md`, and `GOAL.md`; "
+        "allow at most one changed file.\n"
+        "- Workspace: use `source_path=\".\"` and `workspace.backend=\"copy\"`.\n"
+        "- Constraints: no network; preserve the artifact's controller-checked fixed regions.\n"
+        f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
+        f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
+        "Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as the authoritative upper deadline.\n"
+        f"- Promotion rule: select the valid verifier-backed candidate with the best "
+        f"`{metric_name}`, promote it, complete the full goal audit, and write the "
+        "final Goal Plus report.\n"
     )
-    goal = goal_runtime.create_goal(raw_goal=raw_goal, source_path=str(workspace))
-    goal_runtime.record_triage(
-        goal.goal_plus_id,
-        {
-            "is_optimization": True,
-            "confidence": "high",
-            "recommended_phase": "search",
-            "identified_at": "initial",
-            "scenario": "controller_prepared_benchmark_search",
-            "reasons": [
-                "The benchmark adapter owns a finite numeric metric and immutable verifier.",
-                "The artifact edit surface and fixed wall/concurrency budget are already known.",
-            ],
-            "missing": [],
-        },
-    )
-    goal_runtime.save_spec_draft(
-        goal.goal_plus_id,
-        {
-            "baseline": {"source": "materialized seed artifact"},
-            "metric": {"name": metric_name, "direction": metric_direction},
-            "correctness_gate": {"command": "python3 evaluate.py"},
-            "edit_surface": {"allow": [artifact_name]},
-            "verifier_artifacts": [".goal-plus-verifiers/primary_metric.py"],
-            "search_spec": spec_data,
-            "promotion_rule": (
-                f"Select the valid verifier-backed candidate with the best {metric_name}."
-            ),
-            "confidence": "high",
-            "origin": "initial",
-            "open_questions": [],
-        },
-    )
-    frozen = search_runtime.freeze_spec(
-        SearchSpec.model_validate(spec_data),
-        [workspace / ".goal-plus-verifiers/primary_metric.py"],
-    )
-    run_id = search_runtime.create_run(frozen.frozen_spec_id)
-    goal_runtime.link_search_run(goal.goal_plus_id, frozen.frozen_spec_id, run_id)
-    metadata = load_json(workspace / "task.json")
-    setup_budget = load_json(Path(metadata["controller_runtime_dir"]) / "budget.json")
-    return {
-        "mode": "controller_prepared_search_stage",
-        "goal_plus_id": goal.goal_plus_id,
-        "frozen_spec_id": frozen.frozen_spec_id,
-        "run_id": run_id,
-        "worker_host": worker_host,
-        "worker_model": worker_model,
-        "base_model": base_model,
-        "setup_evaluator_calls": setup_budget,
-        "timed_budget_excludes": [
-            "task materialization",
-            "Goal Plus goal/triage/spec freeze",
-            "empty Search run creation",
-        ],
-    }
 
 
 def render_plain_prompt(
     task_text: str,
     wall_seconds: int,
     closeout_seconds: int,
-    lane_index: int,
-    lane_count: int,
 ) -> str:
-    exploration_seconds = max(1, wall_seconds - closeout_seconds)
-    return (
-        f"{task_text.strip()}\n\n"
-        "# Codex-only lane contract\n\n"
-        f"You are independent lane {lane_index + 1} of {lane_count}. Work autonomously for the "
-        f"shared outer budget of {wall_seconds} seconds. Keep testing concrete improvements for "
-        f"about {exploration_seconds} seconds; reserve the final {closeout_seconds} seconds to "
-        "restore or leave the best evaluator-verified candidate in the artifact and exit cleanly. "
-        "Do not stop after the first valid improvement. Use only `python3 evaluate.py` for task "
-        "feedback. The controller will evaluate all lanes and select the best official score.\n"
-    )
+    return render_common_task_prompt(task_text, wall_seconds, closeout_seconds)
 
 
 def codex_provider_args(api_base: str) -> list[str]:
@@ -556,7 +364,8 @@ def prepare(args: argparse.Namespace) -> int:
     description = describe_task(run_task, python)
     workspaces: list[Path] = []
     workspace_commits: list[str] = []
-    goal_plus_prepared: dict[str, Any] | None = None
+    goal_plus_config: dict[str, Any] | None = None
+    prompt_contract: dict[str, Any] | None = None
 
     if method == "plain-codex":
         for lane_index in range(args.concurrency):
@@ -574,6 +383,17 @@ def prepare(args: argparse.Namespace) -> int:
             )
             workspaces.append(workspace)
             workspace_commits.append(materialized["workspace_commit"])
+        task_text = (workspaces[0] / "TASK.md").read_text()
+        common_prompt = render_common_task_prompt(
+            task_text,
+            args.wall_time_seconds,
+            args.soft_closeout_seconds,
+        )
+        prompt_contract = {
+            "mode": "plain_codex_common_prompt",
+            "common_prompt_sha256": sha256_text(common_prompt),
+            "transform": "identity",
+        }
     elif method in {"goal-plus-codex", "goal-plus-pi"}:
         workspace = run_dir / "workspace"
         materialized = materialize_workspace(
@@ -597,20 +417,6 @@ def prepare(args: argparse.Namespace) -> int:
             worker_model = f"{PI_PROVIDER_ID}/{args.model}"
         task_text = (workspace / "TASK.md").read_text()
         goal = render_goal(
-            task_text,
-            args.wall_time_seconds,
-            args.soft_closeout_seconds,
-            args.concurrency,
-            worker_host=worker_host,
-            worker_model=worker_model,
-        )
-        (workspace / "GOAL.md").write_text(goal)
-        workspaces.append(workspace)
-        workspace_commits.append(
-            commit_workspace(workspace, "install pinned Goal Plus host assets")
-        )
-        goal_plus_prepared = prepare_goal_plus_search(
-            workspace=workspace,
             task_text=task_text,
             artifact_name=task.artifact_name,
             metric_name=description["evaluation"]["primary_metric"],
@@ -620,8 +426,33 @@ def prepare(args: argparse.Namespace) -> int:
             concurrency=args.concurrency,
             worker_host=worker_host,
             worker_model=worker_model,
-            base_model=args.model,
         )
+        (workspace / "GOAL.md").write_text(goal)
+        workspaces.append(workspace)
+        workspace_commits.append(
+            commit_workspace(workspace, "install pinned Goal Plus host assets")
+        )
+        common_prompt = render_common_task_prompt(
+            task_text,
+            args.wall_time_seconds,
+            args.soft_closeout_seconds,
+        )
+        prompt_contract = {
+            "mode": "natural_goal_plus_entry",
+            "common_prompt_sha256": sha256_text(common_prompt),
+            "transform": "/goal-plus prefix plus Goal Plus configuration suffix",
+            "goal_prompt_sha256": sha256_text(goal),
+        }
+        goal_plus_config = {
+            "entrypoint": "/goal-plus mode=autonomous",
+            "worker_host": worker_host,
+            "worker_model": worker_model,
+            "base_model": args.model,
+            "metric_name": description["evaluation"]["primary_metric"],
+            "metric_direction": description["evaluation"]["direction"],
+            "artifact_name": task.artifact_name,
+            "state_at_t0": "absent; Goal Plus intake starts from the natural prompt",
+        }
     manifest = {
         "schema_version": 1,
         "status": "prepared",
@@ -663,7 +494,8 @@ def prepare(args: argparse.Namespace) -> int:
         ),
         "workspaces": [str(path) for path in workspaces],
         "workspace_commits": workspace_commits,
-        "goal_plus_prepared": goal_plus_prepared,
+        "prompt_contract": prompt_contract,
+        "goal_plus_config": goal_plus_config,
         "secret_policy": (
             "credentials are inherited from the process environment and never serialized"
         ),
@@ -804,6 +636,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
         best_scores: list[float] = []
         hosts: set[str] = set()
         bound_candidate_ids: set[str] = set()
+        worker_verified_candidate_ids: set[str] = set()
         unbound_agent_session_count = 0
         session_counts_by_candidate: dict[str, int] = {}
         for candidate_path in candidate_paths:
@@ -835,6 +668,13 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 bound_candidate_ids.add(candidate_id)
             else:
                 unbound_agent_session_count += 1
+            counters = session.get("counters") or {}
+            if (
+                isinstance(candidate_id, str)
+                and isinstance(counters.get("verifier_runs"), int)
+                and counters["verifier_runs"] > 0
+            ):
+                worker_verified_candidate_ids.add(candidate_id)
         runs.append(
             {
                 "run_id": payload.get("run_id"),
@@ -845,6 +685,9 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                     len(session_paths) - unbound_agent_session_count
                 ),
                 "bound_candidate_count": len(bound_candidate_ids),
+                "worker_verified_candidate_count": len(
+                    worker_verified_candidate_ids
+                ),
                 "unbound_agent_session_count": unbound_agent_session_count,
                 "session_counts_by_candidate": session_counts_by_candidate,
                 "iteration_count": iteration_count,
@@ -900,6 +743,22 @@ def goal_plus_incomplete_reason(
         runs = [item for item in runs if item.get("run_id") == expected_run_id]
         if len(runs) != 1:
             return f"expected exactly one prepared Search run {expected_run_id}"
+    else:
+        # A natural /goal-plus invocation may leave an aborted spec-discovery
+        # attempt in the append-only history before it creates the successful
+        # Search run.  The experiment result is defined by the run currently
+        # linked from the completed goal, not by historical aborted attempts.
+        linked_run_ids = {
+            item.get("linked_run_id")
+            for item in goals
+            if isinstance(item.get("linked_run_id"), str)
+            and item.get("linked_run_id")
+        }
+        if not linked_run_ids:
+            return "completed Goal Plus record did not link a Search run"
+        runs = [item for item in runs if item.get("run_id") in linked_run_ids]
+        if len(runs) != len(linked_run_ids):
+            return "one or more Goal Plus linked Search runs are missing"
     if expected_concurrency is not None:
         for run in runs:
             if run.get("candidate_count") != expected_concurrency:
@@ -918,35 +777,12 @@ def goal_plus_incomplete_reason(
                     f"Search run {run.get('run_id')} did not keep exactly one session per "
                     f"candidate: {session_counts}"
                 )
-            if run.get("bound_candidate_count") != expected_concurrency:
+            if run.get("worker_verified_candidate_count") != expected_concurrency:
                 return (
-                    f"Search run {run.get('run_id')} launched workers for "
-                    f"{run.get('bound_candidate_count')} candidates; expected {expected_concurrency}"
+                    f"Search run {run.get('run_id')} has completed worker verifier "
+                    f"evidence for {run.get('worker_verified_candidate_count')} "
+                    f"candidates; expected {expected_concurrency}"
                 )
-            if run.get("unbound_agent_session_count"):
-                return (
-                    f"Search run {run.get('run_id')} left "
-                    f"{run.get('unbound_agent_session_count')} unbound agent sessions"
-                )
-    return None
-
-
-def goal_plus_timing_incomplete_reason(
-    control: dict[str, Any], budget: dict[str, Any]
-) -> str | None:
-    """Reject early Goal Plus exits when the protocol has no success target."""
-    if control.get("deadline_reached"):
-        return None
-    duration = control.get("duration_seconds")
-    if not isinstance(duration, (int, float)):
-        return "Goal Plus execution duration is unavailable"
-    minimum = budget["wall_time_seconds"] - budget["soft_closeout_seconds"]
-    tolerance_seconds = 5
-    if duration + tolerance_seconds < minimum:
-        return (
-            f"Goal Plus exited after {duration:.3f}s before the no-target exploration "
-            f"minimum of {minimum}s"
-        )
     return None
 
 
@@ -1332,20 +1168,29 @@ def execute(args: argparse.Namespace) -> int:
         raise RuntimeError(f"run is not prepared: status={manifest['status']}")
 
     method = canonical_method(manifest["method"])
-    prepared_search = manifest.get("goal_plus_prepared")
-    if prepared_search is not None and args.model != prepared_search["base_model"]:
+    if manifest.get("goal_plus_prepared") is not None:
+        raise RuntimeError(
+            "legacy controller-prepared Goal Plus runs cannot be executed by the standard "
+            "prompt runner; preserve them as historical evidence or use closeout"
+        )
+    goal_plus_config = manifest.get("goal_plus_config")
+    if goal_plus_config is not None and args.model != goal_plus_config["base_model"]:
         raise ValueError(
-            "run model differs from the model frozen during prepare: "
-            f"{args.model!r} != {prepared_search['base_model']!r}"
+            "run model differs from the Goal Plus prompt configuration: "
+            f"{args.model!r} != {goal_plus_config['base_model']!r}"
+        )
+    if method in {"goal-plus-codex", "goal-plus-pi"} and (
+        Path(manifest["workspace"]) / ".gp"
+    ).exists():
+        raise RuntimeError(
+            "standard Goal Plus execution must start without pre-created .gp state"
         )
     if not args.model:
         raise ValueError(
             "--model is required so every comparable run has explicit identity"
         )
-    if not args.api_base:
-        raise ValueError(
-            "--api-base is required so all four paths use the same endpoint"
-        )
+    if method in {"openevolve", "goal-plus-pi"} and not args.api_base:
+        raise ValueError(f"--api-base is required for {method}")
     budget = manifest["budget"]
     python = Path(manifest["environment"]["runtime_python"])
     task = resolve_task(
@@ -1357,8 +1202,10 @@ def execute(args: argparse.Namespace) -> int:
     bin_dir = runtime_bin(args.venv.expanduser().absolute())
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
 
-    if not environment.get("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY is required for the unified provider")
+    if args.api_base and not environment.get("OPENAI_API_KEY"):
+        raise RuntimeError(
+            "OPENAI_API_KEY is required when --api-base selects the unified provider"
+        )
 
     manifest["status"] = "running"
     manifest["execution_started_at"] = utc_now()
@@ -1439,8 +1286,6 @@ def execute(args: argparse.Namespace) -> int:
                 (workspace / "TASK.md").read_text(),
                 budget["wall_time_seconds"],
                 budget["soft_closeout_seconds"],
-                lane_index,
-                len(workspaces),
             )
             (lane_dir / "prompt.md").write_text(prompt)
             command = [
@@ -1457,7 +1302,7 @@ def execute(args: argparse.Namespace) -> int:
                 "--color",
                 "never",
                 "--ephemeral",
-                *codex_provider_args(args.api_base),
+                *(codex_provider_args(args.api_base) if args.api_base else []),
                 "--model",
                 args.model,
                 "-",
@@ -1557,13 +1402,15 @@ def execute(args: argparse.Namespace) -> int:
         environment["GOAL_PLUS_OUTER_DEADLINE_AT"] = deadline.isoformat()
         if method == "goal-plus-codex":
             prompt = render_goal(
-                (workspace / "TASK.md").read_text(),
-                budget["wall_time_seconds"],
-                budget["soft_closeout_seconds"],
-                budget["concurrency"],
+                task_text=(workspace / "TASK.md").read_text(),
+                artifact_name=manifest["task"]["artifact_name"],
+                metric_name=manifest["task"]["primary_metric"],
+                metric_direction=manifest["task"]["direction"],
+                wall_seconds=budget["wall_time_seconds"],
+                closeout_seconds=budget["soft_closeout_seconds"],
+                concurrency=budget["concurrency"],
                 worker_host="codex",
                 worker_model=args.model,
-                prepared_search=prepared_search,
             )
             command = [
                 args.codex_bin,
@@ -1579,7 +1426,7 @@ def execute(args: argparse.Namespace) -> int:
                 "--color",
                 "never",
                 "--dangerously-bypass-hook-trust",
-                *codex_provider_args(args.api_base),
+                *(codex_provider_args(args.api_base) if args.api_base else []),
                 *codex_goal_plus_mcp_args(),
                 "--model",
                 args.model,
@@ -1590,13 +1437,15 @@ def execute(args: argparse.Namespace) -> int:
         else:
             qualified_model = f"{PI_PROVIDER_ID}/{args.model}"
             prompt = render_goal(
-                (workspace / "TASK.md").read_text(),
-                budget["wall_time_seconds"],
-                budget["soft_closeout_seconds"],
-                budget["concurrency"],
+                task_text=(workspace / "TASK.md").read_text(),
+                artifact_name=manifest["task"]["artifact_name"],
+                metric_name=manifest["task"]["primary_metric"],
+                metric_direction=manifest["task"]["direction"],
+                wall_seconds=budget["wall_time_seconds"],
+                closeout_seconds=budget["soft_closeout_seconds"],
+                concurrency=budget["concurrency"],
                 worker_host="pi-rpc",
                 worker_model=qualified_model,
-                prepared_search=prepared_search,
             )
             pi_home = run_dir / "pi-home"
             write_pi_models_config(pi_home, api_base=args.api_base, model=args.model)
@@ -1667,14 +1516,9 @@ def execute(args: argparse.Namespace) -> int:
         goal_reason = goal_plus_incomplete_reason(
             control["goal_plus"],
             expected_concurrency=budget["concurrency"],
-            expected_goal_plus_id=(prepared_search or {}).get("goal_plus_id"),
-            expected_run_id=(prepared_search or {}).get("run_id"),
         )
         if goal_reason and not control.get("result_incomplete_reason"):
             control["result_incomplete_reason"] = goal_reason
-        timing_reason = goal_plus_timing_incomplete_reason(control, budget)
-        if timing_reason and not control.get("result_incomplete_reason"):
-            control["result_incomplete_reason"] = timing_reason
         if not control["goal_plus_controller_closeout"].get("completed"):
             control["result_incomplete_reason"] = (
                 "Goal Plus controller closeout failed: "
@@ -1702,6 +1546,9 @@ def execute(args: argparse.Namespace) -> int:
     )
     manifest["model"] = args.model
     manifest["api_base"] = args.api_base
+    manifest["provider_mode"] = (
+        "openai_compatible" if args.api_base else "codex_native_auth"
+    )
     manifest["reasoning_effort"] = DEFAULT_REASONING_EFFORT
     version_command = (
         [
@@ -1763,15 +1610,10 @@ def repair_closeout(args: argparse.Namespace) -> int:
         workspace
     )
     control["goal_plus"] = collect_goal_plus_state(workspace)
-    prepared_search = manifest.get("goal_plus_prepared") or {}
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=manifest["budget"]["concurrency"],
-        expected_goal_plus_id=prepared_search.get("goal_plus_id"),
-        expected_run_id=prepared_search.get("run_id"),
     )
-    timing_reason = goal_plus_timing_incomplete_reason(control, manifest["budget"])
-    reason = reason or timing_reason
     if reason is None and not control.get("hard_killed"):
         control.pop("result_incomplete_reason", None)
         manifest["status"] = "finished"
