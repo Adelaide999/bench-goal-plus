@@ -31,7 +31,7 @@ This run verifies the standard experiment entrypoint rather than the older contr
 | Selected candidate | `c002` |
 | Promotion | non-empty patch applied; Markdown and HTML reports generated |
 
-The two workers produced distinct global-to-local optimization implementations. The controller reverified both, selected `c002`, and the common final evaluator reproduced the selected score.
+The two workers produced distinct global-to-local optimization implementations and each submitted a process-verifier result. The parent selected `c002`, the promotion gate passed, and the common final evaluator reproduced the selected score.
 
 ## Runtime findings
 
@@ -50,7 +50,7 @@ Codex worker handles in this host path expose stable `task_name` values and comp
   --wall-time-seconds 300 \
   --concurrency 2 \
   --model gpt-5.6-sol \
-  --seed 6 \
+  --seed 8 \
   --run-dir runs/openevolve-compare/<run-id>
 
 .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py run \
