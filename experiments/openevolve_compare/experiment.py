@@ -34,6 +34,7 @@ from adapters.openevolve_examples.adapter import (  # noqa: E402
 
 DEFAULT_ENV_MANIFEST = ROOT / "environment/upstreams.json"
 DEFAULT_VENV = ROOT / ".bench-env/venv"
+DEFAULT_CHECKOUT_ROOT = ROOT / "third_party"
 DEFAULT_RUNS = ROOT / "runs/openevolve-compare"
 METHODS = ("openevolve", "plain-codex", "goal-plus-codex", "goal-plus-pi")
 METHOD_ALIASES = {"goal-plus": "goal-plus-codex"}
@@ -173,10 +174,17 @@ def render_goal(
     worker_host: str,
     worker_model: str,
     reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+    worker_runtime_seconds: int | None = None,
 ) -> str:
     """Add the natural Goal Plus entrypoint and config to the common Codex prompt."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
-    dispatch_seconds = max(30, min(60, exploration_seconds // 3))
+    dispatch_seconds = (
+        worker_runtime_seconds
+        if worker_runtime_seconds is not None
+        else max(30, min(60, exploration_seconds // 3))
+    )
+    if dispatch_seconds < 1 or dispatch_seconds > exploration_seconds:
+        raise ValueError("worker runtime must fit inside the exploration budget")
     common_prompt = render_common_task_prompt(
         task_text,
         wall_seconds,
@@ -844,6 +852,9 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "worker_verified_candidate_count": len(
                     worker_verified_candidate_ids
                 ),
+                "worker_verified_candidate_ids": sorted(
+                    worker_verified_candidate_ids
+                ),
                 "unbound_agent_session_count": unbound_agent_session_count,
                 "session_counts_by_candidate": session_counts_by_candidate,
                 "iteration_count": iteration_count,
@@ -864,6 +875,7 @@ def goal_plus_incomplete_reason(
     state: dict[str, Any],
     *,
     expected_concurrency: int | None = None,
+    minimum_worker_verified_candidates: int | None = None,
     expected_goal_plus_id: str | None = None,
     expected_run_id: str | None = None,
 ) -> str | None:
@@ -916,6 +928,16 @@ def goal_plus_incomplete_reason(
         if len(runs) != len(linked_run_ids):
             return "one or more Goal Plus linked Search runs are missing"
     if expected_concurrency is not None:
+        required_worker_evidence = (
+            expected_concurrency
+            if minimum_worker_verified_candidates is None
+            else minimum_worker_verified_candidates
+        )
+        if not 0 <= required_worker_evidence <= expected_concurrency:
+            return (
+                "minimum worker verifier evidence must be between zero and "
+                "expected concurrency"
+            )
         for run in runs:
             if run.get("candidate_count") != expected_concurrency:
                 return (
@@ -933,11 +955,15 @@ def goal_plus_incomplete_reason(
                     f"Search run {run.get('run_id')} did not keep exactly one session per "
                     f"candidate: {session_counts}"
                 )
-            if run.get("worker_verified_candidate_count") != expected_concurrency:
+            worker_verified_count = run.get("worker_verified_candidate_count")
+            if (
+                not isinstance(worker_verified_count, int)
+                or worker_verified_count < required_worker_evidence
+            ):
                 return (
                     f"Search run {run.get('run_id')} has completed worker verifier "
-                    f"evidence for {run.get('worker_verified_candidate_count')} "
-                    f"candidates; expected {expected_concurrency}"
+                    f"evidence for {worker_verified_count} candidates; required at "
+                    f"least {required_worker_evidence}"
                 )
     return None
 
@@ -1807,7 +1833,9 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument(
         "--environment-manifest", type=Path, default=DEFAULT_ENV_MANIFEST
     )
-    prepare_parser.add_argument("--checkout-root", type=Path, default=ROOT.parent)
+    prepare_parser.add_argument(
+        "--checkout-root", type=Path, default=DEFAULT_CHECKOUT_ROOT
+    )
     prepare_parser.add_argument("--venv", type=Path, default=DEFAULT_VENV)
 
     prepare_batch_parser = subparsers.add_parser("prepare-batch")
@@ -1832,7 +1860,9 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_batch_parser.add_argument(
         "--environment-manifest", type=Path, default=DEFAULT_ENV_MANIFEST
     )
-    prepare_batch_parser.add_argument("--checkout-root", type=Path, default=ROOT.parent)
+    prepare_batch_parser.add_argument(
+        "--checkout-root", type=Path, default=DEFAULT_CHECKOUT_ROOT
+    )
     prepare_batch_parser.add_argument("--venv", type=Path, default=DEFAULT_VENV)
 
     run_parser = subparsers.add_parser("run")

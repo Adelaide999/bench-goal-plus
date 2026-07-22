@@ -22,8 +22,8 @@ Plain Codex receives one common task prompt. Codex + Goal Plus receives exactly 
 Bootstrap first, then prepare one persistent but Git-ignored directory per method:
 
 ```bash
-python3 scripts/repro_env.py bootstrap
-python3 scripts/repro_env.py doctor
+python3 scripts/repro_env.py bootstrap --only openevolve
+python3 scripts/repro_env.py doctor --only openevolve
 
 for method in openevolve plain-codex goal-plus-codex goal-plus-pi; do
   .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \

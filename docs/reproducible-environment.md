@@ -2,17 +2,21 @@
 
 ## 目标
 
-换到一台新的 Mac 或 Linux 主机后，只依赖本仓的 `AGENTS.md` 和固定 manifest，就能重建同一 Python runtime、同一 OpenEvolve/Goal Plus 源码版本，并生成不会污染上游 checkout 的实验 workspace。
+换到一台新的 Mac 或 Linux 主机后，只依赖本仓的 `AGENTS.md` 和固定
+manifest，就能重建同一 Python runtime、同一 OpenEvolve/Goal Plus 与
+benchmark 源码版本，并生成不会污染上游 checkout 的实验 workspace。
 
 本仓只保存控制面和 lock；不 vendor 上游源码、不保存 virtualenv、不保存模型密钥。默认布局为：
 
 ```text
-code/
-├── bench-goal-plus/        control plane
-│   ├── .bench-env/venv/    可删除并重建的本机缓存，Git ignored
-│   └── runs/.../workspace/ 每次实验的独立 Git workspace，Git ignored
-├── openevolve/             固定 commit 的 sibling checkout
-└── goal-plus/              固定 commit 的 sibling checkout
+bench-goal-plus/
+├── .bench-env/venv/        可重建的本机 Python runtime，Git ignored
+├── third_party/            所有固定 commit 的上游 checkout，Git ignored
+│   ├── openevolve/
+│   ├── goal-plus/
+│   ├── heurigym/
+│   └── ...                 其他 benchmark/search backend
+└── runs/.../workspace/     每次实验的独立 Git workspace，Git ignored
 ```
 
 ## 主机前置条件
@@ -24,7 +28,8 @@ code/
 - Pi Coding Agent `0.80.6+`；
 - 能安装 CPython 3.12 wheel 的 macOS 或 Linux。
 
-`uv` 会按需取得 Python 3.12。Docker、编译器或 benchmark 数据仍由具体 benchmark 的 runbook 管理，不属于这一层的 OpenEvolve example smoke。
+`uv` 会按需取得 Python 3.12。Docker 镜像、编译器或大型 benchmark 数据仍
+由具体 benchmark 的 runbook 管理；源码 checkout 统一在 `third_party/`。
 
 ## 一键构建和检查
 
@@ -36,18 +41,32 @@ python3 scripts/repro_env.py doctor
 `bootstrap` 会：
 
 1. 读取 `environment/upstreams.json`；
-2. 在本仓父目录克隆缺失的 OpenEvolve/Goal Plus，并 checkout 到固定 commit；
+2. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，并 checkout 到固定 commit；
 3. 创建 `.bench-env/venv` 的 Python 3.12 环境；
-4. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入两个固定 checkout；OpenEvolve 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
+4. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的 OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
 5. 写入 ignored 的 `.bench-env/state.json` 并运行同一套 doctor 检查。
 
-如果 sibling checkout 已存在但 commit 不符，脚本会停止并显示差异，不会 checkout、reset 或删除用户工作。可以传一个全新的目录：
+如果 checkout 已存在但 commit 不符，脚本会停止并显示差异，不会 checkout、
+reset 或删除用户工作。clone 先写入精确的
+`<name>_bootstrap_incomplete` staging path，成功后才重命名；失败目录会原样
+保留供检查。可以传一个全新的统一目录：
 
 ```bash
 python3 scripts/repro_env.py --checkout-root /path/to/clean/checkouts bootstrap
 ```
 
-`doctor` 检查 exact commit、dirty state、Python 3.12、关键 package/entrypoint 和 Codex 最低版本。`.venv/` 是历史本机缓存，不能复制到其他机器；复现标准只有 `.bench-env/venv`。
+若当前只想跑一个 benchmark，可避免下载其余大仓库：
+
+```bash
+python3 scripts/repro_env.py bootstrap --only heurigym
+python3 scripts/repro_env.py doctor --only heurigym
+```
+
+`--only` 可重复；脚本会自动追加 `always=true` 的 OpenEvolve 和 Goal Plus
+runtime。无 `--only` 时才准备 manifest 中的全部上游。`doctor` 检查选中
+checkout 的 exact commit/dirty state、Python 3.12、关键 package/entrypoint 和
+Codex/Pi 最低版本。`.venv/` 是历史本机缓存，不能复制到其他机器；复现标准
+是从 lock 重建 `.bench-env/venv` 与 `third_party/`。
 
 ## 先跑零模型 smoke
 

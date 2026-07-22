@@ -265,6 +265,13 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             "completed worker verifier evidence",
             experiment.goal_plus_incomplete_reason(missing_worker_evidence, **kwargs),
         )
+        self.assertIsNone(
+            experiment.goal_plus_incomplete_reason(
+                missing_worker_evidence,
+                minimum_worker_verified_candidates=1,
+                **kwargs,
+            )
+        )
 
         duplicate_session = json.loads(json.dumps(base_state))
         duplicate_session["runs"][0]["session_counts_by_candidate"] = {

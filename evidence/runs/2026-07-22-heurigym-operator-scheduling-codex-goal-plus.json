@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "benchmark": "HeuriGym",
+  "task_id": "operator_scheduling_demo",
+  "upstream_commit": "e3948542438b2df07a8d20c2f264991719a5585e",
+  "dataset_revision": "c11ab2db2824068e523ac4656a20a6f2581961b8",
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "high",
+  "common_prompt_sha256": "68601929c8af0ee63a6734ae08e47178aeea9296f1bdb93f88beb66130079fcb",
+  "seed": {
+    "valid": true,
+    "total_cost": 138
+  },
+  "plain_codex": {
+    "status": "finished",
+    "wall_time_seconds": 300,
+    "actual_duration_seconds": 300.20402535599715,
+    "concurrency": 2,
+    "deadline_reached": true,
+    "hard_killed": false,
+    "valid": true,
+    "total_cost": 62,
+    "artifact_sha256": "65872cb214660ce608958b85f02f2ef318877f6ef07107ecba47b6404434ce10",
+    "selected_lane": "lane-00",
+    "evaluator_calls_total_claimed": 6,
+    "setup_calls_before_t": 4,
+    "complete_top_level_usage_lanes": 1,
+    "lane_01_usage": {
+      "input_tokens": 487168,
+      "cached_input_tokens": 447744,
+      "output_tokens": 9915,
+      "reasoning_output_tokens": 4802
+    }
+  },
+  "goal_plus_codex": {
+    "status": "finished",
+    "wall_time_seconds": 300,
+    "actual_duration_seconds": 300.0740766259987,
+    "concurrency": 2,
+    "worker_runtime_seconds": 120,
+    "deadline_reached": true,
+    "hard_killed": false,
+    "valid": true,
+    "total_cost": 95,
+    "artifact_sha256": "7fbc84962ffa50a39f339de0b3c0b5770e68f55f2521a1af55f98d1b101d7013",
+    "candidate_count": 2,
+    "bound_agent_session_count": 2,
+    "worker_verified_candidate_count": 1,
+    "selected_candidate_id": "c002",
+    "selected_candidate_worker_verified": true,
+    "iteration_count": 3,
+    "evaluator_calls_total_claimed_after_reaudit": 5,
+    "setup_calls_before_t": 2,
+    "controller_closeout_seconds": 7.827845355997852,
+    "goal_status": "complete",
+    "search_status": "promoted"
+  },
+  "interpretation": "Wiring smoke only. Plain Codex scored lower in this single run; no repeated-seed or native HeuriGym baseline claim is made.",
+  "secret_policy": "No credentials or local absolute paths are stored in this evidence file."
+}

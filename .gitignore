@@ -8,6 +8,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 /.worktrees/
+/third_party/
 /runs/
 /.tmp/
 /artifacts/raw/

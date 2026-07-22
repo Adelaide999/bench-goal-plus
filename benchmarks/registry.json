@@ -38,7 +38,7 @@
         }
       ],
       "data_url": "https://huggingface.co/datasets/SakanaAI/ALE-Bench",
-      "local_path": "../ALE-Bench",
+      "local_path": "third_party/ale-bench",
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
@@ -74,19 +74,19 @@
           "role": "benchmark",
           "upstream_url": "https://github.com/cornell-zhang/heurigym",
           "fork_url": "https://github.com/ck0123/heurigym",
-          "pinned_commit": "a4cf0460152eb798f1b3a797ef22a08192661bf5",
+          "pinned_commit": "e3948542438b2df07a8d20c2f264991719a5585e",
           "license": "Apache-2.0"
         }
       ],
       "data_url": "https://huggingface.co/datasets/heurigen/heurigen-data",
-      "local_path": "../HeuriGym",
+      "local_path": "third_party/heurigym",
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
         "official_verifier": "pass",
         "legacy_agent_smoke": "pass",
-        "plain_codex": "todo",
-        "goal_plus_codex": "todo",
+        "plain_codex": "pass",
+        "goal_plus_codex": "pass",
         "matched_baseline": "todo",
         "campaign_ready": "todo"
       },
@@ -94,12 +94,12 @@
         "evidence/legacy-smokes/2026-07-20-summary.json",
         "evidence/legacy-smokes/source-smoke-results.json",
         "evidence/legacy-smokes/heurigym-operator-scheduling-demo.output",
-        "evidence/environment/2026-07-21-mac-representative-smokes.json"
+        "evidence/environment/2026-07-21-mac-representative-smokes.json",
+        "evidence/runs/2026-07-22-heurigym-operator-scheduling-codex-goal-plus.json",
+        "evidence/runs/2026-07-22-heurigym-operator-scheduling-codex-goal-plus.md"
       ],
-      "next_action": "Move the macOS/data-download compatibility patch into the fork, then expose operator_scheduling as an isolated Codex workspace.",
-      "blockers": [
-        "The current local checkout contains uncommitted compatibility edits; they are not yet present in the fork."
-      ]
+      "next_action": "Repeat operator_scheduling across multiple seeds and add the native HeuriGym agent baseline before expanding the same adapter contract to the other eight tasks.",
+      "blockers": []
     },
     {
       "id": "frontier-engineering-lite",
@@ -117,7 +117,7 @@
         }
       ],
       "data_url": "https://github.com/EinsiaLab/Frontier-Engineering",
-      "local_path": "../Frontier-Engineering",
+      "local_path": "third_party/frontier-engineering",
       "stages": {
         "source_forked": "pass",
         "environment": "partial",
@@ -152,7 +152,7 @@
         }
       ],
       "data_url": "https://github.com/autolabhq/autolab/tree/main/tasks",
-      "local_path": "../AutoLab",
+      "local_path": "third_party/autolab",
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
@@ -195,7 +195,7 @@
         }
       ],
       "data_url": "https://github.com/SwarmResearch/swarmresearch-paper-reproduce",
-      "local_path": "../swarmresearch-paper-reproduce",
+      "local_path": "third_party/swarmresearch-paper-reproduce",
       "stages": {
         "source_forked": "pass",
         "environment": "partial",
@@ -233,7 +233,7 @@
         }
       ],
       "data_url": "https://github.com/FrontierCS/Frontier-CS",
-      "local_path": "../Frontier-CS",
+      "local_path": "third_party/frontier-cs",
       "stages": {
         "source_forked": "pass",
         "environment": "partial",
@@ -303,7 +303,7 @@
           "license": "Apache-2.0"
         }
       ],
-      "local_path": "../skydiscover",
+      "local_path": "third_party/skydiscover",
       "stages": {
         "source_forked": "pass",
         "native_smoke": "pass",
@@ -342,7 +342,7 @@
           "license": "Apache-2.0"
         }
       ],
-      "local_path": "../openevolve",
+      "local_path": "third_party/openevolve",
       "stages": {
         "source_forked": "pass",
         "native_smoke": "todo",

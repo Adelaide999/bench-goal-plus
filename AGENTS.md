@@ -26,7 +26,17 @@ python3 scripts/repro_env.py bootstrap
 python3 scripts/repro_env.py doctor
 ```
 
-`bootstrap` creates the disposable `.bench-env/venv`, clones missing pinned OpenEvolve and Goal Plus checkouts as siblings, installs the locked Python environment, and refuses to rewrite an existing checkout at another commit. On another machine, recreate `.bench-env`; do not copy a virtualenv between hosts.
+`bootstrap` creates the disposable `.bench-env/venv` and clones every pinned
+benchmark/search runtime into ignored `third_party/`. It installs editable
+OpenEvolve and Goal Plus from that same root, and refuses to rewrite an existing
+checkout at another commit. On another machine, recreate `.bench-env` and
+`third_party`; do not copy a virtualenv between hosts. To prepare one benchmark
+plus the always-required runtimes, use:
+
+```bash
+python3 scripts/repro_env.py bootstrap --only heurigym
+python3 scripts/repro_env.py doctor --only heurigym
+```
 
 Prepare and verify a model-free Goal Plus task workspace. Preparation materializes only the task, evaluator wrapper, and portable Goal Plus host assets; `.gp/` must not exist yet:
 
@@ -54,8 +64,7 @@ For the screened no-special-environment OpenEvolve batch, use the catalog instea
 
 ```bash
 .bench-env/venv/bin/python scripts/openevolve_task.py batch-seed-smoke \
-  --task-set cpu_portable --upstream-root ../openevolve \
-  --runtime-python .bench-env/venv/bin/python \
+  --task-set cpu_portable \
   --run-root runs/openevolve-batch/<run-id>
 
 .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare-batch \
@@ -66,3 +75,18 @@ For the screened no-special-environment OpenEvolve batch, use the catalog instea
 ```
 
 `cpu_portable` currently means 12 tasks using only the standard library and locked NumPy/SciPy environment, with no GPU/NPU, downloaded dataset, network service, compiler, or external executable. Batch commands preserve every workspace and record per-cell failures; never delete a partial campaign to retry it.
+
+The first standalone benchmark entry is HeuriGym operator scheduling:
+
+```bash
+.bench-env/venv/bin/python experiments/heurigym_compare/experiment.py prepare \
+  --method plain-codex --wall-time-seconds 300 --concurrency 2 \
+  --model gpt-5.6-sol
+
+.bench-env/venv/bin/python experiments/heurigym_compare/experiment.py prepare \
+  --method goal-plus-codex --wall-time-seconds 300 --concurrency 2 \
+  --worker-runtime-seconds 120 --model gpt-5.6-sol
+```
+
+Run the printed directory with `experiment.py run --run-dir ... --model ...`.
+See `experiments/heurigym_compare/README.md` for provider and closeout details.

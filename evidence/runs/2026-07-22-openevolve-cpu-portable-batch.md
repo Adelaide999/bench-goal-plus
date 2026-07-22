@@ -19,7 +19,7 @@ It does not claim 12 native OpenEvolve searches or 12 paid-model Goal Plus runs.
 ```bash
 .bench-env/venv/bin/python scripts/openevolve_task.py batch-seed-smoke \
   --task-set cpu_portable \
-  --upstream-root ../openevolve \
+  --upstream-root third_party/openevolve \
   --runtime-python .bench-env/venv/bin/python \
   --run-root runs/openevolve-batch/<run-id>
 

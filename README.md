@@ -15,6 +15,7 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 - OpenEvolve `function_minimization` 已完成 [四路径首轮 smoke](evidence/runs/2026-07-22-openevolve-four-path-5m-summary.md)：统一 `gpt-5.6-luna/high`、`T=300s`、`K=2`。该轮保留 native OpenEvolve / plain Codex 结果，并暴露出 Goal Plus 仅靠 controller closeout 也可能误报完成的问题。
 - Goal Plus + Codex/Pi 曾通过 [controller-prepared 严格重跑](evidence/runs/2026-07-22-goal-plus-codex-pi-strict-rerun.md) 验证底层 worker、verifier 和 promotion 能力；该入口现保留为历史诊断证据，不再作为标准主实验。标准入口改为 Plain Codex 使用 common task prompt，Codex + Goal Plus 只增加 `/goal-plus` 前缀和完整配置后缀，并让 Goal/Spec/Run 全部在计时后的自然流程中创建。
 - Goal Plus + Codex 已完成 [自然 prompt 标准入口 E2E](evidence/runs/2026-07-22-goal-plus-codex-natural-prompt.md)：prepare 后不存在 `.gp/`，定时运行内自然创建 Goal/Spec/Run 和两个 Codex workers；`gpt-5.6-sol/high`、`T=300s`、`K=2` 下，`combined_score` 从 1.119176 提升到 1.499540（+33.99%），两个 worker 都提交 verifier 结果并完成 promotion/report。
+- HeuriGym `operator_scheduling` 已完成 [Plain Codex / Goal Plus + Codex 首轮真实 E2E](evidence/runs/2026-07-22-heurigym-operator-scheduling-codex-goal-plus.md)：两者共享 `gpt-5.6-sol/high`、`T=300s`、`K=2`、common prompt 和官方五-case evaluator；seed `total_cost=138`，Plain Codex 得 62，Goal Plus + Codex 得 95。它是接线证据，不是单次方法排名。
 - SkyDiscover/EvoX 已完成 DeepSeek OpenAI-compatible 的 1 iteration smoke，但还不是论文可比实验。
 - 已在当前 Mac 为所有可执行 benchmark 建立代表 case 的环境证据：ALE、AutoLab、SwarmResearch、Frontier-CS 使用镜像，HeuriGym 与 Frontier-Engineering v1-lite 使用 host 环境；完整空间表见 [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
 - 已建立 [Benchmark 快速导读](docs/benchmarks/README.md)：记录当前可跑题数、coverage/campaign 时间，并为 6 套 active benchmark 展开一个真实 case 的输入、agent 动作、期望输出和 verifier。
@@ -63,11 +64,14 @@ docs/goal-plus-benchmark-experiment.md  Goal Plus 接入、并发、公平预算
 docs/openevolve-cpu-examples.md         OpenEvolve 无特殊硬件示例的主实验/诊断/暂缓分级
 docs/reproducible-environment.md         新机器 bootstrap、doctor、workspace 与实验执行手册
 environment/                             Python lock 与 OpenEvolve/Goal Plus 固定版本 manifest
+third_party/                             所有 pinned benchmark/search runtime 的统一 ignored checkout 根目录
 experiments/openevolve_compare/          native OE / Plain Codex / Goal Plus+Codex / Goal Plus+Pi 同任务时限入口
+experiments/heurigym_compare/             HeuriGym Plain Codex / Goal Plus+Codex 同任务时限入口
+adapters/heurigym/                        HeuriGym workspace、官方 evaluator 与数据固定层
 adapters/openevolve_examples/           OpenEvolve example catalog、workspace/evaluator/ticket/archive contract
 scripts/run_codex.py           通用非交互 Codex runner，保存 JSONL、usage 与 manifest
 scripts/openevolve_task.py     list/batch-seed-smoke/materialize/evaluate/archive OpenEvolve example task
-scripts/repro_env.py           创建并检查可丢弃的 `.bench-env/venv` 与 sibling upstreams
+scripts/repro_env.py           创建并检查可丢弃的 `.bench-env/venv` 与 `third_party/` pinned checkouts
 scripts/status.py              校验 registry 并打印状态矩阵
 evidence/legacy-smokes/        迁入的摘要、结果及 SkyDiscover 完整 checkpoint
 legacy/direct-api/             原有 direct-API smoke 辅助脚本，作为环境基线
@@ -87,7 +91,12 @@ python3 scripts/repro_env.py bootstrap
 python3 scripts/repro_env.py doctor
 ```
 
-它会按 `environment/upstreams.json` 准备 sibling OpenEvolve/Goal Plus checkout，并按 `environment/requirements.lock` 创建 `.bench-env/venv`。`.venv/` 只是旧本机缓存，不属于复现契约；换机器必须重建 `.bench-env/venv`。
+它会按 `environment/upstreams.json` 把所有 benchmark、OpenEvolve 和 Goal Plus
+准备到本仓统一的 ignored `third_party/`，并按 `environment/requirements.lock`
+创建 `.bench-env/venv`。只准备一个 benchmark 时可用
+`bootstrap --only heurigym`；OpenEvolve/Goal Plus 作为公共 runtime 仍会自动加入。
+`.venv/` 只是旧本机缓存，不属于复现契约；换机器必须重建 `.bench-env/venv`
+和 `third_party/`，不能复制另一台机器的 virtualenv。
 
 ```bash
 python3 scripts/status.py

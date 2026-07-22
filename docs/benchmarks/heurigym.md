@@ -10,8 +10,8 @@ HeuriGym 是 9 道科学与工程组合优化题。Agent 的产物是一个可�
 | 候选 artifact | Python solver |
 | 输出 | 每个实例对应一个结构化文本解 |
 | 指标 | `valid` + task-native cost，方向通常是最小化 |
-| 当前门禁 | `operator_scheduling` 环境和 verifier 已通；其余数据待补 |
-| 固定源码 | `cornell-zhang/heurigym@a4cf046` |
+| 当前门禁 | `operator_scheduling` 已完成 Plain Codex 与 Goal Plus + Codex 真实 E2E；其余 8 题待接 |
+| 固定源码 | `ck0123/heurigym@e394854` |
 
 9 题包括 `operator_scheduling`、`egraph_extraction`、`global_routing`、`intra_op_parallel`、`crew_pairing`、`pickup_delivery_time_windows`、`pedigree`、`protein_sequence_design` 和 `technology_mapping`。
 
@@ -68,7 +68,8 @@ Verifier 分两层：
 - **合法性**：对每条边检查 `start(src)+delay(src) ≤ start(dst)`；对每个 cycle 检查活跃资源数不超过容量。
 - **成本**：`max(start(node)+delay(resource))`，即最后一个操作结束的 cycle，**越低越好**。
 
-本机确定性 smoke 对一个 demo 产生 `valid=true, cost=7`。这只证明 harness 已通，不代表达到该实例最优解。
+当前 adapter 固定五个 public demo cases。故意串行的 seed 在五题上的
+aggregate `total_cost=138`；它是环境/合法性基线，不代表最优解。
 
 ---
 
@@ -82,7 +83,20 @@ HeuriGym 最有价值的观测不是最终 cost 一项，而是 Goal Plus 是否
 - resource over-allocation；
 - 解合法但 latency 很差。
 
-建议先完整跑 9 题 × 1 candidate，随后对每题固定 3 iterations 比较 plain self-refine、parallel lineages 和 Goal Plus。当前默认每个候选程序运行 timeout 是 10 秒；全集默认 3 iterations 约需 3–6 小时。
+标准入口已经不是“给 HeuriGym 内部再塞一个 Codex provider”，而是让
+benchmark controller materialize 相同 workspace：Plain Codex 直接接收 common
+task prompt；Goal Plus + Codex 仅增加 `/goal-plus` 与完整条件约束。两边都调用
+同一个 HeuriGym verifier/evaluator。
+
+首轮真实 smoke 使用 `gpt-5.6-sol/high`、`T=300s`、`K=2`：Plain Codex 从
+138 降到 62；Goal Plus + Codex 降到 95。Goal Plus 自然创建 2 个 candidate
+和 2 个已绑定 Codex session，其中 1 个 worker 在 deadline 前提交 verifier，
+被选中的 `c002` 正是这个 worker-verified candidate。这个单次结果只证明两条
+链路已通，不能解释为 Plain Codex 方法优于 Goal Plus。
+
+下一阶段应先重复 `operator_scheduling` 多个 seed，并补原生 HeuriGym agent
+baseline，再扩展其余 8 题。当前每个候选程序对每个 case 的 timeout 是 10 秒；
+全 9 题 campaign 的真实时间需要在 Linux 上实测后冻结。
 
 ## 可复用对比数据
 
@@ -93,6 +107,8 @@ HeuriGym 最有价值的观测不是最终 cost 一项，而是 Goal Plus 是否
 ## 代码与证据
 
 - 上游：[cornell-zhang/heurigym](https://github.com/cornell-zhang/heurigym)
+- 可复现入口：[`experiments/heurigym_compare/README.md`](../../experiments/heurigym_compare/README.md)
+- 首轮 Plain/Goal Plus 证据：[`evidence/runs/2026-07-22-heurigym-operator-scheduling-codex-goal-plus.md`](../../evidence/runs/2026-07-22-heurigym-operator-scheduling-codex-goal-plus.md)
 - 历史 smoke：[`evidence/legacy-smokes/heurigym-operator-scheduling-demo.output`](../../evidence/legacy-smokes/heurigym-operator-scheduling-demo.output)
 - 统一环境证据：[`evidence/environment/2026-07-21-mac-representative-smokes.json`](../../evidence/environment/2026-07-21-mac-representative-smokes.json)
 

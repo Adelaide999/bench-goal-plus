@@ -19,8 +19,6 @@ List the portable batch and run one official seed evaluation for every task:
 
 .bench-env/venv/bin/python scripts/openevolve_task.py batch-seed-smoke \
   --task-set cpu_portable \
-  --upstream-root ../openevolve \
-  --runtime-python .bench-env/venv/bin/python \
   --run-root runs/openevolve-batch/<run-id>
 ```
 
@@ -39,8 +37,6 @@ python3 scripts/repro_env.py bootstrap
 
 python3 scripts/openevolve_task.py materialize \
   --task-id function_minimization \
-  --upstream-root ../openevolve \
-  --runtime-python .bench-env/venv/bin/python \
   --workspace /tmp/openevolve-function-minimization \
   --max-evaluator-calls 7 \
   --reserved-final-calls 1

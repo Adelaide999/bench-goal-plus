@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create and verify the portable OpenEvolve + Goal Plus runtime."""
+"""Create and verify the portable benchmark runtime and managed checkouts."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "environment/upstreams.json"
 DEFAULT_LOCK = ROOT / "environment/requirements.lock"
 DEFAULT_VENV = ROOT / ".bench-env/venv"
-DEFAULT_CHECKOUT_ROOT = ROOT.parent
+DEFAULT_CHECKOUT_ROOT = ROOT / "third_party"
 STATE_PATH = ROOT / ".bench-env/state.json"
 
 
@@ -54,10 +54,31 @@ def venv_bin(venv: Path) -> Path:
     return venv / ("Scripts" if sys.platform == "win32" else "bin")
 
 
-def checkout_paths(manifest: dict[str, Any], checkout_root: Path) -> dict[str, Path]:
+def selected_upstreams(
+    manifest: dict[str, Any], only: list[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    upstreams = manifest["upstreams"]
+    if not only:
+        return dict(upstreams)
+    requested = set(only)
+    unknown = requested - set(upstreams)
+    if unknown:
+        raise ValueError("unknown managed checkout(s): " + ", ".join(sorted(unknown)))
+    return {
+        name: entry
+        for name, entry in upstreams.items()
+        if entry.get("always") is True or name in requested
+    }
+
+
+def checkout_paths(
+    manifest: dict[str, Any],
+    checkout_root: Path,
+    only: list[str] | None = None,
+) -> dict[str, Path]:
     return {
         name: checkout_root / entry["checkout_dir"]
-        for name, entry in manifest["upstreams"].items()
+        for name, entry in selected_upstreams(manifest, only).items()
     }
 
 
@@ -77,8 +98,39 @@ def git_state(path: Path) -> dict[str, Any]:
 def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
-        run(["git", "clone", entry["repository"], str(path)])
-        run(["git", "-C", str(path), "checkout", "--detach", entry["pinned_commit"]])
+        staging = path.with_name(path.name + "_bootstrap_incomplete")
+        if staging.exists():
+            raise RuntimeError(
+                f"preserved incomplete checkout exists: {staging}; rename it to *_bak "
+                "after inspection before retrying"
+            )
+        staging.mkdir()
+        run(["git", "-C", str(staging), "init", "-q"])
+        run(
+            [
+                "git",
+                "-C",
+                str(staging),
+                "remote",
+                "add",
+                "origin",
+                entry["repository"],
+            ]
+        )
+        run(
+            [
+                "git",
+                "-C",
+                str(staging),
+                "fetch",
+                "--depth",
+                "1",
+                "origin",
+                entry["pinned_commit"],
+            ]
+        )
+        run(["git", "-C", str(staging), "checkout", "-q", "--detach", "FETCH_HEAD"])
+        staging.rename(path)
         return
     state = git_state(path)
     if not state["is_git"]:
@@ -123,12 +175,14 @@ def collect_doctor(
     checkout_root: Path,
     venv: Path,
     lock: Path = DEFAULT_LOCK,
+    only: list[str] | None = None,
 ) -> dict[str, Any]:
     python = venv_python(venv)
-    paths = checkout_paths(manifest, checkout_root)
+    chosen = selected_upstreams(manifest, only)
+    paths = checkout_paths(manifest, checkout_root, only)
     checks: list[dict[str, Any]] = []
 
-    for name, entry in manifest["upstreams"].items():
+    for name, entry in chosen.items():
         state = git_state(paths[name])
         passed = bool(
             state["is_git"]
@@ -226,6 +280,7 @@ def collect_doctor(
         "python": str(python),
         "venv": str(venv),
         "checkout_root": str(checkout_root),
+        "managed_checkouts": list(chosen),
         "requirements_lock_sha256": sha256_file(lock) if lock.is_file() else None,
         "packages": versions,
         "checks": checks,
@@ -236,7 +291,8 @@ def bootstrap(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     checkout_root = args.checkout_root.expanduser().absolute()
     venv = args.venv.expanduser().absolute()
-    for name, entry in manifest["upstreams"].items():
+    chosen = selected_upstreams(manifest, args.only)
+    for name, entry in chosen.items():
         ensure_checkout(checkout_root / entry["checkout_dir"], entry)
 
     uv = shutil.which(args.uv)
@@ -260,25 +316,31 @@ def bootstrap(args: argparse.Namespace) -> int:
             [uv, "pip", "install", "--python", str(python), "-r", str(args.lock)],
             capture=False,
         )
-        paths = checkout_paths(manifest, checkout_root)
-        run(
-            [
-                uv,
-                "pip",
-                "install",
-                "--python",
-                str(python),
-                "--no-build-isolation",
-                "--no-deps",
-                "-e",
-                str(paths["openevolve"]),
-                "-e",
-                str(paths["goal_plus"]),
-            ],
-            capture=False,
-        )
+        paths = checkout_paths(manifest, checkout_root, args.only)
+        editable_paths = [
+            paths[name] for name, entry in chosen.items() if entry.get("editable") is True
+        ]
+        if editable_paths:
+            editable_args: list[str] = []
+            for path in editable_paths:
+                editable_args.extend(["-e", str(path)])
+            run(
+                [
+                    uv,
+                    "pip",
+                    "install",
+                    "--python",
+                    str(python),
+                    "--no-build-isolation",
+                    "--no-deps",
+                    *editable_args,
+                ],
+                capture=False,
+            )
 
-    payload = collect_doctor(manifest, checkout_root, venv, args.lock)
+    payload = collect_doctor(
+        manifest, checkout_root, venv, args.lock, only=args.only
+    )
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(payload, indent=2) + "\n")
     print(json.dumps(payload, indent=2))
@@ -291,6 +353,7 @@ def doctor(args: argparse.Namespace) -> int:
         args.checkout_root.expanduser().absolute(),
         args.venv.expanduser().absolute(),
         args.lock,
+        only=args.only,
     )
     print(json.dumps(payload, indent=2))
     return 0 if payload["ok"] else 1
@@ -307,8 +370,14 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap_parser = subparsers.add_parser("bootstrap")
     bootstrap_parser.add_argument("--uv", default="uv")
     bootstrap_parser.add_argument("--skip-install", action="store_true")
+    bootstrap_parser.add_argument(
+        "--only",
+        action="append",
+        help="clone/check one named benchmark plus the always-managed runtime checkouts",
+    )
 
-    subparsers.add_parser("doctor")
+    doctor_parser = subparsers.add_parser("doctor")
+    doctor_parser.add_argument("--only", action="append")
     return parser
 
 

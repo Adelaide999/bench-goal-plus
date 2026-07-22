@@ -15,13 +15,20 @@ import repro_env  # noqa: E402
 class ReproEnvironmentTest(unittest.TestCase):
     def test_manifest_pins_portable_upstreams(self) -> None:
         manifest = repro_env.load_manifest(ROOT / "environment/upstreams.json")
+        self.assertEqual(repro_env.DEFAULT_CHECKOUT_ROOT, ROOT / "third_party")
         self.assertEqual(manifest["python"], "3.12")
         self.assertEqual(manifest["pi_min_version"], "0.80.6")
-        self.assertEqual(set(manifest["upstreams"]), {"openevolve", "goal_plus"})
+        self.assertTrue(
+            {"openevolve", "goal_plus", "heurigym", "ale_bench", "autolab"}
+            <= set(manifest["upstreams"])
+        )
         for upstream in manifest["upstreams"].values():
             self.assertRegex(upstream["pinned_commit"], r"^[0-9a-f]{40}$")
             self.assertTrue(upstream["repository"].startswith("https://github.com/"))
             self.assertNotIn("/Users/", upstream["checkout_dir"])
+            self.assertEqual(Path(upstream["checkout_dir"]).parent, Path("."))
+        selected = repro_env.selected_upstreams(manifest, ["heurigym"])
+        self.assertEqual(set(selected), {"openevolve", "goal_plus", "heurigym"})
         task_catalog = json.loads(
             (ROOT / "adapters/openevolve_examples/tasks.json").read_text()
         )

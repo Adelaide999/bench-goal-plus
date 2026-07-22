@@ -5,6 +5,7 @@ editables>=0.5,<1
 fastmcp>=2.3,<3
 flask>=3,<4
 hatchling>=1.27,<2
+huggingface-hub>=0.30,<2
 numpy>=1.26,<3
 openai>=2,<3
 pydantic>=2,<3

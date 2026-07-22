@@ -5,14 +5,58 @@
   "pi_min_version": "0.80.6",
   "upstreams": {
     "openevolve": {
-      "repository": "https://github.com/algorithmicsuperintelligence/openevolve.git",
+      "repository": "https://github.com/ck0123/openevolve.git",
       "checkout_dir": "openevolve",
-      "pinned_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2"
+      "pinned_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2",
+      "always": true,
+      "editable": true
     },
     "goal_plus": {
       "repository": "https://github.com/ck0123/goal-plus.git",
       "checkout_dir": "goal-plus",
-      "pinned_commit": "05626b18b23bbd2ec97713246de989c07be1f842"
+      "pinned_commit": "05626b18b23bbd2ec97713246de989c07be1f842",
+      "always": true,
+      "editable": true
+    },
+    "ale_bench": {
+      "repository": "https://github.com/ck0123/ALE-Bench.git",
+      "checkout_dir": "ale-bench",
+      "pinned_commit": "f7d927906dc1dcd860ee086e4560d576438b1354"
+    },
+    "heurigym": {
+      "repository": "https://github.com/ck0123/heurigym.git",
+      "checkout_dir": "heurigym",
+      "pinned_commit": "e3948542438b2df07a8d20c2f264991719a5585e"
+    },
+    "frontier_engineering": {
+      "repository": "https://github.com/ck0123/Frontier-Engineering.git",
+      "checkout_dir": "frontier-engineering",
+      "pinned_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071"
+    },
+    "autolab": {
+      "repository": "https://github.com/ck0123/autolab.git",
+      "checkout_dir": "autolab",
+      "pinned_commit": "7aff5fe71dfbe152fb0b8e8ac8087210b4bc27d5"
+    },
+    "swarmresearch": {
+      "repository": "https://github.com/ck0123/SwarmResearch.git",
+      "checkout_dir": "swarmresearch",
+      "pinned_commit": "cfdcb71c85ed16e05536a8fce083b075a5e17b3c"
+    },
+    "swarmresearch_tasks": {
+      "repository": "https://github.com/ck0123/swarmresearch-paper-reproduce.git",
+      "checkout_dir": "swarmresearch-paper-reproduce",
+      "pinned_commit": "e848d8d5760065714c38fa7558f0298573db17ab"
+    },
+    "frontier_cs": {
+      "repository": "https://github.com/ck0123/Frontier-CS.git",
+      "checkout_dir": "frontier-cs",
+      "pinned_commit": "07500f9e5751ddf86ef2760e0d35ff93e6a96a29"
+    },
+    "skydiscover": {
+      "repository": "https://github.com/ck0123/skydiscover.git",
+      "checkout_dir": "skydiscover",
+      "pinned_commit": "4734f324c4c3909eb3c8a4bc72a4ca34e6e679ed"
     }
   }
 }

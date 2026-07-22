@@ -11,6 +11,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_UPSTREAM_ROOT = ROOT / "third_party/openevolve"
+DEFAULT_RUNTIME_PYTHON = ROOT / ".bench-env/venv/bin/python"
 sys.path.insert(0, str(ROOT))
 
 from adapters.openevolve_examples.adapter import (  # noqa: E402
@@ -94,15 +96,23 @@ def main() -> int:
 
     batch_parser = subparsers.add_parser("batch-seed-smoke")
     batch_parser.add_argument("--task-set", default="cpu_portable")
-    batch_parser.add_argument("--upstream-root", type=Path, required=True)
-    batch_parser.add_argument("--runtime-python", type=Path, required=True)
+    batch_parser.add_argument(
+        "--upstream-root", type=Path, default=DEFAULT_UPSTREAM_ROOT
+    )
+    batch_parser.add_argument(
+        "--runtime-python", type=Path, default=DEFAULT_RUNTIME_PYTHON
+    )
     batch_parser.add_argument("--run-root", type=Path, required=True)
 
     materialize_parser = subparsers.add_parser("materialize")
     materialize_parser.add_argument("--task-id", required=True)
-    materialize_parser.add_argument("--upstream-root", type=Path, required=True)
+    materialize_parser.add_argument(
+        "--upstream-root", type=Path, default=DEFAULT_UPSTREAM_ROOT
+    )
     materialize_parser.add_argument("--workspace", type=Path, required=True)
-    materialize_parser.add_argument("--runtime-python", type=Path, required=True)
+    materialize_parser.add_argument(
+        "--runtime-python", type=Path, default=DEFAULT_RUNTIME_PYTHON
+    )
     materialize_parser.add_argument(
         "--max-evaluator-calls",
         type=int,
