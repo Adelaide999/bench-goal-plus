@@ -47,6 +47,35 @@ Before spending model budget, the optional seed check is:
 
 Do not run `seed-smoke` on the same directory intended for a later capped campaign unless that extra evaluator call is explicitly part of the protocol.
 
+## Batch campaign
+
+`cpu_portable` is a screened 12-task set requiring no GPU/NPU, downloaded dataset, network service, compiler, or external executable. Prepare the full task × method matrix in one command:
+
+```bash
+.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare-batch \
+  --task-set cpu_portable \
+  --methods openevolve plain-codex goal-plus-codex goal-plus-pi \
+  --run-root runs/openevolve-campaigns/<campaign-id> \
+  --wall-time-seconds 300 \
+  --concurrency 2 \
+  --model gpt-5.6-luna \
+  --seed 1
+```
+
+This expands all 48 cells into persistent isolated directories and writes `campaign.json`. A failure in one cell is recorded without discarding the rest. To prepare only the two Codex paths, pass `--methods plain-codex goal-plus-codex`.
+
+Run the prepared cells sequentially with one outer command:
+
+```bash
+export OPENAI_API_KEY='<secret>'
+.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py run-batch \
+  --campaign runs/openevolve-campaigns/<campaign-id> \
+  --model gpt-5.6-luna \
+  --api-base https://api.example.com/v1
+```
+
+`run-batch` preserves each cell's native `T` and `K`, continues after individual failures by default, and incrementally writes `campaign-results.json`. Re-running the same command resumes the ledger and skips every already-recorded cell; create a new campaign directory for a deliberate rerun. Use `--methods goal-plus-codex` to select a subset or `--fail-fast` for debugging. The API base and credentials are deliberately not copied into the campaign result.
+
 ## Execute
 
 Set the key only in the shell and run each prepared directory with the same endpoint/model:

@@ -36,8 +36,9 @@ class ResolvedTask:
     initial_program: Path
     evaluator: Path
     config: Path
-    requirements: Path
+    requirements: Path | None
     artifact_name: str
+    profile: dict[str, Any]
 
 
 def utc_now() -> str:
@@ -50,6 +51,32 @@ def sha256_text(text: str) -> str:
 
 def load_catalog() -> dict[str, Any]:
     return json.loads(TASKS_PATH.read_text())
+
+
+def list_catalog_tasks(task_set: str | None = None) -> list[dict[str, Any]]:
+    catalog = load_catalog()
+    tasks = catalog.get("tasks") or {}
+    if task_set is None:
+        task_ids = sorted(tasks)
+    else:
+        try:
+            task_ids = list(catalog["task_sets"][task_set])
+        except KeyError as error:
+            raise KeyError(f"unknown OpenEvolve task set: {task_set}") from error
+    missing = [task_id for task_id in task_ids if task_id not in tasks]
+    if missing:
+        raise RuntimeError(
+            f"OpenEvolve task set {task_set!r} references unknown tasks: {missing}"
+        )
+    return [
+        {
+            "task_id": task_id,
+            "source_dir": tasks[task_id]["source_dir"],
+            "artifact_name": tasks[task_id]["artifact_name"],
+            "profile": dict(tasks[task_id].get("profile") or {}),
+        }
+        for task_id in task_ids
+    ]
 
 
 def git_commit(repository: Path) -> str:
@@ -82,6 +109,24 @@ def resolve_task(task_id: str, upstream_root: Path) -> ResolvedTask:
         )
 
     source_dir = upstream_root / entry["source_dir"]
+    requirements_name = entry.get("requirements")
+    requirements = (
+        source_dir / requirements_name
+        if isinstance(requirements_name, str) and requirements_name
+        else None
+    )
+    profile = dict(entry.get("profile") or {})
+    if profile.get("class") == "cpu_portable":
+        unsupported_profile_keys = {
+            key
+            for key in ("gpu", "npu", "network", "external_software", "dataset")
+            if profile.get(key)
+        }
+        if unsupported_profile_keys:
+            raise RuntimeError(
+                f"cpu_portable task {task_id} declares unsupported resources: "
+                f"{sorted(unsupported_profile_keys)}"
+            )
     task = ResolvedTask(
         task_id=task_id,
         upstream_root=upstream_root,
@@ -90,17 +135,19 @@ def resolve_task(task_id: str, upstream_root: Path) -> ResolvedTask:
         initial_program=source_dir / entry["initial_program"],
         evaluator=source_dir / entry["evaluator"],
         config=source_dir / entry["config"],
-        requirements=source_dir / entry["requirements"],
+        requirements=requirements,
         artifact_name=entry["artifact_name"],
+        profile=profile,
     )
     for required_path in (
         task.initial_program,
         task.evaluator,
         task.config,
-        task.requirements,
     ):
         if not required_path.is_file():
             raise FileNotFoundError(required_path)
+    if task.requirements is not None and not task.requirements.is_file():
+        raise FileNotFoundError(task.requirements)
     return task
 
 
@@ -250,6 +297,15 @@ def materialize_workspace(
     prefix, _, suffix = split_evolve_block(seed)
     system_message = description["prompt"]["system_message"]
     evaluation = description["evaluation"]
+    profile_modules = list(task.profile.get("python_modules") or [])
+    portable_constraint = ""
+    if task.profile.get("class") == "cpu_portable":
+        allowed = ", ".join(profile_modules) if profile_modules else "the Python standard library"
+        portable_constraint = (
+            "- This is a portable CPU-only task. Do not use GPU/NPU APIs, network access, "
+            "external executables, downloaded datasets, or undeclared Python packages. "
+            f"The available task dependencies are: {allowed}.\n"
+        )
     if max_evaluator_calls is None:
         evaluation_budget = (
             "Run `python3 evaluate.py` for public feedback. Public evaluator calls are not "
@@ -282,6 +338,7 @@ def materialize_workspace(
         f"- Only edit `{task.artifact_name}`, and only inside its single `EVOLVE-BLOCK`.\n"
         "- Do not modify the evaluator helper, Goal Plus verifier wrapper, task metadata, Git configuration, or files outside this workspace.\n"
         "- Do not use the network.\n"
+        f"{portable_constraint}"
         f"- {evaluation_budget}\n"
         "- Stop with the best verified candidate left in the artifact file.\n"
     )
@@ -291,6 +348,7 @@ def materialize_workspace(
         "- Run `python3 evaluate.py` to obtain official public feedback.\n"
         "- Do not edit `evaluate.py`, `.goal-plus-verifiers/`, `task.json`, `TASK.md`, `AGENTS.md`, or `.gitignore`.\n"
         "- Do not inspect parent directories, evaluator source, credentials, or network resources.\n"
+        f"{portable_constraint}"
         "- Leave the best verified candidate in the artifact file.\n"
     )
     (workspace / "evaluate.py").write_text(render_evaluate_wrapper())
@@ -309,7 +367,10 @@ def materialize_workspace(
         "upstream_commit": task.upstream_commit,
         "config_path": str(task.config),
         "evaluator_path": str(task.evaluator),
-        "requirements_path": str(task.requirements),
+        "requirements_path": (
+            str(task.requirements) if task.requirements is not None else None
+        ),
+        "execution_profile": task.profile,
         "runtime_python": str(runtime_python),
         # Candidate Git worktrees do not contain ignored runtime state. Keep every
         # lineage on one controller-owned ledger in the materialized source workspace.

@@ -49,3 +49,20 @@ export OPENAI_API_KEY='<secret>'
 ```
 
 Prepare `openevolve`, `plain-codex`, `goal-plus-codex`, and `goal-plus-pi` separately. Goal Plus intake, triage, SearchSpec freezing, Search-run creation, candidates, and workers all begin from the natural `/goal-plus` prompt inside `T`. See `docs/reproducible-environment.md` for Mac/Linux details and failure semantics.
+
+For the screened no-special-environment OpenEvolve batch, use the catalog instead of preparing tasks by hand:
+
+```bash
+.bench-env/venv/bin/python scripts/openevolve_task.py batch-seed-smoke \
+  --task-set cpu_portable --upstream-root ../openevolve \
+  --runtime-python .bench-env/venv/bin/python \
+  --run-root runs/openevolve-batch/<run-id>
+
+.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare-batch \
+  --task-set cpu_portable \
+  --methods openevolve plain-codex goal-plus-codex goal-plus-pi \
+  --run-root runs/openevolve-campaigns/<campaign-id> \
+  --wall-time-seconds 300 --concurrency 2 --model gpt-5.6-luna --seed 1
+```
+
+`cpu_portable` currently means 12 tasks using only the standard library and locked NumPy/SciPy environment, with no GPU/NPU, downloaded dataset, network service, compiler, or external executable. Batch commands preserve every workspace and record per-cell failures; never delete a partial campaign to retry it.

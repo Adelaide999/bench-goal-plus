@@ -4,6 +4,22 @@
     "repository": "https://github.com/algorithmicsuperintelligence/openevolve",
     "pinned_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2"
   },
+  "task_sets": {
+    "cpu_portable": [
+      "function_minimization",
+      "background_blur",
+      "circle_packing_with_artifacts",
+      "k_module_problem",
+      "alpha_circle_packing_rect",
+      "alpha_heilbronn_triangle",
+      "alpha_kissing_number",
+      "alpha_heilbronn_convex_13",
+      "alpha_hexagon_packing_11",
+      "alpha_hexagon_packing_12",
+      "alpha_minimizing_max_min_dist_2",
+      "alpha_minimizing_max_min_dist_3"
+    ]
+  },
   "tasks": {
     "function_minimization": {
       "source_dir": "examples/function_minimization",
@@ -11,7 +27,141 @@
       "evaluator": "evaluator.py",
       "config": "config.yaml",
       "requirements": "requirements.txt",
-      "artifact_name": "candidate.py"
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy", "scipy"]
+      }
+    },
+    "background_blur": {
+      "source_dir": "examples/background_blur",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy"]
+      }
+    },
+    "circle_packing_with_artifacts": {
+      "source_dir": "examples/circle_packing_with_artifacts",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy", "scipy"]
+      }
+    },
+    "k_module_problem": {
+      "source_dir": "examples/k_module_problem",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": []
+      }
+    },
+    "alpha_circle_packing_rect": {
+      "source_dir": "examples/alphaevolve_math_problems/circle_packing_rect",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy"]
+      }
+    },
+    "alpha_heilbronn_triangle": {
+      "source_dir": "examples/alphaevolve_math_problems/heilbronn_triangle",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy"]
+      }
+    },
+    "alpha_kissing_number": {
+      "source_dir": "examples/alphaevolve_math_problems/kissing_number",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy"]
+      }
+    },
+    "alpha_heilbronn_convex_13": {
+      "source_dir": "examples/alphaevolve_math_problems/heilbronn_convex/13",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy", "scipy"]
+      }
+    },
+    "alpha_hexagon_packing_11": {
+      "source_dir": "examples/alphaevolve_math_problems/hexagon_packing/11",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy"]
+      }
+    },
+    "alpha_hexagon_packing_12": {
+      "source_dir": "examples/alphaevolve_math_problems/hexagon_packing/12",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy"]
+      }
+    },
+    "alpha_minimizing_max_min_dist_2": {
+      "source_dir": "examples/alphaevolve_math_problems/minimizing_max_min_dist/2",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy", "scipy"]
+      }
+    },
+    "alpha_minimizing_max_min_dist_3": {
+      "source_dir": "examples/alphaevolve_math_problems/minimizing_max_min_dist/3",
+      "initial_program": "initial_program.py",
+      "evaluator": "evaluator.py",
+      "config": "config.yaml",
+      "requirements": "requirements.txt",
+      "artifact_name": "candidate.py",
+      "profile": {
+        "class": "cpu_portable",
+        "python_modules": ["numpy", "scipy"]
+      }
     }
   }
 }

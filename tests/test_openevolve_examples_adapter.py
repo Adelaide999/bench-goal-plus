@@ -25,6 +25,24 @@ def fixed():
 
 
 class OpenEvolveExamplesAdapterTest(unittest.TestCase):
+    def test_cpu_portable_catalog_is_a_batch_without_special_resources(self) -> None:
+        tasks = adapter.list_catalog_tasks("cpu_portable")
+        self.assertEqual(len(tasks), 12)
+        self.assertEqual(len({item["task_id"] for item in tasks}), 12)
+        for item in tasks:
+            profile = item["profile"]
+            self.assertEqual(profile["class"], "cpu_portable")
+            self.assertFalse(profile.get("gpu"))
+            self.assertFalse(profile.get("npu"))
+            self.assertFalse(profile.get("network"))
+            self.assertFalse(profile.get("external_software"))
+            self.assertFalse(profile.get("dataset"))
+            self.assertTrue(
+                set(profile.get("python_modules") or []).issubset(
+                    {"numpy", "scipy"}
+                )
+            )
+
     def test_goal_plus_verifier_converts_full_evaluator_report_to_one_line_metric(
         self,
     ) -> None:
@@ -92,6 +110,10 @@ class OpenEvolveExamplesAdapterTest(unittest.TestCase):
                 config=config,
                 requirements=requirements,
                 artifact_name="candidate.py",
+                profile={
+                    "class": "cpu_portable",
+                    "python_modules": [],
+                },
             )
             description = {
                 "prompt": {"system_message": "Improve solve()."},
@@ -130,6 +152,8 @@ class OpenEvolveExamplesAdapterTest(unittest.TestCase):
                 str(controller_runtime.absolute()),
             )
             self.assertFalse((workspace / ".bench-runtime").exists())
+            self.assertEqual(metadata["execution_profile"]["class"], "cpu_portable")
+            self.assertIn("portable CPU-only task", (workspace / "TASK.md").read_text())
             metadata["runtime_python"] = sys.executable
             (workspace / "task.json").write_text(json.dumps(metadata))
             subprocess.run(

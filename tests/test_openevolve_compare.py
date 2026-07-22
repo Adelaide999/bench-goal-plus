@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import json
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +28,100 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertEqual(args.wall_time_seconds, 300)
         self.assertEqual(args.concurrency, 2)
         self.assertEqual(args.model, "gpt-5.6-luna")
+
+        batch_args = parser.parse_args(
+            [
+                "prepare-batch",
+                "--run-root",
+                "campaign",
+                "--methods",
+                "goal-plus-codex",
+            ]
+        )
+        self.assertEqual(batch_args.task_set, "cpu_portable")
+        self.assertEqual(batch_args.methods, ["goal-plus-codex"])
+        self.assertEqual(batch_args.wall_time_seconds, 300)
+        self.assertEqual(batch_args.concurrency, 2)
+
+    def test_prepare_batch_expands_every_task_method_cell(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir) / "campaign"
+            args = experiment.build_parser().parse_args(
+                [
+                    "prepare-batch",
+                    "--run-root",
+                    str(run_root),
+                    "--methods",
+                    "plain-codex",
+                    "goal-plus-codex",
+                ]
+            )
+            tasks = [{"task_id": "one"}, {"task_id": "two"}]
+            with (
+                mock.patch.object(experiment, "list_catalog_tasks", return_value=tasks),
+                mock.patch.object(experiment, "prepare", return_value=0) as prepare_mock,
+            ):
+                self.assertEqual(experiment.prepare_batch(args), 0)
+
+            campaign = json.loads((run_root / "campaign.json").read_text())
+            self.assertEqual(campaign["task_count"], 2)
+            self.assertEqual(campaign["cell_count"], 4)
+            self.assertEqual(campaign["prepared_count"], 4)
+            self.assertEqual(prepare_mock.call_count, 4)
+            self.assertEqual(
+                {(item["task_id"], item["method"]) for item in campaign["entries"]},
+                {
+                    ("one", "plain-codex"),
+                    ("one", "goal-plus-codex"),
+                    ("two", "plain-codex"),
+                    ("two", "goal-plus-codex"),
+                },
+            )
+
+    def test_run_batch_preserves_results_and_continues_after_incomplete_cell(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            campaign_path = root / "campaign.json"
+            campaign_path.write_text(
+                json.dumps(
+                    {
+                        "model": "test-model",
+                        "methods": ["goal-plus-codex"],
+                        "entries": [
+                            {
+                                "task_id": "one",
+                                "method": "goal-plus-codex",
+                                "run_dir": str(root / "one"),
+                                "prepared": True,
+                                "error": None,
+                            },
+                            {
+                                "task_id": "two",
+                                "method": "goal-plus-codex",
+                                "run_dir": str(root / "two"),
+                                "prepared": True,
+                                "error": None,
+                            },
+                        ],
+                    }
+                )
+            )
+            args = experiment.build_parser().parse_args(
+                ["run-batch", "--campaign", str(campaign_path)]
+            )
+            with mock.patch.object(experiment, "execute", side_effect=[2, 0]) as run:
+                self.assertEqual(experiment.run_batch(args), 2)
+
+            results = json.loads((root / "campaign-results.json").read_text())
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(
+                [item["status"] for item in results["results"]],
+                ["incomplete", "finished"],
+            )
+            self.assertNotIn("api_base", results)
+            with mock.patch.object(experiment, "execute") as resumed_run:
+                self.assertEqual(experiment.run_batch(args), 2)
+                resumed_run.assert_not_called()
 
     def test_goal_plus_assets_copy_only_portable_project_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -25,6 +25,7 @@ from adapters.openevolve_examples.adapter import (  # noqa: E402
     describe_task,
     evaluate_workspace,
     git_commit,
+    list_catalog_tasks,
     materialize_workspace,
     resolve_task,
     run_worker,
@@ -472,6 +473,7 @@ def prepare(args: argparse.Namespace) -> int:
             "artifact_name": task.artifact_name,
             "primary_metric": description["evaluation"]["primary_metric"],
             "direction": description["evaluation"]["direction"],
+            "execution_profile": task.profile,
             "upstream_commit": task.upstream_commit,
             "initial_program": str(task.initial_program),
             "evaluator": str(task.evaluator),
@@ -503,6 +505,160 @@ def prepare(args: argparse.Namespace) -> int:
     write_json(run_dir / "experiment.json", manifest)
     print(run_dir)
     return 0
+
+
+def prepare_batch(args: argparse.Namespace) -> int:
+    """Prepare every task/method cell in a reusable experiment campaign."""
+    run_root = args.run_root.expanduser().absolute()
+    methods = list(dict.fromkeys(canonical_method(item) for item in args.methods))
+    tasks = list_catalog_tasks(args.task_set)
+    run_root.mkdir(parents=True, exist_ok=False)
+    entries: list[dict[str, Any]] = []
+
+    for task in tasks:
+        task_id = task["task_id"]
+        for method in methods:
+            run_dir = run_root / task_id / method
+            prepare_args = argparse.Namespace(
+                method=method,
+                task_id=task_id,
+                seed=args.seed,
+                model=args.model,
+                wall_time_seconds=args.wall_time_seconds,
+                concurrency=args.concurrency,
+                soft_closeout_seconds=args.soft_closeout_seconds,
+                hard_kill_grace_seconds=args.hard_kill_grace_seconds,
+                iterations_ceiling=args.iterations_ceiling,
+                run_dir=run_dir,
+                environment_manifest=args.environment_manifest,
+                checkout_root=args.checkout_root,
+                venv=args.venv,
+            )
+            entry = {
+                "task_id": task_id,
+                "method": method,
+                "run_dir": str(run_dir),
+                "prepared": False,
+                "error": None,
+            }
+            try:
+                prepare(prepare_args)
+                entry["prepared"] = True
+            except Exception as error:  # Keep the rest of the batch reproducible.
+                entry["error"] = f"{type(error).__name__}: {error}"
+            entries.append(entry)
+
+    prepared_count = sum(bool(item["prepared"]) for item in entries)
+    campaign = {
+        "schema_version": 1,
+        "prepared_at": utc_now(),
+        "task_set": args.task_set,
+        "task_count": len(tasks),
+        "methods": methods,
+        "cell_count": len(entries),
+        "prepared_count": prepared_count,
+        "model": args.model,
+        "seed": args.seed,
+        "budget": {
+            "wall_time_seconds": args.wall_time_seconds,
+            "concurrency": args.concurrency,
+            "soft_closeout_seconds": args.soft_closeout_seconds,
+            "hard_kill_grace_seconds": args.hard_kill_grace_seconds,
+            "iterations_ceiling": args.iterations_ceiling,
+        },
+        "entries": entries,
+        "secret_policy": (
+            "credentials are inherited only by run-batch and are never serialized"
+        ),
+    }
+    write_json(run_root / "campaign.json", campaign)
+    print(json.dumps(campaign, indent=2))
+    return 0 if prepared_count == len(entries) else 2
+
+
+def run_batch(args: argparse.Namespace) -> int:
+    """Execute prepared campaign cells sequentially and preserve every result."""
+    campaign_path = args.campaign.expanduser().absolute()
+    if campaign_path.is_dir():
+        campaign_path = campaign_path / "campaign.json"
+    campaign = load_json(campaign_path)
+    selected_methods = {
+        canonical_method(item) for item in (args.methods or campaign["methods"])
+    }
+    model = args.model or campaign["model"]
+    results_path = campaign_path.parent / "campaign-results.json"
+    results: list[dict[str, Any]] = []
+    if results_path.is_file():
+        existing = load_json(results_path)
+        results = list(existing.get("results") or [])
+    recorded_cells = {
+        (item["task_id"], item["method"])
+        for item in results
+        if isinstance(item, dict)
+        and isinstance(item.get("task_id"), str)
+        and isinstance(item.get("method"), str)
+    }
+
+    for item in campaign["entries"]:
+        if item["method"] not in selected_methods:
+            continue
+        cell = (item["task_id"], item["method"])
+        if cell in recorded_cells:
+            continue
+        result = {
+            "task_id": item["task_id"],
+            "method": item["method"],
+            "run_dir": item["run_dir"],
+            "started_at": utc_now(),
+            "returncode": None,
+            "status": "not_run",
+            "error": None,
+        }
+        if not item["prepared"]:
+            result["status"] = "prepare_failed"
+            result["error"] = item["error"]
+        else:
+            try:
+                result["returncode"] = execute(
+                    argparse.Namespace(
+                        run_dir=Path(item["run_dir"]),
+                        venv=args.venv,
+                        codex_bin=args.codex_bin,
+                        pi_bin=args.pi_bin,
+                        model=model,
+                        api_base=args.api_base,
+                    )
+                )
+                result["status"] = (
+                    "finished" if result["returncode"] == 0 else "incomplete"
+                )
+            except Exception as error:  # Preserve the remaining campaign cells.
+                result["status"] = "error"
+                result["error"] = f"{type(error).__name__}: {error}"
+        result["finished_at"] = utc_now()
+        results.append(result)
+        write_json(
+            results_path,
+            {
+                "schema_version": 1,
+                "campaign": str(campaign_path),
+                "updated_at": utc_now(),
+                "model": model,
+                "methods": sorted(selected_methods),
+                "results": results,
+                "secret_policy": "provider credentials and API base are not serialized",
+            },
+        )
+        recorded_cells.add(cell)
+        if args.fail_fast and result["status"] != "finished":
+            break
+
+    selected_results = [
+        item for item in results if item["method"] in selected_methods
+    ]
+    failed = [item for item in selected_results if item["status"] != "finished"]
+    print(json.dumps({"results": results}, indent=2))
+    return 0 if selected_results and not failed else 2
 
 
 def send_soft_stop(process: subprocess.Popen[str]) -> None:
@@ -1654,6 +1810,31 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--checkout-root", type=Path, default=ROOT.parent)
     prepare_parser.add_argument("--venv", type=Path, default=DEFAULT_VENV)
 
+    prepare_batch_parser = subparsers.add_parser("prepare-batch")
+    prepare_batch_parser.add_argument("--task-set", default="cpu_portable")
+    prepare_batch_parser.add_argument(
+        "--methods", nargs="+", choices=(*METHODS, *METHOD_ALIASES), default=list(METHODS)
+    )
+    prepare_batch_parser.add_argument("--seed", type=int, default=1)
+    prepare_batch_parser.add_argument("--model", default=DEFAULT_MODEL)
+    prepare_batch_parser.add_argument(
+        "--wall-time-seconds", type=int, default=DEFAULT_WALL_TIME_SECONDS
+    )
+    prepare_batch_parser.add_argument(
+        "--concurrency", type=int, default=DEFAULT_CONCURRENCY
+    )
+    prepare_batch_parser.add_argument("--soft-closeout-seconds", type=int, default=60)
+    prepare_batch_parser.add_argument("--hard-kill-grace-seconds", type=int, default=30)
+    prepare_batch_parser.add_argument(
+        "--iterations-ceiling", type=int, default=1_000_000
+    )
+    prepare_batch_parser.add_argument("--run-root", type=Path, required=True)
+    prepare_batch_parser.add_argument(
+        "--environment-manifest", type=Path, default=DEFAULT_ENV_MANIFEST
+    )
+    prepare_batch_parser.add_argument("--checkout-root", type=Path, default=ROOT.parent)
+    prepare_batch_parser.add_argument("--venv", type=Path, default=DEFAULT_VENV)
+
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--run-dir", type=Path, required=True)
     run_parser.add_argument("--venv", type=Path, default=DEFAULT_VENV)
@@ -1661,6 +1842,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--pi-bin", default="pi")
     run_parser.add_argument("--model", default=DEFAULT_MODEL)
     run_parser.add_argument("--api-base")
+
+    run_batch_parser = subparsers.add_parser("run-batch")
+    run_batch_parser.add_argument("--campaign", type=Path, required=True)
+    run_batch_parser.add_argument("--methods", nargs="+", choices=METHODS)
+    run_batch_parser.add_argument("--venv", type=Path, default=DEFAULT_VENV)
+    run_batch_parser.add_argument("--codex-bin", default="codex")
+    run_batch_parser.add_argument("--pi-bin", default="pi")
+    run_batch_parser.add_argument("--model")
+    run_batch_parser.add_argument("--api-base")
+    run_batch_parser.add_argument("--fail-fast", action="store_true")
 
     smoke_parser = subparsers.add_parser("seed-smoke")
     smoke_parser.add_argument("--run-dir", type=Path, required=True)
@@ -1673,6 +1864,10 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.command == "prepare":
         return prepare(args)
+    if args.command == "prepare-batch":
+        return prepare_batch(args)
+    if args.command == "run-batch":
+        return run_batch(args)
     if args.command == "seed-smoke":
         return seed_smoke(args)
     if args.command == "closeout":

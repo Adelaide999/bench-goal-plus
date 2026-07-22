@@ -129,7 +129,7 @@ class BenchmarkDocsTest(unittest.TestCase):
         )
         for required in (
             "共同 task/evaluator substrate",
-            "三套独立入口",
+            "四套独立入口",
             "原生 OpenEvolve",
             "Plain Codex",
             "Goal Plus",
