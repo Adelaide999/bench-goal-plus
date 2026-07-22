@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-07-22",
+  "checked_at": "2026-07-23",
   "status_values": ["pass", "partial", "todo", "blocked", "n/a"],
   "gate_sets": {
     "benchmark": [
@@ -45,7 +45,7 @@
         "official_verifier": "pass",
         "legacy_agent_smoke": "pass",
         "plain_codex": "pass",
-        "goal_plus_codex": "todo",
+        "goal_plus_codex": "pass",
         "matched_baseline": "todo",
         "campaign_ready": "todo"
       },
@@ -58,9 +58,11 @@
         "evidence/runs/2026-07-21-ale-ahc027-plain-codex/public-eval.json",
         "evidence/runs/2026-07-21-ale-ahc027-plain-codex/solution.cpp",
         "evidence/runs/2026-07-21-ale-ahc027-plain-codex/events.jsonl",
-        "evidence/environment/2026-07-21-mac-representative-smokes.json"
+        "evidence/environment/2026-07-21-mac-representative-smokes.json",
+        "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.json",
+        "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md"
       ],
-      "next_action": "Wrap the same ahc027 workspace/evaluator contract with Goal Plus + Codex for a 2-lineage, 3-evaluator-call smoke.",
+      "next_action": "Run ahc027 Plain and Goal Plus with one matched T/K/model protocol, then expand the same adapter contract across the remaining nine Lite tasks.",
       "blockers": []
     },
     {
@@ -123,15 +125,17 @@
         "environment": "partial",
         "official_verifier": "pass",
         "legacy_agent_smoke": "todo",
-        "plain_codex": "todo",
-        "goal_plus_codex": "todo",
+        "plain_codex": "pass",
+        "goal_plus_codex": "pass",
         "matched_baseline": "todo",
         "campaign_ready": "todo"
       },
       "evidence": [
-        "evidence/environment/2026-07-21-mac-representative-smokes.json"
+        "evidence/environment/2026-07-21-mac-representative-smokes.json",
+        "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.json",
+        "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md"
       ],
-      "next_action": "Materialize MallocLab as an isolated Codex workspace and preserve the same raw 0-100 score parser before expanding to the other nine v1-lite tasks.",
+      "next_action": "Freeze one matched MallocLab T/K/model protocol, then validate shipped baselines and portable runtimes for the remaining nine v1-lite tasks.",
       "blockers": [
         "Only MallocLab has been environment-tested; the remaining nine v1-lite tasks use task-local Python runtimes and assets that must be frozen on Linux."
       ]
@@ -158,8 +162,8 @@
         "environment": "pass",
         "official_verifier": "pass",
         "legacy_agent_smoke": "pass",
-        "plain_codex": "todo",
-        "goal_plus_codex": "todo",
+        "plain_codex": "pass",
+        "goal_plus_codex": "pass",
         "matched_baseline": "todo",
         "campaign_ready": "todo"
       },
@@ -167,9 +171,11 @@
         "evidence/legacy-smokes/2026-07-20-summary.json",
         "evidence/legacy-smokes/source-smoke-results.json",
         "evidence/legacy-smokes/autolab-toy-isa-reward.json",
-        "evidence/environment/2026-07-21-mac-representative-smokes.json"
+        "evidence/environment/2026-07-21-mac-representative-smokes.json",
+        "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.json",
+        "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md"
       ],
-      "next_action": "Add a Codex agent profile for toy_isa_opt without the NVIDIA-only Harbor patch and preserve Harbor reward artifacts.",
+      "next_action": "Repeat toy_isa_opt with one matched T/K/model protocol and complete usage telemetry before selecting 6-10 CPU tasks.",
       "blockers": []
     },
     {
@@ -239,17 +245,19 @@
         "environment": "partial",
         "official_verifier": "pass",
         "legacy_agent_smoke": "todo",
-        "plain_codex": "todo",
-        "goal_plus_codex": "todo",
+        "plain_codex": "pass",
+        "goal_plus_codex": "pass",
         "matched_baseline": "todo",
         "campaign_ready": "todo"
       },
       "evidence": [
-        "evidence/environment/2026-07-21-mac-representative-smokes.json"
+        "evidence/environment/2026-07-21-mac-representative-smokes.json",
+        "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.json",
+        "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md"
       ],
-      "next_action": "Expose algorithmic/problem-0 as a plain Codex workspace and parse its native partial score; select the 5-high/5-low slice only after the algorithmic adapter is repeatable.",
+      "next_action": "Make problem-0 final scoring deterministic or repeated, then select and materialize the 5-high/5-low Algorithmic slice.",
       "blockers": [
-        "The algorithmic server calls every non-perfect optimization ratio Wrong Answer even when the checker emits a valid partial score; the adapter must not treat passed=false as zero.",
+        "Problem 0's shipped candidate uses clock-seeded search, so a formal comparison needs repeated final measurements or a frozen RNG policy.",
         "The full checkout and FrontierCS 2.0 systems tasks are too heavy for the current Mac; several tasks require 16-32 GB RAM or H100-class GPUs."
       ]
     },

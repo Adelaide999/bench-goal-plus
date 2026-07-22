@@ -68,6 +68,60 @@ checkout 的 exact commit/dirty state、Python 3.12、关键 package/entrypoint 
 Codex/Pi 最低版本。`.venv/` 是历史本机缓存，不能复制到其他机器；复现标准
 是从 lock 重建 `.bench-env/venv` 与 `third_party/`。
 
+当前所有受管源码都只允许出现在这个统一根目录：
+
+```text
+third_party/{ale-bench,autolab,frontier-cs,frontier-engineering,
+             heurigym,swarmresearch,swarmresearch-paper-reproduce,
+             skydiscover,openevolve,goal-plus}
+```
+
+runner 不再依赖 `code/` 下的旁路 checkout。`environment/upstreams.json` 是
+目录名、fork 和 commit 的唯一安装清单；出现失败的 staging checkout 时脚本
+会保留 `<name>_bootstrap_incomplete`，不会删除或覆盖现有目录。
+当前机器的 10 个 active checkout 已全部通过 sanitized
+[`full doctor`](../evidence/environment/2026-07-23-unified-third-party-doctor.json)。
+
+## Standalone benchmark 统一入口
+
+ALE-Bench Lite、AutoLab、Frontier-Engineering、Frontier-CS 和 HeuriGym 共用
+同一个启动形状，但各自仍调用原生 evaluator、raw metric 和方向：
+
+```bash
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
+  --benchmark frontier-engineering-malloclab \
+  --method goal-plus-codex \
+  --wall-time-seconds 420 --soft-closeout-seconds 60 \
+  --worker-runtime-seconds 180 --concurrency 2 --model gpt-5.6-sol
+
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py run \
+  --run-dir runs/benchmark-compare/<run-id> --model gpt-5.6-sol
+```
+
+可选 benchmark ID 和实测预算见
+[`experiments/benchmark_compare/README.md`](../experiments/benchmark_compare/README.md)。
+Goal Plus 的 seed evaluation 写到 run-local `controller-runtime/`，不会在定时
+启动前把 `.bench-runtime/` 带进 source/candidate Git 历史。
+
+Frontier-CS problem 0 还需要 pinned judge image。源码 sparse checkout 已包含
+完整官方 image build context；新机器执行：
+
+```bash
+docker build \
+  -t bench-goal-plus/frontier-cs-judge:07500f9 \
+  third_party/frontier-cs/algorithmic
+```
+
+ALE 与 Frontier-CS 的 `evaluate.py` 都需要访问 host Docker socket，因此统一
+runner 会仅对这两个 adapter 显式使用 Codex `danger-full-access`，并把该选择写入
+run manifest；其他 adapter 仍使用 `workspace-write`。这两个 Docker case 应只在
+隔离的 benchmark 主机上运行，不能把 `workspace-write` 下的“missing image”当成
+真实环境缺失。
+
+ALE 使用官方 `ale-bench:cpp20-202301` 镜像。首次 evaluator 会构建 Rust
+`gen/tester/vis`，controller 将二进制缓存到 `.bench-env/cache/ale-bench/`；
+缓存和 Docker image 都是可重建主机资产，不进入 Git。
+
 ## 先跑零模型 smoke
 
 ```bash

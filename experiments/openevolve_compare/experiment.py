@@ -175,6 +175,7 @@ def render_goal(
     worker_model: str,
     reasoning_effort: str = DEFAULT_REASONING_EFFORT,
     worker_runtime_seconds: int | None = None,
+    verifier_timeout_seconds: int = 60,
 ) -> str:
     """Add the natural Goal Plus entrypoint and config to the common Codex prompt."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
@@ -185,6 +186,8 @@ def render_goal(
     )
     if dispatch_seconds < 1 or dispatch_seconds > exploration_seconds:
         raise ValueError("worker runtime must fit inside the exploration budget")
+    if verifier_timeout_seconds < 1:
+        raise ValueError("verifier timeout must be positive")
     common_prompt = render_common_task_prompt(
         task_text,
         wall_seconds,
@@ -207,9 +210,11 @@ def render_goal(
         f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
         f"- Metric: `{metric_name}` with direction `{metric_direction}`.\n"
         "- Process verifier: `python3 .goal-plus-verifiers/primary_metric.py`, role "
-        "`ranking_signal`, feedback policy `summary_only`, timeout 60 seconds.\n"
+        "`ranking_signal`, feedback policy `summary_only`, timeout "
+        f"{verifier_timeout_seconds} seconds.\n"
         "- Promotion verifier: the same command, role `promotion_gate`, feedback policy "
-        "`final_only`, timeout 60 seconds. The verifier is controller-owned and immutable.\n"
+        f"`final_only`, timeout {verifier_timeout_seconds} seconds. The verifier is "
+        "controller-owned and immutable.\n"
         "- Each candidate worker must submit its own final process verifier result. After a "
         "worker returns with that durable result, do not run a duplicate parent-side process "
         "verification for the same candidate; wait for all workers, then select and let the "
@@ -794,8 +799,22 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
     for path in sorted((root / "runs").glob("run_*/run.json")):
         payload = load_json(path)
         run_dir = path.parent
+        metric_direction = None
+        frozen_spec_id = payload.get("frozen_spec_id")
+        if isinstance(frozen_spec_id, str):
+            frozen_spec_path = root / "specs" / frozen_spec_id / "frozen_spec.json"
+            if frozen_spec_path.is_file():
+                metric_direction = (load_json(frozen_spec_path).get("spec") or {}).get(
+                    "metric_direction"
+                )
         candidate_paths = sorted(run_dir.glob("candidates/*/candidate.json"))
         session_paths = sorted(run_dir.glob("agent_sessions/agent_*.json"))
+        process_verifier_logs = sorted(
+            run_dir.glob("candidates/*/logs/process/*.log")
+        )
+        promotion_verifier_logs = sorted(
+            run_dir.glob("candidates/*/logs/promotion/*.log")
+        )
         iteration_count = 0
         best_scores: list[float] = []
         hosts: set[str] = set()
@@ -803,6 +822,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
         worker_verified_candidate_ids: set[str] = set()
         unbound_agent_session_count = 0
         session_counts_by_candidate: dict[str, int] = {}
+        bound_session_counts_by_candidate: dict[str, int] = {}
         for candidate_path in candidate_paths:
             candidate = load_json(candidate_path)
             iterations = candidate.get("iterations")
@@ -823,13 +843,24 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 session_counts_by_candidate[candidate_id] = (
                     session_counts_by_candidate.get(candidate_id, 0) + 1
                 )
-            external_id = (session.get("host_handle") or {}).get("external_id")
-            if (
+            host_handle = session.get("host_handle") or {}
+            external_id = host_handle.get("external_id")
+            task_name = host_handle.get("task_name")
+            is_bound = (
                 isinstance(candidate_id, str)
-                and isinstance(external_id, str)
-                and external_id
-            ):
+                and (
+                    (isinstance(external_id, str) and external_id)
+                    or (
+                        isinstance(task_name, str)
+                        and task_name.startswith("/")
+                    )
+                )
+            )
+            if is_bound:
                 bound_candidate_ids.add(candidate_id)
+                bound_session_counts_by_candidate[candidate_id] = (
+                    bound_session_counts_by_candidate.get(candidate_id, 0) + 1
+                )
             else:
                 unbound_agent_session_count += 1
             counters = session.get("counters") or {}
@@ -857,8 +888,21 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 ),
                 "unbound_agent_session_count": unbound_agent_session_count,
                 "session_counts_by_candidate": session_counts_by_candidate,
+                "bound_session_counts_by_candidate": (
+                    bound_session_counts_by_candidate
+                ),
                 "iteration_count": iteration_count,
-                "best_recorded_score": max(best_scores) if best_scores else None,
+                "process_verifier_command_count": len(process_verifier_logs),
+                "promotion_verifier_command_count": len(promotion_verifier_logs),
+                "metric_direction": metric_direction,
+                "best_recorded_score": (
+                    min(best_scores)
+                    if best_scores and metric_direction == "minimize"
+                    else max(best_scores) if best_scores else None
+                ),
+                "recorded_score_min": min(best_scores) if best_scores else None,
+                "recorded_score_max": max(best_scores) if best_scores else None,
+                "selected_score": payload.get("selected_score"),
                 "hosts": sorted(hosts),
                 "report_exists": (run_dir / "report.md").is_file(),
             }
@@ -944,7 +988,11 @@ def goal_plus_incomplete_reason(
                     f"Search run {run.get('run_id')} materialized "
                     f"{run.get('candidate_count')} candidates; expected {expected_concurrency}"
                 )
-            session_counts = run.get("session_counts_by_candidate") or {}
+            session_counts = (
+                run.get("bound_session_counts_by_candidate")
+                or run.get("session_counts_by_candidate")
+                or {}
+            )
             duplicate_sessions = {
                 candidate_id: count
                 for candidate_id, count in session_counts.items()
@@ -952,7 +1000,7 @@ def goal_plus_incomplete_reason(
             }
             if len(session_counts) != expected_concurrency or duplicate_sessions:
                 return (
-                    f"Search run {run.get('run_id')} did not keep exactly one session per "
+                    f"Search run {run.get('run_id')} did not keep exactly one bound session per "
                     f"candidate: {session_counts}"
                 )
             worker_verified_count = run.get("worker_verified_candidate_count")

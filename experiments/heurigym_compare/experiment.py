@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -18,15 +20,6 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from adapters.heurigym.adapter import (  # noqa: E402
-    ARTIFACT_NAME,
-    DIRECTION,
-    PRIMARY_METRIC,
-    TASK_ID,
-    evaluate_workspace,
-    git_commit,
-    materialize_workspace,
-)
 from experiments.openevolve_compare.experiment import (  # noqa: E402
     DEFAULT_REASONING_EFFORT,
     append_unique_lines,
@@ -52,9 +45,40 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
 DEFAULT_ENV_MANIFEST = ROOT / "environment/upstreams.json"
 DEFAULT_CHECKOUT_ROOT = ROOT / "third_party"
 DEFAULT_VENV = ROOT / ".bench-env/venv"
-DEFAULT_RUNS = ROOT / "runs/heurigym-compare"
+DEFAULT_RUNS = ROOT / "runs/benchmark-compare"
 DEFAULT_MODEL = "gpt-5.6-sol"
 METHODS = ("plain-codex", "goal-plus-codex")
+BENCHMARK_ADAPTERS = {
+    "ale-bench-lite": "adapters.ale.adapter",
+    "autolab-toy-isa": "adapters.autolab.adapter",
+    "frontier-cs-problem-0": "adapters.frontier_cs.adapter",
+    "frontier-engineering-malloclab": "adapters.frontier_engineering.adapter",
+    "heurigym": "adapters.heurigym.adapter",
+}
+
+
+def configure_adapter(benchmark_id: str) -> None:
+    module = importlib.import_module(BENCHMARK_ADAPTERS[benchmark_id])
+    global ARTIFACT_NAME, BENCHMARK_NAME, CASE_SET_DESCRIPTION
+    global CODEX_SANDBOX, DIRECTION
+    global PRIMARY_METRIC, TASK_ID, UPSTREAM_KEY
+    global VERIFIER_TIMEOUT_SECONDS
+    global evaluate_workspace, git_commit, materialize_workspace
+    ARTIFACT_NAME = module.ARTIFACT_NAME
+    BENCHMARK_NAME = module.BENCHMARK_NAME
+    CASE_SET_DESCRIPTION = module.CASE_SET_DESCRIPTION
+    CODEX_SANDBOX = module.CODEX_SANDBOX
+    DIRECTION = module.DIRECTION
+    PRIMARY_METRIC = module.PRIMARY_METRIC
+    TASK_ID = module.TASK_ID
+    UPSTREAM_KEY = module.UPSTREAM_KEY
+    VERIFIER_TIMEOUT_SECONDS = module.VERIFIER_TIMEOUT_SECONDS
+    evaluate_workspace = module.evaluate_workspace
+    git_commit = module.git_commit
+    materialize_workspace = module.materialize_workspace
+
+
+configure_adapter("heurigym")
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -63,7 +87,7 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def default_run_dir(method: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return DEFAULT_RUNS / f"{timestamp}-{TASK_ID}-{method}"
+    return DEFAULT_RUNS / f"{timestamp}-{UPSTREAM_KEY}-{TASK_ID}-{method}"
 
 
 def runtime_bin(venv: Path) -> Path:
@@ -71,6 +95,7 @@ def runtime_bin(venv: Path) -> Path:
 
 
 def prepare(args: argparse.Namespace) -> int:
+    configure_adapter(args.benchmark)
     if args.wall_time_seconds <= args.soft_closeout_seconds:
         raise ValueError("wall time must exceed the closeout reserve")
     if args.concurrency < 1:
@@ -81,9 +106,9 @@ def prepare(args: argparse.Namespace) -> int:
     environment = load_json(args.environment_manifest)
     upstreams = environment["upstreams"]
     checkout_root = args.checkout_root.expanduser().absolute()
-    heurigym_root = checkout_root / upstreams["heurigym"]["checkout_dir"]
+    benchmark_root = checkout_root / upstreams[UPSTREAM_KEY]["checkout_dir"]
     goal_plus_root = checkout_root / upstreams["goal_plus"]["checkout_dir"]
-    for name, path in (("heurigym", heurigym_root), ("goal_plus", goal_plus_root)):
+    for name, path in ((UPSTREAM_KEY, benchmark_root), ("goal_plus", goal_plus_root)):
         if not (path / ".git").exists():
             raise FileNotFoundError(
                 f"managed {name} checkout is missing: {path}; run repro_env.py bootstrap"
@@ -103,7 +128,7 @@ def prepare(args: argparse.Namespace) -> int:
             lane = f"lane-{lane_index:02d}"
             workspace = run_dir / "workspaces" / lane
             materialized = materialize_workspace(
-                heurigym_root,
+                benchmark_root,
                 workspace,
             )
             workspaces.append(workspace)
@@ -122,7 +147,7 @@ def prepare(args: argparse.Namespace) -> int:
     else:
         workspace = run_dir / "workspace"
         materialized = materialize_workspace(
-            heurigym_root,
+            benchmark_root,
             workspace,
         )
         copy_goal_plus_assets(goal_plus_root, workspace)
@@ -170,6 +195,8 @@ def prepare(args: argparse.Namespace) -> int:
         "status": "prepared",
         "prepared_at": utc_now(),
         "method": args.method,
+        "benchmark_adapter": args.benchmark,
+        "benchmark_name": BENCHMARK_NAME,
         "task_id": TASK_ID,
         "model": args.model,
         "reasoning_effort": DEFAULT_REASONING_EFFORT,
@@ -184,14 +211,16 @@ def prepare(args: argparse.Namespace) -> int:
             "artifact_name": ARTIFACT_NAME,
             "primary_metric": PRIMARY_METRIC,
             "direction": DIRECTION,
-            "upstream_commit": git_commit(heurigym_root),
-            "case_set": "operator_scheduling/demo (5 public cases)",
+            "codex_sandbox": CODEX_SANDBOX,
+            "upstream_key": UPSTREAM_KEY,
+            "upstream_commit": git_commit(benchmark_root),
+            "case_set": CASE_SET_DESCRIPTION,
         },
         "environment": {
             "manifest": str(args.environment_manifest.absolute()),
             "checkout_root": str(checkout_root),
-            "heurigym_root": str(heurigym_root),
-            "heurigym_commit": git_commit(heurigym_root),
+            "benchmark_root": str(benchmark_root),
+            "benchmark_commit": git_commit(benchmark_root),
             "goal_plus_root": str(goal_plus_root),
             "goal_plus_commit": git_commit(goal_plus_root),
             "runtime_bin": str(runtime_bin(args.venv.expanduser().absolute())),
@@ -219,6 +248,49 @@ def evaluate(workspace: Path, mode: str) -> dict[str, Any]:
     )
 
 
+def evaluate_with_controller_runtime(
+    workspace: Path,
+    mode: str,
+    controller_runtime: Path,
+) -> dict[str, Any]:
+    """Evaluate without materializing mutable runtime files in a Goal workspace."""
+    previous = os.environ.get("GOAL_PLUS_VERIFIER_TMPDIR")
+    os.environ["GOAL_PLUS_VERIFIER_TMPDIR"] = str(controller_runtime)
+    try:
+        return evaluate(workspace, mode)
+    finally:
+        if previous is None:
+            os.environ.pop("GOAL_PLUS_VERIFIER_TMPDIR", None)
+        else:
+            os.environ["GOAL_PLUS_VERIFIER_TMPDIR"] = previous
+
+
+@contextmanager
+def controller_subprocess_environment(
+    *, runtime_bin_dir: Path, verifier_tmpdir: Path
+):
+    """Give controller-owned Goal Plus verifiers the pinned benchmark runtime."""
+    updates = {
+        "PATH": str(runtime_bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+        "GOAL_PLUS_VERIFIER_TMPDIR": str(verifier_tmpdir),
+    }
+    previous = {key: os.environ.get(key) for key in updates}
+    os.environ.update(updates)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def score_order_key(evaluation: dict[str, Any]) -> float:
+    value = primary_score(evaluation)
+    return value if DIRECTION == "minimize" else -value
+
+
 def codex_command(
     *,
     codex_bin: str,
@@ -226,6 +298,7 @@ def codex_command(
     output_last_message: Path,
     model: str,
     api_base: str | None,
+    sandbox: str,
     goal_plus: bool,
     ephemeral: bool,
 ) -> list[str]:
@@ -234,7 +307,7 @@ def codex_command(
         "exec",
         "--json",
         "--sandbox",
-        "workspace-write",
+        sandbox,
         "--cd",
         str(workspace),
         "--output-last-message",
@@ -245,6 +318,8 @@ def codex_command(
         "--config",
         f'model_reasoning_effort="{DEFAULT_REASONING_EFFORT}"',
     ]
+    if not goal_plus:
+        command.extend(["--config", 'approval_policy="never"'])
     if ephemeral:
         command.append("--ephemeral")
     if api_base:
@@ -290,6 +365,7 @@ def execute_plain(
             output_last_message=lane_dir / "final-message.txt",
             model=args.model,
             api_base=args.api_base,
+            sandbox=CODEX_SANDBOX,
             goal_plus=False,
             ephemeral=True,
         )
@@ -327,7 +403,14 @@ def execute_plain(
                 "codex": parse_codex_events(lane_dir / "events.jsonl"),
             }
         )
-    selected = min(lane_results, key=lambda item: primary_score(item["evaluation"]))
+    valid_lane_results = [
+        item for item in lane_results if item["evaluation"].get("valid") is True
+    ]
+    selection_pool = valid_lane_results or lane_results
+    selected = min(
+        selection_pool,
+        key=lambda item: score_order_key(item["evaluation"]),
+    )
     write_json(run_dir / "lane-results.json", {"lanes": lane_results})
     write_json(run_dir / "final-eval.json", selected["evaluation"])
     shutil.copy2(selected["candidate"], run_dir / ARTIFACT_NAME)
@@ -354,6 +437,10 @@ def execute_plain(
         control["result_incomplete_reason"] = (
             "plain Codex lanes did not exit cleanly: " + ", ".join(bad)
         )
+    if not valid_lane_results:
+        control["result_incomplete_reason"] = (
+            "official final evaluator rejected every Plain Codex lane"
+        )
     return control
 
 
@@ -367,13 +454,20 @@ def execute_goal_plus(
     workspace = Path(manifest["workspace"])
     if (workspace / ".gp").exists():
         raise RuntimeError("standard Goal Plus run must start without .gp")
-    seed = evaluate(workspace, "public")
+    seed = evaluate_with_controller_runtime(
+        workspace,
+        "public",
+        run_dir / "controller-runtime/seed",
+    )
     write_json(run_dir / "seed-eval.json", seed)
-    setup_calls = evaluator_budget(workspace)["total_claimed"]
+    setup_calls = seed["budget"]["total_claimed"]
     deadline = datetime.now(timezone.utc) + timedelta(
         seconds=budget["wall_time_seconds"]
     )
     environment["GOAL_PLUS_OUTER_DEADLINE_AT"] = deadline.isoformat()
+    environment["GOAL_PLUS_VERIFIER_TMPDIR"] = str(
+        run_dir / "controller-runtime/goal-plus"
+    )
     prompt = render_goal(
         task_text=(workspace / "TASK.md").read_text(),
         artifact_name=ARTIFACT_NAME,
@@ -385,6 +479,7 @@ def execute_goal_plus(
         worker_host="codex",
         worker_model=args.model,
         worker_runtime_seconds=budget["worker_runtime_seconds"],
+        verifier_timeout_seconds=VERIFIER_TIMEOUT_SECONDS,
     )
     (run_dir / "prompt.md").write_text(prompt)
     command = codex_command(
@@ -393,6 +488,7 @@ def execute_goal_plus(
         output_last_message=run_dir / "final-message.txt",
         model=args.model,
         api_base=args.api_base,
+        sandbox=CODEX_SANDBOX,
         goal_plus=True,
         ephemeral=False,
     )
@@ -406,15 +502,39 @@ def execute_goal_plus(
         wall_time_seconds=budget["wall_time_seconds"],
         hard_kill_grace_seconds=budget["hard_kill_grace_seconds"],
     )
-    control["goal_plus_controller_closeout"] = finalize_goal_plus_search(workspace)
-    final = evaluate(workspace, "final")
+    with controller_subprocess_environment(
+        runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
+        verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
+    ):
+        control["goal_plus_controller_closeout"] = finalize_goal_plus_search(workspace)
+    final = evaluate_with_controller_runtime(
+        workspace,
+        "final",
+        run_dir / "controller-runtime/final",
+    )
     write_json(run_dir / "final-eval.json", final)
     shutil.copy2(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
     control["codex"] = parse_codex_events(run_dir / "events.jsonl")
     control["goal_plus"] = collect_goal_plus_state(workspace)
+    goal_runs = control["goal_plus"]["runs"]
+    process_calls = sum(
+        item.get("process_verifier_command_count", 0) for item in goal_runs
+    )
+    promotion_calls = sum(
+        item.get("promotion_verifier_command_count", 0) for item in goal_runs
+    )
     control["evaluator_calls"] = {
-        **final["budget"],
+        "total_claimed": (
+            setup_calls
+            + process_calls
+            + promotion_calls
+            + final["budget"]["total_claimed"]
+        ),
         "setup_claimed_before_t": setup_calls,
+        "process_verifier_commands": process_calls,
+        "promotion_verifier_commands": promotion_calls,
+        "controller_final_claimed": final["budget"]["total_claimed"],
+        "coverage": "seed + Goal Plus verifier command logs + controller final ledger",
     }
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
@@ -439,6 +559,7 @@ def execute(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.expanduser().absolute()
     manifest_path = run_dir / "experiment.json"
     manifest = load_json(manifest_path)
+    configure_adapter(manifest.get("benchmark_adapter", "heurigym"))
     if manifest["status"] != "prepared":
         raise RuntimeError(f"run is not prepared: {manifest['status']}")
     if args.model != manifest["model"]:
@@ -489,11 +610,21 @@ def execute(args: argparse.Namespace) -> int:
 def seed_smoke(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.expanduser().absolute()
     manifest = load_json(run_dir / "experiment.json")
+    configure_adapter(manifest.get("benchmark_adapter", "heurigym"))
     results = []
     for workspace_text in manifest["workspaces"]:
         workspace = Path(workspace_text)
+        evaluation = (
+            evaluate_with_controller_runtime(
+                workspace,
+                "public",
+                run_dir / "controller-runtime/seed-smoke" / workspace.name,
+            )
+            if manifest["method"] == "goal-plus-codex"
+            else evaluate(workspace, "public")
+        )
         results.append(
-            {"workspace": str(workspace), "evaluation": evaluate(workspace, "public")}
+            {"workspace": str(workspace), "evaluation": evaluation}
         )
     payload = {"task_id": TASK_ID, "results": results}
     write_json(run_dir / "seed-smoke.json", payload)
@@ -506,17 +637,49 @@ def repair_closeout(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.expanduser().absolute()
     manifest_path = run_dir / "experiment.json"
     manifest = load_json(manifest_path)
+    configure_adapter(manifest.get("benchmark_adapter", "heurigym"))
     if manifest["method"] != "goal-plus-codex":
         raise ValueError("closeout is only valid for Goal Plus + Codex runs")
     workspace = Path(manifest["workspace"])
     control = dict(manifest.get("execution") or {})
-    control["goal_plus_controller_closeout_repair"] = finalize_goal_plus_search(
-        workspace
+    with controller_subprocess_environment(
+        runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
+        verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
+    ):
+        control["goal_plus_controller_closeout_repair"] = finalize_goal_plus_search(
+            workspace
+        )
+    final = evaluate_with_controller_runtime(
+        workspace,
+        "final",
+        run_dir / "controller-runtime/final",
     )
-    final = evaluate(workspace, "final")
     write_json(run_dir / "final-eval.json", final)
     shutil.copy2(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
     control["goal_plus"] = collect_goal_plus_state(workspace)
+    goal_runs = control["goal_plus"]["runs"]
+    process_calls = sum(
+        item.get("process_verifier_command_count", 0) for item in goal_runs
+    )
+    promotion_calls = sum(
+        item.get("promotion_verifier_command_count", 0) for item in goal_runs
+    )
+    setup_calls = (control.get("evaluator_calls") or {}).get(
+        "setup_claimed_before_t", 1
+    )
+    control["evaluator_calls"] = {
+        "total_claimed": (
+            setup_calls
+            + process_calls
+            + promotion_calls
+            + final["budget"]["total_claimed"]
+        ),
+        "setup_claimed_before_t": setup_calls,
+        "process_verifier_commands": process_calls,
+        "promotion_verifier_commands": promotion_calls,
+        "controller_final_claimed": final["budget"]["total_claimed"],
+        "coverage": "seed + Goal Plus verifier command logs + controller final ledger",
+    }
     budget = manifest["budget"]
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
@@ -540,12 +703,6 @@ def repair_closeout(args: argparse.Namespace) -> int:
     else:
         control.pop("result_incomplete_reason", None)
         manifest["status"] = "finished"
-    control["evaluator_calls"] = {
-        **evaluator_budget(workspace),
-        "setup_claimed_before_t": control.get("evaluator_calls", {}).get(
-            "setup_claimed_before_t", 0
-        ),
-    }
     manifest["execution"] = control
     manifest["closeout_repaired_at"] = utc_now()
     write_json(manifest_path, manifest)
@@ -558,6 +715,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     prepare_parser = subparsers.add_parser("prepare")
+    prepare_parser.add_argument(
+        "--benchmark", choices=tuple(BENCHMARK_ADAPTERS), default="heurigym"
+    )
     prepare_parser.add_argument("--method", choices=METHODS, required=True)
     prepare_parser.add_argument("--model", default=DEFAULT_MODEL)
     prepare_parser.add_argument("--wall-time-seconds", type=int, default=300)

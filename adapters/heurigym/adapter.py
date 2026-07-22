@@ -23,8 +23,13 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTROLLER_PATH = Path(__file__).resolve()
+UPSTREAM_KEY = "heurigym"
+BENCHMARK_NAME = "HeuriGym"
 ARTIFACT_NAME = "solver.py"
 TASK_ID = "operator_scheduling_demo"
+CASE_SET_DESCRIPTION = "operator_scheduling/demo (5 public cases)"
+CODEX_SANDBOX = "workspace-write"
+VERIFIER_TIMEOUT_SECONDS = 60
 DATASET_REPOSITORY = "heurigen/heurigen-data"
 DATASET_REVISION = "c11ab2db2824068e523ac4656a20a6f2581961b8"
 CASE_NAMES = ("demo.json", "ewf.json", "hal.json", "horner.json", "motion.json")
@@ -457,7 +462,12 @@ def evaluate_workspace(workspace: Path, upstream_root: Path, mode: str) -> dict[
     )
     budget = claim_evaluator_call(runtime_dir, mode)
     changed_paths = changed_workspace_paths(workspace)
-    unauthorized_paths = sorted(changed_paths - {ARTIFACT_NAME})
+    unauthorized_paths = sorted(
+        path
+        for path in changed_paths - {ARTIFACT_NAME}
+        if not path.startswith(".bench-runtime/")
+        and path not in {".tmp/handoff.json", "results.tsv"}
+    )
     if unauthorized_paths or not (workspace / ARTIFACT_NAME).is_file():
         report = {
             "schema_version": 1,

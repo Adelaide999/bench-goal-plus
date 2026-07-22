@@ -7,6 +7,7 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 ## 当前结果
 
 - 已新建 8 个 GitHub fork（5 个独立 benchmark、SwarmResearch 的 2 个 substrate/method 仓和 SkyDiscover）；OpenEvolve 原先已有 fork，共跟踪 9 个 fork。
+- 10 个受管源码/runtime checkout 已全部收敛到 ignored `third_party/` 并通过 [full doctor](evidence/environment/2026-07-23-unified-third-party-doctor.json)：exact commit、clean tree、Python lock、OpenEvolve/Goal Plus entrypoint、Codex/Pi 版本均通过；runner 不再依赖 `code/` 旁路路径。
 - PERFOPT-Bench 当前没有可 fork 的公开可执行 GitHub 仓库，只有 4open.science artifact 与宣传站，因此明确标为 `blocked`，不拿网站仓冒充 benchmark。
 - ALE-Bench Lite、HeuriGym、AutoLab 已有本机官方 verifier / 远端模型 smoke 证据。
 - ALE-Bench Lite `ahc027` 已完成首个真实 plain Codex smoke：`gpt-5.4-mini` 改写候选后 5/5 public-lite cases accepted，raw score 从 61,302,533 降到 55,181,186（该题越低越好，改善 9.99%）。
@@ -16,12 +17,17 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 - Goal Plus + Codex/Pi 曾通过 [controller-prepared 严格重跑](evidence/runs/2026-07-22-goal-plus-codex-pi-strict-rerun.md) 验证底层 worker、verifier 和 promotion 能力；该入口现保留为历史诊断证据，不再作为标准主实验。标准入口改为 Plain Codex 使用 common task prompt，Codex + Goal Plus 只增加 `/goal-plus` 前缀和完整配置后缀，并让 Goal/Spec/Run 全部在计时后的自然流程中创建。
 - Goal Plus + Codex 已完成 [自然 prompt 标准入口 E2E](evidence/runs/2026-07-22-goal-plus-codex-natural-prompt.md)：prepare 后不存在 `.gp/`，定时运行内自然创建 Goal/Spec/Run 和两个 Codex workers；`gpt-5.6-sol/high`、`T=300s`、`K=2` 下，`combined_score` 从 1.119176 提升到 1.499540（+33.99%），两个 worker 都提交 verifier 结果并完成 promotion/report。
 - HeuriGym `operator_scheduling` 已完成 [Plain Codex / Goal Plus + Codex 首轮真实 E2E](evidence/runs/2026-07-22-heurigym-operator-scheduling-codex-goal-plus.md)：两者共享 `gpt-5.6-sol/high`、`T=300s`、`K=2`、common prompt 和官方五-case evaluator；seed `total_cost=138`，Plain Codex 得 62，Goal Plus + Codex 得 95。它是接线证据，不是单次方法排名。
+- Standalone benchmark 已收敛到同一 [Plain Codex / Goal Plus + Codex runner](experiments/benchmark_compare/README.md)：当前支持 ALE-Bench Lite `ahc027`、AutoLab `toy_isa_opt`、Frontier-Engineering `MallocLab`、Frontier-CS `problem-0` 和 HeuriGym `operator_scheduling`；每题仍保留自己的 artifact、official evaluator、raw metric、方向、timeout 和资源要求。
+- AutoLab host-portable smoke 已跑通：`gpt-5.6-sol/high`、`K=2` 下 Plain Codex 在 `T=240s` 从 `9220` 降到 `1547 cycles`；Goal Plus 在 `T=360s` 创建 2 个已绑定 Codex lineage，至少 1 个 worker 提交 verifier，但最终仍为 seed `9220`。这证明路径成立，不代表 Goal Plus 输赢。
+- Frontier-Engineering MallocLab 的上游 evaluator 已在 macOS 通过 portable rebuild：seed `28/100`；Plain Codex `T=300s,K=2` 达到 `90/100`，Goal Plus `T=420s,K=2` 的 best verified/promoted 结果为 `89/100`。两者都通过 `11/11` traces；预算不同，仍只是各自接线 smoke。
+- ALE-Bench Lite `ahc027` 的通用 Goal Plus 入口也已完成真实 E2E：`gpt-5.6-sol/high`、`T=480s`、`K=2` 下创建 2 个已绑定且均提交 verifier 的 Codex lineage，9 次 process-verifier iteration 后从 seed `55,181,186` 降到最终 `52,693,209`（越低越好，改善 `4.51%`）；本轮共记录 12 次 evaluator command/call，仍是接线证据而非 matched 方法排名。
+- Frontier-CS problem 0 已完成 Docker host-capable 的两条真实路径：Plain Codex `T=180s,K=2` 最终 `93.4561753`（12 calls）；Goal Plus `T=420s,K=2` 创建 2 个已绑定、均有 verifier 的 lineage，7 次 process iterations 后 search best `93.3980341`、promotion gate `93.2217282`、独立 final `93.3097979`（10 calls）。该上游使用 clock-seeded 搜索，三次分数差异是已知噪声，不能把这轮当作方法排名。
 - SkyDiscover/EvoX 已完成 DeepSeek OpenAI-compatible 的 1 iteration smoke，但还不是论文可比实验。
 - 已在当前 Mac 为所有可执行 benchmark 建立代表 case 的环境证据：ALE、AutoLab、SwarmResearch、Frontier-CS 使用镜像，HeuriGym 与 Frontier-Engineering v1-lite 使用 host 环境；完整空间表见 [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
 - 已建立 [Benchmark 快速导读](docs/benchmarks/README.md)：记录当前可跑题数、coverage/campaign 时间，并为 6 套 active benchmark 展开一个真实 case 的输入、agent 动作、期望输出和 verifier。
 - 已建立 [Goal Plus 接入与并发实验协议](docs/goal-plus-benchmark-experiment.md)：区分 agent/evaluator/task 三层并发，定义 matched-budget baseline、逐 benchmark 整改和非 Pass@K 的验收门槛；OpenEvolve 自带 CPU 任务见 [示例审计](docs/openevolve-cpu-examples.md)。
 - 已建立 [可移植复现环境](docs/reproducible-environment.md)：固定 Python 依赖及 OpenEvolve/Goal Plus commit，自动 bootstrap/doctor，并为四条独立路径生成隔离实验目录。Goal Plus 的 `.gp` 只存在于临时 task workspace。
-- OpenEvolve example 的自然 `/goal-plus` 标准入口现已跑通并作为新的统一模板；ALE-Bench Lite、HeuriGym、AutoLab 等 benchmark 后续复用同一 common-prompt / Goal Plus-suffix 结构。
+- OpenEvolve example 的自然 `/goal-plus` 标准入口已成为统一模板；ALE-Bench Lite、HeuriGym、AutoLab、Frontier-Engineering 和 Frontier-CS 现在复用同一 common-prompt / Goal Plus-suffix 结构。
 
 ## 固定验收门禁
 
@@ -66,7 +72,8 @@ docs/reproducible-environment.md         新机器 bootstrap、doctor、workspac
 environment/                             Python lock 与 OpenEvolve/Goal Plus 固定版本 manifest
 third_party/                             所有 pinned benchmark/search runtime 的统一 ignored checkout 根目录
 experiments/openevolve_compare/          native OE / Plain Codex / Goal Plus+Codex / Goal Plus+Pi 同任务时限入口
-experiments/heurigym_compare/             HeuriGym Plain Codex / Goal Plus+Codex 同任务时限入口
+experiments/benchmark_compare/             五套 standalone benchmark 的 Plain Codex / Goal Plus+Codex 统一入口
+experiments/heurigym_compare/              上述通用实现的兼容入口
 adapters/heurigym/                        HeuriGym workspace、官方 evaluator 与数据固定层
 adapters/openevolve_examples/           OpenEvolve example catalog、workspace/evaluator/ticket/archive contract
 scripts/run_codex.py           通用非交互 Codex runner，保存 JSONL、usage 与 manifest

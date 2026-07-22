@@ -10,7 +10,7 @@ Frontier-Engineering 面向真实工程优化：候选通常是源码、设计�
 | 本项目范围 | 官方 v1-lite 10 题 |
 | 候选 artifact | 代码或 task-specific 工程 artifact |
 | 指标 | 每题 raw score + Medal Score；本项目优先 raw score |
-| 当前门禁 | MallocLab verifier 已通；其余 9 题 runtime 未冻结 |
+| 当前门禁 | MallocLab host evaluator 与 Plain/Goal Plus runner 已接；其余 9 题 runtime 未冻结 |
 | 固定源码 | `EinsiaLab/Frontier-Engineering@e3fa29c` |
 
 v1-lite 涵盖 MallocLab、量子路由、JobShop、库存优化、电池快充、机械臂周期、全息聚焦、无线仿真、反应优化和拓扑优化。
@@ -80,7 +80,7 @@ Verifier 先 `make clean && make`，再运行 `./mdriver -V`，解析：
 - Kops throughput；
 - 最终 `score / 100`。
 
-本机 baseline 结果是 `28/100`，通过 `6/11` traces。这个低但非零的连续分数非常适合测试 Goal Plus 是否能沿着“先修合法性，再做性能”逐步搜索。
+本机 baseline 结果是 `28/100`，通过 `6/11` traces。通用 Plain Codex smoke 在 `gpt-5.6-sol/high`、`T=300s`、`K=2` 下达到 `90/100` 并通过 `11/11` traces；Goal Plus 的 `T=420s`、`K=2` smoke 创建 2 个已绑定且均提交 verifier 的 lineage，最终 `89/100`、同样通过 `11/11`。预算不同，因此只证明两条 E2E 路径。这个低但非零的连续分数非常适合测试 Goal Plus 是否能沿着“先修合法性，再做性能”逐步搜索。
 
 ---
 
@@ -104,6 +104,8 @@ v1-lite 环境安装加单候选覆盖预计 3–8 小时；官方 100 iteration
 ## 代码与证据
 
 - 上游：[EinsiaLab/Frontier-Engineering](https://github.com/EinsiaLab/Frontier-Engineering)
+- Plain/Goal Plus 统一入口：[`experiments/benchmark_compare/`](../../experiments/benchmark_compare/)
+- Standalone E2E 汇总：[`evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md`](../../evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md)
 - 本机结果：[`evidence/environment/2026-07-21-mac-representative-smokes.json`](../../evidence/environment/2026-07-21-mac-representative-smokes.json)
 
 [上一篇：HeuriGym](heurigym.md) | [返回 Benchmark 导读](README.md) | [下一篇：AutoLab](autolab-cpu.md)

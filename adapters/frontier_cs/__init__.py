@@ -1,0 +1,1 @@
+"""Frontier-CS benchmark adapter."""

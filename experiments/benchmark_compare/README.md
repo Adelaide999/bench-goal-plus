@@ -1,0 +1,116 @@
+# Standalone benchmark Plain Codex / Goal Plus + Codex runner
+
+This runner applies one experiment contract to the standalone benchmark cases
+that already have a portable, controller-owned evaluator. It is intentionally
+not another benchmark framework: every adapter materializes one upstream task,
+one editable artifact, and its native raw metric; the common runner only owns
+Codex launch, Goal Plus launch, wall deadline, concurrency, and evidence.
+
+## Supported task IDs
+
+| `--benchmark` | Editable artifact | Native metric | Current host requirement |
+|---|---|---|---|
+| `ale-bench-lite` | `solution.cpp` | `overall_absolute_score` minimize | Docker image `ale-bench:cpp20-202301`; about 2.73 GB |
+| `autolab-toy-isa` | `program.s` | `cycles` minimize | C compiler and `make` |
+| `frontier-cs-problem-0` | `solution.cpp` | `checker_score_percent` maximize | Docker image `bench-goal-plus/frontier-cs-judge:07500f9`; about 1.27 GB |
+| `frontier-engineering-malloclab` | `mm.c` | `combined_score` maximize | C compiler and `make` |
+| `heurigym` | `solver.py` | `total_cost` minimize | Python only after dataset bootstrap |
+
+Every upstream checkout lives in the ignored `third_party/` directory. Run a
+task-specific bootstrap instead of cloning beside the repository:
+
+```bash
+python3 scripts/repro_env.py bootstrap --only autolab
+python3 scripts/repro_env.py doctor --only autolab
+```
+
+The upstream keys are `ale_bench`, `autolab`, `frontier_cs`,
+`frontier_engineering`, and `heurigym`. OpenEvolve and Goal Plus are always
+included because they are pinned shared runtimes.
+
+The two Docker-backed adapters (`ale-bench-lite` and
+`frontier-cs-problem-0`) launch Codex with `danger-full-access` and explicit
+`approval_policy=never`: a workspace sandbox cannot access the host Docker
+socket, so otherwise `evaluate.py` would falsely report a missing image. The
+other three adapters keep `workspace-write`. This sandbox choice is written to
+the run manifest; use these Docker cases only on an isolated benchmark host.
+
+## Prepare, inspect, and run
+
+The same command shape works for every table row:
+
+```bash
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
+  --benchmark autolab-toy-isa --method plain-codex \
+  --wall-time-seconds 360 --soft-closeout-seconds 60 \
+  --worker-runtime-seconds 120 --concurrency 2 --model gpt-5.6-sol
+
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
+  --benchmark autolab-toy-isa --method goal-plus-codex \
+  --wall-time-seconds 360 --soft-closeout-seconds 60 \
+  --worker-runtime-seconds 120 --concurrency 2 --model gpt-5.6-sol
+```
+
+Preparation prints a new ignored run directory. For Goal Plus, confirm that
+`workspace/.gp` is absent before `run`; Goal Plus state is created only by the
+timed natural `/goal-plus` prompt. Seed evaluation uses a controller runtime
+outside that workspace, so `.bench-runtime/` is not copied into Goal Plus
+candidate Git histories. A model-free evaluator check is available:
+
+```bash
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py seed-smoke \
+  --run-dir runs/benchmark-compare/<run-id>
+
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py run \
+  --run-dir runs/benchmark-compare/<run-id> --model gpt-5.6-sol
+```
+
+Do not mix `seed-smoke` into a strict campaign ledger because it intentionally
+claims another public evaluator call. Failed and partial run directories are
+preserved; create another run ID instead of deleting or reusing one.
+
+## Budget sizing
+
+`T` is a total method budget, not a fixed number of rounds. Goal Plus includes
+intake, triage, spec freeze, candidate creation, worker launch, and search in
+that same `T`. In the measured AutoLab smoke, `T=240s` launched both workers
+too late for either to verify, while `T=360s` leaves a usable 120-second worker
+window. That shorter run is diagnostic evidence, not a valid Goal Plus result.
+
+Start with these wiring budgets on the current Mac, then freeze one matched
+campaign budget per task:
+
+| Task | Suggested wiring `T / closeout / worker` |
+|---|---|
+| AutoLab / HeuriGym | `360 / 60 / 120` seconds |
+| Frontier-Engineering MallocLab | `420 / 60 / 180` seconds |
+| Frontier-CS problem 0 | `480 / 90 / 180` seconds |
+| ALE-Bench Lite AHC027 | `480 / 60 / 180` seconds after cache warm-up |
+
+ALE's first post-bootstrap evaluation took 145 seconds while building and
+caching the official Rust tools; the next identical five-case evaluation took
+11.08 seconds. The cache lives under ignored `.bench-env/cache/`, not in an
+agent workspace. Its adapter still freezes a 180-second Goal Plus verifier
+timeout so a cold host fails explicitly instead of being mistaken for a bad
+candidate. Preserve cold setup time, actual evaluator calls, and timed search
+wall time separately; these wiring budgets are not paper-ready matched budgets.
+The first completed generic Goal Plus run used `T=480s,K=2`, obtained durable
+results from both workers, and promoted score `52,693,209` from seed
+`55,181,186` after 9 process iterations.
+
+Frontier-CS problem 0 takes about 14-16 seconds per compile/run/checker call.
+The upstream reference uses clock-seeded search, so repeated seed scores vary
+slightly (about 92.8-93.1 in the local smokes). A formal campaign must repeat
+final evaluation or require deterministic candidate programs; a single noisy
+reference score is only wiring evidence.
+The completed host-capable smokes used Plain `T=180s,K=2` (final
+`93.4561753`, 12 calls) and Goal Plus `T=420s,K=2` (7 process iterations,
+search best `93.3980341`, promotion `93.2217282`, independent final
+`93.3097979`, 10 calls). The score drift is why these are wiring results rather
+than a method comparison.
+
+Plain Codex uses `K` isolated lanes and selects by the adapter's declared
+metric direction. Goal Plus uses `K` candidate lineages and must produce `K`
+bound sessions plus at least one worker-submitted verifier result for a wiring
+smoke to count as complete. Deterministic closeout cannot turn an unverified
+worker session into a passing run.

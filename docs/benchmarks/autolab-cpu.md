@@ -11,7 +11,7 @@ AutoLab 把长期自主研究变成可执行任务：agent 进入一个已经能
 | 候选 artifact | task-specific 源码、配置或实验产物 |
 | 指标 | correctness gate + task-native 连续 reward |
 | 资源上限 | 单任务最多 4 CPU、4096 MiB；20 题为 2h、5 题为 4h agent budget |
-| 当前门禁 | `toy_isa_opt` 环境和 official verifier 已通；Codex adapter 待接 |
+| 当前门禁 | `toy_isa_opt` 的 host evaluator、Plain Codex 和 Goal Plus + Codex 已通 |
 | 固定源码 | `MetaStone-AI/AutoLab@7aff5fe` |
 
 它真正测试的是长时 agent 的实验纪律：能否先建立正确 baseline，形成假设，执行可证伪实验，避免 hardcode/改 verifier，并在多次尝试后留下 best-seen artifact。
@@ -78,7 +78,7 @@ Verifier 会构建 simulator，先跑 seed `0`，再用 `42/137/999` 复查正�
 
 通过后按 cycles 线性归一化：基线 `9220` 对应 0，verifier 当前使用的 best-known `1545` 对应 1，并截断到 `[0,1]`。任务 metadata 中另有 reference `2954`；正式实验应保存这两个原始字段，不能把 metadata reference 当成 verifier 的归一化常量。
 
-本机镜像 smoke 得到 `cycles=9220, verify=ok`；历史优化证据达到 `cycles=2194, reward=0.9154`。
+本机 seed 得到 `cycles=9220, verify=ok`；历史优化证据达到 `cycles=2194, reward=0.9154`。新的 host-portable runner 用 `gpt-5.6-sol/high`、`K=2` 跑出 Plain Codex `1547 cycles`；Goal Plus 在 `T=360s` 内确实启动 2 个 Codex lineage、其中 1 个提交 verifier，但本轮最终仍是 seed `9220`。这只能证明接线成立，不能把单轮结果解释为方法排名。
 
 ---
 
@@ -104,6 +104,8 @@ Verifier 会构建 simulator，先跑 seed `0`，再用 `42/137/999` 复查正�
 
 - 上游：[MetaStone-AI/AutoLab](https://github.com/MetaStone-AI/AutoLab)
 - 历史 smoke：[`evidence/legacy-smokes/autolab-toy-isa-reward.json`](../../evidence/legacy-smokes/autolab-toy-isa-reward.json)
+- Plain/Goal Plus 统一入口：[`experiments/benchmark_compare/`](../../experiments/benchmark_compare/)
+- Standalone E2E 汇总：[`evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md`](../../evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md)
 - 镜像与本机结果：[`evidence/environment/2026-07-21-mac-representative-smokes.json`](../../evidence/environment/2026-07-21-mac-representative-smokes.json)
 
 [上一篇：Frontier-Engineering](frontier-engineering-v1-lite.md) | [返回 Benchmark 导读](README.md) | [下一篇：SwarmResearch](swarmresearch-15.md)

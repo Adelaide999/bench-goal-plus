@@ -117,18 +117,25 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
                 entry["repository"],
             ]
         )
-        run(
-            [
-                "git",
-                "-C",
-                str(staging),
-                "fetch",
-                "--depth",
-                "1",
-                "origin",
-                entry["pinned_commit"],
-            ]
+        fetch_command = ["git", "-C", str(staging), "fetch"]
+        if entry.get("sparse_paths"):
+            fetch_command.append("--filter=blob:none")
+        fetch_command.extend(
+            ["--depth", "1", "origin", entry["pinned_commit"]]
         )
+        run(fetch_command)
+        if entry.get("sparse_paths"):
+            run(
+                [
+                    "git",
+                    "-C",
+                    str(staging),
+                    "sparse-checkout",
+                    "set",
+                    "--no-cone",
+                    *entry["sparse_paths"],
+                ]
+            )
         run(["git", "-C", str(staging), "checkout", "-q", "--detach", "FETCH_HEAD"])
         staging.rename(path)
         return

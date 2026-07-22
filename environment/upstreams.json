@@ -31,7 +31,11 @@
     "frontier_engineering": {
       "repository": "https://github.com/ck0123/Frontier-Engineering.git",
       "checkout_dir": "frontier-engineering",
-      "pinned_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071"
+      "pinned_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+      "sparse_paths": [
+        "/frontier_eval/tasks/malloclab/",
+        "/benchmarks/ComputerSystems/MallocLab/"
+      ]
     },
     "autolab": {
       "repository": "https://github.com/ck0123/autolab.git",
@@ -51,7 +55,17 @@
     "frontier_cs": {
       "repository": "https://github.com/ck0123/Frontier-CS.git",
       "checkout_dir": "frontier-cs",
-      "pinned_commit": "07500f9e5751ddf86ef2760e0d35ff93e6a96a29"
+      "pinned_commit": "07500f9e5751ddf86ef2760e0d35ff93e6a96a29",
+      "sparse_paths": [
+        "/algorithmic/Dockerfile",
+        "/algorithmic/entrypoint.sh",
+        "/algorithmic/server.js",
+        "/algorithmic/package.json",
+        "/algorithmic/package-lock.json",
+        "/algorithmic/judge/",
+        "/algorithmic/problems/0/",
+        "/algorithmic/README.md"
+      ]
     },
     "skydiscover": {
       "repository": "https://github.com/ck0123/skydiscover.git",

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-07-23",
+  "ok": true,
+  "checkout_root": "third_party",
+  "managed_checkouts": {
+    "openevolve": "411fb59c886c18704caaffb611e17cf9e7d824d2",
+    "goal_plus": "05626b18b23bbd2ec97713246de989c07be1f842",
+    "ale_bench": "f7d927906dc1dcd860ee086e4560d576438b1354",
+    "heurigym": "e3948542438b2df07a8d20c2f264991719a5585e",
+    "frontier_engineering": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+    "autolab": "7aff5fe71dfbe152fb0b8e8ac8087210b4bc27d5",
+    "swarmresearch": "cfdcb71c85ed16e05536a8fce083b075a5e17b3c",
+    "swarmresearch_tasks": "e848d8d5760065714c38fa7558f0298573db17ab",
+    "frontier_cs": "07500f9e5751ddf86ef2760e0d35ff93e6a96a29",
+    "skydiscover": "4734f324c4c3909eb3c8a4bc72a4ca34e6e679ed"
+  },
+  "all_checkouts_clean": true,
+  "runtime": {
+    "python": "3.12.9",
+    "openevolve": "0.3.2",
+    "goal_plus": "0.1.0",
+    "fastmcp": "2.14.7",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "openai": "2.46.0",
+    "codex_cli": "0.145.0",
+    "pi": "0.80.6"
+  },
+  "requirements_lock_sha256": "7c1a73f4e8577129354782a43efda5901a184902caea42d9371634b997cadefd",
+  "secret_policy": "Sanitized doctor evidence stores no absolute home path, credential, or environment-variable value."
+}

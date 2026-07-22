@@ -249,6 +249,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                     "worker_verified_candidate_count": 2,
                     "unbound_agent_session_count": 0,
                     "session_counts_by_candidate": {"c001": 1, "c002": 1},
+                    "bound_session_counts_by_candidate": {"c001": 1, "c002": 1},
                 }
             ],
         }
@@ -278,8 +279,12 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             "c001": 2,
             "c002": 2,
         }
+        duplicate_session["runs"][0]["bound_session_counts_by_candidate"] = {
+            "c001": 2,
+            "c002": 2,
+        }
         self.assertIn(
-            "exactly one session per candidate",
+            "exactly one bound session per candidate",
             experiment.goal_plus_incomplete_reason(duplicate_session, **kwargs),
         )
 
@@ -316,6 +321,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                     "worker_verified_candidate_count": 0,
                     "unbound_agent_session_count": 0,
                     "session_counts_by_candidate": {},
+                    "bound_session_counts_by_candidate": {},
                 },
                 {
                     "run_id": "run_final",
@@ -325,6 +331,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                     "worker_verified_candidate_count": 2,
                     "unbound_agent_session_count": 0,
                     "session_counts_by_candidate": {"c001": 1, "c002": 1},
+                    "bound_session_counts_by_candidate": {"c001": 1, "c002": 1},
                 },
             ],
         }

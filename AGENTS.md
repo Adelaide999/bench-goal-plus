@@ -76,17 +76,24 @@ For the screened no-special-environment OpenEvolve batch, use the catalog instea
 
 `cpu_portable` currently means 12 tasks using only the standard library and locked NumPy/SciPy environment, with no GPU/NPU, downloaded dataset, network service, compiler, or external executable. Batch commands preserve every workspace and record per-cell failures; never delete a partial campaign to retry it.
 
-The first standalone benchmark entry is HeuriGym operator scheduling:
+Standalone benchmarks share one runner while preserving their own task,
+artifact, evaluator, raw metric, and metric direction:
 
 ```bash
-.bench-env/venv/bin/python experiments/heurigym_compare/experiment.py prepare \
-  --method plain-codex --wall-time-seconds 300 --concurrency 2 \
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
+  --benchmark autolab-toy-isa --method plain-codex \
+  --wall-time-seconds 360 --soft-closeout-seconds 60 --concurrency 2 \
   --model gpt-5.6-sol
 
-.bench-env/venv/bin/python experiments/heurigym_compare/experiment.py prepare \
-  --method goal-plus-codex --wall-time-seconds 300 --concurrency 2 \
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
+  --benchmark autolab-toy-isa --method goal-plus-codex \
+  --wall-time-seconds 360 --soft-closeout-seconds 60 --concurrency 2 \
   --worker-runtime-seconds 120 --model gpt-5.6-sol
 ```
 
 Run the printed directory with `experiment.py run --run-dir ... --model ...`.
-See `experiments/heurigym_compare/README.md` for provider and closeout details.
+Supported IDs, task-specific environment requirements, measured verifier time,
+and recommended wiring budgets are in
+`experiments/benchmark_compare/README.md`. The older
+`experiments/heurigym_compare/experiment.py` remains a compatibility entrypoint
+to the same implementation.

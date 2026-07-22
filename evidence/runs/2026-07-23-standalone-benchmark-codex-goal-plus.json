@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-07-23",
+  "scope": "Standalone benchmark adapter and real-model wiring evidence; budgets are intentionally task-specific and are not a matched method comparison.",
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "high",
+  "concurrency": 2,
+  "managed_checkout_root": "third_party",
+  "environment_evidence": "evidence/environment/2026-07-23-unified-third-party-doctor.json",
+  "upstreams": {
+    "ale_bench": "f7d927906dc1dcd860ee086e4560d576438b1354",
+    "autolab": "7aff5fe71dfbe152fb0b8e8ac8087210b4bc27d5",
+    "frontier_cs": "07500f9e5751ddf86ef2760e0d35ff93e6a96a29",
+    "frontier_engineering": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+    "heurigym": "e3948542438b2df07a8d20c2f264991719a5585e",
+    "goal_plus": "05626b18b23bbd2ec97713246de989c07be1f842"
+  },
+  "results": [
+    {
+      "benchmark": "ALE-Bench Lite",
+      "task_id": "ahc027",
+      "metric": "overall_absolute_score",
+      "direction": "minimize",
+      "seed": 55181186,
+      "plain_reference": {
+        "model": "gpt-5.4-mini",
+        "score": 55181186,
+        "evidence": "evidence/runs/2026-07-21-ale-ahc027-plain-codex/summary.json",
+        "comparable_to_goal_run": false
+      },
+      "goal_plus_codex": {
+        "status": "finished",
+        "wall_time_seconds": 480,
+        "actual_duration_seconds": 480.05101440699946,
+        "worker_runtime_seconds": 180,
+        "valid": true,
+        "final_score": 52693209,
+        "artifact_sha256": "1ceac4185d8becd45e5bcd4c8db06d1d976a487480acac3a6d9fa44fbd6d351a",
+        "candidate_count": 2,
+        "bound_agent_session_count": 2,
+        "worker_verified_candidate_count": 2,
+        "iteration_count": 9,
+        "evaluator_calls_total": 12,
+        "hard_killed": false
+      }
+    },
+    {
+      "benchmark": "AutoLab",
+      "task_id": "toy_isa_opt",
+      "metric": "cycles",
+      "direction": "minimize",
+      "seed": 9220,
+      "plain_codex": {
+        "status": "finished",
+        "wall_time_seconds": 240,
+        "actual_duration_seconds": 240.21339780400012,
+        "valid": true,
+        "final_score": 1547,
+        "artifact_sha256": "40349609ecf8be371a06272da153c213b4baefdf15dab43e9915abd35dec72ab",
+        "selected_lane": "lane-00",
+        "evaluator_calls_total": 8,
+        "hard_killed": false
+      },
+      "goal_plus_codex": {
+        "status": "finished",
+        "wall_time_seconds": 360,
+        "actual_duration_seconds": 360.0444645069947,
+        "worker_runtime_seconds": 120,
+        "valid": true,
+        "final_score": 9220,
+        "artifact_sha256": "c4c5399fdab61c5b006cc6d1ae4b66d56ccafa2af9b11a1bf7cc9d120051d45a",
+        "candidate_count": 2,
+        "bound_agent_session_count": 2,
+        "worker_verified_candidate_count": 1,
+        "iteration_count": 5,
+        "evaluator_telemetry": "legacy run schema; six process logs plus one promotion log exist, while repeated controller re-audits make the old aggregate ledger unsuitable for matched accounting",
+        "hard_killed": false
+      }
+    },
+    {
+      "benchmark": "Frontier-Engineering v1-lite",
+      "task_id": "malloclab",
+      "metric": "combined_score",
+      "direction": "maximize",
+      "seed": 28,
+      "plain_codex": {
+        "status": "finished",
+        "wall_time_seconds": 300,
+        "actual_duration_seconds": 300.2161330460003,
+        "valid": true,
+        "final_score": 90,
+        "artifact_sha256": "388796879eae8e97bae2db74e612744e2f30cff647d821d90680c477f904805e",
+        "selected_lane": "lane-01",
+        "evaluator_calls_total": 18,
+        "hard_killed": false
+      },
+      "goal_plus_codex": {
+        "status": "finished",
+        "wall_time_seconds": 420,
+        "actual_duration_seconds": 420.05329381200136,
+        "worker_runtime_seconds": 180,
+        "valid": true,
+        "final_score": 89,
+        "artifact_sha256": "e50221923858dcd88e559f2eaf0535018963f34e330b1600431cc83e17cdc2f4",
+        "candidate_count": 2,
+        "bound_agent_session_count": 2,
+        "unbound_launch_attempt_count": 2,
+        "worker_verified_candidate_count": 2,
+        "iteration_count": 8,
+        "evaluator_calls_total_after_reaudits": 14,
+        "hard_killed": false
+      }
+    },
+    {
+      "benchmark": "Frontier-CS Algorithmic",
+      "task_id": "problem-0",
+      "metric": "checker_score_percent",
+      "direction": "maximize",
+      "nondeterministic_candidate": true,
+      "codex_sandbox": "danger-full-access",
+      "plain_codex": {
+        "status": "finished",
+        "wall_time_seconds": 180,
+        "actual_duration_seconds": 180.2079062060002,
+        "valid": true,
+        "final_score": 93.4561753,
+        "artifact_sha256": "ed6ac8005f0c84c60e6654ba17e76ac9205d5aa6d0294d122ed8aeda2a1513f0",
+        "selected_lane": "lane-00",
+        "evaluator_calls_total": 12,
+        "hard_killed": false
+      },
+      "goal_plus_codex": {
+        "status": "finished",
+        "wall_time_seconds": 420,
+        "actual_duration_seconds": 420.0465740449945,
+        "worker_runtime_seconds": 150,
+        "valid": true,
+        "search_best_score": 93.3980341,
+        "promotion_gate_score": 93.2217282,
+        "independent_final_score": 93.3097979,
+        "artifact_sha256": "dd1907a602e906d43de8215c865830da4aef398aca439691e576e8df61388f61",
+        "candidate_count": 2,
+        "bound_agent_session_count": 2,
+        "worker_verified_candidate_count": 2,
+        "iteration_count": 7,
+        "evaluator_calls_total": 10,
+        "hard_killed": false
+      }
+    },
+    {
+      "benchmark": "HeuriGym",
+      "task_id": "operator_scheduling_demo",
+      "metric": "total_cost",
+      "direction": "minimize",
+      "seed": 138,
+      "plain_codex_score": 62,
+      "goal_plus_codex_score": 95,
+      "evidence": "evidence/runs/2026-07-22-heurigym-operator-scheduling-codex-goal-plus.json"
+    }
+  ],
+  "diagnostic_runs_preserved": [
+    "AutoLab Goal Plus T=240s: candidates launched but no worker verifier result before deadline.",
+    "Frontier-Engineering first Goal Plus run: controller runtime files polluted the candidate edit surface.",
+    "ALE first generic Goal Plus run: controller closeout used the host Python and raced an in-flight verifier.",
+    "Frontier-CS workspace-sandbox Plain run: Codex could not access the installed Docker image.",
+    "Frontier-CS first Goal Plus run: Docker staging assumed the source workspace lived below the repository root."
+  ],
+  "telemetry_limitations": {
+    "tokens": "Codex processes ended at the wall deadline without terminal usage events; exact top-level and worker token totals are unavailable for most runs.",
+    "cost": "No provider price or complete token ledger is available; do not infer monetary cost.",
+    "comparison": "Plain and Goal Plus wiring budgets differ on these tasks, and Frontier-CS is noisy. No row is a method ranking."
+  },
+  "secret_policy": "No credentials, provider headers, API keys, or local absolute home paths are stored in this evidence file."
+}

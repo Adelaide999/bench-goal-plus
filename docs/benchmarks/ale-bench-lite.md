@@ -10,7 +10,7 @@ ALE-Bench 把 AtCoder Heuristic Contest 变成 agent benchmark：agent 不是回
 | 候选 artifact | 通常为 C++20、Python 或 Rust 程序 |
 | 指标 | task-native raw score；方向因题而异 |
 | 典型反馈 | 编译结果、合法性、每个 public case 分数、聚合 raw score |
-| 当前门禁 | 环境、official verifier、plain Codex 已通过；Goal Plus 待接 |
+| 当前门禁 | 通用 Plain/Goal Plus runner 与 official-lite evaluator 已接；两条 Codex 路径都有真实 E2E 证据 |
 | 固定源码 | `SakanaAI/ALE-Bench@f7d9279` |
 
 它适合证明 Goal Plus 的点，不是“模型会不会写竞赛代码”，而是：相同模型和 evaluator-call 预算下，多 lineage、反馈利用、失败恢复和 best-seen 保留是否带来稳定 raw-score 提升。
@@ -69,7 +69,7 @@ RRDDLUUL...
 
 非法路线得到 WA。合法路线按重复路线稳定后的平均污垢 `S̄` 计绝对分，**越低越好**；ALE 再用历史 standings 转成 rank/performance。Lite 默认每次 public evaluation 使用 5 个 cases，本项目 smoke 的 final private-lite 使用 200 个 cases。
 
-当前证据中，plain Codex 生成的候选在 5/5 public cases 上合法，raw absolute score 从 `61,302,533` 降到 `55,181,186`，改善约 `9.99%`。
+当前证据中，plain Codex 生成的候选在 5/5 public cases 上合法，raw absolute score 从 `61,302,533` 降到 `55,181,186`，改善约 `9.99%`。通用 adapter 复验同一候选仍得到 `55,181,186`；首次 Rust tool build 后，一次五-case warm evaluation 实测约 `11.08s`。通用 Goal Plus 入口随后在 `gpt-5.6-sol/high`、`T=480s`、`K=2` 下创建 2 个已绑定且均提交 verifier 的 lineage，记录 9 次 process iterations，最终选择并 promotion `52,693,209`，相对该 seed 再降低 `4.51%`。本轮总计记录 12 次 evaluator command/call，预算和旧 plain 证据不匹配，因此只证明 E2E 接线与搜索闭环。
 
 ---
 
@@ -93,6 +93,8 @@ RRDDLUUL...
 
 - 上游：[SakanaAI/ALE-Bench](https://github.com/SakanaAI/ALE-Bench)
 - 本仓 adapter：[`adapters/ale/`](../../adapters/ale/)
+- Plain/Goal Plus 统一入口：[`experiments/benchmark_compare/`](../../experiments/benchmark_compare/)
+- Standalone E2E 汇总：[`evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md`](../../evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md)
 - plain Codex 证据：[`evidence/runs/2026-07-21-ale-ahc027-plain-codex/`](../../evidence/runs/2026-07-21-ale-ahc027-plain-codex/)
 - 镜像与机器证据：[`evidence/environment/2026-07-21-mac-representative-smokes.json`](../../evidence/environment/2026-07-21-mac-representative-smokes.json)
 
