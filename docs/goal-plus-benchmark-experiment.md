@@ -61,6 +61,30 @@ Q = 1 task
 
 ---
 
+## Codex 接入整改总表
+
+先区分两种接法：**Plain Codex** 是一次 `codex exec` 直接在题目 workspace 中改 artifact；**Goal Plus + Codex** 是 Goal Plus 管理多条长期 lane、共享 Search Evidence/Schema，并由 Codex worker 反复修改和验证 artifact。前者只证明 Codex 能做题，后者才是本项目要比较的搜索方法。
+
+| Benchmark / baseline | Plain Codex 当前证据 | Goal Plus + Codex 当前状态 | benchmark / fork 要改什么 | `bench-goal-plus` 要新增什么 | `goal-plus` core 要改什么 | 最小完成门槛 |
+|---|---|---|---|---|---|---|
+| ALE-Bench Lite | **已通 1 题**：AHC027 可由 `scripts/run_codex.py` 运行并通过官方 public verifier | 未接通 | 不改上游；保持 public feedback / private final 边界 | SearchSpec、每 lane 独立 workspace、public raw-score parser、全局 call gate、最终 private-lite 一次评测 | 无 benchmark-specific 改动 | `K≥2`、同一题多轮 public evaluate、可继续同 worker、产出完整 usage/trajectory |
+| HeuriGym | 未跑 Codex smoke | 未接通 | 原则上不改上游；仅在固定 fork 保留必要的 macOS/数据下载兼容补丁 | 9 题 materializer、数据 digest、solver-only 编辑约束、统一 `verify()+evaluate()` wrapper、minimize parser | 无 benchmark-specific 改动 | 先通 1 题三轮，再通 9 题；每次记录 valid/cost/runtime |
+| Frontier-Engineering v1-lite | 只验证过 MallocLab evaluator，不等于 Codex 做题已通 | 未接通 | 在固定 fork 新增 `frontier_eval.algorithms.goal_plus` 插件；不改 task/evaluator | Goal Plus controller、history/usage exporter，复用 `metrics.json` 与 `artifacts.json` | 无 benchmark-specific 改动 | MallocLab 20-call 闭环；随后 lite 10 题能与原生 OpenEvolve/AB-MCTS 共用同一 evaluator |
+| AutoLab CPU subset | 官方 verifier smoke 已验证；Codex agent 尚未跑通 | 未接通 | 通常不改任务；若 Harbor agent discovery 要求注册，只加薄 agent shim | Harbor workspace/container bridge、允许文件白名单、reward parser、CPU/内存/硬件指纹采集 | 无 benchmark-specific 改动 | 先通 1 个 puzzle/challenge 的 `K=2,E=1` 长时 run，并能恢复/保留 best artifact |
+| SwarmResearch 15 | 只验证过 circle-packing evaluator；Codex 全链未通 | 未接通 | **需要修固定 fork**：bootstrap/import 与 ADRS/ALE worker build context；不改评分语义 | 15 题 `task-eval → native metric` adapter、session/commit/call/cost 轨迹转换、长期 lane controller | 无 benchmark-specific 改动 | 先通 1 题，再做 5-task `K=4/8` pilot；能与公开 Swarm 轨迹按 calls/cost 对齐 |
+| Frontier-CS Algorithmic | 只验证过 problem 0 judge；Codex 全链未通 | 未接通 | 不改上游 judge | 10 题 materializer、controller-owned 容器池、partial-score parser、串行 evaluator gate | 无 benchmark-specific 改动 | 单题 20-call 闭环能接受“合法 partial score 但 `passed=false`”，再扩到冻结 10 题 |
+| OpenEvolve CPU examples（基线） | 不是 benchmark agent；现有 provider 不等于 Codex CLI | 尚不能与 Goal Plus 做同口径 Codex 对比 | 若坚持让 OpenEvolve 使用 Codex，固定 fork 需增加 `codex_cli` provider 和 controller/worker usage telemetry | 将 OpenEvolve history 转成统一 trajectory，并复用完全相同 evaluator/call tickets | 不需要 | 先通 1 个 CPU example，再完成同模型、同 calls、同 `K/E/Q` 的 matched run |
+
+### 表格结论
+
+- **不需要把每个 benchmark 都改造成“支持 Codex API”**。Codex 本身通过 CLI 在隔离 workspace 中读题、改文件、跑测试；benchmark 侧只需稳定的 materializer 和 evaluator adapter。
+- **Goal Plus 已经能把 Codex 当 native worker 使用**；当前缺口是把已在 ST 中验证过的 Codex 总控方式产品化为批量实验 runner，而不是再做一套模型 API client。
+- 绝大多数整改应落在 `bench-goal-plus`。需要改固定 fork 的只有三类固有接口：Frontier-Engineering 的 algorithm plugin、Swarm 的复现基础设施问题，以及作为基线时 OpenEvolve 的 Codex provider/usage telemetry。
+- `goal-plus` core 不需要为六套 benchmark 各写逻辑。公平实验所需的 evaluator ticket gate、预算 watchdog、总控 usage 与统一轨迹可以先在本仓实现；验证稳定后再决定哪些通用能力上收 core。
+- 因此当前真实状态是：**Plain Codex 仅 ALE 1 题已形成做题闭环；其余多数只是 evaluator smoke；Goal Plus + Codex 六套 benchmark 均尚未达到完成门槛。**
+
+---
+
 ## 不是 Pass@4 的实验设计
 
 ### 必跑方法

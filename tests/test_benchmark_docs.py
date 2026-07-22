@@ -104,6 +104,23 @@ class BenchmarkDocsTest(unittest.TestCase):
             with self.subTest(benchmark=benchmark_name):
                 self.assertIn(f"### {benchmark_name}", protocol)
 
+    def test_protocol_has_codex_integration_matrix(self):
+        protocol = (ROOT / "docs" / "goal-plus-benchmark-experiment.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "## Codex 接入整改总表",
+            "Plain Codex 当前证据",
+            "Goal Plus + Codex 当前状态",
+            "benchmark / fork 要改什么",
+            "`bench-goal-plus` 要新增什么",
+            "`goal-plus` core 要改什么",
+            "OpenEvolve CPU examples（基线）",
+            "Plain Codex 仅 ALE 1 题已形成做题闭环",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, protocol)
+
 
 if __name__ == "__main__":
     unittest.main()
