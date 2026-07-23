@@ -18,6 +18,7 @@ Docker 当前总量是 31.34 GB images、7.12 GB build cache、1.50 GB stopped c
 | AutoLab | `toy_isa_opt` | 0.277 GB | 0.75 GB | `cycles=9220, verify=ok` |
 | SwarmResearch | `math/circle_packing` | 0.196 GB（host agent + evaluator-only）或 2.10 GB（论文式 agent CLI task image） | 1.25 GB | evaluator 成功，score 0.9597642169962064 |
 | Frontier-CS | `algorithmic/problem-0` | 1.27 GB | 0.023 GB sparse checkout | judge 完整执行，raw score 93.089935 |
+| EdgeBench | `vliw_kernel_optimization` | 2.23 GB logical（work 1.12 + judge 1.12，共享层使实际增量更小） | 0.024 GB（含 51 个 task definitions） | Plain / Goal Plus 两条真实 lifecycle E2E 均完成 |
 | PERFOPT-Bench | — | 无可用公开镜像 | — | 可执行 artifact 仍不可用 |
 
 ALE 如果还要接受 Rust candidate，再增加 `ale-bench:rust-202301` 2.29 GB；C++ + Rust 两条路径合计 6.32 GB。ALE Lite 的 10 个 task 复用这些语言/judge 镜像，并不是 10 × 6.32 GB。
@@ -36,13 +37,18 @@ Frontier-CS 的参考程序得到部分优化分数，但上游把任何 `scoreR
 | AutoLab 36 | 36 个 Dockerfile，其中 11 个基于 CUDA 12.4/12.8；模型、编译链和数据层会主导空间 | 至少 50–100 GB；只选 6–10 题时逐题构建 |
 | SwarmResearch 15 | 论文式共享 base 已测 2.03 GB；各 evaluator 增量共享，但 ADRS/ALE worker 构建上下文目前不完整 | 10–20 GB；修复上游布局后生成精确 manifest |
 | Frontier-CS | algorithmic 题共用 1.27 GB judge；2.0 systems 题有独立 agent/judge，包含数据库、推理和 GPU workload | CPU subset 20–50 GB；完整 systems/GPU 预留 100 GB 以上 |
+| EdgeBench open-source 51 | 每题可有独立 work/judge tag；VLIW 两张镜像逻辑合计 2.23 GB，但跨题共享层和任务差异未知 | 先为 8–12 gradient subset 预留 20–60 GB，provision 后按 image digest 冻结实测 |
 | PERFOPT-Bench | artifact 未恢复，无法估算 | 暂不预留到 campaign 配额 |
 
-如果只保留目前的代表性验证包：镜像约 5.77 GB（Swarm evaluator-only）或 7.67 GB（Swarm 论文式 image），六个 checkout 合计约 3.26 GB。考虑镜像构建缓存、临时层和日志，实际建议给这批 smoke 留 12–15 GB。当前 130.19 GB 空闲空间完全够用。
+如果把 EdgeBench VLIW 也计入代表性验证包：镜像逻辑大小约 8.00 GB
+（Swarm evaluator-only）或 9.90 GB（Swarm 论文式 image）；共享层会降低真实
+增量。考虑镜像构建缓存、临时层和日志，实际建议给这批 smoke 留 15–20 GB。
+当前记录的 130.19 GB 空闲空间完全够用。
 
 ## 当前 Mac 的运行边界
 
-- ALE、HeuriGym、Frontier-Engineering、AutoLab CPU case 和 Swarm math 可以串行跑。
+- ALE、HeuriGym、Frontier-Engineering、AutoLab CPU case、Swarm math 和
+  EdgeBench VLIW 可以串行跑。
 - Frontier-CS 已在 Docker VM 中用 `--privileged --shm-size=4g`、1 worker、1 go-judge parallelism 跑通；不要在 8.4 GB VM 上并发多个 judge。
 - AutoLab CUDA、Frontier-CS GPU/systems，以及多 seed × 多 method campaign 不应放在本机。
 - 本机只承担 materialize、agent 接线、official evaluator、evidence schema 和恢复机制 smoke；论文结果统一到 Linux 重跑。

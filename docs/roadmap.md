@@ -10,7 +10,7 @@
 
 - [x] 建立中央仓库、状态 registry 与 fork/upstream/commit 映射。
 - [x] 建立非交互 Codex runner，保留 JSONL、thread id、usage、stderr、最终消息和 manifest。
-- [x] 为 6 套 active benchmark 建立统一导读，记录规模、时间与代表 case 的 I/O/verifier 契约。
+- [x] 为 7 套 active benchmark 建立统一导读，记录规模、时间与代表 case 的 I/O/verifier 契约。
 - [x] 定义 Goal Plus 的逐 benchmark 接入改造、三层并发、matched-budget baseline 与非 Pass@K 验收协议。
 - [ ] 定义统一 benchmark adapter 接口：`materialize -> prompt -> evaluate -> parse -> archive`。
 - [x] OpenEvolve example adapter 支持原子 evaluator ledger；显式 hard cap 只用于 mechanism ablation，系统级主实验按 outer wall deadline 运行。
@@ -81,7 +81,18 @@
 - [ ] 再选择 5 high/5 low Pass@1 子集。
 - [ ] systems/GPU tasks 转移到 Linux 32 GB+ / GPU 节点，不在当前 Mac 强行 campaign。
 
-### P7：PERFOPT-Bench
+### P7：EdgeBench
+
+完成定义：
+
+- [x] 固定 fork、SForge、Goal Plus 与 HuggingFace task revision。
+- [x] VLIW profile 可 provision/doctor/prepare/run/status/stop/finalize。
+- [x] Plain Codex 与 Goal Plus + Codex 同模型、同 `T/K` 完成真实 lifecycle E2E，
+  并回收 evaluator calls 与 Codex session usage。
+- [ ] 使用 `T>=300s,K>=2` 跑一轮会实际 dispatch Goal Plus worker 的 matched pilot。
+- [ ] 冻结 8–12 个 gradient cases、镜像 digest 与 Linux 资源排程。
+
+### P8：PERFOPT-Bench
 
 完成定义：
 

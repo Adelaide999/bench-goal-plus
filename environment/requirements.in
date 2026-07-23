@@ -1,10 +1,11 @@
-# Shared runtime dependencies for pinned OpenEvolve and Goal Plus checkouts.
+# Shared runtime dependencies for pinned benchmark and search-runtime checkouts.
 # Exact transitive versions are generated into requirements.lock.
 ahocorapy>=1.6,<2
 cairosvg>=2.7,<3
 dacite>=1.9.2,<2
 docker>=7,<8
 editables>=0.5,<1
+fastapi>=0.116,<1
 fastmcp>=2.3,<3
 flask>=3,<4
 hatchling>=1.27,<2

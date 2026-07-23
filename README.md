@@ -6,8 +6,8 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 
 ## 当前结果
 
-- 已新建 8 个 GitHub fork（5 个独立 benchmark、SwarmResearch 的 2 个 substrate/method 仓和 SkyDiscover）；OpenEvolve 原先已有 fork，共跟踪 9 个 fork。
-- 10 个受管源码/runtime checkout 已全部收敛到 ignored `third_party/` 并通过 [full doctor](evidence/environment/2026-07-23-unified-third-party-doctor.json)：exact commit、clean tree、Python lock、OpenEvolve/Goal Plus entrypoint、Codex/Pi 版本均通过；runner 不再依赖 `code/` 旁路路径。
+- 已跟踪 10 个 GitHub fork；EdgeBench fork 也已纳入统一版本清单。
+- 11 个受管源码/runtime checkout 已全部收敛到 ignored `third_party/`；EdgeBench 可单独执行 `bootstrap --only edgebench`，其 SForge 与 Goal Plus exact commit、任务 revision、Codex auth policy 和单题镜像由同一 control plane 检查。
 - PERFOPT-Bench 当前没有可 fork 的公开可执行 GitHub 仓库，只有 4open.science artifact 与宣传站，因此明确标为 `blocked`，不拿网站仓冒充 benchmark。
 - ALE-Bench Lite、HeuriGym、AutoLab 已有本机官方 verifier / 远端模型 smoke 证据。
 - ALE-Bench Lite `ahc027` 已完成首个真实 plain Codex smoke：`gpt-5.4-mini` 改写候选后 5/5 public-lite cases accepted，raw score 从 61,302,533 降到 55,181,186（该题越低越好，改善 9.99%）。
@@ -24,10 +24,11 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 - Frontier-CS problem 0 已完成 Docker host-capable 的两条真实路径：Plain Codex `T=180s,K=2` 最终 `93.4561753`（12 calls）；Goal Plus `T=420s,K=2` 创建 2 个已绑定、均有 verifier 的 lineage，7 次 process iterations 后 search best `93.3980341`、promotion gate `93.2217282`、独立 final `93.3097979`（10 calls）。该上游使用 clock-seeded 搜索，三次分数差异是已知噪声，不能把这轮当作方法排名。
 - SkyDiscover/EvoX 已完成 DeepSeek OpenAI-compatible 的 1 iteration smoke，但还不是论文可比实验。
 - 已在当前 Mac 为所有可执行 benchmark 建立代表 case 的环境证据：ALE、AutoLab、SwarmResearch、Frontier-CS 使用镜像，HeuriGym 与 Frontier-Engineering v1-lite 使用 host 环境；完整空间表见 [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
-- 已建立 [Benchmark 快速导读](docs/benchmarks/README.md)：记录当前可跑题数、coverage/campaign 时间，并为 6 套 active benchmark 展开一个真实 case 的输入、agent 动作、期望输出和 verifier。
+- 已建立 [Benchmark 快速导读](docs/benchmarks/README.md)：记录当前可跑题数、coverage/campaign 时间，并为 7 套 active benchmark 展开一个真实 case 的输入、agent 动作、期望输出和 verifier。
 - 已建立 [Goal Plus 接入与并发实验协议](docs/goal-plus-benchmark-experiment.md)：区分 agent/evaluator/task 三层并发，定义 matched-budget baseline、逐 benchmark 整改和非 Pass@K 的验收门槛；OpenEvolve 自带 CPU 任务见 [示例审计](docs/openevolve-cpu-examples.md)。
 - 已建立 [可移植复现环境](docs/reproducible-environment.md)：固定 Python 依赖及 OpenEvolve/Goal Plus commit，自动 bootstrap/doctor，并为四条独立路径生成隔离实验目录。Goal Plus 的 `.gp` 只存在于临时 task workspace。
 - OpenEvolve example 的自然 `/goal-plus` 标准入口已成为统一模板；ALE-Bench Lite、HeuriGym、AutoLab、Frontier-Engineering 和 Frontier-CS 现在复用同一 common-prompt / Goal Plus-suffix 结构。
+- EdgeBench 已接入 campaign controller：固定 fork 与 HuggingFace revision，按 profile 精确拉取任务/镜像，区分 Plain Codex 的 K 个独立 replica 与 Goal Plus 的 K 个 internal workers，并提供 `prepare / run / status / stop / finalize`。VLIW 已完成同模型、同 `T/K` 的真实 lifecycle E2E，judge lifecycle、evaluator calls 和 Codex session usage 均可回收；`T=120s` 尚不足以 dispatch Goal Plus worker，所以它仍不是方法效果对比。
 
 ## 固定验收门禁
 
@@ -54,9 +55,44 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 4. AutoLab CPU subset
 5. SwarmResearch 15-task substrate（先 Math / ADRS / ALE 各一题）
 6. Frontier-CS
-7. PERFOPT-Bench（等待公开 artifact 恢复）
+7. EdgeBench open-source gradient subset
+8. PERFOPT-Bench（等待公开 artifact 恢复）
 
-SkyDiscover/EvoX 与 OpenEvolve 是 search backend，不与 benchmark 混为一类。EdgeBench 已按用户要求排除。
+SkyDiscover/EvoX 与 OpenEvolve 是 search backend，不与 benchmark 混为一类。
+
+## 统一控制面架构
+
+绝大多数 benchmark 的差别在 native harness 和 evaluator，不在控制面的生命周期。
+Codex 始终从本仓根目录启动；`bench-goal-plus` 管版本、实验协议、进程与统计，
+上游 harness 继续拥有 task runtime 和 official judge：
+
+```text
+Codex 启动于 bench-goal-plus/
+          │
+          ▼
+experiments/<benchmark>/experiment.py
+  provision / doctor / prepare / run / status / stop / finalize
+          │
+          ▼
+third_party/<benchmark>/  ← pinned fork / pinned dataset revision
+          │
+          ▼
+benchmark-native harness
+          │
+     ┌────┴────┐
+     ▼         ▼
+ Work/runtime   Judge/evaluator
+     │         │
+     └────┬────┘
+          ▼
+runs/<benchmark>/<campaign-id>/
+  manifests / prompts / logs / usage / artifacts / comparison
+```
+
+`third_party/` 是可重建依赖，不是实验现场；`runs/` 才是可恢复的 campaign
+状态。controller 不重写 benchmark 的评分逻辑，也不把所有任务强塞进一个
+artifact adapter。没有 Docker 的 benchmark 仍使用同一生命周期，只是
+`Work/runtime` 与 `Judge/evaluator` 由 host process 承担。
 
 ## 仓库结构
 
@@ -74,6 +110,7 @@ third_party/                             所有 pinned benchmark/search runtime 
 experiments/openevolve_compare/          native OE / Plain Codex / Goal Plus+Codex / Goal Plus+Pi 同任务时限入口
 experiments/benchmark_compare/             五套 standalone benchmark 的 Plain Codex / Goal Plus+Codex 统一入口
 experiments/heurigym_compare/              上述通用实现的兼容入口
+experiments/edgebench/                      SForge 原生 runtime/judge 的 campaign 控制、监控、停止与汇总
 adapters/heurigym/                        HeuriGym workspace、官方 evaluator 与数据固定层
 adapters/openevolve_examples/           OpenEvolve example catalog、workspace/evaluator/ticket/archive contract
 scripts/run_codex.py           通用非交互 Codex runner，保存 JSONL、usage 与 manifest
@@ -125,6 +162,26 @@ python3 scripts/run_codex.py \
 runner 不保存环境变量值；模型/provider、任务 commit 和 evaluator 仍必须由 benchmark adapter 写入 run manifest 扩展字段。
 
 OpenEvolve task 的四路径对比入口见 [实验目录](experiments/openevolve_compare/README.md)。`prepare-batch` / `run-batch` 可一次展开并执行 12-task × 多方法 campaign；主实验固定相同 task/evaluator/model、总 wall budget `T` 和 live concurrency `K`。各方法的 evaluator calls、iterations 与 tokens/cost 在运行后报告，不用强行改造 Goal Plus 去模拟 OpenEvolve round。
+
+EdgeBench 使用自己的 SForge harness，不走 standalone artifact adapter：
+
+```bash
+python3 scripts/repro_env.py bootstrap --only edgebench
+
+.bench-env/venv/bin/python experiments/edgebench/experiment.py provision \
+  --profile vliw-smoke
+.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
+  --profile vliw-smoke
+.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
+  --profile vliw-smoke --campaign-id vliw-matched-01
+.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
+  --campaign vliw-matched-01 --detach
+.bench-env/venv/bin/python experiments/edgebench/experiment.py status \
+  --campaign vliw-matched-01
+```
+
+完整停止、恢复边界和汇总字段见
+[EdgeBench campaign runbook](experiments/edgebench/README.md)。
 
 ## 旧资料边界
 

@@ -21,6 +21,7 @@
 | AutoLab CPU subset | 25 | `toy_isa_opt` 已通；其余镜像待构建 | 10 分钟/题的 bounded coverage 约 6–10 小时 | 20 题 × 2h + 5 题 × 4h = 60 agent-hours；加 verifier 约 2.5–3 天 |
 | SwarmResearch 论文任务集 | 15：Math 5 + ADRS 5 + ALE 5 | Circle Packing 已通；ADRS/ALE worker 布局待修 | evaluator-only 约 2–6 小时 | 公开轨迹任务 wall span 串行合计约 76.9 小时 |
 | Frontier-CS Algorithmic | 当前固定版本 188 | problem-0 已通；其余 task 尚未 materialize | reference/verifier 全扫约 1–3 小时 | 单次 agent/题约 10–30 小时；20 calls/题可能 100–300 小时 |
+| EdgeBench open-source subset | 51；先选 8–12 gradient cases | VLIW 的环境、Plain Codex、Goal Plus 已通；统一 controller 已接入 | 单候选/题通常 10 分钟–2 小时，取决于任务 | 正式 profile 建议每题 1–2 小时；8–12 题约 16–48 method-hours |
 
 这些数字不应直接拿来横向比较方法速度：ALE 的一次 candidate 会跑多个 generated cases，AutoLab 的“2 小时”是长时 agent budget，Swarm 的公开 wall span包含并行研究者，而 Frontier-CS 的题量远大于其他集合。公平实验最终应以 **evaluator calls + wall time + model calls/tokens** 三组预算同时报告。
 
@@ -38,6 +39,7 @@ Goal Plus 的逐项接入改造、`K/E/Q` 三层并发和 matched-budget baselin
 | [AutoLab CPU subset](autolab-cpu.md) | 长时 agent 是否会实验、验证、保留最好实现并抵抗 shortcut | Toy ISA 流水线调度 |
 | [SwarmResearch 15](swarmresearch-15.md) | 多 lineage / swarm 搜索是否能在大搜索空间中累积有效发现 | 26 圆装箱 |
 | [Frontier-CS Algorithmic](frontier-cs-algorithmic.md) | 面向开放算法研究问题生成可执行程序，并从连续 partial score 改进 | Polyomino Packing |
+| [EdgeBench](edgebench.md) | 在真实隔离 artifact + hidden judge 上利用连续 feedback 持续优化 | VLIW Kernel Optimization |
 
 PERFOPT-Bench 因缺少可执行公开 artifact 继续挂起，不进入本文档集。SkyDiscover/EvoX 和 OpenEvolve 是 search backend，不作为 benchmark 单独写 case 文档。
 
@@ -50,5 +52,6 @@ PERFOPT-Bench 因缺少可执行公开 artifact 继续挂起，不进入本文�
 3. **AutoLab 只选 6–10 个 CPU case**：先验证 persistence，不在 Mac 上消耗完整 60 小时。
 4. **SwarmResearch 15**：修好统一 evaluator/worker 后作为最终大实验 substrate。
 5. **Frontier-CS 选 10 题**：保留 188 题 track 作为题库，不在本地对所有方法全扫。
+6. **EdgeBench 先冻结 8–12 个 gradient cases**：Mac 只做单题接线，正式多方法 campaign 放到 Linux。
 
 空间与 Linux 节点规划见 [Docker 镜像空间计划](../docker-storage-plan.md)，工程门禁以 [`benchmarks/registry.json`](../../benchmarks/registry.json) 为唯一状态源。

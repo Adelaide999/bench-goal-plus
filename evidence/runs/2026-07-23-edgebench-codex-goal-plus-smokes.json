@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "benchmark": "EdgeBench",
+  "task": "vliw_kernel_optimization",
+  "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+  "fork_commit_with_control_plane_support": "b27bf1bfc6978238561afd720f7bf036ed389f1a",
+  "purpose": "wiring and campaign-lifecycle evidence; none of these short runs is a method-effect result",
+  "runs": [
+    {
+      "run_id": "codex-only-launcher-smoke-20260722-155300",
+      "method": "plain-codex",
+      "model": "gpt-5.5",
+      "reasoning_effort": null,
+      "wall_time_seconds": 180,
+      "live_search_concurrency": 1,
+      "best_raw_score": 4941.0,
+      "metric_direction": "minimize",
+      "edgebench_score": 0.0,
+      "edgebench_score_extended": 0.009057936737459235,
+      "total_rounds": 3,
+      "agent_submissions": 0,
+      "auto_submissions": 3,
+      "valid": true
+    },
+    {
+      "run_id": "codex-gp-gpt56terra-high-vliw-1h-p3-20260723-112302",
+      "method": "goal-plus-codex",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "high",
+      "wall_time_seconds": 3600,
+      "live_search_concurrency": 3,
+      "best_raw_score": 1878.0,
+      "metric_direction": "minimize",
+      "edgebench_score": 57.94759876401189,
+      "edgebench_score_extended": 57.94759876401189,
+      "total_rounds": 16,
+      "agent_submissions": 5,
+      "auto_submissions": 11,
+      "resume_count": 8,
+      "goal_plus_search_runs": 3,
+      "goal_plus_agent_sessions": 9,
+      "valid": true
+    }
+  ],
+  "matched_controller_e2e": {
+    "campaign_id": "edgebench-control-e2e-v4-20260723",
+    "status": "completed",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "high",
+    "wall_time_seconds": 120,
+    "live_search_concurrency": 1,
+    "matched_protocol": true,
+    "edgebench_commit": "b27bf1bfc6978238561afd720f7bf036ed389f1a",
+    "goal_plus_commit": "05626b18b23bbd2ec97713246de989c07be1f842",
+    "controller": {
+      "detached_process_group": "pass",
+      "owned_judge_started": "pass",
+      "owned_judge_closed": "pass",
+      "finalize": "pass"
+    },
+    "methods": [
+      {
+        "method": "plain-codex",
+        "best_raw_score": 147734.0,
+        "edgebench_score": 0.0,
+        "evaluator_calls": 1,
+        "runtime_seconds": 120.06611204147339,
+        "codex_sessions": 1,
+        "input_tokens": 30289,
+        "cached_input_tokens": 20992,
+        "output_tokens": 232
+      },
+      {
+        "method": "goal-plus-codex",
+        "best_raw_score": 147734.0,
+        "edgebench_score": 0.0,
+        "evaluator_calls": 2,
+        "runtime_seconds": 120.07645630836487,
+        "codex_sessions": 1,
+        "input_tokens": 495196,
+        "cached_input_tokens": 454144,
+        "output_tokens": 2375,
+        "goal_plus_search_runs": 1,
+        "goal_plus_candidates": 0,
+        "goal_plus_worker_sessions": 0
+      }
+    ],
+    "interpretation": "The matched run proves launch, live monitoring, owned-judge lifecycle, timeout closeout, scoring, evaluator accounting, and archived Codex usage. At T=120 the Goal Plus main session created Goal, triage, frozen spec, and a Search run but reached the outer deadline before dispatching a candidate worker, so the equal score is not search-effect evidence."
+  },
+  "controller_smoke": {
+    "profile": "vliw-smoke",
+    "provision": "pass",
+    "doctor": "pass",
+    "prepare": "pass",
+    "run_with_real_model": "pass",
+    "status": "pass",
+    "finalize": "pass",
+    "stop_semantics": "SIGINT process group with preserved campaign directory"
+  }
+}

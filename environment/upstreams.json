@@ -18,6 +18,14 @@
       "always": true,
       "editable": true
     },
+    "edgebench": {
+      "repository": "https://github.com/ck0123/EdgeBench.git",
+      "checkout_dir": "edgebench",
+      "pinned_commit": "b27bf1bfc6978238561afd720f7bf036ed389f1a",
+      "editable": true,
+      "dataset_repository": "ByteDance-Seed/EdgeBench",
+      "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9"
+    },
     "ale_bench": {
       "repository": "https://github.com/ck0123/ALE-Bench.git",
       "checkout_dir": "ale-bench",

@@ -262,11 +262,49 @@
       ]
     },
     {
+      "id": "edgebench",
+      "display_name": "EdgeBench open-source subset",
+      "kind": "benchmark",
+      "gate_set": "benchmark",
+      "priority": 7,
+      "repositories": [
+        {
+          "role": "benchmark-harness",
+          "upstream_url": "https://github.com/ByteDance-Seed/EdgeBench",
+          "fork_url": "https://github.com/ck0123/EdgeBench",
+          "pinned_commit": "b27bf1bfc6978238561afd720f7bf036ed389f1a",
+          "license": "Apache-2.0"
+        }
+      ],
+      "data_url": "https://huggingface.co/datasets/ByteDance-Seed/EdgeBench",
+      "local_path": "third_party/edgebench",
+      "stages": {
+        "source_forked": "pass",
+        "environment": "pass",
+        "official_verifier": "pass",
+        "legacy_agent_smoke": "pass",
+        "plain_codex": "pass",
+        "goal_plus_codex": "pass",
+        "matched_baseline": "partial",
+        "campaign_ready": "partial"
+      },
+      "evidence": [
+        "evidence/environment/2026-07-23-edgebench-vliw-doctor.json",
+        "evidence/runs/2026-07-23-edgebench-codex-goal-plus-smokes.json",
+        "evidence/runs/2026-07-23-edgebench-codex-goal-plus-smokes.md"
+      ],
+      "next_action": "Run a T>=300s, K>=2 VLIW matched pilot that dispatches Goal Plus workers, then freeze an 8-12 task gradient subset and Linux resource schedule.",
+      "blockers": [
+        "The matched T=120s lifecycle run reached the deadline after Goal/Spec/Search creation but before Goal Plus dispatched a candidate worker, so it is not search-effect evidence.",
+        "Only the VLIW task is provisioned by the initial profile; the final 8-12 task gradient subset is not frozen."
+      ]
+    },
+    {
       "id": "perfopt-bench",
       "display_name": "PERFOPT-Bench",
       "kind": "benchmark",
       "gate_set": "benchmark",
-      "priority": 7,
+      "priority": 8,
       "repositories": [
         {
           "role": "artifact",

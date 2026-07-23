@@ -19,7 +19,14 @@ class ReproEnvironmentTest(unittest.TestCase):
         self.assertEqual(manifest["python"], "3.12")
         self.assertEqual(manifest["pi_min_version"], "0.80.6")
         self.assertTrue(
-            {"openevolve", "goal_plus", "heurigym", "ale_bench", "autolab"}
+            {
+                "openevolve",
+                "goal_plus",
+                "edgebench",
+                "heurigym",
+                "ale_bench",
+                "autolab",
+            }
             <= set(manifest["upstreams"])
         )
         for upstream in manifest["upstreams"].values():
@@ -29,6 +36,11 @@ class ReproEnvironmentTest(unittest.TestCase):
             self.assertEqual(Path(upstream["checkout_dir"]).parent, Path("."))
         selected = repro_env.selected_upstreams(manifest, ["heurigym"])
         self.assertEqual(set(selected), {"openevolve", "goal_plus", "heurigym"})
+        selected_edgebench = repro_env.selected_upstreams(manifest, ["edgebench"])
+        self.assertEqual(
+            set(selected_edgebench), {"openevolve", "goal_plus", "edgebench"}
+        )
+        self.assertTrue(selected_edgebench["edgebench"]["editable"])
         task_catalog = json.loads(
             (ROOT / "adapters/openevolve_examples/tasks.json").read_text()
         )

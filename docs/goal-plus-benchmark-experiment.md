@@ -2,7 +2,7 @@
 
 ## 结论先行
 
-这 6 套 benchmark 与 Goal Plus 的总体方向是匹配的，但目前还不能直接组成公平大实验。真正缺的不是再写一个 prompt，而是把 **artifact 型任务、并发控制、统一 wall deadline、Codex 总控成本和原始分数轨迹** 接入同一控制面。
+这 7 套 benchmark 与 Goal Plus 的总体方向是匹配的，但目前还不能直接组成公平大实验。真正缺的不是再写一个 prompt，而是把 **artifact 型任务、并发控制、统一 wall deadline、Codex 总控成本和原始分数轨迹** 接入同一控制面。
 
 优先级如下：
 
@@ -12,6 +12,7 @@
 | P0 | HeuriGym | 很高 | 9 题 CPU 可跑，合法性和 cost 分离，适合看反馈利用与搜索效率 |
 | P0 | OpenEvolve CPU examples | 很高 | 可直接固定相同 evaluator，对 Goal Plus 与 OpenEvolve 做方法级比较 |
 | P1 | ALE-Bench Lite | 高 | 10 题有连续 raw score 和 public/private 边界，适合验证 generalization |
+| P1 | EdgeBench open-source subset | 很高 | native work/judge 隔离、连续 raw score 和正式 reference curves 都适合搜索策略对比 |
 | P1 | SwarmResearch 15 | 很高但工程未齐 | 最接近“并发研究是否真的有价值”的最终对手与任务集 |
 | P2 | AutoLab CPU subset | 高但昂贵 | 最能验证长时 persistence，但预算应按 agent-hours 而非 iteration 对齐 |
 | P2 | Frontier-CS Algorithmic | 中高但昂贵 | partial score 有搜索梯度，但 188 题和 judge 资源不适合先全量跑 |
@@ -73,6 +74,7 @@ Q = 1 task
 | AutoLab CPU subset | 官方 verifier smoke 已验证；Codex agent 尚未跑通 | 未接通 | 通常不改任务；若 Harbor agent discovery 要求注册，只加薄 agent shim | Harbor workspace/container bridge、允许文件白名单、reward parser、CPU/内存/硬件指纹采集 | 无 benchmark-specific 改动 | 先通 1 个 puzzle/challenge 的 `K=2,E=1` 长时 run，并能恢复/保留 best artifact |
 | SwarmResearch 15 | 只验证过 circle-packing evaluator；Codex 全链未通 | 未接通 | **需要修固定 fork**：bootstrap/import 与 ADRS/ALE worker build context；不改评分语义 | 15 题 `task-eval → native metric` adapter、session/commit/call/cost 轨迹转换、长期 lane controller | 无 benchmark-specific 改动 | 先通 1 题，再做 5-task `K=4/8` pilot；能与公开 Swarm 轨迹按 calls/cost 对齐 |
 | Frontier-CS Algorithmic | 只验证过 problem 0 judge；Codex 全链未通 | 未接通 | 不改上游 judge | 10 题 materializer、controller-owned 容器池、partial-score parser、串行 evaluator gate | 无 benchmark-specific 改动 | 单题 20-call 闭环能接受“合法 partial score 但 `passed=false`”，再扩到冻结 10 题 |
+| EdgeBench open-source subset | **已通 1 题**：VLIW 的 Plain Codex、hidden judge、final archive 和完整 session usage 可用 | **已通 1 题**：旧长 run 已验证 K 个 internal workers/promotion；新 controller 已完成同 T/K/model lifecycle E2E | 固定 fork 已增加 K/worker lease 参数、Codex JSONL usage、session archive、pinned Goal Plus source 与 CLI path 修复；不改 task/judge 语义 | 已有 `provision/doctor/prepare/run/status/stop/finalize` campaign controller；待冻结 8–12 题 profile | 无 benchmark-specific 改动 | 用 `T>=300s,K>=2` 补一轮实际 dispatch worker 的 matched pilot；随后 8–12 gradient cases 可在 Linux 批量调度 |
 | OpenEvolve CPU examples（任务包 + 原生基线） | **已通 1 题**：Function Minimization 由通用 adapter materialize，Plain Codex 将 raw score 提升 23.46%，4 public + 1 final calls | runner 已实现、真实模型 run 待验收 | 不改 OpenEvolve controller/provider；原生 OpenEvolve 保持自己的搜索入口 | 已有 task catalog、materializer、原生 evaluator wrapper，以及 `T/K` 外层控制的 native/Plain/Goal Plus 三入口；待补真实三方法证据与 usage coverage | 不需要 | 在同一 Function Minimization wall budget 与并发下补原生 OpenEvolve 与 Goal Plus；随后扩到 Background Blur、Circle Packing 和两道 JAX 数学题 |
 
 ### 表格结论
@@ -81,7 +83,11 @@ Q = 1 task
 - **Goal Plus 已经能把 Codex 当 native worker 使用**；当前缺口是把已在 ST 中验证过的 Codex 总控方式产品化为批量实验 runner，而不是再做一套模型 API client。
 - 绝大多数整改应落在 `bench-goal-plus`。需要改固定 fork 的固有接口主要是 Frontier-Engineering 的 algorithm plugin 和 Swarm 的复现基础设施问题；OpenEvolve examples 只抽取 task/evaluator contract，不修改其 controller 或 provider。
 - `goal-plus` core 不需要为六套 benchmark 各写逻辑，也不需要加入 OpenEvolve round/call 模拟器。外层 wall controller、evaluator ledger、总控 usage 与统一轨迹都留在本仓。
-- 因此当前真实状态是：**Plain Codex 已在 ALE 与 OpenEvolve Function Minimization 各形成 1 题做题闭环；其余多数只是 evaluator smoke；Goal Plus + Codex 六套 benchmark 均尚未达到完成门槛。**
+- 因此当前真实状态是：**ALE、HeuriGym、AutoLab、Frontier-Engineering、
+  Frontier-CS 与 EdgeBench 已各有至少一题的 Plain / Goal Plus 真实路径证据；
+  OpenEvolve CPU task 包已有批量 materialize/evaluator 能力；SwarmResearch 仍是
+  最主要的完整 agent 路径缺口。正式大实验尚缺 matched multi-seed 数据与冻结
+  subset，不能把这些接线 smoke 当作方法排名。**
 
 ---
 
@@ -204,6 +210,26 @@ SwarmResearch 15 上再加入论文原生 Swarm；Frontier-Engineering 上再加
 **与官方工作对应**：用公开 Pass@1 分布只做 5 high/5 low 的分层抽样；最后比较 partial raw score/AUC，而不是再次报告 pass@4。188 题只用于 verifier sweep 和后续扩展。
 
 **是否匹配**：方法上匹配、资源上偏重。必须先证明 10 题有连续 gradient，剔除只有 0/满分的硬门槛题。
+
+### EdgeBench open-source subset
+
+**整改**：保留 SForge 对 work container、hidden judge、auto-eval 和 final archive
+的所有权；`bench-goal-plus` 只固定 fork/data revision、生成方法 cell、管理
+PID/PGID 和输出统一 summary。Plain Codex 的 `K` 映射为 K 个独立 SForge
+replicas，Goal Plus 的 `K` 映射为一个 outer run 内的 K 个 workers。
+
+**建议并发/预算**：Mac 用 VLIW 做 `T=5–15min,K=1/2` 接线；Linux 正式 profile
+用 8–12 个 gradient cases、`K=4,E=1,Q` 按节点资源排程、每题 1–2h。cell 默认
+串行，避免 replicas、Goal Plus workers 和 task concurrency 三层相乘。
+
+**与官方工作对应**：保留 raw score 与 task direction，同时用 fork 的官方
+curve reporter 生成 EdgeBench 0–100 和 matched/nearest checkpoint reference。
+论文/reference curve 只作外部定位；Goal Plus 归因仍需同模型、同 `T/K` 的
+Plain Codex / Independent Parallel 重跑。
+
+**是否匹配**：很匹配。它同时提供真实 artifact、连续梯度和较大搜索空间，是
+证明 Goal Plus 不只是 Pass@K 的核心候选；最脆弱点是不同任务的 runtime 和
+资源跨度很大，因此 subset/profile 必须先冻结。
 
 ---
 

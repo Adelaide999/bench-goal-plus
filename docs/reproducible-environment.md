@@ -81,15 +81,19 @@ Frontier-Engineering、HeuriGym、Frontier-CS 和 OpenEvolve worker 分别使用
 
 ```text
 third_party/{ale-bench,autolab,frontier-cs,frontier-engineering,
-             heurigym,swarmresearch,swarmresearch-paper-reproduce,
+             edgebench,heurigym,swarmresearch,swarmresearch-paper-reproduce,
              skydiscover,openevolve,goal-plus}
 ```
 
 runner 不再依赖 `code/` 下的旁路 checkout。`environment/upstreams.json` 是
 目录名、fork 和 commit 的唯一安装清单；出现失败的 staging checkout 时脚本
 会保留 `<name>_bootstrap_incomplete`，不会删除或覆盖现有目录。
-当前机器的 10 个 active checkout 已全部通过 sanitized
-[`full doctor`](../evidence/environment/2026-07-23-unified-third-party-doctor.json)。
+当前机器的前 10 个 active checkout 已通过 sanitized
+[`full doctor`](../evidence/environment/2026-07-23-unified-third-party-doctor.json)；
+新增 EdgeBench 由独立
+[`profile doctor`](../evidence/environment/2026-07-23-edgebench-vliw-doctor.json)
+验证。下一次全量环境冻结时应生成包含 11 个 checkout 的新 full-doctor
+evidence。
 
 ## Standalone benchmark 统一入口
 

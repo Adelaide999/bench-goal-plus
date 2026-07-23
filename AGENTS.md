@@ -42,6 +42,27 @@ python3 scripts/repro_env.py bootstrap --only heurigym
 python3 scripts/repro_env.py doctor --only heurigym
 ```
 
+EdgeBench 仍由 native SForge 拥有 work container、hidden judge 和最终归档；
+本仓只管理 pinned source/data、campaign 生命周期与汇总：
+
+```bash
+python3 scripts/repro_env.py bootstrap --only edgebench
+.bench-env/venv/bin/python experiments/edgebench/experiment.py provision \
+  --profile vliw-smoke
+.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
+  --profile vliw-smoke
+.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
+  --profile vliw-smoke --campaign-id vliw-matched-01
+.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
+  --campaign vliw-matched-01 --detach
+.bench-env/venv/bin/python experiments/edgebench/experiment.py status \
+  --campaign vliw-matched-01
+```
+
+Use `stop --campaign ...` for a recoverable `SIGINT` closeout; never delete a
+partial campaign. Plain Codex maps `K` to independent SForge replicas, while
+Goal Plus maps the same `K` to internal workers in one outer SForge run.
+
 Prepare and verify a model-free Goal Plus task workspace. Preparation materializes only the task, evaluator wrapper, and portable Goal Plus host assets; `.gp/` must not exist yet:
 
 ```bash

@@ -1,0 +1,73 @@
+{
+  "checked_at": "2026-07-23T09:15:22+00:00",
+  "checks": [
+    {
+      "actual_commit": "b27bf1bfc6978238561afd720f7bf036ed389f1a",
+      "expected_commit": "b27bf1bfc6978238561afd720f7bf036ed389f1a",
+      "name": "checkout:edgebench",
+      "passed": true
+    },
+    {
+      "actual_commit": "05626b18b23bbd2ec97713246de989c07be1f842",
+      "expected_commit": "05626b18b23bbd2ec97713246de989c07be1f842",
+      "name": "checkout:goal-plus",
+      "passed": true
+    },
+    {
+      "name": "entrypoint:sforge",
+      "passed": true,
+      "path": ".bench-env/venv/bin/sforge"
+    },
+    {
+      "name": "runtime:sforge-server-dependencies",
+      "passed": true,
+      "stderr": null
+    },
+    {
+      "name": "runtime:repository-local-temp",
+      "passed": true,
+      "path": ".tmp"
+    },
+    {
+      "name": "auth:codex",
+      "passed": true,
+      "policy": "SFORGE_CODEX_AUTH_FILE or ~/.codex/auth.json"
+    },
+    {
+      "architecture": "x86_64",
+      "name": "docker:engine",
+      "passed": true,
+      "stderr": null
+    },
+    {
+      "actual": "x86_64",
+      "name": "docker:linux-amd64",
+      "passed": true,
+      "required": "linux/amd64"
+    },
+    {
+      "name": "task:vliw_kernel_optimization",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/vliw_kernel_optimization.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:vliw_kernel_optimization",
+      "passed": true
+    },
+    {
+      "image": "edgebench.work.vliw_kernel_optimization:9fa380a0ebef",
+      "name": "image:edgebench.work.vliw_kernel_optimization:9fa380a0ebef",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.vliw_kernel_optimization:5cdef0021634",
+      "name": "image:edgebench.judge.vliw_kernel_optimization:5cdef0021634",
+      "passed": true
+    }
+  ],
+  "ok": true,
+  "profile": "vliw-smoke",
+  "schema_version": 1
+}

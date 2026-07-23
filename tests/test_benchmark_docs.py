@@ -12,6 +12,7 @@ BENCHMARK_DOCS = (
     "autolab-cpu.md",
     "swarmresearch-15.md",
     "frontier-cs-algorithmic.md",
+    "edgebench.md",
 )
 REQUIRED_CASE_SECTIONS = (
     "## 30 秒理解",
@@ -102,6 +103,7 @@ class BenchmarkDocsTest(unittest.TestCase):
             "AutoLab CPU subset",
             "SwarmResearch 15",
             "Frontier-CS Algorithmic",
+            "EdgeBench open-source subset",
         ):
             with self.subTest(benchmark=benchmark_name):
                 self.assertIn(f"### {benchmark_name}", protocol)
@@ -118,7 +120,8 @@ class BenchmarkDocsTest(unittest.TestCase):
             "`bench-goal-plus` 要新增什么",
             "`goal-plus` core 要改什么",
             "OpenEvolve CPU examples（任务包 + 原生基线）",
-            "Plain Codex 已在 ALE 与 OpenEvolve Function Minimization 各形成 1 题做题闭环",
+            "ALE、HeuriGym、AutoLab、Frontier-Engineering",
+            "Frontier-CS 与 EdgeBench 已各有至少一题的 Plain / Goal Plus 真实路径证据",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, protocol)

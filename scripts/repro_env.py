@@ -166,7 +166,16 @@ def sha256_file(path: Path) -> str:
 
 
 def package_versions(python: Path) -> dict[str, str | None]:
-    packages = ("openevolve", "goal-plus", "fastmcp", "numpy", "scipy", "openai")
+    packages = (
+        "openevolve",
+        "goal-plus",
+        "sforge",
+        "fastapi",
+        "fastmcp",
+        "numpy",
+        "scipy",
+        "openai",
+    )
     script = (
         "import importlib.metadata,json\n"
         f"names={packages!r}\n"
@@ -252,6 +261,15 @@ def collect_doctor(
                 "version": versions.get(package),
             }
         )
+    if "edgebench" in chosen:
+        for package in ("sforge", "fastapi"):
+            checks.append(
+                {
+                    "name": f"package:{package}",
+                    "passed": bool(versions.get(package)),
+                    "version": versions.get(package),
+                }
+            )
 
     for executable in (
         "openevolve-run",
@@ -265,6 +283,15 @@ def collect_doctor(
         checks.append(
             {
                 "name": f"entrypoint:{executable}",
+                "passed": bool(result and result.returncode == 0),
+            }
+        )
+    if "edgebench" in chosen:
+        path = venv_bin(venv) / "sforge"
+        result = run([str(path), "--help"], check=False) if path.is_file() else None
+        checks.append(
+            {
+                "name": "entrypoint:sforge",
                 "passed": bool(result and result.returncode == 0),
             }
         )
