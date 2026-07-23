@@ -13,7 +13,7 @@ Frontier-Engineering 面向真实工程优化：候选通常是源码、设计�
 | Docker | 当前 MallocLab **不需要**；本机 C 编译器 + `make` 即可 |
 | 无 Docker 环境 | 可以跑 MallocLab；其余 9 题仍需逐题确认 runtime，不据此宣称全套可跑 |
 | 当前门禁 | MallocLab host evaluator 与 Plain/Goal Plus runner 已接；其余 9 题 runtime 未冻结 |
-| 固定源码 | `EinsiaLab/Frontier-Engineering@e3fa29c` |
+| 跟踪源码 | `ck0123/Frontier-Engineering@main`；run manifest 记录实际 commit |
 
 v1-lite 涵盖 MallocLab、量子路由、JobShop、库存优化、电池快充、机械臂周期、全息聚焦、无线仿真、反应优化和拓扑优化。
 

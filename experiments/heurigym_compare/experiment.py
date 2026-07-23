@@ -102,6 +102,26 @@ def runtime_bin(venv: Path) -> Path:
     return venv / ("Scripts" if os.name == "nt" else "bin")
 
 
+def checkout_branch(path: Path) -> str | None:
+    completed = subprocess.run(
+        ["git", "-C", str(path), "symbolic-ref", "--short", "-q", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.stdout.strip() if completed.returncode == 0 else None
+
+
+def checkout_dirty(path: Path) -> bool:
+    completed = subprocess.run(
+        ["git", "-C", str(path), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return bool(completed.stdout.strip())
+
+
 def prepare(args: argparse.Namespace) -> int:
     configure_adapter(args.benchmark)
     if args.wall_time_seconds <= args.soft_closeout_seconds:
@@ -139,10 +159,12 @@ def prepare(args: argparse.Namespace) -> int:
             raise FileNotFoundError(
                 f"managed {name} checkout is missing: {path}; run repro_env.py bootstrap"
             )
-        expected = upstreams[name]["pinned_commit"]
-        actual = git_commit(path)
+        expected = upstreams[name]["tracking_branch"]
+        actual = checkout_branch(path)
         if actual != expected:
-            raise RuntimeError(f"{name} commit mismatch: expected {expected}, got {actual}")
+            raise RuntimeError(f"{name} branch mismatch: expected {expected}, got {actual}")
+        if checkout_dirty(path):
+            raise RuntimeError(f"managed {name} checkout has local changes: {path}")
 
     run_dir = (args.run_dir or default_run_dir(args.method)).expanduser().absolute()
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -194,7 +216,7 @@ def prepare(args: argparse.Namespace) -> int:
         (workspace / "GOAL.md").write_text(goal_prompt)
         workspaces.append(workspace)
         workspace_commits.append(
-            commit_workspace(workspace, "install pinned Goal Plus host assets")
+            commit_workspace(workspace, "install managed Goal Plus host assets")
         )
         common_prompt = render_plain_prompt(
             task_text, args.wall_time_seconds, args.soft_closeout_seconds
@@ -239,6 +261,11 @@ def prepare(args: argparse.Namespace) -> int:
             "direction": DIRECTION,
             "codex_sandbox": CODEX_SANDBOX,
             "upstream_key": UPSTREAM_KEY,
+            "upstream_tracking_branch": (
+                upstreams[UPSTREAM_KEY]["tracking_branch"]
+                if LOCAL_SOURCE_RELATIVE is None
+                else None
+            ),
             "upstream_commit": git_commit(benchmark_root),
             "case_set": CASE_SET_DESCRIPTION,
             "source_kind": source_kind,
@@ -248,9 +275,17 @@ def prepare(args: argparse.Namespace) -> int:
             "manifest": str(args.environment_manifest.absolute()),
             "checkout_root": str(checkout_root),
             "benchmark_root": str(benchmark_root),
+            "benchmark_branch": checkout_branch(benchmark_root),
             "benchmark_commit": git_commit(benchmark_root),
+            "benchmark_tracking_branch": (
+                upstreams[UPSTREAM_KEY]["tracking_branch"]
+                if LOCAL_SOURCE_RELATIVE is None
+                else None
+            ),
             "goal_plus_root": str(goal_plus_root),
+            "goal_plus_branch": checkout_branch(goal_plus_root),
             "goal_plus_commit": git_commit(goal_plus_root),
+            "goal_plus_tracking_branch": upstreams["goal_plus"]["tracking_branch"],
             "runtime_bin": str(runtime_bin(args.venv.expanduser().absolute())),
         },
         "workspace": workspace_value,
@@ -297,7 +332,7 @@ def evaluate_with_controller_runtime(
 def controller_subprocess_environment(
     *, runtime_bin_dir: Path, verifier_tmpdir: Path
 ):
-    """Give controller-owned Goal Plus verifiers the pinned benchmark runtime."""
+    """Give controller-owned Goal Plus verifiers the resolved benchmark runtime."""
     updates = {
         "PATH": str(runtime_bin_dir) + os.pathsep + os.environ.get("PATH", ""),
         "GOAL_PLUS_VERIFIER_TMPDIR": str(verifier_tmpdir),

@@ -14,7 +14,7 @@ Runtime / host
   Codex CLI、Pi、Goal Plus runtime、SkyDiscover、OpenEvolve、SForge
           ↓ 负责启动模型、进程、workspace 和上游 harness
 bench-goal-plus
-  固定版本、预算 T/K、运行生命周期、usage/evaluator ledger 和结果汇总
+  tracking branch、resolved commit、预算 T/K、运行生命周期、usage/evaluator ledger 和结果汇总
 ```
 
 同一个 benchmark 可以交给多种方法；同一种方法也应该跨多个 benchmark
@@ -54,7 +54,7 @@ benchmark。
 | OpenEvolve | 搜索方法及参考 runtime | 它的 `examples/` 整体不是正式 benchmark | 原生方法 baseline；同时借用筛选后的 example task 做接线和机制实验 |
 | SwarmResearch | 方法仓 + 论文实验组织 | 不是一套全新的统一 judge | 方法作为 Swarm baseline；Math/ADRS/ALE 15 题作为可复用实验 substrate |
 | SForge | EdgeBench 原生运行/评分 harness | 不是 agent 方案 | 管 EdgeBench work container、hidden judge 和 archive |
-| bench-goal-plus | 实验控制面 | 不替代任何 benchmark evaluator | 管 pinned checkout、workspace、`T/K`、进程、usage 和结果 |
+| bench-goal-plus | 实验控制面 | 不替代任何 benchmark evaluator | 管 branch-tracked checkout、run-level commit snapshot、workspace、`T/K`、进程、usage 和结果 |
 
 OpenEvolve 的 12 个 `cpu_portable` examples 与 SkyDiscover 的 Circle Packing
 可以本机运行，但它们应标为 **method-repo task pack / diagnostic task**。除非

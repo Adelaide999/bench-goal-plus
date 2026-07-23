@@ -1,4 +1,4 @@
-# Shared runtime dependencies for pinned benchmark and search-runtime checkouts.
+# Shared runtime dependencies for branch-tracked benchmark and search-runtime checkouts.
 # Exact transitive versions are generated into requirements.lock.
 ahocorapy>=1.6,<2
 cairosvg>=2.7,<3

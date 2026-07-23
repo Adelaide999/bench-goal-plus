@@ -25,6 +25,7 @@ from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
     describe_task,
     evaluate_workspace,
+    git_branch,
     git_commit,
     list_catalog_tasks,
     materialize_workspace,
@@ -78,6 +79,16 @@ def runtime_python(venv: Path) -> Path:
 
 def runtime_bin(venv: Path) -> Path:
     return venv / ("Scripts" if os.name == "nt" else "bin")
+
+
+def checkout_dirty(path: Path) -> bool:
+    completed = subprocess.run(
+        ["git", "-C", str(path), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return bool(completed.stdout.strip())
 
 
 def canonical_method(method: str) -> str:
@@ -358,6 +369,18 @@ def prepare(args: argparse.Namespace) -> int:
     upstreams = environment["upstreams"]
     openevolve_root = checkout_root / upstreams["openevolve"]["checkout_dir"]
     goal_plus_root = checkout_root / upstreams["goal_plus"]["checkout_dir"]
+    for name, path in (
+        ("openevolve", openevolve_root),
+        ("goal_plus", goal_plus_root),
+    ):
+        expected_branch = upstreams[name]["tracking_branch"]
+        actual_branch = git_branch(path)
+        if actual_branch != expected_branch:
+            raise RuntimeError(
+                f"{name} branch mismatch: expected {expected_branch}, got {actual_branch}"
+            )
+        if checkout_dirty(path):
+            raise RuntimeError(f"managed {name} checkout has local changes: {path}")
     python = runtime_python(args.venv.expanduser().absolute())
     if not python.is_file():
         raise FileNotFoundError(f"reproducible runtime is missing: {python}")
@@ -445,7 +468,7 @@ def prepare(args: argparse.Namespace) -> int:
         (workspace / "GOAL.md").write_text(goal)
         workspaces.append(workspace)
         workspace_commits.append(
-            commit_workspace(workspace, "install pinned Goal Plus host assets")
+            commit_workspace(workspace, "install managed Goal Plus host assets")
         )
         common_prompt = render_common_task_prompt(
             task_text,
@@ -488,6 +511,9 @@ def prepare(args: argparse.Namespace) -> int:
             "primary_metric": description["evaluation"]["primary_metric"],
             "direction": description["evaluation"]["direction"],
             "execution_profile": task.profile,
+            "upstream_tracking_branch": upstreams["openevolve"][
+                "tracking_branch"
+            ],
             "upstream_commit": task.upstream_commit,
             "initial_program": str(task.initial_program),
             "evaluator": str(task.evaluator),
@@ -500,8 +526,16 @@ def prepare(args: argparse.Namespace) -> int:
             "manifest": str(args.environment_manifest.absolute()),
             "runtime_python": str(python),
             "openevolve_root": str(openevolve_root),
+            "openevolve_tracking_branch": upstreams["openevolve"][
+                "tracking_branch"
+            ],
+            "openevolve_branch": git_branch(openevolve_root),
             "openevolve_commit": git_commit(openevolve_root),
             "goal_plus_root": str(goal_plus_root),
+            "goal_plus_tracking_branch": upstreams["goal_plus"][
+                "tracking_branch"
+            ],
+            "goal_plus_branch": git_branch(goal_plus_root),
             "goal_plus_commit": git_commit(goal_plus_root),
         },
         "workspace": str(workspaces[0]) if len(workspaces) == 1 else None,

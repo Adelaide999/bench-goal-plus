@@ -1,8 +1,9 @@
 # EdgeBench campaign controller
 
 这个目录把 EdgeBench 纳入 `bench-goal-plus` 控制面，但不复制 SForge 已经做好的
-容器、hidden judge、auto-eval、replica 和 final archive。控制面固定 source/data
-版本，生成实验单元，启动/监控进程，并把 SForge raw artifact 汇总成同口径表。
+容器、hidden judge、auto-eval、replica 和 final archive。控制面跟踪 source
+branch、固定 data revision，生成实验单元，启动/监控进程，并把 SForge raw
+artifact 汇总成同口径表；campaign manifest 记录实际 source commit。
 
 ## 方法与 K 的映射
 
@@ -29,7 +30,7 @@ python3 scripts/repro_env.py bootstrap --only edgebench
 `provision` 只下载 profile 需要的 task definitions，并只 pull 这些题的 work/judge
 images。`doctor` 检查：
 
-- EdgeBench 与 Goal Plus exact commit；
+- EdgeBench 与 Goal Plus tracked branch、clean state 和当次 resolved commit；
 - SForge entrypoint；
 - Codex auth 文件存在性，但不读取或记录其内容；
 - Docker daemon 与 `linux/amd64`；

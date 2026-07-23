@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "python": "3.12",
   "codex_min_version": "0.144.1",
   "pi_min_version": "0.80.6",
@@ -7,21 +7,21 @@
     "openevolve": {
       "repository": "https://github.com/ck0123/openevolve.git",
       "checkout_dir": "openevolve",
-      "pinned_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2",
+      "tracking_branch": "bench-goal-plus",
       "always": true,
       "editable": true
     },
     "goal_plus": {
       "repository": "https://github.com/ck0123/goal-plus.git",
       "checkout_dir": "goal-plus",
-      "pinned_commit": "e6fb57ce6e5eadb069ff3962aa8b9671b2662c68",
+      "tracking_branch": "main",
       "always": true,
       "editable": true
     },
     "edgebench": {
       "repository": "https://github.com/ck0123/EdgeBench.git",
       "checkout_dir": "edgebench",
-      "pinned_commit": "b27bf1bfc6978238561afd720f7bf036ed389f1a",
+      "tracking_branch": "mac",
       "editable": true,
       "dataset_repository": "ByteDance-Seed/EdgeBench",
       "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9"
@@ -29,17 +29,17 @@
     "ale_bench": {
       "repository": "https://github.com/ck0123/ALE-Bench.git",
       "checkout_dir": "ale-bench",
-      "pinned_commit": "f7d927906dc1dcd860ee086e4560d576438b1354"
+      "tracking_branch": "main"
     },
     "heurigym": {
       "repository": "https://github.com/ck0123/heurigym.git",
       "checkout_dir": "heurigym",
-      "pinned_commit": "e3948542438b2df07a8d20c2f264991719a5585e"
+      "tracking_branch": "main"
     },
     "frontier_engineering": {
       "repository": "https://github.com/ck0123/Frontier-Engineering.git",
       "checkout_dir": "frontier-engineering",
-      "pinned_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+      "tracking_branch": "main",
       "sparse_paths": [
         "/frontier_eval/tasks/malloclab/",
         "/benchmarks/ComputerSystems/MallocLab/"
@@ -48,22 +48,22 @@
     "autolab": {
       "repository": "https://github.com/ck0123/autolab.git",
       "checkout_dir": "autolab",
-      "pinned_commit": "7aff5fe71dfbe152fb0b8e8ac8087210b4bc27d5"
+      "tracking_branch": "main"
     },
     "swarmresearch": {
       "repository": "https://github.com/ck0123/SwarmResearch.git",
       "checkout_dir": "swarmresearch",
-      "pinned_commit": "cfdcb71c85ed16e05536a8fce083b075a5e17b3c"
+      "tracking_branch": "main"
     },
     "swarmresearch_tasks": {
       "repository": "https://github.com/ck0123/swarmresearch-paper-reproduce.git",
       "checkout_dir": "swarmresearch-paper-reproduce",
-      "pinned_commit": "f8cb3b8f6b5e884ad48a03fb65b56e01c3f7bb7b"
+      "tracking_branch": "main"
     },
     "frontier_cs": {
       "repository": "https://github.com/ck0123/Frontier-CS.git",
       "checkout_dir": "frontier-cs",
-      "pinned_commit": "07500f9e5751ddf86ef2760e0d35ff93e6a96a29",
+      "tracking_branch": "main",
       "sparse_paths": [
         "/algorithmic/Dockerfile",
         "/algorithmic/entrypoint.sh",
@@ -78,7 +78,7 @@
     "skydiscover": {
       "repository": "https://github.com/ck0123/skydiscover.git",
       "checkout_dir": "skydiscover",
-      "pinned_commit": "4734f324c4c3909eb3c8a4bc72a4ca34e6e679ed"
+      "tracking_branch": "main"
     }
   }
 }

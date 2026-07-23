@@ -13,7 +13,7 @@ ALE-Bench 把 AtCoder Heuristic Contest 变成 agent benchmark：agent 不是回
 | Docker | **必需**；当前 official-lite 评分路径使用 C++ work image 和 judge image |
 | 无 Docker 环境 | 可读题和 materialize，但不能通过当前支持路径获得官方分数 |
 | 当前门禁 | 通用 Plain/Goal Plus runner 与 official-lite evaluator 已接；两条 Codex 路径都有真实 E2E 证据 |
-| 固定源码 | `SakanaAI/ALE-Bench@f7d9279` |
+| 跟踪源码 | `ck0123/ALE-Bench@main`；run manifest 记录实际 commit |
 
 它适合证明 Goal Plus 的点，不是“模型会不会写竞赛代码”，而是：相同模型和 evaluator-call 预算下，多 lineage、反馈利用、失败恢复和 best-seen 保留是否带来稳定 raw-score 提升。
 

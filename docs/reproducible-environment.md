@@ -2,9 +2,10 @@
 
 ## 目标
 
-换到一台新的 Mac 或 Linux 主机后，只依赖本仓的 `AGENTS.md` 和固定
-manifest，就能重建同一 Python runtime、同一 OpenEvolve/Goal Plus 与
-benchmark 源码版本，并生成不会污染上游 checkout 的实验 workspace。
+换到一台新的 Mac 或 Linux 主机后，只依赖本仓的 `AGENTS.md` 和环境
+manifest，就能重建同一 Python runtime、跟踪指定 OpenEvolve/Goal Plus 与
+benchmark fork branch，并生成不会污染上游 checkout 的实验 workspace。每次
+prepare 会把当时解析到的 commit 写入 run manifest，保证结果可追溯。
 
 本仓只保存控制面和 lock；不 vendor 上游源码、不保存 virtualenv、不保存模型密钥。默认布局为：
 
@@ -12,7 +13,7 @@ benchmark 源码版本，并生成不会污染上游 checkout 的实验 workspac
 bench-goal-plus/
 ├── .tmp/                    controller、verifier、build 和子进程临时文件，Git ignored
 ├── .bench-env/venv/        可重建的本机 Python runtime，Git ignored
-├── third_party/            所有固定 commit 的上游 checkout，Git ignored
+├── third_party/            所有 branch-tracked 上游 checkout，Git ignored
 │   ├── openevolve/
 │   ├── goal-plus/
 │   ├── heurigym/
@@ -46,13 +47,14 @@ python3 scripts/repro_env.py doctor
 
 1. 把当前进程和所有子进程的 `TMPDIR`、`TMP`、`TEMP` 固定到本仓 `.tmp/`，不依赖 `/tmp`、`/private/tmp` 或 `/var/tmp`；
 2. 读取 `environment/upstreams.json`；
-3. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，并 checkout 到固定 commit；
+3. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，checkout 到 manifest 指定 branch，并对 clean checkout 做 fast-forward-only 更新；
 4. 创建 `.bench-env/venv` 的 Python 3.12 环境；
 5. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的 OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
 6. 写入 ignored 的 `.bench-env/state.json` 并运行同一套 doctor 检查。
 
-如果 checkout 已存在但 commit 不符，脚本会停止并显示差异，不会 checkout、
-reset 或删除用户工作。clone 先写入精确的
+如果 checkout dirty、origin/branch 不符、包含未 push commit 或无法
+fast-forward，脚本会停止并显示差异，不会 reset 或删除用户工作；正常落后于
+远端 branch 时会自动 fast-forward。clone 先写入精确的
 `<name>_bootstrap_incomplete` staging path，成功后才重命名；失败目录会原样
 保留供检查。可以传一个全新的统一目录：
 
@@ -70,8 +72,9 @@ python3 scripts/repro_env.py doctor --only heurigym
 
 `--only` 可重复；脚本会自动追加 `always=true` 的 OpenEvolve 和 Goal Plus
 runtime。无 `--only` 时才准备 manifest 中的全部上游。`doctor` 检查选中
-checkout 的 exact commit/dirty state、Python 3.12、关键 package/entrypoint 和
-Codex/Pi 最低版本，以及本仓 `.tmp/` 是否存在且可写。`.venv/` 是历史本机缓存，不能复制到其他机器；复现标准
+checkout 的 origin、branch、upstream、与最近 fetch 的 remote-tracking commit
+一致且 clean，同时检查 Python 3.12、关键 package/entrypoint、Codex/Pi 最低
+版本和本仓 `.tmp/` 是否存在且可写。`.venv/` 是历史本机缓存，不能复制到其他机器；复现标准
 是从 lock 重建 `.bench-env/venv` 与 `third_party/`。
 
 Adapter 自己的临时编译目录也必须通过 `bench_runtime_paths.py` 创建。AutoLab、
@@ -89,7 +92,7 @@ third_party/{ale-bench,autolab,frontier-cs,frontier-engineering,
 ```
 
 runner 不再依赖 `code/` 下的旁路 checkout。`environment/upstreams.json` 是
-目录名、fork 和 commit 的唯一安装清单；出现失败的 staging checkout 时脚本
+目录名、fork 和 tracking branch 的唯一安装清单；出现失败的 staging checkout 时脚本
 会保留 `<name>_bootstrap_incomplete`，不会删除或覆盖现有目录。
 当前机器的前 10 个 active checkout 已通过 sanitized
 [`full doctor`](../evidence/environment/2026-07-23-unified-third-party-doctor.json)；
@@ -157,7 +160,10 @@ ALE 使用官方 `ale-bench:cpp20-202301` 镜像。首次 evaluator 会构建 Ru
   --run-dir runs/openevolve-compare/<run-id>
 ```
 
-这一步复用 pinned OpenEvolve evaluator，不调用模型。Goal Plus 的 project `.codex` assets 会从固定 checkout 复制到 run-local workspace；prepare 完成时 `.gp/` 尚不存在，只有真正发送自然 `/goal-plus` prompt 后才会在该 workspace 内生成。脚本不会自动删除 run directory。
+这一步复用当次 branch snapshot 的 OpenEvolve evaluator，不调用模型。Goal Plus
+的 project `.codex` assets 会从 managed checkout 复制到 run-local workspace；
+该 OpenEvolve/Goal Plus commit 会写入 manifest。prepare 完成时 `.gp/` 尚不存在，
+只有真正发送自然 `/goal-plus` prompt 后才会在该 workspace 内生成。脚本不会自动删除 run directory。
 
 ## 跑四条路径
 

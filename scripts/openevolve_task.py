@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize and evaluate a pinned OpenEvolve example task."""
+"""Materialize and evaluate an OpenEvolve example from a managed branch snapshot."""
 
 from __future__ import annotations
 

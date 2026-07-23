@@ -13,7 +13,7 @@ HeuriGym 是 9 道科学与工程组合优化题。Agent 的产物是一个可�
 | Docker | **不需要**；使用 pinned Python 环境和已 bootstrap 的数据 |
 | 无 Docker 环境 | 可以运行当前 `operator_scheduling` 及后续 host Python 任务 |
 | 当前门禁 | `operator_scheduling` 已完成 Plain Codex 与 Goal Plus + Codex 真实 E2E；其余 8 题待接 |
-| 固定源码 | `ck0123/heurigym@e394854` |
+| 跟踪源码 | `ck0123/heurigym@main`；run manifest 记录实际 commit |
 
 9 题包括 `operator_scheduling`、`egraph_extraction`、`global_routing`、`intra_op_parallel`、`crew_pairing`、`pickup_delivery_time_windows`、`pedigree`、`protein_sequence_design` 和 `technology_mapping`。
 

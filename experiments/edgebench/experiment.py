@@ -87,6 +87,26 @@ def git_head(path: Path) -> str | None:
     return completed.stdout.strip() if completed.returncode == 0 else None
 
 
+def git_branch(path: Path) -> str | None:
+    completed = subprocess.run(
+        ["git", "-C", str(path), "symbolic-ref", "--short", "-q", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.stdout.strip() if completed.returncode == 0 else None
+
+
+def git_dirty(path: Path) -> bool | None:
+    completed = subprocess.run(
+        ["git", "-C", str(path), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return bool(completed.stdout.strip()) if completed.returncode == 0 else None
+
+
 def upstream_entry(name: str) -> dict[str, Any]:
     manifest = read_json(UPSTREAM_MANIFEST)
     return dict(manifest["upstreams"][name])
@@ -252,8 +272,8 @@ def provision(profile: dict[str, Any]) -> int:
 
 
 def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
-    expected_edge = upstream_entry("edgebench")["pinned_commit"]
-    expected_goal = upstream_entry("goal_plus")["pinned_commit"]
+    expected_edge = upstream_entry("edgebench")["tracking_branch"]
+    expected_goal = upstream_entry("goal_plus")["tracking_branch"]
     checks: list[dict[str, Any]] = []
 
     def add(name: str, passed: bool, **details: Any) -> None:
@@ -261,15 +281,20 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
 
     add(
         "checkout:edgebench",
-        git_head(EDGE_ROOT) == expected_edge,
-        expected_commit=expected_edge,
+        git_branch(EDGE_ROOT) == expected_edge and git_dirty(EDGE_ROOT) is False,
+        expected_branch=expected_edge,
+        actual_branch=git_branch(EDGE_ROOT),
         actual_commit=git_head(EDGE_ROOT),
+        dirty=git_dirty(EDGE_ROOT),
     )
     add(
         "checkout:goal-plus",
-        git_head(GOAL_PLUS_ROOT) == expected_goal,
-        expected_commit=expected_goal,
+        git_branch(GOAL_PLUS_ROOT) == expected_goal
+        and git_dirty(GOAL_PLUS_ROOT) is False,
+        expected_branch=expected_goal,
+        actual_branch=git_branch(GOAL_PLUS_ROOT),
         actual_commit=git_head(GOAL_PLUS_ROOT),
+        dirty=git_dirty(GOAL_PLUS_ROOT),
     )
     add("entrypoint:sforge", SFORGE.is_file(), path=" .bench-env/venv/bin/sforge".strip())
     imports = run_capture(
@@ -449,7 +474,15 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "profile": profile["id"],
             "state": "prepared",
             "created_at": utc_now(),
+            "edgebench_tracking_branch": upstream_entry("edgebench")[
+                "tracking_branch"
+            ],
+            "edgebench_branch": git_branch(EDGE_ROOT),
             "edgebench_commit": git_head(EDGE_ROOT),
+            "goal_plus_tracking_branch": upstream_entry("goal_plus")[
+                "tracking_branch"
+            ],
+            "goal_plus_branch": git_branch(GOAL_PLUS_ROOT),
             "goal_plus_commit": git_head(GOAL_PLUS_ROOT),
             "dataset_revision": profile["dataset_revision"],
             "task_ids": list(profile["task_ids"]),

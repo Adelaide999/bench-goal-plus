@@ -1,6 +1,6 @@
 # OpenEvolve task four-path comparison
 
-This harness runs one pinned OpenEvolve example through four independent paths while sharing the seed, official evaluator, model identity, wall-clock budget `T`, and live concurrency `K`:
+This harness runs one OpenEvolve example from the managed branch snapshot through four independent paths while sharing the seed, official evaluator, model identity, wall-clock budget `T`, and live concurrency `K`. The experiment manifest records the resolved source commits:
 
 - `openevolve`: native OpenEvolve population/island search;
 - `plain-codex`: `K` independent Codex lanes, followed by controller selection;

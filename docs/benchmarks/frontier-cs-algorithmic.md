@@ -13,7 +13,7 @@ Frontier-CS 把开放式计算机科学问题封装成可执行 judge。Algorith
 | Docker | **必需**；当前 problem-0 使用 pinned compile/checker judge image |
 | 无 Docker 环境 | 可 materialize 和写候选，但不能通过当前官方 checker 路径评分 |
 | 当前门禁 | problem 0 direct official checker、Plain/Goal Plus runner 和 partial-score parser 已通；两条 Codex 路径都有真实 E2E |
-| 固定源码 | `FrontierCS/Frontier-CS@07500f9` |
+| 跟踪源码 | `ck0123/Frontier-CS@main`；run manifest 记录实际 commit |
 
 Frontier-CS 还包含 Research 和 2.0 类任务；它们有不同依赖与硬件边界，不混入本页的 188 题 Algorithmic 规模估算。
 

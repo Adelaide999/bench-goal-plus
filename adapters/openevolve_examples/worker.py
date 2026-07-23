@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run OpenEvolve config/evaluator code inside its pinned Python environment."""
+"""Run OpenEvolve config/evaluator code inside the locked Python environment."""
 
 from __future__ import annotations
 

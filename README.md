@@ -25,7 +25,7 @@ OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为
 ## 当前结果
 
 - 已跟踪 10 个 GitHub fork；EdgeBench fork 也已纳入统一版本清单。
-- 11 个受管源码/runtime checkout 已全部收敛到 ignored `third_party/`；EdgeBench 可单独执行 `bootstrap --only edgebench`，其 SForge 与 Goal Plus exact commit、任务 revision、Codex auth policy 和单题镜像由同一 control plane 检查。
+- 11 个受管源码/runtime checkout 已全部收敛到 ignored `third_party/`；每个仓只跟踪明确的 fork branch，`bootstrap` 自动 fast-forward，具体实验则在 run manifest 冻结当次 commit。EdgeBench 可单独执行 `bootstrap --only edgebench`，其 SForge/Goal Plus branch、任务 revision、Codex auth policy 和单题镜像由同一 control plane 检查。
 - PERFOPT-Bench 当前没有可 fork 的公开可执行 GitHub 仓库，只有 4open.science artifact 与宣传站，因此明确标为 `blocked`，不拿网站仓冒充 benchmark。
 - ALE-Bench Lite、HeuriGym、AutoLab 已有本机官方 verifier / 远端模型 smoke 证据。
 - ALE-Bench Lite `ahc027` 已完成首个真实 plain Codex smoke：`gpt-5.4-mini` 改写候选后 5/5 public-lite cases accepted，raw score 从 61,302,533 降到 55,181,186（该题越低越好，改善 9.99%）。
@@ -53,9 +53,9 @@ OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为
   `REQUIRED / NO / MIXED / N/A`；[Docker 依赖速查](docs/benchmarks/README.md#docker-依赖速查)
   明确没有 Docker 时仍可运行的 task 与不能替代的官方评分边界。
 - 已建立 [Goal Plus 接入与并发实验协议](docs/goal-plus-benchmark-experiment.md)：区分 agent/evaluator/task 三层并发，定义 matched-budget baseline、逐 benchmark 整改和非 Pass@K 的验收门槛；OpenEvolve 自带 CPU 任务见 [示例审计](docs/openevolve-cpu-examples.md)。
-- 已建立 [可移植复现环境](docs/reproducible-environment.md)：固定 Python 依赖及 OpenEvolve/Goal Plus commit，自动 bootstrap/doctor，并为四条独立路径生成隔离实验目录。Goal Plus 的 `.gp` 只存在于临时 task workspace。
+- 已建立 [可移植复现环境](docs/reproducible-environment.md)：固定 Python 依赖、跟踪 OpenEvolve/Goal Plus fork branch，自动 bootstrap/doctor，并在每个 run manifest 记录实际 commit；四条独立路径各自生成隔离实验目录。Goal Plus 的 `.gp` 只存在于临时 task workspace。
 - OpenEvolve example 的自然 `/goal-plus` 标准入口已成为统一模板；ALE-Bench Lite、HeuriGym、AutoLab、Frontier-Engineering 和 Frontier-CS 现在复用同一 common-prompt / Goal Plus-suffix 结构。
-- EdgeBench 已接入 campaign controller：固定 fork 与 HuggingFace revision，按 profile 精确拉取任务/镜像，区分 Plain Codex 的 K 个独立 replica 与 Goal Plus 的 K 个 internal workers，并提供 `prepare / run / status / stop / finalize`。VLIW 已完成同模型、同 `T/K` 的真实 lifecycle E2E，judge lifecycle、evaluator calls 和 Codex session usage 均可回收；`T=120s` 尚不足以 dispatch Goal Plus worker，所以它仍不是方法效果对比。
+- EdgeBench 已接入 campaign controller：跟踪 fork branch、固定 HuggingFace revision，按 profile 精确拉取任务/镜像，区分 Plain Codex 的 K 个独立 replica 与 Goal Plus 的 K 个 internal workers，并提供 `prepare / run / status / stop / finalize`。VLIW 已完成同模型、同 `T/K` 的真实 lifecycle E2E，judge lifecycle、evaluator calls 和 Codex session usage 均可回收；`T=120s` 尚不足以 dispatch Goal Plus worker，所以它仍不是方法效果对比。
 - 原先位于 Goal Plus `examples-hide/vliw_kernel_optimization` 的 host-only VLIW
   实验已迁入 [`local_examples/`](local_examples/README.md)。这里保留 public /
   held-out controller 边界和统一 Plain Codex / Goal Plus 入口；旧的定制实验
@@ -65,7 +65,7 @@ OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为
 
 每个 benchmark 按同一顺序推进：
 
-1. `source_forked`：上游、fork、commit 与许可边界已记录。
+1. `source_forked`：上游、fork、tracking branch 与许可边界已记录；实验 manifest 另存 resolved commit。
 2. `environment`：依赖与任务数据可重复安装。
 3. `official_verifier`：不依赖模型的确定性 baseline 能被官方 evaluator 接受。
 4. `legacy_agent_smoke`：上游原生 agent/API 路径至少跑通一例，用于隔离环境问题。
@@ -107,7 +107,7 @@ experiments/<benchmark>/experiment.py
   provision / doctor / prepare / run / status / stop / finalize
           │
           ▼
-third_party/<benchmark>/  ← pinned fork / pinned dataset revision
+third_party/<benchmark>/  ← tracked fork branch / pinned dataset revision
           │
           ▼
 benchmark-native harness
@@ -134,7 +134,7 @@ workspace。它不会进入正式 benchmark 数量，也不能替代 SForge hidd
 ## 仓库结构
 
 ```text
-benchmarks/registry.json       唯一状态源：上游、fork、commit、门禁、证据、下一步
+benchmarks/registry.json       唯一状态源：上游、fork、branch、门禁、证据、下一步
 docs/roadmap.md                分 benchmark 的推进计划与完成定义
 docs/experiment-taxonomy.md    Agent 方案、搜索方法、runtime、benchmark 与 task pack 分类
 docs/codex-run-contract.md     所有 benchmark 共用的 Codex 执行/证据契约
@@ -143,8 +143,8 @@ docs/benchmarks/               规模/时间总览与每套 benchmark 的代表 
 docs/goal-plus-benchmark-experiment.md  Goal Plus 接入、并发、公平预算与逐 benchmark 对标协议
 docs/openevolve-cpu-examples.md         OpenEvolve 无特殊硬件示例的主实验/诊断/暂缓分级
 docs/reproducible-environment.md         新机器 bootstrap、doctor、workspace 与实验执行手册
-environment/                             Python lock 与 OpenEvolve/Goal Plus 固定版本 manifest
-third_party/                             所有 pinned benchmark/search runtime 的统一 ignored checkout 根目录
+environment/                             Python lock 与受管 fork branch manifest
+third_party/                             所有 branch-tracked benchmark/search runtime 的统一 ignored checkout 根目录
 local_examples/                          无 Docker 的固定 task replica；只作方法实验，不冒充正式 benchmark
 experiments/openevolve_compare/          native OE / Plain Codex / Goal Plus+Codex / Goal Plus+Pi 同任务时限入口
 experiments/benchmark_compare/             standalone benchmark 与 local task 的 Plain Codex / Goal Plus+Codex 统一入口
@@ -154,7 +154,7 @@ adapters/heurigym/                        HeuriGym workspace、官方 evaluator 
 adapters/openevolve_examples/           OpenEvolve example catalog、workspace/evaluator/ticket/archive contract
 scripts/run_codex.py           通用非交互 Codex runner，保存 JSONL、usage 与 manifest
 scripts/openevolve_task.py     list/batch-seed-smoke/materialize/evaluate/archive OpenEvolve example task
-scripts/repro_env.py           创建并检查可丢弃的 `.bench-env/venv` 与 `third_party/` pinned checkouts
+scripts/repro_env.py           创建、fast-forward 并检查 `.bench-env/venv` 与 `third_party/` managed branches
 scripts/status.py              校验 registry 并打印状态矩阵
 evidence/legacy-smokes/        迁入的摘要、结果及 SkyDiscover 完整 checkpoint
 legacy/direct-api/             原有 direct-API smoke 辅助脚本，作为环境基线
@@ -163,7 +163,7 @@ scripts/verify_legacy_smokes.py 迁移证据与可选上游 raw artifact 交叉�
 tests/                         不调用真实模型的 runner/registry 测试
 ```
 
-上游仓库不作为 submodule 纳入；后续需要修改 fork 时，在 `.worktrees/` 创建干净工作区，并把 fork commit 回填到 registry。
+上游仓库不作为 submodule 纳入；后续需要修改 fork 时，在 `.worktrees/` 创建干净工作区并 push 到 registry 指定 branch。下一次 `bootstrap` 会 fast-forward；历史实验仍由各自 manifest 中的 resolved commit 定位。
 
 ## 使用
 

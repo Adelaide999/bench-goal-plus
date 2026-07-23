@@ -17,7 +17,7 @@
 - [ ] 将 Codex ST controller 产品化为 batch runner，计入 main-agent 与 worker usage。
 - [x] 为 OpenEvolve examples 实现 catalog/materialize/evaluate/archive adapter、原子 evaluator ticket 和 Plain Codex Function Minimization smoke。
 - [x] 实现相同 task/evaluator、`T/K` 外层控制的 OpenEvolve native / Plain Codex / Goal Plus runner；真实 native 与 Goal Plus 模型 run 尚待验收，OpenEvolve 内部不增加 Codex provider。
-- [x] 固定 OpenEvolve/Goal Plus commit 与 Python lock，提供 fresh-host bootstrap/doctor 和 run-local Goal Plus workspace。
+- [x] 跟踪 OpenEvolve/Goal Plus fork branch、固定 Python lock，并在 run manifest 记录 resolved commits；提供 fresh-host bootstrap/doctor 和 run-local Goal Plus workspace。
 - [ ] 为 OpenEvolve 原生 OpenAI-compatible 路径增加 usage/cost instrumentation。
 - [ ] 定义统一 run manifest 扩展：task commit、image digest、model/provider、seed、预算和网络策略。
 - [ ] 定义 evaluator-call ledger；不能用“iteration”代替真实验证次数。
@@ -85,7 +85,7 @@
 
 完成定义：
 
-- [x] 固定 fork、SForge、Goal Plus 与 HuggingFace task revision。
+- [x] 固定 fork branch、SForge/Goal Plus branch contract 与 HuggingFace task revision；campaign 记录 resolved commits。
 - [x] VLIW profile 可 provision/doctor/prepare/run/status/stop/finalize。
 - [x] Plain Codex 与 Goal Plus + Codex 同模型、同 `T/K` 完成真实 lifecycle E2E，
   并回收 evaluator calls 与 Codex session usage。

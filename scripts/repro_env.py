@@ -51,8 +51,16 @@ def run(
 
 def load_manifest(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text())
-    if payload.get("schema_version") != 1:
+    if payload.get("schema_version") != 2:
         raise RuntimeError("unsupported environment manifest schema")
+    for name, entry in payload.get("upstreams", {}).items():
+        branch = entry.get("tracking_branch")
+        if not isinstance(branch, str) or not branch:
+            raise RuntimeError(f"{name}: tracking_branch is required")
+        if branch.startswith(("-", ".", "/")) or ".." in branch:
+            raise RuntimeError(f"{name}: unsafe tracking_branch {branch!r}")
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch) is None:
+            raise RuntimeError(f"{name}: invalid tracking_branch {branch!r}")
     return payload
 
 
@@ -92,20 +100,71 @@ def checkout_paths(
     }
 
 
-def git_state(path: Path) -> dict[str, Any]:
+def normalize_repository(value: str | None) -> str | None:
+    return value.rstrip("/").removesuffix(".git") if value else None
+
+
+def git_state(path: Path, tracking_branch: str | None = None) -> dict[str, Any]:
     if not path.exists():
-        return {"exists": path.exists(), "is_git": False, "head": None, "dirty": None}
+        return {
+            "exists": False,
+            "is_git": False,
+            "head": None,
+            "branch": None,
+            "upstream": None,
+            "remote_head": None,
+            "origin_url": None,
+            "dirty": None,
+        }
     head = run(["git", "-C", str(path), "rev-parse", "HEAD"], check=False)
     status = run(["git", "-C", str(path), "status", "--porcelain"], check=False)
+    branch = run(
+        ["git", "-C", str(path), "symbolic-ref", "--short", "-q", "HEAD"],
+        check=False,
+    )
+    upstream = run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+        check=False,
+    )
+    origin = run(
+        ["git", "-C", str(path), "remote", "get-url", "origin"],
+        check=False,
+    )
+    remote_head = None
+    if tracking_branch:
+        remote = run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "rev-parse",
+                f"refs/remotes/origin/{tracking_branch}",
+            ],
+            check=False,
+        )
+        remote_head = remote.stdout.strip() if remote.returncode == 0 else None
     return {
         "exists": True,
         "is_git": head.returncode == 0,
         "head": head.stdout.strip() if head.returncode == 0 else None,
+        "branch": branch.stdout.strip() if branch.returncode == 0 else None,
+        "upstream": upstream.stdout.strip() if upstream.returncode == 0 else None,
+        "remote_head": remote_head,
+        "origin_url": origin.stdout.strip() if origin.returncode == 0 else None,
         "dirty": bool(status.stdout.strip()) if status.returncode == 0 else None,
     }
 
 
 def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
+    branch = entry["tracking_branch"]
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         staging = path.with_name(path.name + "_bootstrap_incomplete")
@@ -131,7 +190,12 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
         if entry.get("sparse_paths"):
             fetch_command.append("--filter=blob:none")
         fetch_command.extend(
-            ["--depth", "1", "origin", entry["pinned_commit"]]
+            [
+                "--depth",
+                "1",
+                "origin",
+                f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+            ]
         )
         run(fetch_command)
         if entry.get("sparse_paths"):
@@ -146,19 +210,107 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
                     *entry["sparse_paths"],
                 ]
             )
-        run(["git", "-C", str(staging), "checkout", "-q", "--detach", "FETCH_HEAD"])
+        run(
+            [
+                "git",
+                "-C",
+                str(staging),
+                "checkout",
+                "-q",
+                "-b",
+                branch,
+                "--track",
+                f"origin/{branch}",
+            ]
+        )
         staging.rename(path)
         return
-    state = git_state(path)
+    state = git_state(path, branch)
     if not state["is_git"]:
         raise RuntimeError(f"existing checkout path is not a Git repository: {path}")
-    if state["head"] != entry["pinned_commit"]:
-        raise RuntimeError(
-            f"checkout mismatch for {path}: expected {entry['pinned_commit']}, "
-            f"got {state['head']}; use a separate checkout root rather than rewriting it"
-        )
     if state["dirty"]:
         raise RuntimeError(f"checkout has local changes and will not be used: {path}")
+    if normalize_repository(state["origin_url"]) != normalize_repository(
+        entry["repository"]
+    ):
+        raise RuntimeError(
+            f"origin mismatch for {path}: expected {entry['repository']}, "
+            f"got {state['origin_url']}; use a separate checkout root"
+        )
+    fetch_command = ["git", "-C", str(path), "fetch", "--prune"]
+    if entry.get("sparse_paths"):
+        fetch_command.append("--filter=blob:none")
+    fetch_command.extend(
+        [
+            "origin",
+            f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+        ]
+    )
+    run(fetch_command)
+    state = git_state(path, branch)
+    if state["branch"] is None:
+        local_branch = run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+            ],
+            check=False,
+        )
+        if local_branch.returncode == 0:
+            run(["git", "-C", str(path), "checkout", "-q", branch])
+        else:
+            run(
+                [
+                    "git",
+                    "-C",
+                    str(path),
+                    "checkout",
+                    "-q",
+                    "-b",
+                    branch,
+                    "--track",
+                    f"origin/{branch}",
+                ]
+            )
+    elif state["branch"] != branch:
+        raise RuntimeError(
+            f"checkout {path} is on branch {state['branch']!r}, expected {branch!r}; "
+            "switch it explicitly or use a separate checkout root"
+        )
+    state = git_state(path, branch)
+    expected_upstream = f"origin/{branch}"
+    if state["upstream"] != expected_upstream:
+        run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "branch",
+                "--set-upstream-to",
+                expected_upstream,
+                branch,
+            ]
+        )
+    merged = run(
+        ["git", "-C", str(path), "merge", "--ff-only", expected_upstream],
+        check=False,
+    )
+    if merged.returncode != 0:
+        raise RuntimeError(
+            f"checkout {path} cannot fast-forward to {expected_upstream}: "
+            f"{merged.stderr.strip() or merged.stdout.strip()}"
+        )
+    state = git_state(path, branch)
+    if state["head"] != state["remote_head"]:
+        raise RuntimeError(
+            f"checkout {path} has unpublished or divergent commits on {branch}; "
+            "push them to the tracked branch or use a separate checkout root"
+        )
 
 
 def sha256_file(path: Path) -> str:
@@ -222,17 +374,23 @@ def collect_doctor(
     )
 
     for name, entry in chosen.items():
-        state = git_state(paths[name])
+        branch = entry["tracking_branch"]
+        state = git_state(paths[name], branch)
         passed = bool(
             state["is_git"]
-            and state["head"] == entry["pinned_commit"]
+            and state["branch"] == branch
+            and state["upstream"] == f"origin/{branch}"
+            and state["head"] == state["remote_head"]
+            and normalize_repository(state["origin_url"])
+            == normalize_repository(entry["repository"])
             and state["dirty"] is False
         )
         checks.append(
             {
                 "name": f"checkout:{name}",
                 "passed": passed,
-                "expected_commit": entry["pinned_commit"],
+                "expected_branch": branch,
+                "expected_repository": entry["repository"],
                 **state,
             }
         )
@@ -331,7 +489,7 @@ def collect_doctor(
     )
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "ok": all(item["passed"] for item in checks),
         "platform": platform.platform(),
         "python": str(python),

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -24,8 +25,8 @@ def validate(data: dict) -> list[str]:
     gate_sets = data.get("gate_sets", {})
     seen_ids: set[str] = set()
 
-    if data.get("schema_version") != 1:
-        errors.append("schema_version must be 1")
+    if data.get("schema_version") != 2:
+        errors.append("schema_version must be 2")
 
     for item in data.get("items", []):
         item_id = item.get("id", "<missing>")
@@ -60,9 +61,14 @@ def validate(data: dict) -> list[str]:
                 if repository.get("upstream_url", "").startswith("https://github.com/"):
                     if not repository.get("fork_url"):
                         errors.append(f"{item_id}: fork_url missing for GitHub upstream")
-                commit = repository.get("pinned_commit")
-                if not isinstance(commit, str) or len(commit) != 40:
-                    errors.append(f"{item_id}: pinned_commit must be a 40-character SHA")
+                branch = repository.get("tracking_branch")
+                if (
+                    not isinstance(branch, str)
+                    or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch) is None
+                    or branch.startswith(("-", ".", "/"))
+                    or ".." in branch
+                ):
+                    errors.append(f"{item_id}: tracking_branch must be a safe branch name")
 
         for evidence in item.get("evidence", []):
             if not (ROOT / evidence).is_file():

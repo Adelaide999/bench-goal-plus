@@ -16,14 +16,15 @@ best-seen 搜索能力，而不只是 Pass@K。
 | Docker | **必需**；SForge 为每题启动 work container 与独立 hidden judge |
 | 无 Docker 环境 | 不能运行或评分官方 EdgeBench；可运行仓内 VLIW local replica 做诊断 |
 | 当前门禁 | VLIW 的环境、Plain/Goal Plus lifecycle 与 usage 回收已通 |
-| 固定源码 | `ByteDance-Seed/EdgeBench@b27bf1b` |
+| 跟踪源码 | `ck0123/EdgeBench@mac`；campaign manifest 记录实际 commit |
 
 ## 代表 case：VLIW Kernel Optimization
 
 ### 输入是什么
 
 任务 workspace 提供自定义 VLIW/SIMD simulator、kernel generator、
-`solution.py`、public tests 与说明。agent 的自然任务正文来自 pinned task JSON：
+`solution.py`、public tests 与说明。agent 的自然任务正文来自固定 dataset
+revision 的 task JSON：
 实现并优化 `KernelBuilder.build_kernel`，只允许修改 `solution.py`。
 
 ### Agent 要做什么

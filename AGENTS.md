@@ -3,7 +3,10 @@
 This repository is the control plane for Goal Plus benchmark integrations.
 
 - Keep benchmark upstreams in separate forks. Do not vendor their source or datasets here.
-- Pin every upstream/fork commit in `benchmarks/registry.json`.
+- Track one explicit branch for every upstream/fork in `benchmarks/registry.json`
+  and `environment/upstreams.json`. Do not maintain manual commit pins for
+  managed source checkouts; every prepared run must still record the resolved
+  commit SHA in its manifest.
 - Put cross-benchmark orchestration and adapters here; patch a benchmark fork only when the change is intrinsically benchmark-specific.
 - Never persist API keys, auth files, cookies, provider headers, or secret-bearing command lines.
 - A status can become `pass` only when a reproducible command and evidence file exist. Repository support or an unexecuted code path is at most `partial`.
@@ -35,10 +38,11 @@ python3 scripts/repro_env.py bootstrap
 python3 scripts/repro_env.py doctor
 ```
 
-`bootstrap` creates the disposable `.bench-env/venv` and clones every pinned
-benchmark/search runtime into ignored `third_party/`. It installs editable
-OpenEvolve and Goal Plus from that same root, and refuses to rewrite an existing
-checkout at another commit. On another machine, recreate `.bench-env` and
+`bootstrap` creates the disposable `.bench-env/venv` and clones every
+branch-tracked benchmark/search runtime into ignored `third_party/`. It installs
+editable OpenEvolve and Goal Plus from that same root, fetches and fast-forwards
+clean managed branches, and refuses dirty, divergent, wrong-origin, or
+wrong-branch checkouts. On another machine, recreate `.bench-env` and
 `third_party`; do not copy a virtualenv between hosts. To prepare one benchmark
 plus the always-required runtimes, use:
 
@@ -51,7 +55,7 @@ python3 scripts/repro_env.py doctor --only heurigym
 ```
 
 EdgeBench 仍由 native SForge 拥有 work container、hidden judge 和最终归档；
-本仓只管理 pinned source/data、campaign 生命周期与汇总：
+本仓只管理 branch-tracked source、pinned data revision、campaign 生命周期与汇总：
 
 ```bash
 python3 scripts/repro_env.py bootstrap --only edgebench

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "checked_at": "2026-07-23",
   "status_values": ["pass", "partial", "todo", "blocked", "n/a"],
   "gate_sets": {
@@ -33,7 +33,7 @@
           "role": "benchmark",
           "upstream_url": "https://github.com/SakanaAI/ALE-Bench",
           "fork_url": "https://github.com/ck0123/ALE-Bench",
-          "pinned_commit": "f7d927906dc1dcd860ee086e4560d576438b1354",
+          "tracking_branch": "main",
           "license": "Apache-2.0"
         }
       ],
@@ -78,7 +78,7 @@
           "role": "benchmark",
           "upstream_url": "https://github.com/cornell-zhang/heurigym",
           "fork_url": "https://github.com/ck0123/heurigym",
-          "pinned_commit": "e3948542438b2df07a8d20c2f264991719a5585e",
+          "tracking_branch": "main",
           "license": "Apache-2.0"
         }
       ],
@@ -118,7 +118,7 @@
           "role": "benchmark-and-data",
           "upstream_url": "https://github.com/EinsiaLab/Frontier-Engineering",
           "fork_url": "https://github.com/ck0123/Frontier-Engineering",
-          "pinned_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+          "tracking_branch": "main",
           "license": "NOASSERTION"
         }
       ],
@@ -157,7 +157,7 @@
           "role": "benchmark",
           "upstream_url": "https://github.com/autolabhq/autolab",
           "fork_url": "https://github.com/ck0123/autolab",
-          "pinned_commit": "7aff5fe71dfbe152fb0b8e8ac8087210b4bc27d5",
+          "tracking_branch": "main",
           "license": "NOASSERTION"
         }
       ],
@@ -197,14 +197,14 @@
           "role": "method-and-skills",
           "upstream_url": "https://github.com/SwarmResearch/SwarmResearch",
           "fork_url": "https://github.com/ck0123/SwarmResearch",
-          "pinned_commit": "cfdcb71c85ed16e05536a8fce083b075a5e17b3c",
+          "tracking_branch": "main",
           "license": "NOASSERTION"
         },
         {
           "role": "paper-reproduction-and-tasks",
           "upstream_url": "https://github.com/SwarmResearch/swarmresearch-paper-reproduce",
           "fork_url": "https://github.com/ck0123/swarmresearch-paper-reproduce",
-          "pinned_commit": "f8cb3b8f6b5e884ad48a03fb65b56e01c3f7bb7b",
+          "tracking_branch": "main",
           "license": "NOASSERTION"
         }
       ],
@@ -244,7 +244,7 @@
           "role": "benchmark-and-data",
           "upstream_url": "https://github.com/FrontierCS/Frontier-CS",
           "fork_url": "https://github.com/ck0123/Frontier-CS",
-          "pinned_commit": "07500f9e5751ddf86ef2760e0d35ff93e6a96a29",
+          "tracking_branch": "main",
           "license": "MIT"
         }
       ],
@@ -284,7 +284,7 @@
           "role": "benchmark-harness",
           "upstream_url": "https://github.com/ByteDance-Seed/EdgeBench",
           "fork_url": "https://github.com/ck0123/EdgeBench",
-          "pinned_commit": "b27bf1bfc6978238561afd720f7bf036ed389f1a",
+          "tracking_branch": "mac",
           "license": "Apache-2.0"
         }
       ],
@@ -324,7 +324,7 @@
           "role": "artifact",
           "upstream_url": "https://anonymous.4open.science/r/Dataset-D3CC",
           "fork_url": null,
-          "pinned_commit": null,
+          "tracking_branch": null,
           "license": "UNKNOWN"
         }
       ],
@@ -361,7 +361,7 @@
           "role": "search-backend",
           "upstream_url": "https://github.com/skydiscover-ai/skydiscover",
           "fork_url": "https://github.com/ck0123/skydiscover",
-          "pinned_commit": "4734f324c4c3909eb3c8a4bc72a4ca34e6e679ed",
+          "tracking_branch": "main",
           "license": "Apache-2.0"
         }
       ],
@@ -402,7 +402,7 @@
           "role": "search-backend",
           "upstream_url": "https://github.com/algorithmicsuperintelligence/openevolve",
           "fork_url": "https://github.com/ck0123/openevolve",
-          "pinned_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2",
+          "tracking_branch": "bench-goal-plus",
           "license": "Apache-2.0"
         }
       ],

@@ -27,11 +27,11 @@ python3 scripts/repro_env.py doctor --only autolab
 
 The upstream keys are `ale_bench`, `autolab`, `frontier_cs`,
 `frontier_engineering`, and `heurigym`. OpenEvolve and Goal Plus are always
-included because they are pinned shared runtimes.
+included because they are always-managed shared runtimes.
 
 `local-vliw` 不使用 `third_party/` benchmark checkout；它从仓内
 `local_examples/vliw_kernel_optimization` materialize。Goal Plus runtime 仍
-来自 pinned `third_party/goal-plus`。其 manifest 固定标记
+来自 branch-managed `third_party/goal-plus`。其 manifest 固定标记
 `source_kind=local_example` 和 `official_benchmark_comparable=false`；
 workspace evaluator report 另保留 `official_edgebench_comparable=false`。
 

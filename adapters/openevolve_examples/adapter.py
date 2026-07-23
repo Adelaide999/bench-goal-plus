@@ -96,9 +96,23 @@ def git_commit(repository: Path) -> str:
     return result.stdout.strip()
 
 
+def git_branch(repository: Path) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repository), "symbolic-ref", "--short", "-q", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"OpenEvolve checkout must be on its managed branch: {repository}"
+        )
+    return result.stdout.strip()
+
+
 def resolve_task(task_id: str, upstream_root: Path) -> ResolvedTask:
     catalog = load_catalog()
-    if catalog.get("schema_version") != 1:
+    if catalog.get("schema_version") != 2:
         raise RuntimeError("unsupported OpenEvolve task catalog schema")
     try:
         entry = catalog["tasks"][task_id]
@@ -106,11 +120,12 @@ def resolve_task(task_id: str, upstream_root: Path) -> ResolvedTask:
         raise KeyError(f"unknown OpenEvolve example task: {task_id}") from error
 
     upstream_root = upstream_root.resolve()
-    expected_commit = catalog["upstream"]["pinned_commit"]
+    expected_branch = catalog["upstream"]["tracking_branch"]
+    actual_branch = git_branch(upstream_root)
     actual_commit = git_commit(upstream_root)
-    if actual_commit != expected_commit:
+    if actual_branch != expected_branch:
         raise RuntimeError(
-            f"OpenEvolve commit mismatch: expected {expected_commit}, got {actual_commit}"
+            f"OpenEvolve branch mismatch: expected {expected_branch}, got {actual_branch}"
         )
 
     source_dir = upstream_root / entry["source_dir"]

@@ -47,7 +47,10 @@ Q = 1 task
 
 ## Goal Plus 当前已有能力与必须整改项
 
-当前固定版本 `goal-plus@e6fb57c` 已有 Codex/Pi `parallel_loops`、`max_candidates/max_parallel`、同 native worker continuation、verifier-backed best、Search Evidence/Schema、worker min/max runtime 和 usage report；benchmark-specific fixture 已从 runtime 仓迁出。
+当前跟踪 `ck0123/goal-plus@main`；具体实验会把当次 resolved commit 写入
+manifest。该 branch 已有 Codex/Pi `parallel_loops`、`max_candidates/max_parallel`、
+同 native worker continuation、verifier-backed best、Search Evidence/Schema、
+worker min/max runtime 和 usage report；benchmark-specific fixture 已从 runtime 仓迁出。
 
 但用于这批 benchmark 仍缺 6 项：
 
@@ -74,7 +77,7 @@ Q = 1 task
 | AutoLab CPU subset | 官方 verifier smoke 已验证；Codex agent 尚未跑通 | 未接通 | 通常不改任务；若 Harbor agent discovery 要求注册，只加薄 agent shim | Harbor workspace/container bridge、允许文件白名单、reward parser、CPU/内存/硬件指纹采集 | 无 benchmark-specific 改动 | 先通 1 个 puzzle/challenge 的 `K=2,E=1` 长时 run，并能恢复/保留 best artifact |
 | SwarmResearch 15 | 只验证过 circle-packing evaluator；Codex 全链未通 | 未接通 | **需要修固定 fork**：bootstrap/import 与 ADRS/ALE worker build context；不改评分语义 | 15 题 `task-eval → native metric` adapter、session/commit/call/cost 轨迹转换、长期 lane controller | 无 benchmark-specific 改动 | 先通 1 题，再做 5-task `K=4/8` pilot；能与公开 Swarm 轨迹按 calls/cost 对齐 |
 | Frontier-CS Algorithmic | 只验证过 problem 0 judge；Codex 全链未通 | 未接通 | 不改上游 judge | 10 题 materializer、controller-owned 容器池、partial-score parser、串行 evaluator gate | 无 benchmark-specific 改动 | 单题 20-call 闭环能接受“合法 partial score 但 `passed=false`”，再扩到冻结 10 题 |
-| EdgeBench open-source subset | **已通 1 题**：VLIW 的 Plain Codex、hidden judge、final archive 和完整 session usage 可用 | **已通 1 题**：旧长 run 已验证 K 个 internal workers/promotion；新 controller 已完成同 T/K/model lifecycle E2E | 固定 fork 已增加 K/worker lease 参数、Codex JSONL usage、session archive、pinned Goal Plus source 与 CLI path 修复；不改 task/judge 语义 | 已有 `provision/doctor/prepare/run/status/stop/finalize` campaign controller；待冻结 8–12 题 profile | 无 benchmark-specific 改动 | 用 `T>=300s,K>=2` 补一轮实际 dispatch worker 的 matched pilot；随后 8–12 gradient cases 可在 Linux 批量调度 |
+| EdgeBench open-source subset | **已通 1 题**：VLIW 的 Plain Codex、hidden judge、final archive 和完整 session usage 可用 | **已通 1 题**：旧长 run 已验证 K 个 internal workers/promotion；新 controller 已完成同 T/K/model lifecycle E2E | 跟踪 fork branch；其中已增加 K/worker lease 参数、Codex JSONL usage、session archive、managed Goal Plus source 与 CLI path 修复；不改 task/judge 语义 | 已有 `provision/doctor/prepare/run/status/stop/finalize` campaign controller；待冻结 8–12 题 profile | 无 benchmark-specific 改动 | 用 `T>=300s,K>=2` 补一轮实际 dispatch worker 的 matched pilot；随后 8–12 gradient cases 可在 Linux 批量调度 |
 | OpenEvolve CPU examples（任务包 + 原生基线） | **已通 1 题**：Function Minimization 由通用 adapter materialize，Plain Codex 将 raw score 提升 23.46%，4 public + 1 final calls | runner 已实现、真实模型 run 待验收 | 不改 OpenEvolve controller/provider；原生 OpenEvolve 保持自己的搜索入口 | 已有 task catalog、materializer、原生 evaluator wrapper，以及 `T/K` 外层控制的 native/Plain/Goal Plus 三入口；待补真实三方法证据与 usage coverage | 不需要 | 在同一 Function Minimization wall budget 与并发下补原生 OpenEvolve 与 Goal Plus；随后扩到 Background Blur、Circle Packing 和两道 JAX 数学题 |
 
 ### 表格结论
@@ -214,7 +217,7 @@ SwarmResearch 15 上再加入论文原生 Swarm；Frontier-Engineering 上再加
 ### EdgeBench open-source subset
 
 **整改**：保留 SForge 对 work container、hidden judge、auto-eval 和 final archive
-的所有权；`bench-goal-plus` 只固定 fork/data revision、生成方法 cell、管理
+的所有权；`bench-goal-plus` 只固定 fork branch/data revision、生成方法 cell、管理
 PID/PGID 和输出统一 summary。Plain Codex 的 `K` 映射为 K 个独立 SForge
 replicas，Goal Plus 的 `K` 映射为一个 outer run 内的 K 个 workers。
 

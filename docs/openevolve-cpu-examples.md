@@ -10,7 +10,10 @@ OpenEvolve 当前仓库确实有一批可作为**共同 task/evaluator substrate
 NumPy/SciPy；没有 Docker 的环境可以完整 materialize、evaluate 并启动四路径
 campaign。这个结论不扩展到被排除的 OpenEvolve examples。
 
-源代码固定为 [`algorithmicsuperintelligence/openevolve@411fb59`](https://github.com/algorithmicsuperintelligence/openevolve/tree/411fb59c886c18704caaffb611e17cf9e7d824d2)；本次用 `git ls-remote` 确认该提交仍是 upstream HEAD。示例全集位于其 [`examples/`](https://github.com/algorithmicsuperintelligence/openevolve/tree/411fb59c886c18704caaffb611e17cf9e7d824d2/examples) 目录。
+受管源码跟踪 [`ck0123/openevolve@bench-goal-plus`](https://github.com/ck0123/openevolve/tree/bench-goal-plus)；
+`bootstrap` 只做 fast-forward，具体实验在 manifest 记录当次 resolved commit。
+示例全集位于其 [`examples/`](https://github.com/ck0123/openevolve/tree/bench-goal-plus/examples)
+目录。
 
 ## 已批量接入的 `cpu_portable` 任务
 
@@ -184,7 +187,7 @@ OpenEvolve 保持自己的 population、islands、prompt sampler 和模型 API�
 
 ## 2026-07-22 首个 Plain Codex 闭环
 
-已在 `bench-goal-plus` 实现第一版 `openevolve_task` 通用适配器，并用 `function_minimization` 完成真实闭环。适配器没有修改 OpenEvolve provider 或搜索器，而是直接复用固定提交的 `Config`、`Evaluator`、`EVOLVE-BLOCK` 和 raw metrics：
+已在 `bench-goal-plus` 实现第一版 `openevolve_task` 通用适配器，并用 `function_minimization` 完成真实闭环。适配器没有修改 OpenEvolve provider 或搜索器，而是直接复用当次 branch snapshot 的 `Config`、`Evaluator`、`EVOLVE-BLOCK` 和 raw metrics：
 
 ```text
 tasks.json -> materialize isolated workspace -> public evaluator tickets

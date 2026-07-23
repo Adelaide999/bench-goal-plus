@@ -1,8 +1,8 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "upstream": {
-    "repository": "https://github.com/algorithmicsuperintelligence/openevolve",
-    "pinned_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2"
+    "repository": "https://github.com/ck0123/openevolve",
+    "tracking_branch": "bench-goal-plus"
   },
   "task_sets": {
     "cpu_portable": [

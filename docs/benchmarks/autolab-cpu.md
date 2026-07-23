@@ -14,7 +14,7 @@ AutoLab 把长期自主研究变成可执行任务：agent 进入一个已经能
 | Docker | **混合**；当前 `toy_isa_opt` host adapter 不需要，完整 Harbor/task 路径需要容器 |
 | 无 Docker 环境 | 可以跑 `toy_isa_opt`；不能据此复现完整 25-task CPU subset |
 | 当前门禁 | `toy_isa_opt` 的 host evaluator、Plain Codex 和 Goal Plus + Codex 已通 |
-| 固定源码 | `MetaStone-AI/AutoLab@7aff5fe` |
+| 跟踪源码 | `ck0123/autolab@main`；run manifest 记录实际 commit |
 
 它真正测试的是长时 agent 的实验纪律：能否先建立正确 baseline，形成假设，执行可证伪实验，避免 hardcode/改 verifier，并在多次尝试后留下 best-seen artifact。
 
@@ -27,7 +27,7 @@ AutoLab 把长期自主研究变成可执行任务：agent 进入一个已经能
 ### 输入是什么
 
 上游正式路径把任务放进容器；本项目当前的 host-portable adapter 会把等价的
-固定源码复制到仓内临时 build 目录。Agent 看到的任务边界是：
+当次 branch snapshot 的源码复制到仓内临时 build 目录。Agent 看到的任务边界是：
 
 - 可编辑文件：`program.s`；
 - 只读参考：`main.c`、`Makefile` 和任务说明；

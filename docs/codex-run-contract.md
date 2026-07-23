@@ -5,7 +5,7 @@
 ## 控制流
 
 ```text
-benchmark source + pinned task
+branch-tracked benchmark source + pinned task/data revision
   -> isolated git workspace
   -> benchmark-specific prompt and public tools
   -> codex exec --json --sandbox workspace-write
