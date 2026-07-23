@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-07-23",
+  "ok": true,
+  "policy": {
+    "repository_temp_root": ".tmp",
+    "child_environment_keys": [
+      "TMPDIR",
+      "TMP",
+      "TEMP"
+    ],
+    "standalone_fallback": "~/.tmp",
+    "system_host_temp_dependency": false
+  },
+  "code_audit": {
+    "implicit_tempfile_calls_outside_central_runtime_module": 0,
+    "forbidden_absolute_host_temp_config_matches": 0,
+    "supported_execution_paths_checked": [
+      "adapters",
+      "experiments",
+      "scripts",
+      "environment"
+    ]
+  },
+  "doctor": {
+    "ok": true,
+    "managed_checkouts": 10,
+    "repository_local_temp_check": true
+  },
+  "upstreams": {
+    "swarmresearch_tasks": {
+      "commit": "f8cb3b8f6b5e884ad48a03fb65b56e01c3f7bb7b",
+      "server_log_policy": "inherited temp root, with home-local fallback"
+    },
+    "container_internal_temp_users": [
+      "ALE-Bench",
+      "Frontier-CS",
+      "SkyDiscover"
+    ],
+    "container_internal_note": "Container filesystem paths do not require a writable system temp directory on the host."
+  },
+  "seed_smokes": [
+    {
+      "benchmark": "ale-bench-lite",
+      "case": "CustomRetriever",
+      "valid": true,
+      "score": 55181186,
+      "temp_namespace": ".tmp/path-audit-ale-20260723"
+    },
+    {
+      "benchmark": "heurigym",
+      "case": "examples/malloc",
+      "valid": true,
+      "score": 138,
+      "temp_namespace": ".tmp/path-audit-heurigym-20260723"
+    },
+    {
+      "benchmark": "frontier-engineering-lite",
+      "case": "MallocLab",
+      "valid": true,
+      "score": 28,
+      "temp_namespace": ".tmp/path-audit-frontier-engineering-20260723"
+    },
+    {
+      "benchmark": "autolab-cpu",
+      "case": "training-sin",
+      "valid": true,
+      "score": 9220,
+      "temp_namespace": ".tmp/path-audit-autolab-20260723"
+    },
+    {
+      "benchmark": "frontier-cs",
+      "case": "circle-packing",
+      "valid": true,
+      "score": 93.089935,
+      "temp_namespace": ".tmp/path-audit-frontier-cs-20260723"
+    }
+  ],
+  "preservation": {
+    "audit_runs": ".tmp/path-audit-*-20260723",
+    "removed_paths": []
+  }
+}

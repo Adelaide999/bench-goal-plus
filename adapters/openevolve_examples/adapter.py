@@ -7,7 +7,7 @@ import hashlib
 import json
 import math
 import subprocess
-import tempfile
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +16,11 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from bench_runtime_paths import temporary_directory  # noqa: E402
+
+
 TASKS_PATH = Path(__file__).with_name("tasks.json")
 WORKER_PATH = Path(__file__).with_name("worker.py")
 CONTROLLER_PATH = ROOT / "scripts/openevolve_task.py"
@@ -165,8 +170,11 @@ def run_worker(
     command: str,
     arguments: list[str],
 ) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="bench-openevolve-worker-") as temp_dir:
-        output = Path(temp_dir) / "result.json"
+    with temporary_directory(
+        prefix="bench-openevolve-worker-",
+        namespace="openevolve-worker",
+    ) as temp_dir:
+        output = temp_dir / "result.json"
         result = subprocess.run(
             [
                 str(runtime_python),

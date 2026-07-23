@@ -15,6 +15,7 @@ DEFAULT_UPSTREAM_ROOT = ROOT / "third_party/openevolve"
 DEFAULT_RUNTIME_PYTHON = ROOT / ".bench-env/venv/bin/python"
 sys.path.insert(0, str(ROOT))
 
+from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
     BudgetExhausted,
     archive_workspace,
@@ -24,6 +25,8 @@ from adapters.openevolve_examples.adapter import (  # noqa: E402
     materialize_workspace,
     resolve_task,
 )
+
+configure_temp_environment()
 
 
 def batch_seed_smoke(args: argparse.Namespace) -> dict:

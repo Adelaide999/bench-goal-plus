@@ -13,6 +13,7 @@ This repository is the control plane for Goal Plus benchmark integrations.
 - Standard Plain Codex and Codex + Goal Plus comparisons must share one byte-identical common task prompt. Plain Codex uses it directly; Codex + Goal Plus adds only the natural `/goal-plus` prefix and a complete Goal Plus configuration suffix. Do not pre-create Goal Plus goals, frozen specs, Search runs, candidates, or sessions before the timed invocation.
 - Never add benchmark-specific stopping logic to Goal Plus core just to mimic another method's rounds. OpenEvolve may use a very large iteration ceiling and an outer `SIGTERM` deadline.
 - Never run Goal Plus from an upstream or benchmark source checkout. Materialize a disposable Git workspace under ignored `runs/`; keep its `.gp/` state inside that workspace.
+- Never use host-wide `/tmp`, `/private/tmp`, or `/var/tmp` for benchmark controller state, builds, verifier output, tests, or subprocess scratch space. Route `TMPDIR`, `TMP`, and `TEMP` to the ignored repository-local `.tmp/` through `bench_runtime_paths.py`. A user-selected override must remain under the repository or a user-writable location such as `~/.tmp/`.
 - Do not delete local workspaces or caches automatically. If a conflicting path must be preserved, rename it with a `_bak` suffix and report it.
 - Run `python3 scripts/status.py --check` and `python3 -m unittest discover -s tests -v` before committing.
 
@@ -32,6 +33,9 @@ OpenEvolve and Goal Plus from that same root, and refuses to rewrite an existing
 checkout at another commit. On another machine, recreate `.bench-env` and
 `third_party`; do not copy a virtualenv between hosts. To prepare one benchmark
 plus the always-required runtimes, use:
+
+All Python temporary directories and inherited child-process scratch files use
+ignored `bench-goal-plus/.tmp/`; no writable system temp directory is required.
 
 ```bash
 python3 scripts/repro_env.py bootstrap --only heurigym

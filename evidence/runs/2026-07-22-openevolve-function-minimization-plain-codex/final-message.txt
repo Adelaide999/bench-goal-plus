@@ -1,4 +1,4 @@
-Implemented and verified the improved optimizer in [candidate.py](/private/tmp/bench-goal-plus-openevolve-function-20260722/candidate.py).
+Implemented and verified the improved optimizer in [candidate.py](.tmp/historical-openevolve-function-20260722/candidate.py).
 
 - `combined_score`: **1.499764** (seed: **1.214769**)
 - Global-reference distance: **0.0000**

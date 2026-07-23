@@ -37,28 +37,28 @@ python3 scripts/repro_env.py bootstrap
 
 python3 scripts/openevolve_task.py materialize \
   --task-id function_minimization \
-  --workspace /tmp/openevolve-function-minimization \
+  --workspace .tmp/openevolve-function-minimization \
   --max-evaluator-calls 7 \
   --reserved-final-calls 1
 
 python3 scripts/openevolve_task.py evaluate \
-  --workspace /tmp/openevolve-function-minimization \
+  --workspace .tmp/openevolve-function-minimization \
   --mode public
 
 python3 scripts/run_codex.py \
-  --workspace /tmp/openevolve-function-minimization \
-  --prompt-file /tmp/openevolve-function-minimization/TASK.md \
+  --workspace .tmp/openevolve-function-minimization \
+  --prompt-file .tmp/openevolve-function-minimization/TASK.md \
   --run-dir evidence/runs/<run-id> \
   --sandbox workspace-write \
   --ephemeral
 
 python3 scripts/openevolve_task.py evaluate \
-  --workspace /tmp/openevolve-function-minimization \
+  --workspace .tmp/openevolve-function-minimization \
   --mode final \
   --output evidence/runs/<run-id>/final-eval.json
 
 python3 scripts/openevolve_task.py archive \
-  --workspace /tmp/openevolve-function-minimization \
+  --workspace .tmp/openevolve-function-minimization \
   --run-dir evidence/runs/<run-id>
 ```
 

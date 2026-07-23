@@ -21,6 +21,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
     describe_task,
     evaluate_workspace,
@@ -1428,7 +1429,7 @@ def execute(args: argparse.Namespace) -> int:
         Path(manifest["environment"]["openevolve_root"]),
     )
     run_config = Path(manifest["task"]["config"])
-    environment = os.environ.copy()
+    environment = configure_temp_environment(os.environ.copy())
     bin_dir = runtime_bin(args.venv.expanduser().absolute())
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
 

@@ -9,7 +9,6 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -30,6 +29,7 @@ from adapters.portable import (  # noqa: E402
     utc_now,
     write_json,
 )
+from bench_runtime_paths import temporary_directory
 
 
 CONTROLLER_PATH = Path(__file__).resolve()
@@ -200,11 +200,12 @@ def evaluate_workspace(workspace: Path, upstream_root: Path, mode: str) -> dict[
             previous_timeout = os.environ.get("FRONTIER_EVAL_EVALUATOR_TIMEOUT_S")
             os.environ["FRONTIER_EVAL_EVALUATOR_TIMEOUT_S"] = "120"
             try:
-                with tempfile.TemporaryDirectory(
-                    prefix="frontier-malloc-portable-"
+                with temporary_directory(
+                    prefix="frontier-malloc-portable-",
+                    namespace="frontier-engineering",
                 ) as temporary:
                     portable_root = prepare_portable_repo(
-                        upstream_root, Path(temporary)
+                        upstream_root, temporary
                     )
                     raw = load_official_evaluator(upstream_root)(
                         str(workspace / ARTIFACT_NAME), repo_root=portable_root

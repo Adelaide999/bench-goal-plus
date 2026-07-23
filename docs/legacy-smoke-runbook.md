@@ -60,7 +60,7 @@ The deterministic verifier smoke is independent of the invalid model first draft
 ```bash
 .venv/bin/python ../bench-goal-plus/legacy/direct-api/heurigym_operator_solver.py \
   _datasets/operator_scheduling/demo/demo.json \
-  /tmp/heurigym-operator-scheduling-demo.output
+  .tmp/heurigym-operator-scheduling-demo.output
 ```
 
 The accepted output is stored at

@@ -20,6 +20,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from experiments.openevolve_compare.experiment import (  # noqa: E402
     DEFAULT_REASONING_EFFORT,
     append_unique_lines,
@@ -566,7 +567,7 @@ def execute(args: argparse.Namespace) -> int:
         raise ValueError(f"model mismatch: prepared {manifest['model']}, got {args.model}")
     if args.api_base and not os.environ.get("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is required with --api-base")
-    environment = os.environ.copy()
+    environment = configure_temp_environment(os.environ.copy())
     bin_dir = Path(manifest["environment"]["runtime_bin"])
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
     manifest["status"] = "running"

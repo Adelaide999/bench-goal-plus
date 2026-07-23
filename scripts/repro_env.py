@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import re
 import shutil
@@ -16,6 +17,15 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from bench_runtime_paths import (  # noqa: E402
+    DEFAULT_TEMP_ROOT,
+    configure_temp_environment,
+    ensure_temp_root,
+)
+
+
 DEFAULT_MANIFEST = ROOT / "environment/upstreams.json"
 DEFAULT_LOCK = ROOT / "environment/requirements.lock"
 DEFAULT_VENV = ROOT / ".bench-env/venv"
@@ -184,10 +194,23 @@ def collect_doctor(
     lock: Path = DEFAULT_LOCK,
     only: list[str] | None = None,
 ) -> dict[str, Any]:
+    ensure_temp_root()
     python = venv_python(venv)
     chosen = selected_upstreams(manifest, only)
     paths = checkout_paths(manifest, checkout_root, only)
     checks: list[dict[str, Any]] = []
+    checks.append(
+        {
+            "name": "runtime:repository-local-temp",
+            "passed": bool(
+                DEFAULT_TEMP_ROOT.parent == ROOT
+                and DEFAULT_TEMP_ROOT.name == ".tmp"
+                and DEFAULT_TEMP_ROOT.is_dir()
+                and os.access(DEFAULT_TEMP_ROOT, os.W_OK)
+            ),
+            "path": ".tmp",
+        }
+    )
 
     for name, entry in chosen.items():
         state = git_state(paths[name])
@@ -389,6 +412,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    configure_temp_environment()
     args = build_parser().parse_args()
     return bootstrap(args) if args.command == "bootstrap" else doctor(args)
 

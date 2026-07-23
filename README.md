@@ -102,6 +102,8 @@ python3 scripts/repro_env.py doctor
 准备到本仓统一的 ignored `third_party/`，并按 `environment/requirements.lock`
 创建 `.bench-env/venv`。只准备一个 benchmark 时可用
 `bootstrap --only heurigym`；OpenEvolve/Goal Plus 作为公共 runtime 仍会自动加入。
+controller、verifier、临时编译和子进程的 `TMPDIR`、`TMP`、`TEMP` 全部固定到
+本仓 ignored `.tmp/`，不会依赖 `/tmp`、`/private/tmp` 或 `/var/tmp`。
 `.venv/` 只是旧本机缓存，不属于复现契约；换机器必须重建 `.bench-env/venv`
 和 `third_party/`，不能复制另一台机器的 virtualenv。
 

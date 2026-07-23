@@ -18,9 +18,9 @@
   "sandbox": "workspace-write",
   "load_user_config": false,
   "ephemeral": true,
-  "workspace": "/private/tmp/bench-goal-plus-openevolve-function-20260722",
+  "workspace": "<REPO_LOCAL_TMP>/bench-goal-plus-openevolve-function-20260722",
   "workspace_commit": "a298d07542dd85a6c02be359833e6740040a3874",
-  "prompt_file": "/private/tmp/bench-goal-plus-openevolve-function-20260722/TASK.md",
+  "prompt_file": "<REPO_LOCAL_TMP>/bench-goal-plus-openevolve-function-20260722/TASK.md",
   "prompt_sha256": "beafd091950a8857a8cd9ea7d675e7fe077d0c9d607858ba582cfe4da764a5d7",
   "evidence": {
     "events": "events.jsonl",

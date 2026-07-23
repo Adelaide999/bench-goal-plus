@@ -50,7 +50,7 @@
     "swarmresearch_tasks": {
       "repository": "https://github.com/ck0123/swarmresearch-paper-reproduce.git",
       "checkout_dir": "swarmresearch-paper-reproduce",
-      "pinned_commit": "e848d8d5760065714c38fa7558f0298573db17ab"
+      "pinned_commit": "f8cb3b8f6b5e884ad48a03fb65b56e01c3f7bb7b"
     },
     "frontier_cs": {
       "repository": "https://github.com/ck0123/Frontier-CS.git",

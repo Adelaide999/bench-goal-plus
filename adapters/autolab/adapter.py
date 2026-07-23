@@ -9,7 +9,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -29,6 +28,7 @@ from adapters.portable import (
     utc_now,
     write_json,
 )
+from bench_runtime_paths import temporary_directory
 
 
 CONTROLLER_PATH = Path(__file__).resolve()
@@ -171,8 +171,10 @@ def evaluate_candidate(
 
     diagnostics: dict[str, Any] = {}
     results: list[dict[str, Any]] = []
-    with tempfile.TemporaryDirectory(prefix="autolab-toy-isa-") as temporary:
-        build = Path(temporary)
+    with temporary_directory(
+        prefix="autolab-toy-isa-",
+        namespace="autolab",
+    ) as build:
         shutil.copy2(source_files["main.c"], build / "main.c")
         shutil.copy2(source_files["Makefile"], build / "Makefile")
         shutil.copy2(workspace / ARTIFACT_NAME, build / ARTIFACT_NAME)

@@ -10,6 +10,7 @@ benchmark 源码版本，并生成不会污染上游 checkout 的实验 workspac
 
 ```text
 bench-goal-plus/
+├── .tmp/                    controller、verifier、build 和子进程临时文件，Git ignored
 ├── .bench-env/venv/        可重建的本机 Python runtime，Git ignored
 ├── third_party/            所有固定 commit 的上游 checkout，Git ignored
 │   ├── openevolve/
@@ -40,11 +41,12 @@ python3 scripts/repro_env.py doctor
 
 `bootstrap` 会：
 
-1. 读取 `environment/upstreams.json`；
-2. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，并 checkout 到固定 commit；
-3. 创建 `.bench-env/venv` 的 Python 3.12 环境；
-4. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的 OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
-5. 写入 ignored 的 `.bench-env/state.json` 并运行同一套 doctor 检查。
+1. 把当前进程和所有子进程的 `TMPDIR`、`TMP`、`TEMP` 固定到本仓 `.tmp/`，不依赖 `/tmp`、`/private/tmp` 或 `/var/tmp`；
+2. 读取 `environment/upstreams.json`；
+3. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，并 checkout 到固定 commit；
+4. 创建 `.bench-env/venv` 的 Python 3.12 环境；
+5. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的 OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
+6. 写入 ignored 的 `.bench-env/state.json` 并运行同一套 doctor 检查。
 
 如果 checkout 已存在但 commit 不符，脚本会停止并显示差异，不会 checkout、
 reset 或删除用户工作。clone 先写入精确的
@@ -52,7 +54,8 @@ reset 或删除用户工作。clone 先写入精确的
 保留供检查。可以传一个全新的统一目录：
 
 ```bash
-python3 scripts/repro_env.py --checkout-root /path/to/clean/checkouts bootstrap
+python3 scripts/repro_env.py \
+  --checkout-root "$HOME/.tmp/bench-goal-plus-checkouts" bootstrap
 ```
 
 若当前只想跑一个 benchmark，可避免下载其余大仓库：
@@ -65,8 +68,14 @@ python3 scripts/repro_env.py doctor --only heurigym
 `--only` 可重复；脚本会自动追加 `always=true` 的 OpenEvolve 和 Goal Plus
 runtime。无 `--only` 时才准备 manifest 中的全部上游。`doctor` 检查选中
 checkout 的 exact commit/dirty state、Python 3.12、关键 package/entrypoint 和
-Codex/Pi 最低版本。`.venv/` 是历史本机缓存，不能复制到其他机器；复现标准
+Codex/Pi 最低版本，以及本仓 `.tmp/` 是否存在且可写。`.venv/` 是历史本机缓存，不能复制到其他机器；复现标准
 是从 lock 重建 `.bench-env/venv` 与 `third_party/`。
+
+Adapter 自己的临时编译目录也必须通过 `bench_runtime_paths.py` 创建。AutoLab、
+Frontier-Engineering、HeuriGym、Frontier-CS 和 OpenEvolve worker 分别使用
+`.tmp/` 下的独立 namespace。已经 prepare 的 workspace 会记录当次 checkout
+中动态生成的绝对路径，因此换机器后要重新 prepare；这些路径只能指向新机器
+上的仓内 `.tmp/`、`runs/`、`third_party/` 和 `.bench-env/`。
 
 当前所有受管源码都只允许出现在这个统一根目录：
 

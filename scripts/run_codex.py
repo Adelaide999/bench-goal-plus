@@ -6,11 +6,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from bench_runtime_paths import configure_temp_environment  # noqa: E402
 
 
 def utc_now() -> str:
@@ -121,12 +128,14 @@ def main() -> int:
     exit_code: int
     timed_out = False
     with events_path.open("w") as events_file, stderr_path.open("w") as stderr_file:
+        environment = configure_temp_environment(os.environ.copy())
         process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
             stdout=events_file,
             stderr=stderr_file,
             text=True,
+            env=environment,
         )
         try:
             process.communicate(prompt, timeout=args.timeout_seconds)
@@ -174,4 +183,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

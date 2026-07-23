@@ -17,6 +17,9 @@ from experiments.heurigym_compare import experiment
 from experiments.openevolve_compare import experiment as openevolve_experiment
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class PortableBenchmarkAdapterTest(unittest.TestCase):
     def test_registry_exposes_all_standalone_adapters(self) -> None:
         self.assertEqual(
@@ -205,7 +208,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             self.assertEqual(candidate_changed_paths(workspace), {"TASK.md"})
 
     def test_goal_seed_runtime_is_external_and_environment_is_restored(self) -> None:
-        controller_runtime = Path("/tmp/controller-runtime-test")
+        controller_runtime = ROOT / ".tmp/tests/controller-runtime-test"
 
         def fake_evaluate(workspace: Path, mode: str) -> dict[str, object]:
             self.assertEqual(workspace, Path("workspace"))
@@ -233,14 +236,19 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             {"PATH": "/outer/bin", "GOAL_PLUS_VERIFIER_TMPDIR": "outer-runtime"},
             clear=False,
         ):
+            runtime_bin = ROOT / ".tmp/tests/pinned-bin"
+            verifier_runtime = ROOT / ".tmp/tests/controller-runtime"
             with experiment.controller_subprocess_environment(
-                runtime_bin_dir=Path("/pinned/bin"),
-                verifier_tmpdir=Path("/controller/runtime"),
+                runtime_bin_dir=runtime_bin,
+                verifier_tmpdir=verifier_runtime,
             ):
-                self.assertEqual(os.environ["PATH"], "/pinned/bin:/outer/bin")
+                self.assertEqual(
+                    os.environ["PATH"],
+                    f"{runtime_bin}:/outer/bin",
+                )
                 self.assertEqual(
                     os.environ["GOAL_PLUS_VERIFIER_TMPDIR"],
-                    "/controller/runtime",
+                    str(verifier_runtime),
                 )
             self.assertEqual(os.environ["PATH"], "/outer/bin")
             self.assertEqual(os.environ["GOAL_PLUS_VERIFIER_TMPDIR"], "outer-runtime")

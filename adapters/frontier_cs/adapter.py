@@ -10,7 +10,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -31,6 +30,7 @@ from adapters.portable import (  # noqa: E402
     utc_now,
     write_json,
 )
+from bench_runtime_paths import make_preserved_temp_directory
 
 
 CONTROLLER_PATH = Path(__file__).resolve()
@@ -330,9 +330,10 @@ def evaluate_workspace(workspace: Path, upstream_root: Path, mode: str) -> dict[
     metadata = json.loads((workspace / "task.json").read_text())
     changes = candidate_changed_paths(workspace)
     unauthorized = sorted(changes - {ARTIFACT_NAME})
-    call_root = ROOT / ".bench-env/cache/frontier-cs/calls"
-    call_root.mkdir(parents=True, exist_ok=True)
-    call_dir = Path(tempfile.mkdtemp(prefix="call-", dir=call_root))
+    call_dir = make_preserved_temp_directory(
+        prefix="call-",
+        namespace="frontier-cs-calls",
+    )
     diagnostics: dict[str, Any]
     error: str | None = None
     if unauthorized or not (workspace / ARTIFACT_NAME).is_file():

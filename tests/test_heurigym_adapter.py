@@ -9,6 +9,9 @@ from pathlib import Path
 from adapters.heurigym import adapter
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class HeuriGymAdapterTest(unittest.TestCase):
     def test_seed_solver_handles_a_synthetic_parallel_dag(self) -> None:
         problem = {
@@ -42,7 +45,9 @@ class HeuriGymAdapterTest(unittest.TestCase):
         self.assertEqual(set(adapter.CASE_NAMES), set(adapter.EXPECTED_CASE_SHA256))
 
     def test_goal_plus_verifier_uses_controller_and_numeric_metric(self) -> None:
-        rendered = adapter.render_goal_plus_verifier(Path("/tmp/pinned-upstream"))
+        rendered = adapter.render_goal_plus_verifier(
+            ROOT / ".tmp/tests/pinned-upstream"
+        )
         self.assertIn(
             "GOAL_PLUS_VERIFIER_TMPDIR",
             adapter.evaluate_workspace.__code__.co_consts,

@@ -11,6 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from bench_runtime_paths import configure_temp_environment
+
+
+configure_temp_environment()
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()

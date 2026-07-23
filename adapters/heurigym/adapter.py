@@ -14,7 +14,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +21,11 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from bench_runtime_paths import temporary_directory  # noqa: E402
+
+
 CONTROLLER_PATH = Path(__file__).resolve()
 UPSTREAM_KEY = "heurigym"
 BENCHMARK_NAME = "HeuriGym"
@@ -418,8 +422,11 @@ def run_case_subprocess(
     name: str,
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="heurigym-eval-") as temporary:
-        output_path = Path(temporary) / f"{Path(name).stem}.output"
+    with temporary_directory(
+        prefix="heurigym-eval-",
+        namespace="heurigym",
+    ) as temporary:
+        output_path = temporary / f"{Path(name).stem}.output"
         completed = subprocess.run(
             [
                 sys.executable,
