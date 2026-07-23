@@ -352,7 +352,7 @@
     },
     {
       "id": "skydiscover-evox",
-      "display_name": "SkyDiscover / EvoX",
+      "display_name": "SkyDiscover runtime (EvoX method)",
       "kind": "search_backend",
       "gate_set": "search_backend",
       "priority": 1,

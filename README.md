@@ -4,6 +4,24 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 
 **基于 attitude 的 agent 预分析认为：核心关注，必须系统化推进——真正要证明的不是“Codex 能打开这些仓库”，而是同一任务、同一 evaluator、同一预算下，plain Codex 与 Goal Plus + Codex 的搜索轨迹和 best-seen 提升可以复现、计费并公平比较。**
 
+## 先分清实验对象
+
+本仓同时追踪方法和任务，但不会把它们混成“benchmark 数量”：
+
+| 层次 | 当前对象 | 作用 |
+|---|---|---|
+| Agent / 搜索方案 | Plain Codex、Independent Parallel、Goal Plus、OpenEvolve、EvoX、Swarm、AB-MCTS | 决定如何产生、共享、选择和延续候选 |
+| Agent host / runtime | Codex CLI、Pi、Goal Plus runtime、SkyDiscover、OpenEvolve runtime、SForge | 启动模型、workspace、进程和 benchmark-native harness |
+| 正式 Benchmark | ALE-Bench、HeuriGym、Frontier-Engineering、AutoLab、Frontier-CS、EdgeBench、PERFOPT-Bench | 提供任务、artifact、evaluator 和 raw metric |
+| 实验 substrate / task pack | SwarmResearch 15 题、OpenEvolve CPU examples、SkyDiscover Circle Packing | 复用任务做论文对标、方法 pilot 或接线诊断 |
+
+因此，**EvoX 是方法，SkyDiscover 是承载它的 runtime，不是 benchmark**。
+OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为任务包，但不
+自动变成一套正式 benchmark。完整边界见
+[实验对象分类](docs/experiment-taxonomy.md)，本机哪些正式 benchmark case
+可以直接跑见
+[Benchmark 本机运行能力](docs/benchmarks/README.md#本机可直接运行什么)。
+
 ## 当前结果
 
 - 已跟踪 10 个 GitHub fork；EdgeBench fork 也已纳入统一版本清单。
@@ -22,8 +40,14 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 - Frontier-Engineering MallocLab 的上游 evaluator 已在 macOS 通过 portable rebuild：seed `28/100`；Plain Codex `T=300s,K=2` 达到 `90/100`，Goal Plus `T=420s,K=2` 的 best verified/promoted 结果为 `89/100`。两者都通过 `11/11` traces；预算不同，仍只是各自接线 smoke。
 - ALE-Bench Lite `ahc027` 的通用 Goal Plus 入口也已完成真实 E2E：`gpt-5.6-sol/high`、`T=480s`、`K=2` 下创建 2 个已绑定且均提交 verifier 的 Codex lineage，9 次 process-verifier iteration 后从 seed `55,181,186` 降到最终 `52,693,209`（越低越好，改善 `4.51%`）；本轮共记录 12 次 evaluator command/call，仍是接线证据而非 matched 方法排名。
 - Frontier-CS problem 0 已完成 Docker host-capable 的两条真实路径：Plain Codex `T=180s,K=2` 最终 `93.4561753`（12 calls）；Goal Plus `T=420s,K=2` 创建 2 个已绑定、均有 verifier 的 lineage，7 次 process iterations 后 search best `93.3980341`、promotion gate `93.2217282`、独立 final `93.3097979`（10 calls）。该上游使用 clock-seeded 搜索，三次分数差异是已知噪声，不能把这轮当作方法排名。
-- SkyDiscover/EvoX 已完成 DeepSeek OpenAI-compatible 的 1 iteration smoke，但还不是论文可比实验。
-- 已在当前 Mac 为所有可执行 benchmark 建立代表 case 的环境证据：ALE、AutoLab、SwarmResearch、Frontier-CS 使用镜像，HeuriGym 与 Frontier-Engineering v1-lite 使用 host 环境；完整空间表见 [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
+- SkyDiscover runtime + EvoX 方法已完成 DeepSeek OpenAI-compatible 的
+  Circle Packing 1-iteration smoke；这是 method/task compatibility 证据，
+  不是新增 benchmark，也不是论文可比实验。
+- 已在当前 Mac 为可执行 benchmark 建立代表 case 的环境证据：HeuriGym、
+  Frontier-Engineering MallocLab、AutoLab Toy ISA 使用 host 环境；ALE、
+  Frontier-CS、EdgeBench 使用 Docker 正式评分路径；SwarmResearch 当前只有
+  Docker evaluator 证据。完整空间表见
+  [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
 - 已建立 [Benchmark 快速导读](docs/benchmarks/README.md)：记录当前可跑题数、coverage/campaign 时间，并为 7 套 active benchmark 展开一个真实 case 的输入、agent 动作、期望输出和 verifier。
 - Docker 已成为 registry 一等字段：`scripts/status.py` 直接显示
   `REQUIRED / NO / MIXED / N/A`；[Docker 依赖速查](docs/benchmarks/README.md#docker-依赖速查)
@@ -61,7 +85,9 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 7. EdgeBench open-source gradient subset
 8. PERFOPT-Bench（等待公开 artifact 恢复）
 
-SkyDiscover/EvoX 与 OpenEvolve 是 search backend，不与 benchmark 混为一类。
+SkyDiscover 是 search runtime，EvoX 与 OpenEvolve 是搜索方法；它们不与
+benchmark 混为一类。SwarmResearch 同时含方法实现和 15-task 论文 substrate，
+实验时也必须把这两个角色拆开。
 
 ## 统一控制面架构
 
@@ -102,6 +128,7 @@ artifact adapter。没有 Docker 的 benchmark 仍使用同一生命周期，只
 ```text
 benchmarks/registry.json       唯一状态源：上游、fork、commit、门禁、证据、下一步
 docs/roadmap.md                分 benchmark 的推进计划与完成定义
+docs/experiment-taxonomy.md    Agent 方案、搜索方法、runtime、benchmark 与 task pack 分类
 docs/codex-run-contract.md     所有 benchmark 共用的 Codex 执行/证据契约
 docs/docker-storage-plan.md    单 case 实测镜像、全量空间预算与 Linux campaign 规划
 docs/benchmarks/               规模/时间总览与每套 benchmark 的代表 case 导读

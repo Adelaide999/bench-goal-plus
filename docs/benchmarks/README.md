@@ -1,6 +1,13 @@
-# Benchmark 导读与完整运行规模
+# Benchmark 导读、本机运行能力与完整规模
 
-这里回答两个问题：每套 benchmark 实际在测什么，以及当前 Mac 能否把一个正式子集或 track 全部跑完。每篇子文档都按同一顺序展开：**任务边界 → 一个真实 case → 输入 → agent 动作 → 期望输出 → verifier → Goal Plus 实验价值**。
+本页只统计正式 benchmark 和论文实验 substrate，不把 SkyDiscover、EvoX、
+OpenEvolve 等搜索 framework/method 当作 benchmark。完整分类见
+[Agent 方案、搜索方法与 Benchmark](../experiment-taxonomy.md)。
+
+这里回答两个问题：每套 benchmark 实际在测什么，以及当前 Mac 能否直接跑
+一个已接入 case、一个正式子集或整个 track。每篇子文档都按同一顺序展开：
+**任务边界 → 一个真实 case → 输入 → agent 动作 → 期望输出 → verifier →
+Goal Plus 实验价值**。
 
 “完整运行”分为两种口径：
 
@@ -9,30 +16,72 @@
 
 ---
 
+## 本机可直接运行什么
+
+这里的“直接运行”是指已有明确 bootstrap、materialize、evaluator 和
+Plain Codex / Goal Plus 入口，而不是“仓库能下载”或“代码看起来可以”。
+必须区分 **无需 Docker 的 host 直跑**、**当前 Mac 上需要 Docker 的直跑**
+和 **只有 evaluator、还不能做标准 Agent 实验**。
+
+### 无需 Docker：当前已接通的正式 Benchmark case
+
+| Benchmark | 当前可直接跑的 case | 环境 | Plain Codex | Goal Plus + Codex | 全集状态 |
+|---|---|---|---|---|---|
+| HeuriGym | `operator_scheduling` | pinned Python + 已 bootstrap 数据 | 已完成真实 E2E | 已完成真实 E2E | 其余 8 题待接 |
+| Frontier-Engineering v1-lite | `MallocLab` | C 编译器 + `make` | 已完成真实 E2E | 已完成真实 E2E | 其余 9 题 runtime 待冻结 |
+| AutoLab | `toy_isa_opt` host adapter | C 编译器 + `make` | 已完成真实 E2E | 已完成真实 E2E | 完整 CPU/Harbor 路径仍含 task containers |
+
+这三题是当前没有 Docker 时最稳妥的正式 benchmark 起点。统一入口和建议
+`T/K` 见
+[`experiments/benchmark_compare/README.md`](../../experiments/benchmark_compare/README.md)。
+
+### 需要 Docker：当前 Mac 已接通的正式 Benchmark case
+
+| Benchmark | 当前可直接跑的 case | 当前能力 | 全集状态 |
+|---|---|---|---|
+| ALE-Bench Lite | `ahc027` | official-lite evaluator、Plain Codex、Goal Plus + Codex 已完成真实 E2E | Lite 其余 9 题尚未 campaign-ready |
+| Frontier-CS | `problem-0` | pinned judge image、Plain Codex、Goal Plus + Codex 已完成真实 E2E | 其余题尚未 materialize |
+| EdgeBench | VLIW Kernel Optimization | SForge work/judge、Plain Codex、Goal Plus lifecycle E2E 已通 | 8–12 个 gradient subset 尚未冻结 |
+
+这些任务可以在当前有 Docker 的 Mac 上跑，但不是 host-only 路径。启动前必须
+确认 `docker info` 成功，并保留镜像、冷启动和 evaluator 时间。
+
+### 只有局部能力，暂不能当作标准本机 Agent 实验
+
+| 对象 | 当前本机能力 | 还缺什么 |
+|---|---|---|
+| SwarmResearch 15-task substrate | Docker 下 Circle Packing evaluator 已通 | paper-compatible Swarm/Plain/Goal Plus 统一入口；ADRS/ALE worker build context |
+| PERFOPT-Bench | 无 | 公开 executable artifact 当前返回不可用，无法取得任务、依赖和 evaluator |
+
+### 可 host 运行但不计入正式 Benchmark 套数
+
+| Task pack | Docker | 当前用途 |
+|---|---|---|
+| OpenEvolve `cpu_portable` 12 题 | 不需要 | 方法接线、机制诊断和 OpenEvolve/Plain/Goal Plus 四路径 pilot |
+| SkyDiscover Circle Packing | 不需要 | SkyDiscover runtime + EvoX 方法的 compatibility smoke |
+
+这两行是此前最容易混淆的地方：能运行一个 evaluator task，不等于新增了一套
+benchmark。OpenEvolve 和 EvoX 属于被比较的搜索方法，SkyDiscover 是承载
+EvoX 的 runtime。
+
+---
+
 ## Docker 依赖速查
 
-这里的结论按 **bench-goal-plus 当前支持的可评分路径** 标记，而不是只看上游
-仓库里是否存在 Dockerfile。`混合` 表示当前已有无 Docker 的单题入口，但完整
-论文/多题路径仍依赖容器。
+以下按 **bench-goal-plus 当前支持的可评分路径** 标记，而不是只看上游是否
+存在 Dockerfile。`混合` 表示已有 host-portable 单题，但完整论文/多题路径
+仍依赖容器。
 
-| Benchmark / task set | Docker | 没有 Docker 时能否跑 | 边界 |
-|---|---|---|---|
-| HeuriGym | 不需要 | **可以** | 使用 pinned Python 环境和已 bootstrap 的数据 |
-| Frontier-Engineering MallocLab | 不需要 | **可以** | 需要本机 C 编译器和 `make`；其余 v1-lite 任务依赖另行冻结 |
-| AutoLab `toy_isa_opt` | 不需要 | **可以** | 当前 host-portable adapter 需要 C 编译器和 `make` |
-| OpenEvolve `cpu_portable` 12 题 | 不需要 | **可以** | 标准库、NumPy、SciPy；不含被筛掉的特殊软件/数据任务 |
-| SkyDiscover/EvoX Circle Packing smoke | 不需要 | **可以** | EvoX 框架本身可用 Python 跑；换任务后重新检查 evaluator |
-| AutoLab CPU subset / Harbor 正式路径 | 混合 | **不能完整跑** | 代表题可 host 跑，但完整 paper-compatible task 环境使用容器 |
-| ALE-Bench Lite | **需要** | **不可以评分** | official-lite evaluator 需要 C++ work image 和 judge image |
-| SwarmResearch 15 paper substrate | **需要** | **不可以正式复现** | paper-compatible task/evaluator 路径是容器化的 |
-| Frontier-CS Algorithmic | **需要** | **不可以评分** | 当前 problem-0 adapter 需要 pinned judge image 和 Docker socket |
-| EdgeBench | **需要** | **不可以评分** | SForge 需要 work container 与独立 hidden-judge container |
-| PERFOPT-Bench | 未知 | 不可运行 | executable artifact 尚未公开，暂时无法确认 |
-
-因此，无 Docker 环境优先跑：
-`HeuriGym → Frontier-Engineering MallocLab → AutoLab toy_isa_opt →
-OpenEvolve cpu_portable → SkyDiscover/EvoX Circle Packing`。启动 agent 前可用
-`docker info` 判断 Docker 是否可用；失败时不要准备表中标为“需要”的任务。
+| Benchmark / substrate | Docker | 没有 Docker 时能否跑 |
+|---|---|---|
+| HeuriGym | 不需要 | 当前 `operator_scheduling` 可完整评分 |
+| Frontier-Engineering | 不需要 | 当前仅确认 MallocLab；其余 v1-lite runtime 逐题冻结 |
+| AutoLab | 混合 | `toy_isa_opt` 可 host 跑；完整 paper-compatible 路径使用容器 |
+| ALE-Bench Lite | **需要** | 可以 materialize/查看，不能走当前 official-lite 评分 |
+| SwarmResearch 15-task substrate | **需要** | 可以分析轨迹，不能同口径正式评分 |
+| Frontier-CS | **需要** | 当前 problem-0 评分需要 pinned judge image |
+| EdgeBench | **需要** | SForge 需要 work container 和独立 hidden judge |
+| PERFOPT-Bench | 无法判定 | executable artifact 不可访问；不是“不需要 Docker” |
 
 ---
 
@@ -70,17 +119,25 @@ Goal Plus 的逐项接入改造、`K/E/Q` 三层并发和 matched-budget baselin
 | [Frontier-CS Algorithmic](frontier-cs-algorithmic.md) | 面向开放算法研究问题生成可执行程序，并从连续 partial score 改进 | Polyomino Packing |
 | [EdgeBench](edgebench.md) | 在真实隔离 artifact + hidden judge 上利用连续 feedback 持续优化 | VLIW Kernel Optimization |
 
-PERFOPT-Bench 因缺少可执行公开 artifact 继续挂起，不进入本文档集。SkyDiscover/EvoX 和 OpenEvolve 是 search backend，不作为 benchmark 单独写 case 文档。
+PERFOPT-Bench 因缺少可执行公开 artifact 继续挂起，不进入本文档集。
+SkyDiscover 是 runtime，EvoX/OpenEvolve 是搜索方法，因此不作为 benchmark
+单独写 case 文档；它们的分类和当前接入状态见
+[实验对象分类](../experiment-taxonomy.md)。
 
 ---
 
 ## 本地展开顺序
 
-1. **HeuriGym 9 + ALE Lite 10**：题量小、CPU 可跑，先形成 19 题的完整 coverage。
-2. **Frontier-Engineering v1-lite 10**：补齐 runtime 后，将本地完整 coverage 扩到 29 题。
-3. **AutoLab 只选 6–10 个 CPU case**：先验证 persistence，不在 Mac 上消耗完整 60 小时。
-4. **SwarmResearch 15**：修好统一 evaluator/worker 后作为最终大实验 substrate。
-5. **Frontier-CS 选 10 题**：保留 188 题 track 作为题库，不在本地对所有方法全扫。
-6. **EdgeBench 先冻结 8–12 个 gradient cases**：Mac 只做单题接线，正式多方法 campaign 放到 Linux。
+1. **先跑三道无 Docker 已接入 case**：HeuriGym Operator Scheduling、
+   Frontier-Engineering MallocLab、AutoLab Toy ISA。
+2. **再跑三道 Docker 已接入 case**：ALE AHC027、Frontier-CS problem 0、
+   EdgeBench VLIW，验证隔离评分链路。
+3. **HeuriGym 9 + ALE Lite 10**：补齐其余 adapter 后再形成 19 题 coverage；
+   当前不能把单题 E2E 写成全集 ready。
+4. **Frontier-Engineering v1-lite 10**：补齐其余 9 题 runtime 后扩展 coverage。
+5. **AutoLab 只选 6–10 个 CPU case**：先验证 persistence，不在 Mac 上消耗完整 60 小时。
+6. **SwarmResearch 15**：修好统一 evaluator/worker 后作为最终大实验 substrate。
+7. **Frontier-CS 选 10 题**：保留 188 题 track 作为题库，不在本地对所有方法全扫。
+8. **EdgeBench 冻结 8–12 个 gradient cases**：Mac 只做单题接线，正式多方法 campaign 放到 Linux。
 
 空间与 Linux 节点规划见 [Docker 镜像空间计划](../docker-storage-plan.md)，工程门禁以 [`benchmarks/registry.json`](../../benchmarks/registry.json) 为唯一状态源。
