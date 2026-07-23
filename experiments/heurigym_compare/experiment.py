@@ -55,6 +55,7 @@ BENCHMARK_ADAPTERS = {
     "frontier-cs-problem-0": "adapters.frontier_cs.adapter",
     "frontier-engineering-malloclab": "adapters.frontier_engineering.adapter",
     "heurigym": "adapters.heurigym.adapter",
+    "local-vliw": "adapters.local_vliw.adapter",
 }
 
 
@@ -63,6 +64,8 @@ def configure_adapter(benchmark_id: str) -> None:
     global ARTIFACT_NAME, BENCHMARK_NAME, CASE_SET_DESCRIPTION
     global CODEX_SANDBOX, DIRECTION
     global PRIMARY_METRIC, TASK_ID, UPSTREAM_KEY
+    global LOCAL_SOURCE_RELATIVE
+    global OFFICIAL_BENCHMARK_COMPARABLE
     global VERIFIER_TIMEOUT_SECONDS
     global evaluate_workspace, git_commit, materialize_workspace
     ARTIFACT_NAME = module.ARTIFACT_NAME
@@ -73,6 +76,10 @@ def configure_adapter(benchmark_id: str) -> None:
     PRIMARY_METRIC = module.PRIMARY_METRIC
     TASK_ID = module.TASK_ID
     UPSTREAM_KEY = module.UPSTREAM_KEY
+    LOCAL_SOURCE_RELATIVE = getattr(module, "LOCAL_SOURCE_RELATIVE", None)
+    OFFICIAL_BENCHMARK_COMPARABLE = getattr(
+        module, "OFFICIAL_BENCHMARK_COMPARABLE", True
+    )
     VERIFIER_TIMEOUT_SECONDS = module.VERIFIER_TIMEOUT_SECONDS
     evaluate_workspace = module.evaluate_workspace
     git_commit = module.git_commit
@@ -107,9 +114,27 @@ def prepare(args: argparse.Namespace) -> int:
     environment = load_json(args.environment_manifest)
     upstreams = environment["upstreams"]
     checkout_root = args.checkout_root.expanduser().absolute()
-    benchmark_root = checkout_root / upstreams[UPSTREAM_KEY]["checkout_dir"]
     goal_plus_root = checkout_root / upstreams["goal_plus"]["checkout_dir"]
-    for name, path in ((UPSTREAM_KEY, benchmark_root), ("goal_plus", goal_plus_root)):
+    managed_checkouts = [("goal_plus", goal_plus_root)]
+    if LOCAL_SOURCE_RELATIVE is None:
+        benchmark_root = checkout_root / upstreams[UPSTREAM_KEY]["checkout_dir"]
+        managed_checkouts.insert(0, (UPSTREAM_KEY, benchmark_root))
+        source_kind = "managed_upstream"
+    else:
+        benchmark_root = (ROOT / LOCAL_SOURCE_RELATIVE).resolve()
+        try:
+            benchmark_root.relative_to(ROOT)
+        except ValueError as error:
+            raise ValueError(
+                f"local benchmark source escapes repository root: {benchmark_root}"
+            ) from error
+        if not benchmark_root.is_dir():
+            raise FileNotFoundError(
+                f"local benchmark source is missing: {benchmark_root}"
+            )
+        source_kind = "local_example"
+
+    for name, path in managed_checkouts:
         if not (path / ".git").exists():
             raise FileNotFoundError(
                 f"managed {name} checkout is missing: {path}; run repro_env.py bootstrap"
@@ -216,6 +241,8 @@ def prepare(args: argparse.Namespace) -> int:
             "upstream_key": UPSTREAM_KEY,
             "upstream_commit": git_commit(benchmark_root),
             "case_set": CASE_SET_DESCRIPTION,
+            "source_kind": source_kind,
+            "official_benchmark_comparable": OFFICIAL_BENCHMARK_COMPARABLE,
         },
         "environment": {
             "manifest": str(args.environment_manifest.absolute()),

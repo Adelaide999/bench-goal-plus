@@ -13,7 +13,7 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 | Agent / 搜索方案 | Plain Codex、Independent Parallel、Goal Plus、OpenEvolve、EvoX、Swarm、AB-MCTS | 决定如何产生、共享、选择和延续候选 |
 | Agent host / runtime | Codex CLI、Pi、Goal Plus runtime、SkyDiscover、OpenEvolve runtime、SForge | 启动模型、workspace、进程和 benchmark-native harness |
 | 正式 Benchmark | ALE-Bench、HeuriGym、Frontier-Engineering、AutoLab、Frontier-CS、EdgeBench、PERFOPT-Bench | 提供任务、artifact、evaluator 和 raw metric |
-| 实验 substrate / task pack | SwarmResearch 15 题、OpenEvolve CPU examples、SkyDiscover Circle Packing | 复用任务做论文对标、方法 pilot 或接线诊断 |
+| 实验 substrate / task pack | SwarmResearch 15 题、OpenEvolve CPU examples、SkyDiscover Circle Packing、Local VLIW replica | 复用任务做论文对标、方法 pilot 或接线诊断 |
 
 因此，**EvoX 是方法，SkyDiscover 是承载它的 runtime，不是 benchmark**。
 OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为任务包，但不
@@ -35,7 +35,7 @@ OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为
 - Goal Plus + Codex/Pi 曾通过 [controller-prepared 严格重跑](evidence/runs/2026-07-22-goal-plus-codex-pi-strict-rerun.md) 验证底层 worker、verifier 和 promotion 能力；该入口现保留为历史诊断证据，不再作为标准主实验。标准入口改为 Plain Codex 使用 common task prompt，Codex + Goal Plus 只增加 `/goal-plus` 前缀和完整配置后缀，并让 Goal/Spec/Run 全部在计时后的自然流程中创建。
 - Goal Plus + Codex 已完成 [自然 prompt 标准入口 E2E](evidence/runs/2026-07-22-goal-plus-codex-natural-prompt.md)：prepare 后不存在 `.gp/`，定时运行内自然创建 Goal/Spec/Run 和两个 Codex workers；`gpt-5.6-sol/high`、`T=300s`、`K=2` 下，`combined_score` 从 1.119176 提升到 1.499540（+33.99%），两个 worker 都提交 verifier 结果并完成 promotion/report。
 - HeuriGym `operator_scheduling` 已完成 [Plain Codex / Goal Plus + Codex 首轮真实 E2E](evidence/runs/2026-07-22-heurigym-operator-scheduling-codex-goal-plus.md)：两者共享 `gpt-5.6-sol/high`、`T=300s`、`K=2`、common prompt 和官方五-case evaluator；seed `total_cost=138`，Plain Codex 得 62，Goal Plus + Codex 得 95。它是接线证据，不是单次方法排名。
-- Standalone benchmark 已收敛到同一 [Plain Codex / Goal Plus + Codex runner](experiments/benchmark_compare/README.md)：当前支持 ALE-Bench Lite `ahc027`、AutoLab `toy_isa_opt`、Frontier-Engineering `MallocLab`、Frontier-CS `problem-0` 和 HeuriGym `operator_scheduling`；每题仍保留自己的 artifact、official evaluator、raw metric、方向、timeout 和资源要求。
+- Standalone benchmark 已收敛到同一 [Plain Codex / Goal Plus + Codex runner](experiments/benchmark_compare/README.md)：当前支持 ALE-Bench Lite `ahc027`、AutoLab `toy_isa_opt`、Frontier-Engineering `MallocLab`、Frontier-CS `problem-0`、HeuriGym `operator_scheduling`，以及明确标为非官方结果的 host-only `local-vliw`；每题仍保留自己的 artifact、evaluator、raw metric、方向、timeout 和资源要求。
 - AutoLab host-portable smoke 已跑通：`gpt-5.6-sol/high`、`K=2` 下 Plain Codex 在 `T=240s` 从 `9220` 降到 `1547 cycles`；Goal Plus 在 `T=360s` 创建 2 个已绑定 Codex lineage，至少 1 个 worker 提交 verifier，但最终仍为 seed `9220`。这证明路径成立，不代表 Goal Plus 输赢。
 - Frontier-Engineering MallocLab 的上游 evaluator 已在 macOS 通过 portable rebuild：seed `28/100`；Plain Codex `T=300s,K=2` 达到 `90/100`，Goal Plus `T=420s,K=2` 的 best verified/promoted 结果为 `89/100`。两者都通过 `11/11` traces；预算不同，仍只是各自接线 smoke。
 - ALE-Bench Lite `ahc027` 的通用 Goal Plus 入口也已完成真实 E2E：`gpt-5.6-sol/high`、`T=480s`、`K=2` 下创建 2 个已绑定且均提交 verifier 的 Codex lineage，9 次 process-verifier iteration 后从 seed `55,181,186` 降到最终 `52,693,209`（越低越好，改善 `4.51%`）；本轮共记录 12 次 evaluator command/call，仍是接线证据而非 matched 方法排名。
@@ -56,6 +56,10 @@ OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为
 - 已建立 [可移植复现环境](docs/reproducible-environment.md)：固定 Python 依赖及 OpenEvolve/Goal Plus commit，自动 bootstrap/doctor，并为四条独立路径生成隔离实验目录。Goal Plus 的 `.gp` 只存在于临时 task workspace。
 - OpenEvolve example 的自然 `/goal-plus` 标准入口已成为统一模板；ALE-Bench Lite、HeuriGym、AutoLab、Frontier-Engineering 和 Frontier-CS 现在复用同一 common-prompt / Goal Plus-suffix 结构。
 - EdgeBench 已接入 campaign controller：固定 fork 与 HuggingFace revision，按 profile 精确拉取任务/镜像，区分 Plain Codex 的 K 个独立 replica 与 Goal Plus 的 K 个 internal workers，并提供 `prepare / run / status / stop / finalize`。VLIW 已完成同模型、同 `T/K` 的真实 lifecycle E2E，judge lifecycle、evaluator calls 和 Codex session usage 均可回收；`T=120s` 尚不足以 dispatch Goal Plus worker，所以它仍不是方法效果对比。
+- 原先位于 Goal Plus `examples-hide/vliw_kernel_optimization` 的 host-only VLIW
+  实验已迁入 [`local_examples/`](local_examples/README.md)。这里保留 public /
+  held-out controller 边界和统一 Plain Codex / Goal Plus 入口；旧的定制实验
+  harness 不再由 Goal Plus core 仓维护。
 
 ## 固定验收门禁
 
@@ -123,6 +127,10 @@ runs/<benchmark>/<campaign-id>/
 artifact adapter。没有 Docker 的 benchmark 仍使用同一生命周期，只是
 `Work/runtime` 与 `Judge/evaluator` 由 host process 承担。
 
+对于不需要上游 checkout 的固定小任务，唯一例外是仓内 `local_examples/`：
+它直接作为 task source，仍由同一 runner materialize 到 `runs/` 下的隔离
+workspace。它不会进入正式 benchmark 数量，也不能替代 SForge hidden judge。
+
 ## 仓库结构
 
 ```text
@@ -137,8 +145,9 @@ docs/openevolve-cpu-examples.md         OpenEvolve 无特殊硬件示例的主�
 docs/reproducible-environment.md         新机器 bootstrap、doctor、workspace 与实验执行手册
 environment/                             Python lock 与 OpenEvolve/Goal Plus 固定版本 manifest
 third_party/                             所有 pinned benchmark/search runtime 的统一 ignored checkout 根目录
+local_examples/                          无 Docker 的固定 task replica；只作方法实验，不冒充正式 benchmark
 experiments/openevolve_compare/          native OE / Plain Codex / Goal Plus+Codex / Goal Plus+Pi 同任务时限入口
-experiments/benchmark_compare/             五套 standalone benchmark 的 Plain Codex / Goal Plus+Codex 统一入口
+experiments/benchmark_compare/             standalone benchmark 与 local task 的 Plain Codex / Goal Plus+Codex 统一入口
 experiments/heurigym_compare/              上述通用实现的兼容入口
 experiments/edgebench/                      SForge 原生 runtime/judge 的 campaign 控制、监控、停止与汇总
 adapters/heurigym/                        HeuriGym workspace、官方 evaluator 与数据固定层
@@ -212,6 +221,21 @@ python3 scripts/repro_env.py bootstrap --only edgebench
 
 完整停止、恢复边界和汇总字段见
 [EdgeBench campaign runbook](experiments/edgebench/README.md)。
+
+没有 Docker 时，可以先用相同控制协议跑 local VLIW replica：
+
+```bash
+python3 local_examples/vliw_kernel_optimization/evaluate.py --cases both
+
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
+  --benchmark local-vliw --method goal-plus-codex \
+  --wall-time-seconds 360 --soft-closeout-seconds 60 \
+  --worker-runtime-seconds 120 --concurrency 2 --model gpt-5.6-sol
+```
+
+该路径输出 `cycles` raw metric，但 manifest 会固定写入
+`source_kind=local_example` 和 `official_benchmark_comparable=false`，不能与
+官方 EdgeBench score 混报。
 
 ## 旧资料边界
 

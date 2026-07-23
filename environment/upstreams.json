@@ -14,7 +14,7 @@
     "goal_plus": {
       "repository": "https://github.com/ck0123/goal-plus.git",
       "checkout_dir": "goal-plus",
-      "pinned_commit": "05626b18b23bbd2ec97713246de989c07be1f842",
+      "pinned_commit": "e6fb57ce6e5eadb069ff3962aa8b9671b2662c68",
       "always": true,
       "editable": true
     },

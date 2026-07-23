@@ -15,6 +15,7 @@ Codex launch, Goal Plus launch, wall deadline, concurrency, and evidence.
 | `frontier-cs-problem-0` | `solution.cpp` | `checker_score_percent` maximize | **必需** | Image `bench-goal-plus/frontier-cs-judge:07500f9`; about 1.27 GB |
 | `frontier-engineering-malloclab` | `mm.c` | `combined_score` maximize | 不需要 | C compiler and `make` |
 | `heurigym` | `solver.py` | `total_cost` minimize | 不需要 | Python only after dataset bootstrap |
+| `local-vliw` | `solution.py` | `cycles` minimize | 不需要 | Python standard library；local replica，非官方 EdgeBench |
 
 Every upstream checkout lives in the ignored `third_party/` directory. Run a
 task-specific bootstrap instead of cloning beside the repository:
@@ -27,6 +28,12 @@ python3 scripts/repro_env.py doctor --only autolab
 The upstream keys are `ale_bench`, `autolab`, `frontier_cs`,
 `frontier_engineering`, and `heurigym`. OpenEvolve and Goal Plus are always
 included because they are pinned shared runtimes.
+
+`local-vliw` 不使用 `third_party/` benchmark checkout；它从仓内
+`local_examples/vliw_kernel_optimization` materialize。Goal Plus runtime 仍
+来自 pinned `third_party/goal-plus`。其 manifest 固定标记
+`source_kind=local_example` 和 `official_benchmark_comparable=false`；
+workspace evaluator report 另保留 `official_edgebench_comparable=false`。
 
 The two Docker-backed adapters (`ale-bench-lite` and
 `frontier-cs-problem-0`) launch Codex with `danger-full-access` and explicit
@@ -83,6 +90,7 @@ campaign budget per task:
 | Task | Suggested wiring `T / closeout / worker` |
 |---|---|
 | AutoLab / HeuriGym | `360 / 60 / 120` seconds |
+| Local VLIW replica | `360 / 60 / 120` seconds |
 | Frontier-Engineering MallocLab | `420 / 60 / 180` seconds |
 | Frontier-CS problem 0 | `480 / 90 / 180` seconds |
 | ALE-Bench Lite AHC027 | `480 / 60 / 180` seconds after cache warm-up |

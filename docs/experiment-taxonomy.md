@@ -60,6 +60,11 @@ OpenEvolve 的 12 个 `cpu_portable` examples 与 SkyDiscover 的 Circle Packing
 可以本机运行，但它们应标为 **method-repo task pack / diagnostic task**。除非
 另有独立论文、固定数据版本和评分协议，不把它们计入“正式 benchmark 套数”。
 
+`local_examples/vliw_kernel_optimization` 同属这一层：它是从 EdgeBench 固定
+镜像提取的 host-only replica，用于快速比较 Plain Codex、Goal Plus 和后续
+OpenEvolve/EvoX。它复用 `cycles` 语义，但没有 SForge 的容器隔离，不能记为
+官方 EdgeBench 结果。
+
 ---
 
 ## 正式 Benchmark 与实验 substrate
@@ -76,6 +81,7 @@ OpenEvolve 的 12 个 `cpu_portable` examples 与 SkyDiscover 的 Circle Packing
 | SwarmResearch 15-task set | 论文实验 substrate | 复用 Math 5 + ADRS 5 + ALE 5；同时对比 Swarm、EvoX、Goal Plus |
 | OpenEvolve CPU examples | method-repo task pack | 快速接线、机制诊断和第一轮 OpenEvolve matched pilot |
 | SkyDiscover Circle Packing | method-repo task | EvoX compatibility smoke，不单独算一套 benchmark |
+| Local VLIW replica | local task replica | 无 Docker 的搜索方法对比；结果不计入官方 EdgeBench |
 
 Benchmark 的本机可运行状态见
 [Benchmark 导读：本机可直接运行什么](benchmarks/README.md#本机可直接运行什么)；

@@ -59,6 +59,7 @@ Plain Codex / Goal Plus 入口，而不是“仓库能下载”或“代码看�
 |---|---|---|
 | OpenEvolve `cpu_portable` 12 题 | 不需要 | 方法接线、机制诊断和 OpenEvolve/Plain/Goal Plus 四路径 pilot |
 | SkyDiscover Circle Packing | 不需要 | SkyDiscover runtime + EvoX 方法的 compatibility smoke |
+| Local VLIW replica | 不需要 | 从 EdgeBench 镜像提取的 Plain/Goal Plus 本地比较任务；非官方 EdgeBench 分数 |
 
 这两行是此前最容易混淆的地方：能运行一个 evaluator task，不等于新增了一套
 benchmark。OpenEvolve 和 EvoX 属于被比较的搜索方法，SkyDiscover 是承载
@@ -82,6 +83,10 @@ EvoX 的 runtime。
 | Frontier-CS | **需要** | 当前 problem-0 评分需要 pinned judge image |
 | EdgeBench | **需要** | SForge 需要 work container 和独立 hidden judge |
 | PERFOPT-Bench | 无法判定 | executable artifact 不可访问；不是“不需要 Docker” |
+
+`local_examples/vliw_kernel_optimization` 可在无 Docker 主机运行 public 和
+held-out local evaluator，但它没有 SForge 的安全隔离，因此不会改变上表
+EdgeBench 的“需要 Docker”结论。
 
 ---
 

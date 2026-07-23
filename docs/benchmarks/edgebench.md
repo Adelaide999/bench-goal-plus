@@ -14,7 +14,7 @@ best-seen 搜索能力，而不只是 Pass@K。
 |---|---|
 | 公开范围 | 51 题；本项目先冻结 8–12 个 gradient cases |
 | Docker | **必需**；SForge 为每题启动 work container 与独立 hidden judge |
-| 无 Docker 环境 | 可以 bootstrap 源码和阅读 task JSON，但不能运行或评分 EdgeBench |
+| 无 Docker 环境 | 不能运行或评分官方 EdgeBench；可运行仓内 VLIW local replica 做诊断 |
 | 当前门禁 | VLIW 的环境、Plain/Goal Plus lifecycle 与 usage 回收已通 |
 | 固定源码 | `ByteDance-Seed/EdgeBench@b27bf1b` |
 
@@ -65,6 +65,26 @@ python3 scripts/repro_env.py bootstrap --only edgebench
 `K`。Plain Codex 用 K 个 SForge replicas；Goal Plus 用一个 outer SForge run
 与 K 个 internal workers。cells 在一台机器上默认串行，避免资源超卖。
 
+### 无 Docker 的 local replica
+
+仓内 [`local_examples/vliw_kernel_optimization`](../../local_examples/vliw_kernel_optimization/README.md)
+保存了从固定 work/judge images 提取的 simulator、starter、public cases 和
+controller-owned held-out cases：
+
+```bash
+python3 local_examples/vliw_kernel_optimization/evaluate.py --cases both
+
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
+  --benchmark local-vliw --method plain-codex \
+  --wall-time-seconds 360 --soft-closeout-seconds 60 \
+  --worker-runtime-seconds 120 --concurrency 2 --model gpt-5.6-sol
+```
+
+这条路径适合本机快速比较方法，但不是官方 host-only EdgeBench backend。
+held-out cases 已从 agent workspace 中移除，却仍存在同一 Git 仓；拥有宿主
+广域读取权的 agent 可以找到它们。因此结果必须保留
+`official_edgebench_comparable=false`，不能与 SForge score 混报。
+
 ## 可复用对比数据
 
 EdgeBench README 提供 open-source 51-task 的 model reference curves，fork 的
@@ -88,6 +108,7 @@ telemetry，不用于方法排名。正式短 pilot 应至少使用 `T>=300s,K>=
 ## 代码与证据
 
 - [EdgeBench campaign controller](../../experiments/edgebench/README.md)
+- [Host-only VLIW local replica](../../local_examples/vliw_kernel_optimization/README.md)
 - [固定 profile](../../experiments/edgebench/profiles/vliw-smoke.json)
 - [环境 doctor](../../evidence/environment/2026-07-23-edgebench-vliw-doctor.json)
 - [真实接线 smoke](../../evidence/runs/2026-07-23-edgebench-codex-goal-plus-smokes.md)

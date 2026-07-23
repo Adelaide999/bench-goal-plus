@@ -47,7 +47,7 @@ Q = 1 task
 
 ## Goal Plus 当前已有能力与必须整改项
 
-当前固定版本 `goal-plus@05626b1` 已有 Codex/Pi `parallel_loops`、`max_candidates/max_parallel`、同 native worker continuation、verifier-backed best、Search Evidence/Schema、worker min/max runtime 和 usage report。
+当前固定版本 `goal-plus@e6fb57c` 已有 Codex/Pi `parallel_loops`、`max_candidates/max_parallel`、同 native worker continuation、verifier-backed best、Search Evidence/Schema、worker min/max runtime 和 usage report；benchmark-specific fixture 已从 runtime 仓迁出。
 
 但用于这批 benchmark 仍缺 6 项：
 

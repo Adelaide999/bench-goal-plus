@@ -291,7 +291,7 @@
       "data_url": "https://huggingface.co/datasets/ByteDance-Seed/EdgeBench",
       "local_path": "third_party/edgebench",
       "docker_requirement": "required",
-      "docker_scope": "Native SForge requires separate work and hidden-judge containers for every supported task; there is no score-compatible host-only path.",
+      "docker_scope": "Native SForge requires separate work and hidden-judge containers for every supported task; there is no score-compatible host-only path. The repository-local VLIW replica is diagnostic only and does not change this requirement.",
       "stages": {
         "source_forked": "pass",
         "environment": "pass",

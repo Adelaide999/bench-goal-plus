@@ -12,6 +12,7 @@ from adapters.ale import adapter as ale
 from adapters.autolab import adapter as autolab
 from adapters.frontier_cs import adapter as frontier_cs
 from adapters.frontier_engineering import adapter as frontier
+from adapters.local_vliw import adapter as local_vliw
 from adapters.portable import candidate_changed_paths
 from experiments.heurigym_compare import experiment
 from experiments.openevolve_compare import experiment as openevolve_experiment
@@ -30,6 +31,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                 "frontier-cs-problem-0",
                 "frontier-engineering-malloclab",
                 "heurigym",
+                "local-vliw",
             },
         )
 
@@ -40,7 +42,11 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
         self.assertEqual(experiment.CODEX_SANDBOX, "danger-full-access")
         experiment.configure_adapter("autolab-toy-isa")
         self.assertEqual(experiment.CODEX_SANDBOX, "workspace-write")
+        experiment.configure_adapter("local-vliw")
+        self.assertEqual(experiment.CODEX_SANDBOX, "workspace-write")
+        self.assertFalse(experiment.OFFICIAL_BENCHMARK_COMPARABLE)
         experiment.configure_adapter("heurigym")
+        self.assertTrue(experiment.OFFICIAL_BENCHMARK_COMPARABLE)
 
     def test_autolab_parser_requires_successful_verification(self) -> None:
         self.assertEqual(autolab.parse_result("cycles=1547 verify=ok"), (1547, True))
@@ -95,6 +101,24 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
         self.assertEqual(ale.ARTIFACT_NAME, "solution.cpp")
         self.assertEqual(ale.DIRECTION, "minimize")
         self.assertIn("five public-lite seeds", ale.task_text("statement"))
+
+    def test_local_vliw_materializes_only_public_inputs_and_scores_seed(self) -> None:
+        source = ROOT / local_vliw.LOCAL_SOURCE_RELATIVE
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary) / "workspace"
+            metadata = local_vliw.materialize_workspace(source, workspace)
+            self.assertEqual(metadata["classification"], "local_example")
+            self.assertFalse(metadata["official_edgebench_comparable"])
+            self.assertTrue((workspace / "solution.py").is_file())
+            self.assertTrue((workspace / "test_cases/public_cases.json").is_file())
+            self.assertFalse((workspace / "controller").exists())
+            self.assertFalse((workspace / "test_cases/hidden_cases.json").exists())
+
+            report = local_vliw.evaluate_workspace(workspace, source, "public")
+            self.assertTrue(report["valid"])
+            self.assertEqual(report["cycles"], local_vliw.BASELINE_CYCLES)
+            self.assertEqual(report["classification"], "local_example")
+            self.assertFalse(report["official_edgebench_comparable"])
 
     def test_codex_task_name_counts_as_a_bound_goal_plus_session(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
