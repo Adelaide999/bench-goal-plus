@@ -265,9 +265,19 @@ def codex_provider_args(api_base: str) -> list[str]:
         f'model_providers.{CODEX_PROVIDER_ID}.env_key="OPENAI_API_KEY"',
         "--config",
         f'model_providers.{CODEX_PROVIDER_ID}.wire_api="responses"',
+    ]
+
+
+def codex_model_args(model: str, api_base: str | None) -> list[str]:
+    """Pin model/reasoning identically for native and explicit providers."""
+    args = [
         "--config",
         f'model_reasoning_effort="{DEFAULT_REASONING_EFFORT}"',
     ]
+    if api_base:
+        args.extend(codex_provider_args(api_base))
+    args.extend(["--model", model])
+    return args
 
 
 def codex_goal_plus_mcp_args() -> list[str]:
@@ -1567,9 +1577,7 @@ def execute(args: argparse.Namespace) -> int:
                 "--color",
                 "never",
                 "--ephemeral",
-                *(codex_provider_args(args.api_base) if args.api_base else []),
-                "--model",
-                args.model,
+                *codex_model_args(args.model, args.api_base),
                 "-",
             ]
             jobs.append(
@@ -1691,10 +1699,8 @@ def execute(args: argparse.Namespace) -> int:
                 "--color",
                 "never",
                 "--dangerously-bypass-hook-trust",
-                *(codex_provider_args(args.api_base) if args.api_base else []),
+                *codex_model_args(args.model, args.api_base),
                 *codex_goal_plus_mcp_args(),
-                "--model",
-                args.model,
                 "-",
             ]
             stdout_path = run_dir / "events.jsonl"

@@ -450,12 +450,27 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             )
             self.assertNotRegex(raw, r"\bsk-[A-Za-z0-9_-]{16,}\b")
 
-    def test_codex_provider_args_select_responses_and_high_reasoning(self) -> None:
+    def test_codex_provider_args_select_responses(self) -> None:
         args = experiment.codex_provider_args("http://proxy.example/v1")
         joined = "\n".join(args)
         self.assertIn('wire_api="responses"', joined)
         self.assertIn('env_key="OPENAI_API_KEY"', joined)
+
+    def test_codex_model_args_pin_native_auth_model_and_reasoning(self) -> None:
+        args = experiment.codex_model_args("gpt-5.6-terra", None)
+        joined = "\n".join(args)
         self.assertIn('model_reasoning_effort="high"', joined)
+        self.assertEqual(args[-2:], ["--model", "gpt-5.6-terra"])
+        self.assertNotIn("model_provider=", joined)
+
+    def test_codex_model_args_keep_reasoning_with_explicit_provider(self) -> None:
+        args = experiment.codex_model_args(
+            "gpt-5.6-terra", "http://proxy.example/v1"
+        )
+        joined = "\n".join(args)
+        self.assertIn('model_reasoning_effort="high"', joined)
+        self.assertIn('wire_api="responses"', joined)
+        self.assertEqual(args[-2:], ["--model", "gpt-5.6-terra"])
 
     def test_codex_goal_plus_mcp_args_register_runtime_explicitly(self) -> None:
         joined = "\n".join(experiment.codex_goal_plus_mcp_args())
