@@ -11,6 +11,8 @@ AutoLab 把长期自主研究变成可执行任务：agent 进入一个已经能
 | 候选 artifact | task-specific 源码、配置或实验产物 |
 | 指标 | correctness gate + task-native 连续 reward |
 | 资源上限 | 单任务最多 4 CPU、4096 MiB；20 题为 2h、5 题为 4h agent budget |
+| Docker | **混合**；当前 `toy_isa_opt` host adapter 不需要，完整 Harbor/task 路径需要容器 |
+| 无 Docker 环境 | 可以跑 `toy_isa_opt`；不能据此复现完整 25-task CPU subset |
 | 当前门禁 | `toy_isa_opt` 的 host evaluator、Plain Codex 和 Goal Plus + Codex 已通 |
 | 固定源码 | `MetaStone-AI/AutoLab@7aff5fe` |
 
@@ -24,10 +26,11 @@ AutoLab 把长期自主研究变成可执行任务：agent 进入一个已经能
 
 ### 输入是什么
 
-Agent 得到一个容器工作区：
+上游正式路径把任务放进容器；本项目当前的 host-portable adapter 会把等价的
+固定源码复制到仓内临时 build 目录。Agent 看到的任务边界是：
 
-- 可编辑文件：`/app/program.s`；
-- 只读参考：`/app/main.c`、`Makefile` 和任务说明；
+- 可编辑文件：`program.s`；
+- 只读参考：`main.c`、`Makefile` 和任务说明；
 - 隐式数据：A 位于 word address `0..511`，B 位于 `512..1023`，元素范围为 `[0,996]`；
 - 最终结果：程序 halt 时寄存器 `r1` 必须等于点积。
 

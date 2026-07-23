@@ -41,6 +41,16 @@ class BenchmarkDocsTest(unittest.TestCase):
                 for heading in REQUIRED_CASE_SECTIONS:
                     self.assertIn(heading, text)
 
+    def test_docker_requirement_is_visible_in_overview_and_each_benchmark(self):
+        overview = (DOCS_DIR / "README.md").read_text(encoding="utf-8")
+        self.assertIn("## Docker 依赖速查", overview)
+        self.assertIn("没有 Docker 时能否跑", overview)
+        for filename in BENCHMARK_DOCS:
+            text = (DOCS_DIR / filename).read_text(encoding="utf-8")
+            with self.subTest(filename=filename):
+                self.assertIn("Docker", text)
+                self.assertIn("无 Docker 环境", text)
+
     def test_local_markdown_links_resolve(self):
         markdown_files = (
             [DOCS_DIR / "README.md"]

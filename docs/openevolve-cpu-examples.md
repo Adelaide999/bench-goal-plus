@@ -6,6 +6,10 @@ OpenEvolve 当前仓库确实有一批可作为**共同 task/evaluator substrate
 
 当前已经把 12 题固化为 `cpu_portable` task set，并实现批量 list、materialize、seed evaluator smoke、四路径 campaign prepare/run。主实验优先看 `background_blur` 与 `circle_packing_with_artifacts`；8 个 AlphaEvolve 几何/组合连续优化任务用于扩大题量；`function_minimization` 和 `k_module_problem` 主要作为接线与负对照。
 
+**Docker 标记：不需要。** `cpu_portable` 12 题只使用 locked Python、
+NumPy/SciPy；没有 Docker 的环境可以完整 materialize、evaluate 并启动四路径
+campaign。这个结论不扩展到被排除的 OpenEvolve examples。
+
 源代码固定为 [`algorithmicsuperintelligence/openevolve@411fb59`](https://github.com/algorithmicsuperintelligence/openevolve/tree/411fb59c886c18704caaffb611e17cf9e7d824d2)；本次用 `git ls-remote` 确认该提交仍是 upstream HEAD。示例全集位于其 [`examples/`](https://github.com/algorithmicsuperintelligence/openevolve/tree/411fb59c886c18704caaffb611e17cf9e7d824d2/examples) 目录。
 
 ## 已批量接入的 `cpu_portable` 任务

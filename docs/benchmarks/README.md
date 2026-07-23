@@ -9,9 +9,38 @@
 
 ---
 
+## Docker 依赖速查
+
+这里的结论按 **bench-goal-plus 当前支持的可评分路径** 标记，而不是只看上游
+仓库里是否存在 Dockerfile。`混合` 表示当前已有无 Docker 的单题入口，但完整
+论文/多题路径仍依赖容器。
+
+| Benchmark / task set | Docker | 没有 Docker 时能否跑 | 边界 |
+|---|---|---|---|
+| HeuriGym | 不需要 | **可以** | 使用 pinned Python 环境和已 bootstrap 的数据 |
+| Frontier-Engineering MallocLab | 不需要 | **可以** | 需要本机 C 编译器和 `make`；其余 v1-lite 任务依赖另行冻结 |
+| AutoLab `toy_isa_opt` | 不需要 | **可以** | 当前 host-portable adapter 需要 C 编译器和 `make` |
+| OpenEvolve `cpu_portable` 12 题 | 不需要 | **可以** | 标准库、NumPy、SciPy；不含被筛掉的特殊软件/数据任务 |
+| SkyDiscover/EvoX Circle Packing smoke | 不需要 | **可以** | EvoX 框架本身可用 Python 跑；换任务后重新检查 evaluator |
+| AutoLab CPU subset / Harbor 正式路径 | 混合 | **不能完整跑** | 代表题可 host 跑，但完整 paper-compatible task 环境使用容器 |
+| ALE-Bench Lite | **需要** | **不可以评分** | official-lite evaluator 需要 C++ work image 和 judge image |
+| SwarmResearch 15 paper substrate | **需要** | **不可以正式复现** | paper-compatible task/evaluator 路径是容器化的 |
+| Frontier-CS Algorithmic | **需要** | **不可以评分** | 当前 problem-0 adapter 需要 pinned judge image 和 Docker socket |
+| EdgeBench | **需要** | **不可以评分** | SForge 需要 work container 与独立 hidden-judge container |
+| PERFOPT-Bench | 未知 | 不可运行 | executable artifact 尚未公开，暂时无法确认 |
+
+因此，无 Docker 环境优先跑：
+`HeuriGym → Frontier-Engineering MallocLab → AutoLab toy_isa_opt →
+OpenEvolve cpu_portable → SkyDiscover/EvoX Circle Packing`。启动 agent 前可用
+`docker info` 判断 Docker 是否可用；失败时不要准备表中标为“需要”的任务。
+
+---
+
 ## 当前规模与时间
 
-以下估算基于 16 GiB Intel Mac、8.4 GB Docker VM、单 worker 串行执行。模型延迟、候选超时和首次依赖下载会造成较大波动，因此这里给区间而不是伪精确值。
+以下估算基于 16 GiB Intel Mac、8.4 GB Docker VM、单 worker 串行执行。没有
+Docker 的机器只适用上表“不需要”路径。模型延迟、候选超时和首次依赖下载会
+造成较大波动，因此这里给区间而不是伪精确值。
 
 | Benchmark 范围 | 题数 | 当前准备度 | Coverage run | Search campaign |
 |---|---:|---|---:|---:|

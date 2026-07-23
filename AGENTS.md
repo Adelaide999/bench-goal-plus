@@ -15,11 +15,19 @@ This repository is the control plane for Goal Plus benchmark integrations.
 - Never run Goal Plus from an upstream or benchmark source checkout. Materialize a disposable Git workspace under ignored `runs/`; keep its `.gp/` state inside that workspace.
 - Never use host-wide `/tmp`, `/private/tmp`, or `/var/tmp` for benchmark controller state, builds, verifier output, tests, or subprocess scratch space. Route `TMPDIR`, `TMP`, and `TEMP` to the ignored repository-local `.tmp/` through `bench_runtime_paths.py`. A user-selected override must remain under the repository or a user-writable location such as `~/.tmp/`.
 - Do not delete local workspaces or caches automatically. If a conflicting path must be preserved, rename it with a `_bak` suffix and report it.
+- Before preparing a benchmark on a fresh host, read its `docker_requirement` and
+  `docker_scope` in `benchmarks/registry.json`. If `docker info` fails, run only
+  `not_required` paths; a `mixed` item is allowed only through the specific
+  host-portable task named in `docker_scope`. Never silently substitute a
+  host-only evaluator for a containerized official score.
 - Run `python3 scripts/status.py --check` and `python3 -m unittest discover -s tests -v` before committing.
 
 ## Fresh-host bootstrap
 
-Host prerequisites are `git`, a Python `3.10+` launcher, `uv`, and Codex CLI `0.144.1+`. Credentials stay in the host environment or Codex auth store; never write them into this repository.
+Global host prerequisites are `git`, a Python `3.10+` launcher, `uv`, and Codex
+CLI `0.144.1+`. Docker is optional for the control plane but mandatory for
+registry items marked `required`. Credentials stay in the host environment or
+Codex auth store; never write them into this repository.
 
 ```bash
 cd bench-goal-plus

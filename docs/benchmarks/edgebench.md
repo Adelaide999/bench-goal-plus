@@ -10,6 +10,14 @@ hidden judge 给出 correctness 与连续分数。公开子集当前有 51 题�
 还得到可连续优化的 raw score。这样能区分共享证据、跨 lineage transfer 和
 best-seen 搜索能力，而不只是 Pass@K。
 
+| 项目 | 内容 |
+|---|---|
+| 公开范围 | 51 题；本项目先冻结 8–12 个 gradient cases |
+| Docker | **必需**；SForge 为每题启动 work container 与独立 hidden judge |
+| 无 Docker 环境 | 可以 bootstrap 源码和阅读 task JSON，但不能运行或评分 EdgeBench |
+| 当前门禁 | VLIW 的环境、Plain/Goal Plus lifecycle 与 usage 回收已通 |
+| 固定源码 | `ByteDance-Seed/EdgeBench@b27bf1b` |
+
 ## 代表 case：VLIW Kernel Optimization
 
 ### 输入是什么

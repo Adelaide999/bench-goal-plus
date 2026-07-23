@@ -10,6 +10,8 @@ Frontier-CS 把开放式计算机科学问题封装成可执行 judge。Algorith
 | 本项目本机范围 | 先 materialize problem 0，再选 5 个高 Pass@1 + 5 个低 Pass@1 |
 | 候选 artifact | 读取任意实例的可编译程序，通常为 C++ |
 | 指标 | checker-native partial score；每题方向由 statement/checker 定义 |
+| Docker | **必需**；当前 problem-0 使用 pinned compile/checker judge image |
+| 无 Docker 环境 | 可 materialize 和写候选，但不能通过当前官方 checker 路径评分 |
 | 当前门禁 | problem 0 direct official checker、Plain/Goal Plus runner 和 partial-score parser 已通；两条 Codex 路径都有真实 E2E |
 | 固定源码 | `FrontierCS/Frontier-CS@07500f9` |
 

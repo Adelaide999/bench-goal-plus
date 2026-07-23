@@ -29,8 +29,11 @@ bench-goal-plus/
 - Pi Coding Agent `0.80.6+`；
 - 能安装 CPython 3.12 wheel 的 macOS 或 Linux。
 
-`uv` 会按需取得 Python 3.12。Docker 镜像、编译器或大型 benchmark 数据仍
-由具体 benchmark 的 runbook 管理；源码 checkout 统一在 `third_party/`。
+`uv` 会按需取得 Python 3.12。Docker 不是控制面的全局前置条件：
+`benchmarks/registry.json` 中 `not_required` 的路径可以在无 Docker 主机运行；
+`required` 路径不能评分，`mixed` 只能使用 `docker_scope` 明确列出的
+host-portable task。Docker 镜像、编译器或大型 benchmark 数据仍由具体
+benchmark 的 runbook 管理；源码 checkout 统一在 `third_party/`。
 
 ## 一键构建和检查
 

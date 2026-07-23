@@ -20,6 +20,7 @@ def load_registry() -> dict:
 def validate(data: dict) -> list[str]:
     errors: list[str] = []
     allowed = set(data.get("status_values", []))
+    docker_values = {"required", "not_required", "mixed", "unavailable"}
     gate_sets = data.get("gate_sets", {})
     seen_ids: set[str] = set()
 
@@ -31,6 +32,15 @@ def validate(data: dict) -> list[str]:
         if item_id in seen_ids:
             errors.append(f"duplicate item id: {item_id}")
         seen_ids.add(item_id)
+
+        docker_requirement = item.get("docker_requirement")
+        if docker_requirement not in docker_values:
+            errors.append(
+                f"{item_id}: docker_requirement must be one of "
+                f"{sorted(docker_values)}, got {docker_requirement!r}"
+            )
+        if not item.get("docker_scope"):
+            errors.append(f"{item_id}: docker_scope must explain the supported path")
 
         gate_set = item.get("gate_set")
         expected = set(gate_sets.get(gate_set, []))
@@ -71,24 +81,43 @@ def compact(status: str) -> str:
     }[status]
 
 
+def compact_docker(requirement: str) -> str:
+    return {
+        "required": "REQUIRED",
+        "not_required": "NO",
+        "mixed": "MIXED",
+        "unavailable": "N/A",
+    }[requirement]
+
+
 def print_table(data: dict) -> None:
     benchmark_gates = data["gate_sets"]["benchmark"]
     print("# Benchmarks")
-    print("| Priority | Benchmark | " + " | ".join(benchmark_gates) + " |")
-    print("|---:|---|" + "---|" * len(benchmark_gates))
+    print("| Priority | Benchmark | Docker | " + " | ".join(benchmark_gates) + " |")
+    print("|---:|---|---|" + "---|" * len(benchmark_gates))
     benchmarks = [item for item in data["items"] if item["gate_set"] == "benchmark"]
     for item in sorted(benchmarks, key=lambda value: value["priority"]):
         values = [compact(item["stages"][gate]) for gate in benchmark_gates]
-        print(f"| {item['priority']} | {item['display_name']} | " + " | ".join(values) + " |")
+        docker = compact_docker(item["docker_requirement"])
+        print(
+            f"| {item['priority']} | {item['display_name']} | {docker} | "
+            + " | ".join(values)
+            + " |"
+        )
 
     search_gates = data["gate_sets"]["search_backend"]
     print("\n# Search backends")
-    print("| Priority | Backend | " + " | ".join(search_gates) + " |")
-    print("|---:|---|" + "---|" * len(search_gates))
+    print("| Priority | Backend | Docker | " + " | ".join(search_gates) + " |")
+    print("|---:|---|---|" + "---|" * len(search_gates))
     backends = [item for item in data["items"] if item["gate_set"] == "search_backend"]
     for item in sorted(backends, key=lambda value: value["priority"]):
         values = [compact(item["stages"][gate]) for gate in search_gates]
-        print(f"| {item['priority']} | {item['display_name']} | " + " | ".join(values) + " |")
+        docker = compact_docker(item["docker_requirement"])
+        print(
+            f"| {item['priority']} | {item['display_name']} | {docker} | "
+            + " | ".join(values)
+            + " |"
+        )
 
 
 def main() -> int:
@@ -112,4 +141,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -25,6 +25,9 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 - SkyDiscover/EvoX 已完成 DeepSeek OpenAI-compatible 的 1 iteration smoke，但还不是论文可比实验。
 - 已在当前 Mac 为所有可执行 benchmark 建立代表 case 的环境证据：ALE、AutoLab、SwarmResearch、Frontier-CS 使用镜像，HeuriGym 与 Frontier-Engineering v1-lite 使用 host 环境；完整空间表见 [镜像空间与 Linux 规划](docs/docker-storage-plan.md)。
 - 已建立 [Benchmark 快速导读](docs/benchmarks/README.md)：记录当前可跑题数、coverage/campaign 时间，并为 7 套 active benchmark 展开一个真实 case 的输入、agent 动作、期望输出和 verifier。
+- Docker 已成为 registry 一等字段：`scripts/status.py` 直接显示
+  `REQUIRED / NO / MIXED / N/A`；[Docker 依赖速查](docs/benchmarks/README.md#docker-依赖速查)
+  明确没有 Docker 时仍可运行的 task 与不能替代的官方评分边界。
 - 已建立 [Goal Plus 接入与并发实验协议](docs/goal-plus-benchmark-experiment.md)：区分 agent/evaluator/task 三层并发，定义 matched-budget baseline、逐 benchmark 整改和非 Pass@K 的验收门槛；OpenEvolve 自带 CPU 任务见 [示例审计](docs/openevolve-cpu-examples.md)。
 - 已建立 [可移植复现环境](docs/reproducible-environment.md)：固定 Python 依赖及 OpenEvolve/Goal Plus commit，自动 bootstrap/doctor，并为四条独立路径生成隔离实验目录。Goal Plus 的 `.gp` 只存在于临时 task workspace。
 - OpenEvolve example 的自然 `/goal-plus` 标准入口已成为统一模板；ALE-Bench Lite、HeuriGym、AutoLab、Frontier-Engineering 和 Frontier-CS 现在复用同一 common-prompt / Goal Plus-suffix 结构。

@@ -10,6 +10,8 @@ SwarmResearch 不是一套全新的 judge，而是一套多 agent 研究方法�
 | 候选 artifact | Python/C++ 程序或 task-specific solver |
 | 指标 | task-native continuous score；方向随题目定义 |
 | 论文预算口径 | README 估算约 100 美元/题；论文在 50 美元 cutoff 报告结果 |
+| Docker | **正式复现必需**；当前 paper-compatible task/evaluator 路径容器化 |
+| 无 Docker 环境 | 可分析公开轨迹和代码，但不能生成同口径官方 task score |
 | 当前门禁 | Math `circle_packing` evaluator 已通；ADRS/ALE worker build context 待补 |
 | 固定源码 | method `SakanaAI/SwarmResearch@cfdcb71`；tasks `SakanaAI/swarm-research-reproduce@e848d8d` |
 

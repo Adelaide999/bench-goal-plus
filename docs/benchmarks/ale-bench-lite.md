@@ -10,6 +10,8 @@ ALE-Bench 把 AtCoder Heuristic Contest 变成 agent benchmark：agent 不是回
 | 候选 artifact | 通常为 C++20、Python 或 Rust 程序 |
 | 指标 | task-native raw score；方向因题而异 |
 | 典型反馈 | 编译结果、合法性、每个 public case 分数、聚合 raw score |
+| Docker | **必需**；当前 official-lite 评分路径使用 C++ work image 和 judge image |
+| 无 Docker 环境 | 可读题和 materialize，但不能通过当前支持路径获得官方分数 |
 | 当前门禁 | 通用 Plain/Goal Plus runner 与 official-lite evaluator 已接；两条 Codex 路径都有真实 E2E 证据 |
 | 固定源码 | `SakanaAI/ALE-Bench@f7d9279` |
 

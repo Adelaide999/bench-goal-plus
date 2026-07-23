@@ -8,13 +8,13 @@ Codex launch, Goal Plus launch, wall deadline, concurrency, and evidence.
 
 ## Supported task IDs
 
-| `--benchmark` | Editable artifact | Native metric | Current host requirement |
-|---|---|---|---|
-| `ale-bench-lite` | `solution.cpp` | `overall_absolute_score` minimize | Docker image `ale-bench:cpp20-202301`; about 2.73 GB |
-| `autolab-toy-isa` | `program.s` | `cycles` minimize | C compiler and `make` |
-| `frontier-cs-problem-0` | `solution.cpp` | `checker_score_percent` maximize | Docker image `bench-goal-plus/frontier-cs-judge:07500f9`; about 1.27 GB |
-| `frontier-engineering-malloclab` | `mm.c` | `combined_score` maximize | C compiler and `make` |
-| `heurigym` | `solver.py` | `total_cost` minimize | Python only after dataset bootstrap |
+| `--benchmark` | Editable artifact | Native metric | Docker | Current host requirement |
+|---|---|---|---|---|
+| `ale-bench-lite` | `solution.cpp` | `overall_absolute_score` minimize | **必需** | Image `ale-bench:cpp20-202301`; about 2.73 GB |
+| `autolab-toy-isa` | `program.s` | `cycles` minimize | 不需要 | C compiler and `make` |
+| `frontier-cs-problem-0` | `solution.cpp` | `checker_score_percent` maximize | **必需** | Image `bench-goal-plus/frontier-cs-judge:07500f9`; about 1.27 GB |
+| `frontier-engineering-malloclab` | `mm.c` | `combined_score` maximize | 不需要 | C compiler and `make` |
+| `heurigym` | `solver.py` | `total_cost` minimize | 不需要 | Python only after dataset bootstrap |
 
 Every upstream checkout lives in the ignored `third_party/` directory. Run a
 task-specific bootstrap instead of cloning beside the repository:

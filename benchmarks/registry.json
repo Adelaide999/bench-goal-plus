@@ -39,6 +39,8 @@
       ],
       "data_url": "https://huggingface.co/datasets/SakanaAI/ALE-Bench",
       "local_path": "third_party/ale-bench",
+      "docker_requirement": "required",
+      "docker_scope": "The current official-lite evaluator requires the ALE C++ and judge images. Without Docker, tasks can be inspected or materialized but not scored through the supported official path.",
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
@@ -82,6 +84,8 @@
       ],
       "data_url": "https://huggingface.co/datasets/heurigen/heurigen-data",
       "local_path": "third_party/heurigym",
+      "docker_requirement": "not_required",
+      "docker_scope": "The supported path runs in the pinned Python environment after dataset bootstrap; Docker is not used.",
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
@@ -120,6 +124,8 @@
       ],
       "data_url": "https://github.com/EinsiaLab/Frontier-Engineering",
       "local_path": "third_party/frontier-engineering",
+      "docker_requirement": "not_required",
+      "docker_scope": "The currently integrated MallocLab path is host-native and needs a C compiler plus make. Other v1-lite tasks retain task-specific runtime requirements.",
       "stages": {
         "source_forked": "pass",
         "environment": "partial",
@@ -157,6 +163,8 @@
       ],
       "data_url": "https://github.com/autolabhq/autolab/tree/main/tasks",
       "local_path": "third_party/autolab",
+      "docker_requirement": "mixed",
+      "docker_scope": "The integrated toy_isa_opt path is host-portable with a C compiler and make, but the paper-compatible multi-task AutoLab/Harbor path uses task containers.",
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
@@ -202,6 +210,8 @@
       ],
       "data_url": "https://github.com/SwarmResearch/swarmresearch-paper-reproduce",
       "local_path": "third_party/swarmresearch-paper-reproduce",
+      "docker_requirement": "required",
+      "docker_scope": "The supported paper-compatible task/evaluator path is containerized. Without Docker, repositories and trajectories remain inspectable but official task evaluation is unavailable.",
       "stages": {
         "source_forked": "pass",
         "environment": "partial",
@@ -240,6 +250,8 @@
       ],
       "data_url": "https://github.com/FrontierCS/Frontier-CS",
       "local_path": "third_party/frontier-cs",
+      "docker_requirement": "required",
+      "docker_scope": "The current problem-0 compile/checker adapter requires the pinned Frontier-CS judge image and host Docker access.",
       "stages": {
         "source_forked": "pass",
         "environment": "partial",
@@ -278,6 +290,8 @@
       ],
       "data_url": "https://huggingface.co/datasets/ByteDance-Seed/EdgeBench",
       "local_path": "third_party/edgebench",
+      "docker_requirement": "required",
+      "docker_scope": "Native SForge requires separate work and hidden-judge containers for every supported task; there is no score-compatible host-only path.",
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
@@ -316,6 +330,8 @@
       ],
       "data_url": "https://anonymous.4open.science/r/Dataset-D3CC",
       "local_path": null,
+      "docker_requirement": "unavailable",
+      "docker_scope": "The executable public artifact is unavailable, so its Docker requirements cannot yet be verified.",
       "stages": {
         "source_forked": "blocked",
         "environment": "blocked",
@@ -350,6 +366,8 @@
         }
       ],
       "local_path": "third_party/skydiscover",
+      "docker_requirement": "mixed",
+      "docker_scope": "The current EvoX circle-packing smoke is Python-only, while the broader task catalog inherits task-specific evaluator and container requirements.",
       "stages": {
         "source_forked": "pass",
         "native_smoke": "pass",
@@ -389,6 +407,8 @@
         }
       ],
       "local_path": "third_party/openevolve",
+      "docker_requirement": "not_required",
+      "docker_scope": "The frozen 12-task cpu_portable set runs in the locked Python environment without Docker; excluded examples may need other toolchains or datasets.",
       "stages": {
         "source_forked": "pass",
         "native_smoke": "todo",
