@@ -32,6 +32,7 @@ from adapters.openevolve_examples.adapter import (  # noqa: E402
     resolve_task,
     run_worker,
 )
+from experiments.openevolve_compare.reporting import write_campaign_report  # noqa: E402
 
 
 DEFAULT_ENV_MANIFEST = ROOT / "environment/upstreams.json"
@@ -44,6 +45,7 @@ DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_WALL_TIME_SECONDS = 300
 DEFAULT_CONCURRENCY = 2
 DEFAULT_REASONING_EFFORT = "high"
+CODEX_SANDBOX = "danger-full-access"
 CODEX_PROVIDER_ID = "bench_proxy"
 PI_PROVIDER_ID = "bench-openai"
 
@@ -66,6 +68,17 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
+def refresh_campaign_report(run_root: Path) -> None:
+    """Refresh derived reports without interrupting an expensive campaign."""
+    try:
+        write_campaign_report(run_root)
+    except Exception as error:
+        print(
+            f"WARNING: campaign report refresh failed: {type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
 
 
 def default_run_dir(task_id: str, method: str, seed: int) -> Path:
@@ -280,11 +293,19 @@ def codex_model_args(model: str, api_base: str | None) -> list[str]:
     return args
 
 
+def codex_execution_args() -> list[str]:
+    """Run benchmark Codex lanes non-interactively with host-level access."""
+    return [
+        "--sandbox",
+        CODEX_SANDBOX,
+        "--config",
+        'approval_policy="never"',
+    ]
+
+
 def codex_goal_plus_mcp_args() -> list[str]:
     """Register and non-interactively approve Goal Plus for `codex exec`."""
     return [
-        "--config",
-        'approval_policy="never"',
         "--config",
         'mcp_servers.goal-plus.command="goal-plus"',
         "--config",
@@ -556,6 +577,14 @@ def prepare(args: argparse.Namespace) -> int:
         "workspace_commits": workspace_commits,
         "prompt_contract": prompt_contract,
         "goal_plus_config": goal_plus_config,
+        "codex_sandbox": (
+            CODEX_SANDBOX
+            if method in {"plain-codex", "goal-plus-codex"}
+            else None
+        ),
+        "codex_approval_policy": (
+            "never" if method in {"plain-codex", "goal-plus-codex"} else None
+        ),
         "secret_policy": (
             "credentials are inherited from the process environment and never serialized"
         ),
@@ -616,6 +645,7 @@ def prepare_batch(args: argparse.Namespace) -> int:
         "cell_count": len(entries),
         "prepared_count": prepared_count,
         "model": args.model,
+        "reasoning_effort": DEFAULT_REASONING_EFFORT,
         "seed": args.seed,
         "budget": {
             "wall_time_seconds": args.wall_time_seconds,
@@ -630,6 +660,7 @@ def prepare_batch(args: argparse.Namespace) -> int:
         ),
     }
     write_json(run_root / "campaign.json", campaign)
+    refresh_campaign_report(run_root)
     print(json.dumps(campaign, indent=2))
     return 0 if prepared_count == len(entries) else 2
 
@@ -707,6 +738,7 @@ def run_batch(args: argparse.Namespace) -> int:
                 "secret_policy": "provider credentials and API base are not serialized",
             },
         )
+        refresh_campaign_report(campaign_path.parent)
         recorded_cells.add(cell)
         if args.fail_fast and result["status"] != "finished":
             break
@@ -1261,6 +1293,29 @@ def primary_score(evaluation: dict[str, Any]) -> float:
     return float(metric["value"])
 
 
+def select_best_lane(
+    lane_evaluations: list[dict[str, Any]], *, maximize: bool
+) -> tuple[dict[str, Any] | None, list[str]]:
+    scored: list[dict[str, Any]] = []
+    invalid_lanes: list[str] = []
+    for item in lane_evaluations:
+        try:
+            score = primary_score(item["evaluation"])
+        except (KeyError, RuntimeError):
+            invalid_lanes.append(item["lane"])
+            continue
+        scored.append({**item, "_primary_score": score})
+    if not scored:
+        return None, invalid_lanes
+    selected = sorted(
+        scored,
+        key=lambda item: item["_primary_score"],
+        reverse=maximize,
+    )[0]
+    selected.pop("_primary_score")
+    return selected, invalid_lanes
+
+
 def evaluator_budget_for_workspace(workspace: Path) -> dict[str, Any]:
     metadata = load_json(workspace / "task.json")
     return load_json(Path(metadata["controller_runtime_dir"]) / "budget.json")
@@ -1482,6 +1537,9 @@ def execute(args: argparse.Namespace) -> int:
             "OPENAI_API_KEY is required when --api-base selects the unified provider"
         )
 
+    if method in {"plain-codex", "goal-plus-codex"}:
+        manifest["codex_sandbox"] = CODEX_SANDBOX
+        manifest["codex_approval_policy"] = "never"
     manifest["status"] = "running"
     manifest["execution_started_at"] = utc_now()
     write_json(manifest_path, manifest)
@@ -1567,8 +1625,7 @@ def execute(args: argparse.Namespace) -> int:
                 args.codex_bin,
                 "exec",
                 "--json",
-                "--sandbox",
-                "workspace-write",
+                *codex_execution_args(),
                 "--cd",
                 str(workspace),
                 "--output-last-message",
@@ -1614,17 +1671,21 @@ def execute(args: argparse.Namespace) -> int:
                     "codex": parse_codex_events(lane_dir / "events.jsonl"),
                 }
             )
-        reverse = manifest["task"]["direction"] == "maximize"
-        selected = sorted(
-            lane_evaluations,
-            key=lambda item: primary_score(item["evaluation"]),
-            reverse=reverse,
-        )[0]
-        write_json(run_dir / "final-eval.json", selected["evaluation"])
-        shutil.copy2(selected["candidate"], run_dir / "final-candidate.py")
         write_json(run_dir / "lane-results.json", {"lanes": lane_evaluations})
-        control["selected_lane"] = selected["lane"]
-        control["selected_score"] = primary_score(selected["evaluation"])
+        selected, invalid_lanes = select_best_lane(
+            lane_evaluations,
+            maximize=manifest["task"]["direction"] == "maximize",
+        )
+        control["invalid_evaluation_lanes"] = invalid_lanes
+        if selected is None:
+            control["result_incomplete_reason"] = (
+                "plain Codex produced no lane with a numeric final metric"
+            )
+        else:
+            write_json(run_dir / "final-eval.json", selected["evaluation"])
+            shutil.copy2(selected["candidate"], run_dir / "final-candidate.py")
+            control["selected_lane"] = selected["lane"]
+            control["selected_score"] = primary_score(selected["evaluation"])
         control["codex"] = {
             "lanes": [
                 {"lane": item["lane"], **item["codex"]} for item in lane_evaluations
@@ -1689,8 +1750,7 @@ def execute(args: argparse.Namespace) -> int:
                 args.codex_bin,
                 "exec",
                 "--json",
-                "--sandbox",
-                "workspace-write",
+                *codex_execution_args(),
                 "--cd",
                 str(workspace),
                 "--output-last-message",

@@ -67,6 +67,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             self.assertEqual(campaign["task_count"], 2)
             self.assertEqual(campaign["cell_count"], 4)
             self.assertEqual(campaign["prepared_count"], 4)
+            self.assertTrue((run_root / "campaign-summary.json").is_file())
+            self.assertTrue((run_root / "campaign-summary.md").is_file())
             self.assertEqual(prepare_mock.call_count, 4)
             self.assertEqual(
                 {(item["task_id"], item["method"]) for item in campaign["entries"]},
@@ -113,9 +115,15 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 self.assertEqual(experiment.run_batch(args), 2)
 
             results = json.loads((root / "campaign-results.json").read_text())
+            report = json.loads((root / "campaign-summary.json").read_text())
             self.assertEqual(run.call_count, 2)
             self.assertEqual(
                 [item["status"] for item in results["results"]],
+                ["incomplete", "finished"],
+            )
+            self.assertEqual(report["record_count"], 2)
+            self.assertEqual(
+                [item["status"] for item in report["records"]],
                 ["incomplete", "finished"],
             )
             self.assertNotIn("api_base", results)
@@ -474,7 +482,6 @@ class OpenEvolveComparisonTest(unittest.TestCase):
 
     def test_codex_goal_plus_mcp_args_register_runtime_explicitly(self) -> None:
         joined = "\n".join(experiment.codex_goal_plus_mcp_args())
-        self.assertIn('approval_policy="never"', joined)
         self.assertIn('mcp_servers.goal-plus.command="goal-plus"', joined)
         self.assertIn('mcp_servers.goal-plus.args=["--root", ".gp"]', joined)
         self.assertIn("mcp_servers.goal-plus.tool_timeout_sec=300", joined)
@@ -482,6 +489,50 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             'mcp_servers.goal-plus.default_tools_approval_mode="approve"', joined
         )
         self.assertIn("mcp_servers.goal-plus.enabled=true", joined)
+
+    def test_codex_execution_args_use_unrestricted_noninteractive_mode(self) -> None:
+        args = experiment.codex_execution_args()
+        self.assertEqual(
+            args,
+            [
+                "--sandbox",
+                "danger-full-access",
+                "--config",
+                'approval_policy="never"',
+            ],
+        )
+
+    def test_best_lane_selection_skips_non_numeric_evaluations(self) -> None:
+        lanes = [
+            {
+                "lane": "lane-invalid",
+                "evaluation": {"primary_metric": {"value": None}},
+            },
+            {
+                "lane": "lane-low",
+                "evaluation": {"primary_metric": {"value": 1.0}},
+            },
+            {
+                "lane": "lane-high",
+                "evaluation": {"primary_metric": {"value": 2.0}},
+            },
+        ]
+        selected, invalid = experiment.select_best_lane(lanes, maximize=True)
+        self.assertEqual(selected["lane"], "lane-high")
+        self.assertEqual(invalid, ["lane-invalid"])
+
+    def test_best_lane_selection_reports_all_invalid(self) -> None:
+        selected, invalid = experiment.select_best_lane(
+            [
+                {
+                    "lane": "lane-invalid",
+                    "evaluation": {"primary_metric": {"value": None}},
+                }
+            ],
+            maximize=False,
+        )
+        self.assertIsNone(selected)
+        self.assertEqual(invalid, ["lane-invalid"])
 
     @unittest.skipUnless(hasattr(signal, "SIGTERM"), "requires POSIX-style SIGTERM")
     def test_outer_controller_requests_soft_stop_at_deadline(self) -> None:

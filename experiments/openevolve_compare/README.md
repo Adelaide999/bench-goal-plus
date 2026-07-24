@@ -76,6 +76,30 @@ export OPENAI_API_KEY='<secret>'
 
 `run-batch` preserves each cell's native `T` and `K`, continues after individual failures by default, and incrementally writes `campaign-results.json`. Re-running the same command resumes the ledger and skips every already-recorded cell; create a new campaign directory for a deliberate rerun. Use `--methods goal-plus-codex` to select a subset or `--fail-fast` for debugging. The API base and credentials are deliberately not copied into the campaign result.
 
+Every `prepare-batch` and completed `run-batch` cell also refreshes
+`campaign-summary.json` and `campaign-summary.md` in that campaign directory.
+These are derived views: `campaign.json`, `campaign-results.json`, and each
+cell's raw evidence remain authoritative. The report preserves the evaluator's
+raw metric and direction. A positive `directional_gain` means improvement over
+the best observed seed in that cell (`final - seed` for maximize, `seed - final`
+for minimize); it is not a cross-task normalized score.
+
+To merge arbitrary campaign directories, `campaign.json` files, or individual
+run directories without hard-coding task or agent names:
+
+```bash
+.bench-env/venv/bin/python scripts/openevolve_report.py \
+  runs/openevolve-campaigns/<campaign-a> \
+  runs/openevolve-campaigns/<campaign-b> \
+  --markdown-out runs/openevolve-reports/comparison.md \
+  --json-out runs/openevolve-reports/comparison.json
+```
+
+Sources may overlap; run directories are de-duplicated. Repeat `--method` or
+`--task` to filter the derived view. New methods and tasks require no reporter
+code changes as long as they retain the experiment manifest and evaluation
+contracts.
+
 ## Execute
 
 Set the key only in the shell and run each prepared directory with the same endpoint/model:
