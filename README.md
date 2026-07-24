@@ -43,6 +43,13 @@ OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为
 - SkyDiscover runtime + EvoX 方法已完成 DeepSeek OpenAI-compatible 的
   Circle Packing 1-iteration smoke；这是 method/task compatibility 证据，
   不是新增 benchmark，也不是论文可比实验。
+- SkyDiscover Best-of-N 已通过本仓统一控制面跑通
+  [`function_minimization` 1-iteration 功能 smoke](evidence/runs/2026-07-24-skydiscover-best-of-n-function-minimization-smoke.json)：
+  `gpt-5.6-luna/medium`、`K=1`，35.38 秒内从 `1.4286455109`
+  提升到 controller final `1.4995399520`。candidate workspace bridge、
+  checkpoint、精确 evaluator ledger 和独立 final evaluation 均已接通；
+  native seed/best-test 仍在计时内且 usage/实际并发遥测缺失，因此 registry
+  只提升为 `benchmark_adapter=partial`。
 - 已在当前 Mac 为可执行 benchmark 建立代表 case 的环境证据：HeuriGym、
   Frontier-Engineering MallocLab、AutoLab Toy ISA 使用 host 环境；ALE、
   Frontier-CS、EdgeBench 使用 Docker 正式评分路径；SwarmResearch 当前只有

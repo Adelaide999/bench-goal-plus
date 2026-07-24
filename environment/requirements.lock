@@ -244,6 +244,7 @@ pyperclip==1.11.0
     # via fastmcp
 python-dotenv==1.2.2
     # via
+    #   -r environment/requirements.in
     #   fastmcp
     #   pydantic-settings
 python-json-logger==4.1.0

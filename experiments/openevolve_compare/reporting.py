@@ -58,6 +58,10 @@ def direction_best(values: list[float], direction: str | None) -> float | None:
 def collect_usage(execution: dict[str, Any]) -> dict[str, Any]:
     usages: list[dict[str, Any]] = []
     coverage = None
+    common = execution.get("usage")
+    if isinstance(common, dict):
+        usages.append(common)
+        coverage = common.get("coverage")
     codex = execution.get("codex")
     if isinstance(codex, dict):
         coverage = codex.get("coverage")

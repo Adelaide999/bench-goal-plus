@@ -46,6 +46,11 @@ class ReproEnvironmentTest(unittest.TestCase):
             set(selected_edgebench), {"openevolve", "goal_plus", "edgebench"}
         )
         self.assertTrue(selected_edgebench["edgebench"]["editable"])
+        selected_sky = repro_env.selected_upstreams(manifest, ["skydiscover"])
+        self.assertEqual(
+            set(selected_sky), {"openevolve", "goal_plus", "skydiscover"}
+        )
+        self.assertTrue(selected_sky["skydiscover"]["editable"])
         task_catalog = json.loads(
             (ROOT / "adapters/openevolve_examples/tasks.json").read_text()
         )
