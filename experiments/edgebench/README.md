@@ -36,6 +36,14 @@ images。`doctor` 检查：
 - Docker daemon 与 `linux/amd64`；
 - HuggingFace dataset revision；
 - profile 中每题的精确 work/judge image tag。
+- profile 含 Rust 任务时，启动实际 Work/Judge image，用非登录 shell 核对
+  `cargo`/`rustc 1.88.0`；镜像不完整时要求宿主机固定 SHA256 的 Rust 缓存可用。
+
+`bootstrap --only edgebench` 会按 rsproxy、SJTU mirror、官方源的顺序预下载
+Rust distribution 到 `~/.cache/sforge/rust/`，最终统一核对官方 SHA256。正常发布
+镜像已包含相同版本，因此运行时只做快速探测；
+缺失或版本漂移时，SForge 才把缓存注入 Work/Judge。Rust compiler 和 crate
+依赖都不会在任务容器内联网下载。
 
 任务数据在 `third_party/edgebench/tasks/`，并写入该 checkout 本机
 `.git/info/exclude`；它不会污染 fork，也不会让 managed checkout 误报 dirty。

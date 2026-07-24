@@ -77,6 +77,14 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def git_head(path: Path) -> str | None:
     completed = subprocess.run(
         ["git", "-C", str(path), "rev-parse", "HEAD"],
@@ -217,6 +225,58 @@ def task_images(task_id: str) -> tuple[str, str]:
     )
 
 
+def rust_runtime_asset() -> dict[str, str]:
+    path = EDGE_ROOT / "sforge" / "harness" / "runtime_assets.json"
+    payload = read_json(path)
+    asset = payload.get("rust") if payload.get("schema_version") == 1 else None
+    required = {"version", "target", "archive_name", "url", "sha256"}
+    if not isinstance(asset, dict) or required - set(asset):
+        raise RuntimeError(f"invalid EdgeBench runtime asset manifest: {path}")
+    return {key: str(asset[key]) for key in required}
+
+
+def rust_runtime_archive_status() -> dict[str, Any]:
+    try:
+        asset = rust_runtime_asset()
+        archive = (
+            Path.home()
+            / ".cache"
+            / "sforge"
+            / "rust"
+            / asset["archive_name"]
+        )
+        actual_sha256 = sha256_file(archive) if archive.is_file() else None
+        return {
+            "passed": actual_sha256 == asset["sha256"],
+            "path": str(archive),
+            "version": asset["version"],
+            "expected_sha256": asset["sha256"],
+            "actual_sha256": actual_sha256,
+        }
+    except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+        return {"passed": False, "error": str(exc)}
+
+
+def rust_image_runtime_probe(image: str, version: str) -> dict[str, Any]:
+    command = (
+        "set -e; command -v cargo; command -v rustc; "
+        f"cargo --version | grep -F 'cargo {version} '; "
+        f"rustc --version | grep -F 'rustc {version} '"
+    )
+    return run_capture(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "/bin/bash",
+            image,
+            "-c",
+            command,
+        ]
+    )
+
+
 def dataset_revision(task_id: str) -> str | None:
     metadata = TASKS_DIR / ".cache" / "huggingface" / "download" / f"{task_id}.json.metadata"
     if not metadata.is_file():
@@ -332,6 +392,8 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         actual=architecture or None,
     )
 
+    rust_archive: dict[str, Any] | None = None
+
     for task_id in profile["task_ids"]:
         task_path = TASKS_DIR / f"{task_id}.json"
         add(f"task:{task_id}", task_path.is_file(), path=portable_path(task_path))
@@ -344,6 +406,19 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         )
         if not task_path.is_file():
             continue
+        config = task_config(task_id)
+        if config.get("base_image") == "rust" and rust_archive is None:
+            rust_archive = rust_runtime_archive_status()
+            rust_details = {
+                key: value
+                for key, value in rust_archive.items()
+                if key != "passed"
+            }
+            add(
+                "runtime:rust-host-cache",
+                bool(rust_archive["passed"]),
+                **rust_details,
+            )
         for image in task_images(task_id):
             inspected = run_capture(["docker", "image", "inspect", image])
             add(
@@ -351,6 +426,29 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                 inspected["returncode"] == 0,
                 image=image,
             )
+            if config.get("base_image") == "rust" and inspected["returncode"] == 0:
+                assert rust_archive is not None
+                version = str(rust_archive.get("version") or "")
+                probe = (
+                    rust_image_runtime_probe(image, version)
+                    if version
+                    else {
+                        "returncode": 1,
+                        "stdout": "",
+                        "stderr": "Rust runtime manifest has no version",
+                    }
+                )
+                native = probe["returncode"] == 0
+                add(
+                    f"runtime:rust:{image}",
+                    native or bool(rust_archive["passed"]),
+                    image=image,
+                    expected_version=version,
+                    native=native,
+                    fallback_archive_ready=bool(rust_archive["passed"]),
+                    stdout=probe["stdout"][-400:] or None,
+                    stderr=probe["stderr"][-400:] or None,
+                )
 
     return {
         "schema_version": 1,

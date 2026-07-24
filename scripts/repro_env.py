@@ -12,6 +12,8 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -314,7 +316,143 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
 
 
 def sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def edgebench_rust_runtime_asset(edgebench_checkout: Path) -> dict[str, Any]:
+    manifest_path = (
+        edgebench_checkout / "sforge" / "harness" / "runtime_assets.json"
+    )
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"cannot read EdgeBench runtime asset manifest: {manifest_path}"
+        ) from exc
+    asset = payload.get("rust") if payload.get("schema_version") == 1 else None
+    required = {"version", "target", "archive_name", "url", "sha256"}
+    if not isinstance(asset, dict) or required - set(asset):
+        raise RuntimeError(f"invalid EdgeBench runtime asset manifest: {manifest_path}")
+    result: dict[str, Any] = {key: str(asset[key]) for key in required}
+    download_urls = asset.get("download_urls")
+    if download_urls is not None:
+        if not isinstance(download_urls, list) or not all(
+            isinstance(url, str) and url for url in download_urls
+        ):
+            raise RuntimeError(
+                f"invalid Rust download_urls in runtime asset manifest: {manifest_path}"
+            )
+        result["download_urls"] = list(download_urls)
+    return result
+
+
+def rust_runtime_cache_path(
+    asset: dict[str, Any], cache_root: Path | None = None
+) -> Path:
+    root = cache_root or Path.home() / ".cache" / "sforge" / "rust"
+    return root / asset["archive_name"]
+
+
+def _preserve_as_backup(path: Path) -> Path:
+    suffix = 1
+    while True:
+        ending = "_bak" if suffix == 1 else f"_bak{suffix}"
+        backup = path.with_name(path.name + ending)
+        if not backup.exists():
+            path.rename(backup)
+            print(f"Preserved conflicting runtime asset as {backup}")
+            return backup
+        suffix += 1
+
+
+def ensure_edgebench_rust_runtime(
+    edgebench_checkout: Path,
+    cache_root: Path | None = None,
+) -> Path:
+    """Download the pinned Rust distribution to a host cache atomically."""
+
+    asset = edgebench_rust_runtime_asset(edgebench_checkout)
+    destination = rust_runtime_cache_path(asset, cache_root)
+    expected_sha256 = asset["sha256"]
+    if destination.is_file() and sha256_file(destination) == expected_sha256:
+        print(f"Rust runtime cache ready: {destination}")
+        return destination
+    if destination.exists():
+        _preserve_as_backup(destination)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = destination.with_name(destination.name + "_bootstrap_incomplete")
+    if staging.is_file() and sha256_file(staging) == expected_sha256:
+        staging.rename(destination)
+        print(f"Rust runtime cache ready: {destination}")
+        return destination
+    if staging.exists():
+        _preserve_as_backup(staging)
+
+    urls = list(asset.get("download_urls") or [asset["url"]])
+    failures: list[str] = []
+    for url in urls:
+        offset = staging.stat().st_size if staging.is_file() else 0
+        print(
+            f"Downloading Rust {asset['version']} ({asset['target']}) from {url} "
+            f"to {destination} (resume={offset})"
+        )
+        request = urllib.request.Request(url)
+        if offset:
+            request.add_header("Range", f"bytes={offset}-")
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                partial = getattr(response, "status", None) == 206
+                if offset and not partial:
+                    _preserve_as_backup(staging)
+                    offset = 0
+                mode = "ab" if offset and partial else "wb"
+                with staging.open(mode) as sink:
+                    shutil.copyfileobj(response, sink, length=1024 * 1024)
+        except (OSError, urllib.error.URLError) as exc:
+            failures.append(f"{url}: {exc}")
+            continue
+
+        actual_sha256 = sha256_file(staging)
+        if actual_sha256 == expected_sha256:
+            staging.rename(destination)
+            print(f"Rust runtime cache ready: {destination}")
+            return destination
+        failures.append(
+            f"{url}: checksum mismatch (expected {expected_sha256}, "
+            f"got {actual_sha256})"
+        )
+        _preserve_as_backup(staging)
+
+    raise RuntimeError(
+        "failed to download the pinned Rust runtime; " + "; ".join(failures)
+    )
+
+
+def edgebench_rust_runtime_status(edgebench_checkout: Path) -> dict[str, Any]:
+    try:
+        asset = edgebench_rust_runtime_asset(edgebench_checkout)
+        archive = rust_runtime_cache_path(asset)
+        actual_sha256 = sha256_file(archive) if archive.is_file() else None
+        return {
+            "name": "runtime:edgebench-rust",
+            "passed": actual_sha256 == asset["sha256"],
+            "version": asset["version"],
+            "target": asset["target"],
+            "path": str(archive),
+            "expected_sha256": asset["sha256"],
+            "actual_sha256": actual_sha256,
+        }
+    except RuntimeError as exc:
+        return {
+            "name": "runtime:edgebench-rust",
+            "passed": False,
+            "error": str(exc),
+        }
 
 
 def package_versions(python: Path) -> dict[str, str | None]:
@@ -453,6 +591,7 @@ def collect_doctor(
                 "passed": bool(result and result.returncode == 0),
             }
         )
+        checks.append(edgebench_rust_runtime_status(paths["edgebench"]))
 
     codex_path = shutil.which("codex")
     codex_text = None
@@ -509,6 +648,10 @@ def bootstrap(args: argparse.Namespace) -> int:
     chosen = selected_upstreams(manifest, args.only)
     for name, entry in chosen.items():
         ensure_checkout(checkout_root / entry["checkout_dir"], entry)
+    if "edgebench" in chosen:
+        ensure_edgebench_rust_runtime(
+            checkout_root / chosen["edgebench"]["checkout_dir"]
+        )
 
     uv = shutil.which(args.uv)
     if not uv:

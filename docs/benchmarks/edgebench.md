@@ -62,6 +62,10 @@ python3 scripts/repro_env.py bootstrap --only edgebench
   --campaign vliw-matched-01 --detach
 ```
 
+该 bootstrap 同时准备固定 SHA256 的 Rust 1.88.0 Linux x64 宿主缓存。Rust
+任务会优先使用 Work/Judge image 内同版本工具链，仅在缺失或版本漂移时离线
+注入；不会在 agent 或 hidden verifier 运行期间联网安装 compiler/crates。
+
 正式对比固定 task/data revision、model/reasoning、总时间 `T` 和 live concurrency
 `K`。Plain Codex 用 K 个 SForge replicas；Goal Plus 用一个 outer SForge run
 与 K 个 internal workers。cells 在一台机器上默认串行，避免资源超卖。

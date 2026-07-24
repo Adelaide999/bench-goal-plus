@@ -145,6 +145,25 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "http://host.docker.internal:3128",
         )
 
+    def test_rust_runtime_probe_preserves_image_environment(self) -> None:
+        original = EDGE.run_capture
+        captured = []
+
+        def fake_run_capture(command, *, env=None):
+            captured.append(command)
+            return {"returncode": 0, "stdout": "rustc 1.88.0", "stderr": ""}
+
+        EDGE.run_capture = fake_run_capture
+        try:
+            result = EDGE.rust_image_runtime_probe("example:rust", "1.88.0")
+        finally:
+            EDGE.run_capture = original
+
+        self.assertEqual(result["returncode"], 0)
+        self.assertIn("-c", captured[0])
+        self.assertNotIn("-lc", captured[0])
+        self.assertIn("command -v cargo", captured[0][-1])
+
     def test_codex_usage_reads_jsonl_agent_output(self) -> None:
         run = self.temp / "task-run"
         run.mkdir()

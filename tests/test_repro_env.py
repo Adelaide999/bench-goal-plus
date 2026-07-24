@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -165,6 +166,72 @@ class ReproEnvironmentTest(unittest.TestCase):
             repro_env.parse_codex_version("codex-cli 0.144.6"), (0, 144, 6)
         )
         self.assertIsNone(repro_env.parse_codex_version("unknown"))
+
+    def test_edgebench_rust_runtime_download_is_pinned_and_atomic(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            edgebench = temp / "edgebench"
+            manifest = edgebench / "sforge" / "harness" / "runtime_assets.json"
+            manifest.parent.mkdir(parents=True)
+            source = temp / "rust.tar.xz"
+            source.write_bytes(b"rust runtime")
+            checksum = hashlib.sha256(source.read_bytes()).hexdigest()
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "rust": {
+                            "version": "1.2.3",
+                            "target": "x86_64-unknown-linux-gnu",
+                            "archive_name": "rust.tar.xz",
+                            "url": source.as_uri(),
+                            "sha256": checksum,
+                        },
+                    }
+                )
+            )
+            cache = temp / "cache"
+
+            result = repro_env.ensure_edgebench_rust_runtime(edgebench, cache)
+
+            self.assertEqual(result.read_bytes(), b"rust runtime")
+            self.assertFalse(
+                (cache / "rust.tar.xz_bootstrap_incomplete").exists()
+            )
+
+    def test_edgebench_rust_runtime_preserves_invalid_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            edgebench = temp / "edgebench"
+            manifest = edgebench / "sforge" / "harness" / "runtime_assets.json"
+            manifest.parent.mkdir(parents=True)
+            source = temp / "source.tar.xz"
+            source.write_bytes(b"new runtime")
+            checksum = hashlib.sha256(source.read_bytes()).hexdigest()
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "rust": {
+                            "version": "1.2.3",
+                            "target": "x86_64-unknown-linux-gnu",
+                            "archive_name": "rust.tar.xz",
+                            "url": source.as_uri(),
+                            "sha256": checksum,
+                        },
+                    }
+                )
+            )
+            cache = temp / "cache"
+            cache.mkdir()
+            (cache / "rust.tar.xz").write_bytes(b"old runtime")
+
+            repro_env.ensure_edgebench_rust_runtime(edgebench, cache)
+
+            self.assertEqual((cache / "rust.tar.xz").read_bytes(), b"new runtime")
+            self.assertEqual(
+                (cache / "rust.tar.xz_bak").read_bytes(), b"old runtime"
+            )
 
     def test_missing_git_checkout_is_reported_without_mutation(self) -> None:
         state = repro_env.git_state(ROOT / "does-not-exist")

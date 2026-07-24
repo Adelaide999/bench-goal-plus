@@ -48,9 +48,10 @@ python3 scripts/repro_env.py doctor
 1. 把当前进程和所有子进程的 `TMPDIR`、`TMP`、`TEMP` 固定到本仓 `.tmp/`，不依赖 `/tmp`、`/private/tmp` 或 `/var/tmp`；
 2. 读取 `environment/upstreams.json`；
 3. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，checkout 到 manifest 指定 branch，并对 clean checkout 做 fast-forward-only 更新；
-4. 创建 `.bench-env/venv` 的 Python 3.12 环境；
-5. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的 OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
-6. 写入 ignored 的 `.bench-env/state.json` 并运行同一套 doctor 检查。
+4. 选中 EdgeBench 时，依次尝试 rsproxy、SJTU mirror 和官方源，把 Rust 1.88.0 Linux x64 distribution 下载到宿主机 `~/.cache/sforge/rust/` 并核对官方固定 SHA256，供 Rust Work/Judge 镜像缺少工具链时离线注入；
+5. 创建 `.bench-env/venv` 的 Python 3.12 环境；
+6. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的 OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
+7. 写入 ignored 的 `.bench-env/state.json` 并运行同一套 doctor 检查。
 
 如果 checkout dirty、origin/branch 不符、包含未 push commit 或无法
 fast-forward，脚本会停止并显示差异，不会 reset 或删除用户工作；正常落后于
@@ -74,7 +75,7 @@ python3 scripts/repro_env.py doctor --only heurigym
 runtime。无 `--only` 时才准备 manifest 中的全部上游。`doctor` 检查选中
 checkout 的 origin、branch、upstream、与最近 fetch 的 remote-tracking commit
 一致且 clean，同时检查 Python 3.12、关键 package/entrypoint、Codex/Pi 最低
-版本和本仓 `.tmp/` 是否存在且可写。`.venv/` 是历史本机缓存，不能复制到其他机器；复现标准
+版本、EdgeBench Rust 缓存的 SHA256 和本仓 `.tmp/` 是否存在且可写。`.venv/` 是历史本机缓存，不能复制到其他机器；复现标准
 是从 lock 重建 `.bench-env/venv` 与 `third_party/`。
 
 Adapter 自己的临时编译目录也必须通过 `bench_runtime_paths.py` 创建。AutoLab、
