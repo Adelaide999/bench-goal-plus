@@ -167,6 +167,26 @@ class ReproEnvironmentTest(unittest.TestCase):
         )
         self.assertIsNone(repro_env.parse_codex_version("unknown"))
 
+    def test_repository_normalization_equates_https_and_ssh_remotes(self) -> None:
+        expected = "https://github.com/example/project"
+
+        self.assertEqual(
+            repro_env.normalize_repository("git@github.com:example/project.git"),
+            expected,
+        )
+        self.assertEqual(
+            repro_env.normalize_repository(
+                "ssh://git@github.com/example/project.git"
+            ),
+            expected,
+        )
+        self.assertEqual(
+            repro_env.normalize_repository(
+                "https://github.com/example/project.git"
+            ),
+            expected,
+        )
+
     def test_edgebench_rust_runtime_download_is_pinned_and_atomic(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)

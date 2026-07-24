@@ -103,7 +103,14 @@ def checkout_paths(
 
 
 def normalize_repository(value: str | None) -> str | None:
-    return value.rstrip("/").removesuffix(".git") if value else None
+    if not value:
+        return None
+    normalized = value.rstrip("/").removesuffix(".git")
+    ssh_match = re.fullmatch(r"(?:ssh://)?git@([^/:]+)[:/](.+)", normalized)
+    if ssh_match:
+        host, path = ssh_match.groups()
+        return f"https://{host.lower()}/{path}"
+    return normalized
 
 
 def git_state(path: Path, tracking_branch: str | None = None) -> dict[str, Any]:
