@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "search_backend_functional_smoke",
+  "run_date": "2026-07-24",
+  "status": "finished",
+  "branch": "feat/skydiscover-backend-v1",
+  "task": {
+    "benchmark": "openevolve-examples",
+    "task_id": "function_minimization",
+    "primary_metric": "combined_score",
+    "direction": "maximize",
+    "openevolve_commit": "411fb59c886c18704caaffb611e17cf9e7d824d2"
+  },
+  "method": {
+    "method": "skydiscover-best-of-n",
+    "runtime": "skydiscover",
+    "runtime_version": "0.0.0",
+    "runtime_commit": "4734f324c4c3909eb3c8a4bc72a4ca34e6e679ed",
+    "algorithm": "best_of_n",
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "medium",
+    "provider_mode": "openai_compatible",
+    "api_base": "http://211.159.177.143:18081/v1"
+  },
+  "budget": {
+    "wall_time_seconds": 180,
+    "concurrency_cap": 1,
+    "iterations_ceiling": 1,
+    "hard_kill_grace_seconds": 30
+  },
+  "execution": {
+    "duration_seconds": 35.382946682017064,
+    "returncode": 0,
+    "deadline_reached": false,
+    "hard_killed": false,
+    "completed_iterations": 1,
+    "candidate_evaluation_workspace_count": 3,
+    "evaluator_calls": {
+      "total_claimed": 5,
+      "public_claimed": 4,
+      "final_claimed": 1,
+      "setup_claimed_before_t": 1,
+      "timed_plus_closeout_claimed": 4
+    },
+    "usage_coverage": "missing: SkyDiscover OpenAI-compatible client does not persist response usage metadata",
+    "actual_concurrency_coverage": "missing: runtime does not persist an observed peak"
+  },
+  "result": {
+    "seed_primary_metric": 1.4286455109142118,
+    "native_best_primary_metric": 1.4995399519577806,
+    "controller_final_primary_metric": 1.4995399519577806,
+    "directional_gain": 0.07089444104356879,
+    "candidate_sha256": "13def90bcc94e0cd319bf8c1e754b0ac6ea1d51f2bc8566257afe222d05328c5",
+    "evaluation_history_sha256": "2a20bb0784838c4b5107326435099c36a3ccf975782301913aea242054dc0887",
+    "config_sha256": "06eac2552c6b3dee0a905339a801222b785c0fbd8ec3b39392712eccc29f81c3"
+  },
+  "reproduction": {
+    "bootstrap": "python3 scripts/repro_env.py bootstrap --only skydiscover",
+    "prepare": ".bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare --method skydiscover-best-of-n --task-id function_minimization --wall-time-seconds 180 --soft-closeout-seconds 30 --hard-kill-grace-seconds 30 --concurrency 1 --iterations-ceiling 1 --model gpt-5.6-luna --reasoning-effort medium --run-dir runs/openevolve-compare/skydiscover-bon-function-minimization-smoke-v1",
+    "seed_smoke": ".bench-env/venv/bin/python experiments/openevolve_compare/experiment.py seed-smoke --run-dir runs/openevolve-compare/skydiscover-bon-function-minimization-smoke-v1",
+    "run": "OPENAI_API_KEY must be inherited from the shell; run experiment.py run --run-dir runs/openevolve-compare/skydiscover-bon-function-minimization-smoke-v1 --model gpt-5.6-luna --api-base http://211.159.177.143:18081/v1"
+  },
+  "evidence": {
+    "candidate": "evidence/runs/2026-07-24-skydiscover-best-of-n-function-minimization-candidate.py",
+    "full_run_directory": "runs/openevolve-compare/skydiscover-bon-function-minimization-smoke-v1",
+    "full_run_directory_policy": "ignored, preserved locally, and not required to contain credentials"
+  },
+  "limitations": [
+    "SkyDiscover still evaluates its seed and best program inside the timed native runtime; this is a functional smoke, not a matched baseline.",
+    "The native OpenAI-compatible client drops response usage metadata.",
+    "Best-of-N does not consistently seed every native random source.",
+    "The runtime does not persist observed peak concurrency."
+  ],
+  "secret_scan": {
+    "pattern": "sk-[A-Za-z0-9_-]{16,}",
+    "scope": "full preserved run directory",
+    "result": "clean"
+  }
+}

@@ -78,7 +78,8 @@
     "skydiscover": {
       "repository": "https://github.com/ck0123/skydiscover.git",
       "checkout_dir": "skydiscover",
-      "tracking_branch": "main"
+      "tracking_branch": "main",
+      "editable": true
     }
   }
 }

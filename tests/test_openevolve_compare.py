@@ -18,16 +18,23 @@ from experiments.openevolve_compare import experiment  # noqa: E402
 
 
 class OpenEvolveComparisonTest(unittest.TestCase):
-    def test_four_canonical_methods_and_experiment_defaults(self) -> None:
+    def test_canonical_methods_and_experiment_defaults(self) -> None:
         self.assertEqual(
             experiment.METHODS,
-            ("openevolve", "plain-codex", "goal-plus-codex", "goal-plus-pi"),
+            (
+                "openevolve",
+                "plain-codex",
+                "goal-plus-codex",
+                "goal-plus-pi",
+                "skydiscover-best-of-n",
+            ),
         )
         parser = experiment.build_parser()
         args = parser.parse_args(["prepare", "--method", "plain-codex"])
         self.assertEqual(args.wall_time_seconds, 300)
         self.assertEqual(args.concurrency, 2)
         self.assertEqual(args.model, "gpt-5.6-luna")
+        self.assertEqual(args.reasoning_effort, "high")
 
         batch_args = parser.parse_args(
             [

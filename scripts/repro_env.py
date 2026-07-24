@@ -466,6 +466,7 @@ def package_versions(python: Path) -> dict[str, str | None]:
     packages = (
         "openevolve",
         "goal-plus",
+        "skydiscover",
         "sforge",
         "fastapi",
         "fastmcp",
@@ -573,6 +574,14 @@ def collect_doctor(
                     "version": versions.get(package),
                 }
             )
+    if "skydiscover" in chosen:
+        checks.append(
+            {
+                "name": "package:skydiscover",
+                "passed": bool(versions.get("skydiscover")),
+                "version": versions.get("skydiscover"),
+            }
+        )
 
     for executable in (
         "openevolve-run",
@@ -599,6 +608,15 @@ def collect_doctor(
             }
         )
         checks.append(edgebench_rust_runtime_status(paths["edgebench"]))
+    if "skydiscover" in chosen:
+        path = venv_bin(venv) / "skydiscover-run"
+        result = run([str(path), "--help"], check=False) if path.is_file() else None
+        checks.append(
+            {
+                "name": "entrypoint:skydiscover-run",
+                "passed": bool(result and result.returncode == 0),
+            }
+        )
 
     codex_path = shutil.which("codex")
     codex_text = None

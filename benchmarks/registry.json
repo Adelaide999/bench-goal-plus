@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "checked_at": "2026-07-23",
+  "checked_at": "2026-07-24",
   "status_values": ["pass", "partial", "todo", "blocked", "n/a"],
   "gate_sets": {
     "benchmark": [
@@ -352,7 +352,7 @@
     },
     {
       "id": "skydiscover-evox",
-      "display_name": "SkyDiscover runtime (EvoX method)",
+      "display_name": "SkyDiscover runtime (EvoX / Best-of-N methods)",
       "kind": "search_backend",
       "gate_set": "search_backend",
       "priority": 1,
@@ -371,7 +371,7 @@
       "stages": {
         "source_forked": "pass",
         "native_smoke": "pass",
-        "benchmark_adapter": "todo",
+        "benchmark_adapter": "partial",
         "usage_telemetry": "blocked",
         "matched_baseline": "todo"
       },
@@ -384,11 +384,14 @@
         "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1/metadata.json",
         "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1/programs/22a62f43-96ae-458d-a8a1-8049a8b71684.json",
         "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1/programs/c66bf67c-ef8f-42af-93d4-7a5d7e37cc93.json",
-        "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/logs/evox_20260720_035607.log.txt"
+        "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/logs/evox_20260720_035607.log.txt",
+        "evidence/runs/2026-07-24-skydiscover-best-of-n-function-minimization-smoke.json",
+        "evidence/runs/2026-07-24-skydiscover-best-of-n-function-minimization-candidate.py"
       ],
-      "next_action": "Add response-usage capture, then implement the Swarm task-eval workspace adapter.",
+      "next_action": "Move seed and best-test evaluation under bench controller ownership, add response-usage and observed-concurrency telemetry, then reuse the candidate-workspace bridge from standalone benchmark adapters.",
       "blockers": [
-        "The current OpenAI-compatible client path discards response usage metadata."
+        "The current OpenAI-compatible client path discards response usage metadata.",
+        "The current native runner evaluates the seed and best candidate inside its timed runtime, so the finished bridge smoke is not yet a matched baseline."
       ]
     },
     {

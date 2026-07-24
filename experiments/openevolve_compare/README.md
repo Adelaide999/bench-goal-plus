@@ -1,13 +1,14 @@
-# OpenEvolve task four-path comparison
+# OpenEvolve task multi-backend comparison
 
-This harness runs one OpenEvolve example from the managed branch snapshot through four independent paths while sharing the seed, official evaluator, model identity, wall-clock budget `T`, and live concurrency `K`. The experiment manifest records the resolved source commits:
+This harness runs one OpenEvolve example from the managed branch snapshot through independent search backends while sharing the seed, official evaluator, model identity, wall-clock budget `T`, and live concurrency cap `K`. The experiment manifest records the resolved source commits:
 
 - `openevolve`: native OpenEvolve population/island search;
 - `plain-codex`: `K` independent Codex lanes, followed by controller selection;
 - `goal-plus-codex`: Goal Plus fixed parallel lineages hosted by Codex;
-- `goal-plus-pi`: the same Goal Plus contract hosted by Pi RPC workers.
+- `goal-plus-pi`: the same Goal Plus contract hosted by Pi RPC workers;
+- `skydiscover-best-of-n`: SkyDiscover native Best-of-N with a controller-owned candidate-workspace evaluator bridge.
 
-Defaults are `T=300s`, `K=2`, model `gpt-5.6-luna`, and reasoning `high`. OpenEvolve and Pi require an explicit OpenAI-compatible `--api-base` and inherit `OPENAI_API_KEY`; the key is never serialized. Codex paths can omit `--api-base` and use the machine's native Codex login, or use the same explicit endpoint as the other paths.
+Defaults are `T=300s`, `K=2`, model `gpt-5.6-luna`, and reasoning `high`. OpenEvolve, Pi, and SkyDiscover require an explicit OpenAI-compatible `--api-base` and inherit `OPENAI_API_KEY`; the key is never serialized. Codex paths can omit `--api-base` and use the machine's native Codex login, or use the same explicit endpoint as the other paths.
 
 `T` is a total cap, not a minimum duration or success criterion. The default prompt asks all paths to reserve the final 60 seconds for making the best verified artifact ready; a method may finish earlier when it has satisfied the objective.
 
@@ -46,6 +47,31 @@ Before spending model budget, the optional seed check is:
 ```
 
 Do not run `seed-smoke` on the same directory intended for a later capped campaign unless that extra evaluator call is explicitly part of the protocol.
+
+For the current SkyDiscover functional path, bootstrap its managed editable
+runtime and prepare Best-of-N explicitly:
+
+```bash
+python3 scripts/repro_env.py bootstrap --only skydiscover
+
+.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
+  --method skydiscover-best-of-n \
+  --task-id function_minimization \
+  --wall-time-seconds 180 \
+  --soft-closeout-seconds 30 \
+  --concurrency 1 \
+  --iterations-ceiling 1 \
+  --model gpt-5.6-luna \
+  --reasoning-effort medium
+```
+
+The bridge preserves one isolated workspace per candidate, maps minimize
+metrics to an internal negated `combined_score`, keeps raw metrics unchanged,
+and shares the controller evaluator ledger. SkyDiscover upstream still
+evaluates its seed and best candidate inside the timed process and does not
+persist response usage or observed peak concurrency. Until those intrinsic
+runtime gaps are fixed, this path is a functional smoke rather than a matched
+baseline.
 
 ## Batch campaign
 
