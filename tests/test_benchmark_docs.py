@@ -14,6 +14,7 @@ BENCHMARK_DOCS = (
     "frontier-cs-algorithmic.md",
     "edgebench.md",
 )
+TASK_PACK_DOCS = ("skydiscover-task-packs.md",)
 REQUIRED_CASE_SECTIONS = (
     "## 30 秒理解",
     "### 输入是什么",
@@ -29,7 +30,7 @@ REQUIRED_CASE_SECTIONS = (
 class BenchmarkDocsTest(unittest.TestCase):
     def test_overview_links_every_active_benchmark(self):
         overview = (DOCS_DIR / "README.md").read_text(encoding="utf-8")
-        for filename in BENCHMARK_DOCS:
+        for filename in BENCHMARK_DOCS + TASK_PACK_DOCS:
             with self.subTest(filename=filename):
                 self.assertIn(f"]({filename})", overview)
 
@@ -49,12 +50,31 @@ class BenchmarkDocsTest(unittest.TestCase):
             text = (DOCS_DIR / filename).read_text(encoding="utf-8")
             with self.subTest(filename=filename):
                 self.assertIn("Docker", text)
+                self.assertIn("Docker 空间", text)
                 self.assertIn("无 Docker 环境", text)
+        self.assertIn("镜像逻辑大小 / 共享层实际增量 / 建议预留", overview)
+
+    def test_skydiscover_task_pack_records_measured_space_and_exclusions(self):
+        text = (DOCS_DIR / "skydiscover-task-packs.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "19 个镜像 tag",
+            "8.57 GB",
+            "2.49 GB",
+            "10 GB",
+            "ADRS/eplb",
+            "math/second_autocorr_ineq",
+            "kernelbench",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
 
     def test_local_markdown_links_resolve(self):
         markdown_files = (
             [DOCS_DIR / "README.md"]
             + [DOCS_DIR / filename for filename in BENCHMARK_DOCS]
+            + [DOCS_DIR / filename for filename in TASK_PACK_DOCS]
             + [
                 ROOT / "docs" / "goal-plus-benchmark-experiment.md",
                 ROOT / "docs" / "openevolve-cpu-examples.md",
@@ -81,6 +101,7 @@ class BenchmarkDocsTest(unittest.TestCase):
             path.read_text(encoding="utf-8")
             for path in [DOCS_DIR / "README.md"]
             + [DOCS_DIR / filename for filename in BENCHMARK_DOCS]
+            + [DOCS_DIR / filename for filename in TASK_PACK_DOCS]
             + extra_docs
         )
         self.assertNotRegex(combined, r"/Users/[^/\s]+")

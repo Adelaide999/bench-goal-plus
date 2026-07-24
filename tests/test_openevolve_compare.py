@@ -27,6 +27,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 "goal-plus-codex",
                 "goal-plus-pi",
                 "skydiscover-best-of-n",
+                "skydiscover-evox",
+                "skydiscover-adaevolve",
             ),
         )
         parser = experiment.build_parser()

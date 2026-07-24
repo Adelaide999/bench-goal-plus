@@ -699,8 +699,8 @@ def prepare(args: argparse.Namespace) -> int:
                     "inside timed runtime; functional-smoke limitation"
                 ),
                 "determinism_coverage": (
-                    "requested seed is persisted, but Best-of-N does not "
-                    "consistently seed every native random source"
+                    "requested seed is persisted, but the selected SkyDiscover "
+                    "algorithm does not consistently seed every native random source"
                 ),
             }
             if is_sky

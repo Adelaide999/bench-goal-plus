@@ -11,6 +11,7 @@ SwarmResearch 不是一套全新的 judge，而是一套多 agent 研究方法�
 | 指标 | task-native continuous score；方向随题目定义 |
 | 论文预算口径 | README 估算约 100 美元/题；论文在 50 美元 cutoff 报告结果 |
 | Docker | **正式复现必需**；当前 paper-compatible task/evaluator 路径容器化 |
+| Docker 空间 | Circle Packing evaluator-only 为 `0.196 GB`，论文式 agent CLI task image 为 `2.10 GB`；完整 15 题仍按 `10–20 GB` 规划 |
 | 无 Docker 环境 | 可分析公开轨迹和代码，但不能生成同口径官方 task score |
 | 当前门禁 | Math `circle_packing` evaluator 已通；ADRS/ALE worker build context 待补 |
 | 跟踪源码 | method `ck0123/SwarmResearch@main`；tasks `ck0123/swarmresearch-paper-reproduce@main`；run manifest 记录实际 commit |

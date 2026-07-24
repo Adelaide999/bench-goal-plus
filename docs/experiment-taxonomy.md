@@ -59,6 +59,9 @@ benchmark。
 OpenEvolve 的 12 个 `cpu_portable` examples 与 SkyDiscover 的 Circle Packing
 可以本机运行，但它们应标为 **method-repo task pack / diagnostic task**。除非
 另有独立论文、固定数据版本和评分协议，不把它们计入“正式 benchmark 套数”。
+SkyDiscover 自带 Math/ADRS 等任务的 Docker 范围和实测空间单独记录在
+[task-pack 环境页](benchmarks/skydiscover-task-packs.md)，不混入正式
+benchmark 计数。
 
 `local_examples/vliw_kernel_optimization` 同属这一层：它是从 EdgeBench 固定
 镜像提取的 host-only replica，用于快速比较 Plain Codex、Goal Plus 和后续

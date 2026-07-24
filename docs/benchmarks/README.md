@@ -51,17 +51,18 @@ Plain Codex / Goal Plus 入口，而不是“仓库能下载”或“代码看�
 | 对象 | 当前本机能力 | 还缺什么 |
 |---|---|---|
 | SwarmResearch 15-task substrate | Docker 下 Circle Packing evaluator 已通 | paper-compatible Swarm/Plain/Goal Plus 统一入口；ADRS/ALE worker build context |
+| SkyDiscover Math/ADRS task pack | 19 个非 Torch CPU evaluator images 已构建并通过依赖检查 | 逐 task evaluator smoke 和统一 benchmark controller |
 | PERFOPT-Bench | 无 | 公开 executable artifact 当前返回不可用，无法取得任务、依赖和 evaluator |
 
 ### 可 host 运行但不计入正式 Benchmark 套数
 
-| Task pack | Docker | 当前用途 |
-|---|---|---|
-| OpenEvolve `cpu_portable` 12 题 | 不需要 | 方法接线、机制诊断和 OpenEvolve/Plain/Goal Plus 四路径 pilot |
-| SkyDiscover Circle Packing | 不需要 | SkyDiscover runtime + EvoX 方法的 compatibility smoke |
-| Local VLIW replica | 不需要 | 从 EdgeBench 镜像提取的 Plain/Goal Plus 本地比较任务；非官方 EdgeBench 分数 |
+| Task pack | Docker | Docker 空间 | 当前用途 |
+|---|---|---:|---|
+| OpenEvolve `cpu_portable` 12 题 | 不需要 | `0 GB` | 方法接线、机制诊断和 OpenEvolve/Plain/Goal Plus 四路径 pilot |
+| SkyDiscover Circle Packing | 不需要 | `0 GB` | SkyDiscover runtime + EvoX 方法的 compatibility smoke |
+| Local VLIW replica | 不需要 | `0 GB` | 从 EdgeBench 镜像提取的 Plain/Goal Plus 本地比较任务；非官方 EdgeBench 分数 |
 
-这两行是此前最容易混淆的地方：能运行一个 evaluator task，不等于新增了一套
+这些 task pack 是此前最容易混淆的地方：能运行一个 evaluator task，不等于新增了一套
 benchmark。OpenEvolve 和 EvoX 属于被比较的搜索方法，SkyDiscover 是承载
 EvoX 的 runtime。
 
@@ -71,18 +72,20 @@ EvoX 的 runtime。
 
 以下按 **bench-goal-plus 当前支持的可评分路径** 标记，而不是只看上游是否
 存在 Dockerfile。`混合` 表示已有 host-portable 单题，但完整论文/多题路径
-仍依赖容器。
+仍依赖容器。空间统一按“镜像逻辑大小 / 共享层实际增量 / 建议预留”解释；
+没有实测时明确标为未知。
 
-| Benchmark / substrate | Docker | 没有 Docker 时能否跑 |
-|---|---|---|
-| HeuriGym | 不需要 | 当前 `operator_scheduling` 可完整评分 |
-| Frontier-Engineering | 不需要 | 当前仅确认 MallocLab；其余 v1-lite runtime 逐题冻结 |
-| AutoLab | 混合 | `toy_isa_opt` 可 host 跑；完整 paper-compatible 路径使用容器 |
-| ALE-Bench Lite | **需要** | 可以 materialize/查看，不能走当前 official-lite 评分 |
-| SwarmResearch 15-task substrate | **需要** | 可以分析轨迹，不能同口径正式评分 |
-| Frontier-CS | **需要** | 当前 problem-0 评分需要 pinned judge image |
-| EdgeBench | **需要** | SForge 需要 work container 和独立 hidden judge |
-| PERFOPT-Bench | 无法判定 | executable artifact 不可访问；不是“不需要 Docker” |
+| Benchmark / substrate | Docker | Docker 空间 | 没有 Docker 时能否跑 |
+|---|---|---|---|
+| HeuriGym | 不需要 | `0 GB` | 当前 `operator_scheduling` 可完整评分 |
+| Frontier-Engineering | 当前 case 不需要 | MallocLab `0 GB` | 当前仅确认 MallocLab；其余 v1-lite runtime 逐题冻结 |
+| AutoLab | 混合 | host case `0 GB`；已测 task image `0.277 GB` | `toy_isa_opt` 可 host 跑；完整 paper-compatible 路径使用容器 |
+| ALE-Bench Lite | **需要** | C++ 路径 `4.03 GB`；建议 `10 GB` | 可以 materialize/查看，不能走当前 official-lite 评分 |
+| SwarmResearch 15-task substrate | **需要** | 当前 `0.196/2.10 GB` 两种 Circle Packing 口径；完整集建议 `10–20 GB` | 可以分析轨迹，不能同口径正式评分 |
+| [SkyDiscover Math/ADRS task pack](skydiscover-task-packs.md) | **需要** | 非 Torch 19 tags：逻辑 `8.57 GB`、实际新增约 `2.49 GB`、建议 `10 GB` | Circle Packing、HotPotQA 和 Image Gen 仍有 host 路径 |
+| Frontier-CS | **需要** | 共用 judge `1.27 GB`；建议 `2 GB` | 当前 problem-0 评分需要 pinned judge image |
+| EdgeBench | **需要** | VLIW work + judge 逻辑 `2.23 GB`；单 case 建议 `5 GB` | SForge 需要 work container 和独立 hidden judge |
+| PERFOPT-Bench | 无法判定 | 未知 | executable artifact 不可访问；不是“不需要 Docker” |
 
 `local_examples/vliw_kernel_optimization` 可在无 Docker 主机运行 public 和
 held-out local evaluator，但它没有 SForge 的安全隔离，因此不会改变上表
@@ -126,8 +129,9 @@ Goal Plus 的逐项接入改造、`K/E/Q` 三层并发和 matched-budget baselin
 
 PERFOPT-Bench 因缺少可执行公开 artifact 继续挂起，不进入本文档集。
 SkyDiscover 是 runtime，EvoX/OpenEvolve 是搜索方法，因此不作为 benchmark
-单独写 case 文档；它们的分类和当前接入状态见
-[实验对象分类](../experiment-taxonomy.md)。
+单独写 case 文档；其自带任务的
+[Docker 与空间说明](skydiscover-task-packs.md)作为环境页维护，分类和当前
+接入状态见[实验对象分类](../experiment-taxonomy.md)。
 
 ---
 

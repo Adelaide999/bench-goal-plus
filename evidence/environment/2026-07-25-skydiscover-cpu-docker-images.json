@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-07-25",
+  "kind": "docker_image_space_audit",
+  "host": {
+    "architecture": "x86_64",
+    "docker_server_version": "29.4.0",
+    "docker_vm_memory_bytes": 8400662528,
+    "host_available_gib_before": 113,
+    "host_available_gib_after": 110
+  },
+  "source": {
+    "runtime": "SkyDiscover",
+    "commit": "4734f324c4c3909eb3c8a4bc72a4ca34e6e679ed",
+    "base_image": "python:3.12-slim",
+    "build_recipe": "upstream generic evaluator recipe with an explicit PyPI mirror; task requirements were unchanged"
+  },
+  "scope": {
+    "math_images": 15,
+    "adrs_images": 4,
+    "total_images": 19,
+    "excluded": [
+      {
+        "task": "math/circle_packing",
+        "reason": "the supported compatibility smoke uses the host evaluator"
+      },
+      {
+        "task": "math/second_autocorr_ineq",
+        "reason": "excluded from the no-Torch CPU pack"
+      },
+      {
+        "task": "ADRS/eplb",
+        "reason": "excluded from the no-Torch CPU pack"
+      },
+      {
+        "task": "gpu_mode and kernelbench",
+        "reason": "GPU workloads are outside the current host scope"
+      }
+    ]
+  },
+  "measurement": {
+    "logical_image_size_bytes": 8567759305,
+    "logical_image_size_gb": 8.568,
+    "docker_images_before_gb": 31.34,
+    "docker_images_after_gb": 33.83,
+    "approx_unique_image_store_delta_gb": 2.49,
+    "docker_build_cache_before_gb": 7.117,
+    "docker_build_cache_after_gb": 9.606,
+    "note": "logical sizes are summed per tag; shared Python and dependency layers make the unique Docker-store and host-disk increments smaller",
+    "recommended_free_space_gb": 10
+  },
+  "frontier_cs_reference": {
+    "tag": "bench-goal-plus/frontier-cs-judge:07500f9",
+    "id": "sha256:155819203551a3a15d03e6e12264451e557f3323c5a7af3d4b75dd2a78ae3a14",
+    "size_bytes": 1270184456,
+    "logical_size_gb": 1.27,
+    "combined_with_skydiscover_logical_size_bytes": 9837943761,
+    "combined_with_skydiscover_logical_size_gb": 9.838
+  },
+  "validation": {
+    "image_count": 19,
+    "missing_images": 0,
+    "pip_check_failures": 0,
+    "torch_present_images": 0,
+    "excluded_tags_present": 0
+  },
+  "images": [
+    {
+      "tag": "skydiscover-circle_packing_rect-evaluator:latest",
+      "id": "sha256:7c1c747cc03dde98a402b18a599f593f436a03ac34b5e024227d7fbf0fd353b8",
+      "size_bytes": 334967796
+    },
+    {
+      "tag": "skydiscover-erdos_min_overlap-evaluator:latest",
+      "id": "sha256:d429eb3bfe8cbf051660236318e40d1e63f5e9ee3205c697b03a7ec1afea6e2e",
+      "size_bytes": 752697970
+    },
+    {
+      "tag": "skydiscover-first_autocorr_ineq-evaluator:latest",
+      "id": "sha256:3aa4176060c55c200bc2243257f5b6facb291802ce081838340dc25c9b952c18",
+      "size_bytes": 752698253
+    },
+    {
+      "tag": "skydiscover-13-evaluator:latest",
+      "id": "sha256:4708119bf109b86469556ce804a9c6138f8218be3e15744748abc745d5a855c9",
+      "size_bytes": 334966850
+    },
+    {
+      "tag": "skydiscover-14-evaluator:latest",
+      "id": "sha256:7256fa3296e1551f1f0acf7adcd68051998e4e805cbc95629aeb8b6729fc6af1",
+      "size_bytes": 752697741
+    },
+    {
+      "tag": "skydiscover-heilbronn_triangle-evaluator:latest",
+      "id": "sha256:e62afac277aa96a8b23491213b6a59e4e2ad9f5dfd597d2cbdb14237de3def30",
+      "size_bytes": 334967087
+    },
+    {
+      "tag": "skydiscover-11-evaluator:latest",
+      "id": "sha256:7a0cfc931c6e377f65f6e1ebb4162cebdb9e4c2788057db6671ebdd55b79cb4d",
+      "size_bytes": 334972750
+    },
+    {
+      "tag": "skydiscover-12-evaluator:latest",
+      "id": "sha256:423386e6ea3d646133129ab889bfa3175b8f6cb9117d2628803932a0f92be82d",
+      "size_bytes": 334972751
+    },
+    {
+      "tag": "skydiscover-matmul-evaluator:latest",
+      "id": "sha256:53bbe2550254346350944be2163fea99a74ae6aaef4f120c621489bc2082115b",
+      "size_bytes": 752699361
+    },
+    {
+      "tag": "skydiscover-2-evaluator:latest",
+      "id": "sha256:de60921e198e24b5e5b64ad374c3c148d7944517d8c9a504982a7142ef66e2a6",
+      "size_bytes": 334966491
+    },
+    {
+      "tag": "skydiscover-3-evaluator:latest",
+      "id": "sha256:354b9f9303e2f0191852a70828f876ecb4529ccb6ff2721b98a1b0c8dd254d0b",
+      "size_bytes": 334966490
+    },
+    {
+      "tag": "skydiscover-signal_processing-evaluator:latest",
+      "id": "sha256:4ca1a88e89ec9e6e83a9001625a3bddcbf4f3adf7a5798a5633f1fd02247b5a5",
+      "size_bytes": 344384426
+    },
+    {
+      "tag": "skydiscover-sums_diffs_finite_sets-evaluator:latest",
+      "id": "sha256:03f2db787bb87b27ed67f1bde1ad08f754b5b8fe62afb9d95c8823ba47ae7c31",
+      "size_bytes": 752698251
+    },
+    {
+      "tag": "skydiscover-third_autocorr_ineq-evaluator:latest",
+      "id": "sha256:c5c492b73e70414db33acde38aaa5c5e9497c4a2b23fdb25f4017eef31dc0a6c",
+      "size_bytes": 752698189
+    },
+    {
+      "tag": "skydiscover-uncertainty_ineq-evaluator:latest",
+      "id": "sha256:64168b1e0ec07e814c89ab93d268ae81b40e6a30f399de41619db855f8c67667",
+      "size_bytes": 410067306
+    },
+    {
+      "tag": "skydiscover-cloudcast-evaluator:latest",
+      "id": "sha256:c56763965820936ad633b45c72bce93aceb50a1c6c490e098855c5b87358ba69",
+      "size_bytes": 279936072
+    },
+    {
+      "tag": "skydiscover-llm_sql-evaluator:latest",
+      "id": "sha256:28f7b7c229ed72ea7e1a48eb9eab78458d44181e79cb1076eb9f8a4dcfc22c54",
+      "size_bytes": 279919887
+    },
+    {
+      "tag": "skydiscover-prism-evaluator:latest",
+      "id": "sha256:2a6320664a8d89956384101ccc6098094e57937fafe6009735b9838e6764590c",
+      "size_bytes": 196228730
+    },
+    {
+      "tag": "skydiscover-txn_scheduling-evaluator:latest",
+      "id": "sha256:570459aa46b1c45bf91aae8422ed231629bb9e303d860fbf8ad6cf764fc5405e",
+      "size_bytes": 196252904
+    }
+  ]
+}

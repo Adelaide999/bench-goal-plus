@@ -352,7 +352,7 @@
     },
     {
       "id": "skydiscover-evox",
-      "display_name": "SkyDiscover runtime (EvoX / Best-of-N methods)",
+      "display_name": "SkyDiscover runtime (Best-of-N / EvoX / AdaEvolve methods)",
       "kind": "search_backend",
       "gate_set": "search_backend",
       "priority": 1,
@@ -367,7 +367,7 @@
       ],
       "local_path": "third_party/skydiscover",
       "docker_requirement": "mixed",
-      "docker_scope": "The current EvoX circle-packing smoke is Python-only, while the broader task catalog inherits task-specific evaluator and container requirements.",
+      "docker_scope": "Circle Packing uses the host evaluator. The measured no-Torch Math/ADRS pack has 19 evaluator tags (8.57 GB logical, about 2.49 GB unique image-store increment); eplb, second_autocorr_ineq, GPU Mode, and KernelBench are excluded.",
       "stages": {
         "source_forked": "pass",
         "native_smoke": "pass",
@@ -386,7 +386,12 @@
         "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/checkpoints/checkpoint_1/programs/c66bf67c-ef8f-42af-93d4-7a5d7e37cc93.json",
         "evidence/legacy-smokes/skydiscover-evox-circle-deepseek-1iter-20260720/logs/evox_20260720_035607.log.txt",
         "evidence/runs/2026-07-24-skydiscover-best-of-n-function-minimization-smoke.json",
-        "evidence/runs/2026-07-24-skydiscover-best-of-n-function-minimization-candidate.py"
+        "evidence/runs/2026-07-24-skydiscover-best-of-n-function-minimization-candidate.py",
+        "evidence/runs/2026-07-24-skydiscover-evox-function-minimization-smoke.json",
+        "evidence/runs/2026-07-24-skydiscover-evox-function-minimization-candidate.py",
+        "evidence/runs/2026-07-24-skydiscover-adaevolve-function-minimization-smoke.json",
+        "evidence/runs/2026-07-24-skydiscover-adaevolve-function-minimization-iteration-1-candidate.py",
+        "evidence/environment/2026-07-25-skydiscover-cpu-docker-images.json"
       ],
       "next_action": "Move seed and best-test evaluation under bench controller ownership, add response-usage and observed-concurrency telemetry, then reuse the candidate-workspace bridge from standalone benchmark adapters.",
       "blockers": [

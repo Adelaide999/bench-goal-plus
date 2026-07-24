@@ -11,6 +11,7 @@ Frontier-CS 把开放式计算机科学问题封装成可执行 judge。Algorith
 | 候选 artifact | 读取任意实例的可编译程序，通常为 C++ |
 | 指标 | checker-native partial score；每题方向由 statement/checker 定义 |
 | Docker | **必需**；当前 problem-0 使用 pinned compile/checker judge image |
+| Docker 空间 | Algorithmic 题共用 `1.27 GB` judge image；单机建议预留 `2 GB`，不随题数线性增长 |
 | 无 Docker 环境 | 可 materialize 和写候选，但不能通过当前官方 checker 路径评分 |
 | 当前门禁 | problem 0 direct official checker、Plain/Goal Plus runner 和 partial-score parser 已通；两条 Codex 路径都有真实 E2E |
 | 跟踪源码 | `ck0123/Frontier-CS@main`；run manifest 记录实际 commit |

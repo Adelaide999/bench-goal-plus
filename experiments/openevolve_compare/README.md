@@ -6,7 +6,12 @@ This harness runs one OpenEvolve example from the managed branch snapshot throug
 - `plain-codex`: `K` independent Codex lanes, followed by controller selection;
 - `goal-plus-codex`: Goal Plus fixed parallel lineages hosted by Codex;
 - `goal-plus-pi`: the same Goal Plus contract hosted by Pi RPC workers;
-- `skydiscover-best-of-n`: SkyDiscover native Best-of-N with a controller-owned candidate-workspace evaluator bridge.
+- `skydiscover-best-of-n`: SkyDiscover native Best-of-N;
+- `skydiscover-evox`: SkyDiscover EvoX co-evolves the candidate and search strategy;
+- `skydiscover-adaevolve`: SkyDiscover AdaEvolve adaptive multi-island search.
+
+All three SkyDiscover methods use the same controller-owned
+candidate-workspace evaluator bridge.
 
 Defaults are `T=300s`, `K=2`, model `gpt-5.6-luna`, and reasoning `high`. OpenEvolve, Pi, and SkyDiscover require an explicit OpenAI-compatible `--api-base` and inherit `OPENAI_API_KEY`; the key is never serialized. Codex paths can omit `--api-base` and use the machine's native Codex login, or use the same explicit endpoint as the other paths.
 
@@ -48,30 +53,62 @@ Before spending model budget, the optional seed check is:
 
 Do not run `seed-smoke` on the same directory intended for a later capped campaign unless that extra evaluator call is explicitly part of the protocol.
 
-For the current SkyDiscover functional path, bootstrap its managed editable
-runtime and prepare Best-of-N explicitly:
+For the current SkyDiscover functional paths, bootstrap its managed editable
+runtime and prepare each native algorithm explicitly:
 
 ```bash
 python3 scripts/repro_env.py bootstrap --only skydiscover
 
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
-  --method skydiscover-best-of-n \
-  --task-id function_minimization \
-  --wall-time-seconds 180 \
-  --soft-closeout-seconds 30 \
-  --concurrency 1 \
-  --iterations-ceiling 1 \
-  --model gpt-5.6-luna \
-  --reasoning-effort medium
+for method in \
+  skydiscover-best-of-n \
+  skydiscover-evox \
+  skydiscover-adaevolve
+do
+  .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
+    --method "$method" \
+    --task-id function_minimization \
+    --wall-time-seconds 180 \
+    --soft-closeout-seconds 30 \
+    --concurrency 1 \
+    --iterations-ceiling 1 \
+    --model gpt-5.6-luna \
+    --reasoning-effort medium
+done
 ```
 
 The bridge preserves one isolated workspace per candidate, maps minimize
 metrics to an internal negated `combined_score`, keeps raw metrics unchanged,
-and shares the controller evaluator ledger. SkyDiscover upstream still
-evaluates its seed and best candidate inside the timed process and does not
-persist response usage or observed peak concurrency. Until those intrinsic
-runtime gaps are fixed, this path is a functional smoke rather than a matched
-baseline.
+and shares the controller evaluator ledger. EvoX uses the same explicit run
+model for candidate generation and search-strategy evolution
+(`search.share_llm=true`); one requested EvoX iteration can therefore make
+multiple model calls. AdaEvolve keeps its adaptive, UCB, migration, archive,
+dynamic-island, and paradigm-breakthrough controls enabled.
+
+SkyDiscover upstream still evaluates its seed and best candidate inside the
+timed process and does not persist response usage or observed peak concurrency.
+Until those intrinsic runtime gaps are fixed, these paths are functional
+smokes rather than matched baselines.
+
+Docker is not required for the current Circle Packing or
+`function_minimization` compatibility paths. SkyDiscover's separate no-Torch
+Math/ADRS evaluator pack uses 19 Docker tags: `8.57 GB` logical total, about
+`2.49 GB` unique image-store increment on the measured host, and `10 GB`
+recommended free space. See the
+[task-pack environment note](../../docs/benchmarks/skydiscover-task-packs.md).
+
+Two real `glm-5.2/medium` examples now cover the richer algorithms:
+
+- [EvoX, one iteration](../../evidence/runs/2026-07-24-skydiscover-evox-function-minimization-smoke.json)
+  completed strategy meta-evolution and automatic variation-operator generation,
+  retried one invalid candidate, and improved `combined_score` from
+  `1.4286455109` to `1.4995399684`.
+- [AdaEvolve, one iteration](../../evidence/runs/2026-07-24-skydiscover-adaevolve-function-minimization-smoke.json)
+  exercised two islands and the adaptive/UCB controls. Its generated candidate
+  was valid but worse, so native selection correctly retained the seed at
+  `1.4286455109`.
+
+These are execution-path evidence. Do not interpret a single short iteration
+as an algorithm ranking.
 
 ## Batch campaign
 
@@ -80,7 +117,9 @@ baseline.
 ```bash
 .bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare-batch \
   --task-set cpu_portable \
-  --methods openevolve plain-codex goal-plus-codex goal-plus-pi \
+  --methods \
+    openevolve plain-codex goal-plus-codex goal-plus-pi \
+    skydiscover-best-of-n skydiscover-evox skydiscover-adaevolve \
   --run-root runs/openevolve-campaigns/<campaign-id> \
   --wall-time-seconds 300 \
   --concurrency 2 \
@@ -88,7 +127,10 @@ baseline.
   --seed 1
 ```
 
-This expands all 48 cells into persistent isolated directories and writes `campaign.json`. A failure in one cell is recorded without discarding the rest. To prepare only the two Codex paths, pass `--methods plain-codex goal-plus-codex`.
+This expands all 84 cells into persistent isolated directories and writes
+`campaign.json`. A failure in one cell is recorded without discarding the rest.
+To prepare only the two Codex paths, pass
+`--methods plain-codex goal-plus-codex`.
 
 Run the prepared cells sequentially with one outer command:
 

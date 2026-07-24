@@ -10,12 +10,13 @@ Goal Plus 的 benchmark 集成与实验控制仓。它把此前散落在 `mythin
 
 | 层次 | 当前对象 | 作用 |
 |---|---|---|
-| Agent / 搜索方案 | Plain Codex、Independent Parallel、Goal Plus、OpenEvolve、EvoX、Swarm、AB-MCTS | 决定如何产生、共享、选择和延续候选 |
+| Agent / 搜索方案 | Plain Codex、Independent Parallel、Goal Plus、OpenEvolve、EvoX、AdaEvolve、Swarm、AB-MCTS | 决定如何产生、共享、选择和延续候选 |
 | Agent host / runtime | Codex CLI、Pi、Goal Plus runtime、SkyDiscover、OpenEvolve runtime、SForge | 启动模型、workspace、进程和 benchmark-native harness |
 | 正式 Benchmark | ALE-Bench、HeuriGym、Frontier-Engineering、AutoLab、Frontier-CS、EdgeBench、PERFOPT-Bench | 提供任务、artifact、evaluator 和 raw metric |
 | 实验 substrate / task pack | SwarmResearch 15 题、OpenEvolve CPU examples、SkyDiscover Circle Packing、Local VLIW replica | 复用任务做论文对标、方法 pilot 或接线诊断 |
 
-因此，**EvoX 是方法，SkyDiscover 是承载它的 runtime，不是 benchmark**。
+因此，**EvoX / AdaEvolve 是方法，SkyDiscover 是承载它们的 runtime，不是
+benchmark**。
 OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为任务包，但不
 自动变成一套正式 benchmark。完整边界见
 [实验对象分类](docs/experiment-taxonomy.md)，本机哪些正式 benchmark case
@@ -50,6 +51,17 @@ OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为
   checkpoint、精确 evaluator ledger 和独立 final evaluation 均已接通；
   native seed/best-test 仍在计时内且 usage/实际并发遥测缺失，因此 registry
   只提升为 `benchmark_adapter=partial`。
+- SkyDiscover EvoX 已完成
+  [`function_minimization` 真实 1-iteration smoke](evidence/runs/2026-07-24-skydiscover-evox-function-minimization-smoke.json)：
+  `glm-5.2/medium`、`T=300s`、`K=1`，75.54 秒内执行 strategy
+  meta-evolution、自动生成 variation operators，并在一次无效候选重试后将
+  `combined_score` 从 `1.4286455109` 提升到 `1.4995399684`，共 6 次
+  evaluator calls。
+- SkyDiscover AdaEvolve 已完成
+  [`function_minimization` 真实 1-iteration smoke](evidence/runs/2026-07-24-skydiscover-adaevolve-function-minimization-smoke.json)：
+  `glm-5.2/medium`、`T=240s`、`K=1`，31.55 秒内运行双 island、自适应/UCB
+  选择和 checkpoint；生成候选有效但仅得 `0.5010882153`，所以原生 selector
+  正确保留 `1.4286455109` 的 seed。该结果证明执行与选择链路，不代表优化质量。
 - 已在当前 Mac 为可执行 benchmark 建立代表 case 的环境证据：HeuriGym、
   Frontier-Engineering MallocLab、AutoLab Toy ISA 使用 host 环境；ALE、
   Frontier-CS、EdgeBench 使用 Docker 正式评分路径；SwarmResearch 当前只有
@@ -96,9 +108,9 @@ OpenEvolve 同样是方法及参考 runtime；它仓库里的 examples 可作为
 7. EdgeBench open-source gradient subset
 8. PERFOPT-Bench（等待公开 artifact 恢复）
 
-SkyDiscover 是 search runtime，EvoX 与 OpenEvolve 是搜索方法；它们不与
-benchmark 混为一类。SwarmResearch 同时含方法实现和 15-task 论文 substrate，
-实验时也必须把这两个角色拆开。
+SkyDiscover 是 search runtime，EvoX、AdaEvolve 与 OpenEvolve 是搜索方法；
+它们不与 benchmark 混为一类。SwarmResearch 同时含方法实现和 15-task 论文
+substrate，实验时也必须把这两个角色拆开。
 
 ## 统一控制面架构
 

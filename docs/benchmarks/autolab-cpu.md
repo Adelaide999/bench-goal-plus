@@ -12,6 +12,7 @@ AutoLab 把长期自主研究变成可执行任务：agent 进入一个已经能
 | 指标 | correctness gate + task-native 连续 reward |
 | 资源上限 | 单任务最多 4 CPU、4096 MiB；20 题为 2h、5 题为 4h agent budget |
 | Docker | **混合**；当前 `toy_isa_opt` host adapter 不需要，完整 Harbor/task 路径需要容器 |
+| Docker 空间 | 当前 host 路径为 `0 GB`；已测 `toy_isa_opt` task image 为 `0.277 GB`，完整 25-task CPU subset 尚未实测 |
 | 无 Docker 环境 | 可以跑 `toy_isa_opt`；不能据此复现完整 25-task CPU subset |
 | 当前门禁 | `toy_isa_opt` 的 host evaluator、Plain Codex 和 Goal Plus + Codex 已通 |
 | 跟踪源码 | `ck0123/autolab@main`；run manifest 记录实际 commit |

@@ -11,6 +11,7 @@ HeuriGym 是 9 道科学与工程组合优化题。Agent 的产物是一个可�
 | 输出 | 每个实例对应一个结构化文本解 |
 | 指标 | `valid` + task-native cost，方向通常是最小化 |
 | Docker | **不需要**；使用 pinned Python 环境和已 bootstrap 的数据 |
+| Docker 空间 | `0 GB`；Python venv 和数据属于 host 空间，不计入 Docker |
 | 无 Docker 环境 | 可以运行当前 `operator_scheduling` 及后续 host Python 任务 |
 | 当前门禁 | `operator_scheduling` 已完成 Plain Codex 与 Goal Plus + Codex 真实 E2E；其余 8 题待接 |
 | 跟踪源码 | `ck0123/heurigym@main`；run manifest 记录实际 commit |

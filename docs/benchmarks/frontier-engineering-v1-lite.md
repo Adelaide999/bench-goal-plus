@@ -11,6 +11,7 @@ Frontier-Engineering 面向真实工程优化：候选通常是源码、设计�
 | 候选 artifact | 代码或 task-specific 工程 artifact |
 | 指标 | 每题 raw score + Medal Score；本项目优先 raw score |
 | Docker | 当前 MallocLab **不需要**；本机 C 编译器 + `make` 即可 |
+| Docker 空间 | 当前 MallocLab 路径为 `0 GB`；其余 9 题尚未冻结统一镜像口径 |
 | 无 Docker 环境 | 可以跑 MallocLab；其余 9 题仍需逐题确认 runtime，不据此宣称全套可跑 |
 | 当前门禁 | MallocLab host evaluator 与 Plain/Goal Plus runner 已接；其余 9 题 runtime 未冻结 |
 | 跟踪源码 | `ck0123/Frontier-Engineering@main`；run manifest 记录实际 commit |

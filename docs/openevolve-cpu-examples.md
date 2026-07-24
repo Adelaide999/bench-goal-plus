@@ -10,6 +10,9 @@ OpenEvolve 当前仓库确实有一批可作为**共同 task/evaluator substrate
 NumPy/SciPy；没有 Docker 的环境可以完整 materialize、evaluate 并启动四路径
 campaign。这个结论不扩展到被排除的 OpenEvolve examples。
 
+**Docker 空间：`0 GB`。** `.bench-env`、OpenEvolve checkout、候选工作区和
+实验日志使用 host 文件系统，不应记入 Docker 镜像配额。
+
 受管源码跟踪 [`ck0123/openevolve@bench-goal-plus`](https://github.com/ck0123/openevolve/tree/bench-goal-plus)；
 `bootstrap` 只做 fast-forward，具体实验在 manifest 记录当次 resolved commit。
 示例全集位于其 [`examples/`](https://github.com/ck0123/openevolve/tree/bench-goal-plus/examples)

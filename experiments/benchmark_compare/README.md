@@ -8,14 +8,14 @@ Codex launch, Goal Plus launch, wall deadline, concurrency, and evidence.
 
 ## Supported task IDs
 
-| `--benchmark` | Editable artifact | Native metric | Docker | Current host requirement |
-|---|---|---|---|---|
-| `ale-bench-lite` | `solution.cpp` | `overall_absolute_score` minimize | **必需** | Image `ale-bench:cpp20-202301`; about 2.73 GB |
-| `autolab-toy-isa` | `program.s` | `cycles` minimize | 不需要 | C compiler and `make` |
-| `frontier-cs-problem-0` | `solution.cpp` | `checker_score_percent` maximize | **必需** | Image `bench-goal-plus/frontier-cs-judge:07500f9`; about 1.27 GB |
-| `frontier-engineering-malloclab` | `mm.c` | `combined_score` maximize | 不需要 | C compiler and `make` |
-| `heurigym` | `solver.py` | `total_cost` minimize | 不需要 | Python only after dataset bootstrap |
-| `local-vliw` | `solution.py` | `cycles` minimize | 不需要 | Python standard library；local replica，非官方 EdgeBench |
+| `--benchmark` | Editable artifact | Native metric | Docker | Docker space | Current host requirement |
+|---|---|---|---|---|---|
+| `ale-bench-lite` | `solution.cpp` | `overall_absolute_score` minimize | **必需** | C++ + judge 逻辑 `4.03 GB`；预留 `10 GB` | Images `ale-bench:cpp20-202301` and pinned Rust judge |
+| `autolab-toy-isa` | `program.s` | `cycles` minimize | 不需要 | `0 GB` | C compiler and `make` |
+| `frontier-cs-problem-0` | `solution.cpp` | `checker_score_percent` maximize | **必需** | `1.27 GB`；预留 `2 GB` | Image `bench-goal-plus/frontier-cs-judge:07500f9` |
+| `frontier-engineering-malloclab` | `mm.c` | `combined_score` maximize | 不需要 | `0 GB` | C compiler and `make` |
+| `heurigym` | `solver.py` | `total_cost` minimize | 不需要 | `0 GB` | Python only after dataset bootstrap |
+| `local-vliw` | `solution.py` | `cycles` minimize | 不需要 | `0 GB` | Python standard library；local replica，非官方 EdgeBench |
 
 Every upstream checkout lives in the ignored `third_party/` directory. Run a
 task-specific bootstrap instead of cloning beside the repository:

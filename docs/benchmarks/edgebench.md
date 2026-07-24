@@ -14,6 +14,7 @@ best-seen 搜索能力，而不只是 Pass@K。
 |---|---|
 | 公开范围 | 51 题；本项目先冻结 8–12 个 gradient cases |
 | Docker | **必需**；SForge 为每题启动 work container 与独立 hidden judge |
+| Docker 空间 | VLIW 代表 case 的 work + judge 逻辑合计 `2.23 GB`；单 case 建议预留 `5 GB`，多题需 provision 后按 digest 实测 |
 | 无 Docker 环境 | 不能运行或评分官方 EdgeBench；可运行仓内 VLIW local replica 做诊断 |
 | 当前门禁 | VLIW 的环境、Plain/Goal Plus lifecycle 与 usage 回收已通 |
 | 跟踪源码 | `ck0123/EdgeBench@mac`；campaign manifest 记录实际 commit |

@@ -11,6 +11,7 @@ ALE-Bench 把 AtCoder Heuristic Contest 变成 agent benchmark：agent 不是回
 | 指标 | task-native raw score；方向因题而异 |
 | 典型反馈 | 编译结果、合法性、每个 public case 分数、聚合 raw score |
 | Docker | **必需**；当前 official-lite 评分路径使用 C++ work image 和 judge image |
+| Docker 空间 | 当前 C++ 路径逻辑大小 `4.03 GB`；若同时保留 Rust candidate image 为 `6.32 GB`；建议预留 `10 GB` |
 | 无 Docker 环境 | 可读题和 materialize，但不能通过当前支持路径获得官方分数 |
 | 当前门禁 | 通用 Plain/Goal Plus runner 与 official-lite evaluator 已接；两条 Codex 路径都有真实 E2E 证据 |
 | 跟踪源码 | `ck0123/ALE-Bench@main`；run manifest 记录实际 commit |

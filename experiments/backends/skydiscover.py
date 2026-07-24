@@ -8,7 +8,7 @@ from typing import Any
 
 
 METHOD_PREFIX = "skydiscover-"
-SUPPORTED_ALGORITHMS = ("best_of_n",)
+SUPPORTED_ALGORITHMS = ("best_of_n", "evox", "adaevolve")
 METHODS = tuple(
     METHOD_PREFIX + algorithm.replace("_", "-") for algorithm in SUPPORTED_ALGORITHMS
 )
@@ -22,6 +22,36 @@ def algorithm_for_method(method: str) -> str:
     if not is_method(method):
         raise ValueError(f"unsupported SkyDiscover method: {method}")
     return method.removeprefix(METHOD_PREFIX).replace("-", "_")
+
+
+def database_config(algorithm: str, seed: int) -> dict[str, Any]:
+    """Return explicit native search controls for one SkyDiscover algorithm."""
+    if algorithm == "best_of_n":
+        controls: dict[str, Any] = {
+            "best_of_n": 5,
+        }
+    elif algorithm == "evox":
+        controls = {
+            "auto_generate_variation_operators": True,
+        }
+    elif algorithm == "adaevolve":
+        controls = {
+            "population_size": 20,
+            "num_islands": 2,
+            "use_adaptive_search": True,
+            "use_ucb_selection": True,
+            "use_migration": True,
+            "use_unified_archive": True,
+            "use_dynamic_islands": True,
+            "use_paradigm_breakthrough": True,
+        }
+    else:
+        raise ValueError(f"unsupported SkyDiscover algorithm: {algorithm}")
+
+    # SkyDiscover does not currently consume this consistently across these
+    # algorithms. Persist it for audit without claiming end-to-end determinism.
+    controls["random_seed"] = seed
+    return controls
 
 
 def write_config(
@@ -72,13 +102,10 @@ def write_config(
         "search": {
             "type": algorithm,
             "num_context_programs": 4,
+            # EvoX must use the run model for both candidate and search-strategy
+            # evolution. The field is harmless for the other native algorithms.
             "share_llm": True,
-            "database": {
-                "best_of_n": 5,
-                # Best-of-N does not currently consume this consistently. Keep the
-                # requested seed in the native config and report determinism coverage.
-                "random_seed": seed,
-            },
+            "database": database_config(algorithm, seed),
         },
         "prompt": {
             "system_message": task_prompt,

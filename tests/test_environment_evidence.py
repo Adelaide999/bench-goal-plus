@@ -8,6 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE = ROOT / "evidence/environment/2026-07-21-mac-representative-smokes.json"
 TEMP_AUDIT = ROOT / "evidence/environment/2026-07-23-repository-local-temp-audit.json"
+SKYDISCOVER_DOCKER_AUDIT = (
+    ROOT / "evidence/environment/2026-07-25-skydiscover-cpu-docker-images.json"
+)
 
 
 class EnvironmentEvidenceTest(unittest.TestCase):
@@ -46,6 +49,25 @@ class EnvironmentEvidenceTest(unittest.TestCase):
                 for item in payload["seed_smokes"]
             )
         )
+        self.assertNotIn("/Users/", raw)
+        self.assertNotRegex(raw, r"sk-[A-Za-z0-9]{12,}")
+
+    def test_skydiscover_docker_space_audit_is_complete_and_sanitized(
+        self,
+    ) -> None:
+        raw = SKYDISCOVER_DOCKER_AUDIT.read_text()
+        payload = json.loads(raw)
+
+        images = payload["images"]
+        self.assertEqual(len(images), 19)
+        self.assertEqual(
+            sum(item["size_bytes"] for item in images),
+            payload["measurement"]["logical_image_size_bytes"],
+        )
+        self.assertEqual(payload["validation"]["missing_images"], 0)
+        self.assertEqual(payload["validation"]["pip_check_failures"], 0)
+        self.assertEqual(payload["validation"]["torch_present_images"], 0)
+        self.assertEqual(payload["measurement"]["recommended_free_space_gb"], 10)
         self.assertNotIn("/Users/", raw)
         self.assertNotRegex(raw, r"sk-[A-Za-z0-9]{12,}")
 
