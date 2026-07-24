@@ -68,7 +68,14 @@ python3 scripts/repro_env.py bootstrap --only edgebench
 
 正式对比固定 task/data revision、model/reasoning、总时间 `T` 和 live concurrency
 `K`。Plain Codex 用 K 个 SForge replicas；Goal Plus 用一个 outer SForge run
-与 K 个 internal workers。cells 在一台机器上默认串行，避免资源超卖。
+与 K 个 internal workers。独立的 `cell_concurrency` 控制同时运行的不同题，默认
+为 1，避免和题内 K 无意相乘。
+
+`experiments/edgebench/profiles/full-codex-2h.json` 覆盖全部 51 个公开任务，固定
+Plain Codex、`gpt-5.6-sol/medium`、每题 `T=7200s`、题内 `K=1`、跨题
+`cell_concurrency=2`，并由 detached controller 同时执行两道不同题。Linux
+rootless Docker 上的宿主 loopback API 和 Judge 通过 campaign-owned 随机端口桥
+提供给容器；桥随 controller 生命周期关闭，API 密钥不落盘。
 
 ### 无 Docker 的 local replica
 

@@ -66,6 +66,20 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         _, profile = EDGE.load_profile("vliw-smoke")
         return profile
 
+    def test_full_codex_profile_covers_all_public_tasks(self) -> None:
+        _, profile = EDGE.load_profile("full-codex-2h")
+
+        self.assertEqual(len(profile["task_ids"]), 51)
+        self.assertEqual(len(set(profile["task_ids"])), 51)
+        self.assertEqual(profile["methods"], ["plain-codex"])
+        self.assertEqual(profile["model"], "gpt-5.6-sol")
+        self.assertEqual(profile["reasoning_effort"], "medium")
+        self.assertEqual(profile["wall_time_seconds"], 7200)
+        self.assertEqual(profile["concurrency"], 1)
+        self.assertEqual(profile["cell_concurrency"], 2)
+        self.assertNotIn("work_cpu_limit", profile)
+        self.assertNotIn("judge_cpu_limit", profile)
+
     def test_prepare_encodes_plain_outer_and_goal_plus_inner_concurrency(self) -> None:
         args = SimpleNamespace(
             method=None,
@@ -98,7 +112,180 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(plain["inner_search_concurrency"], 0)
         self.assertEqual(goal_plus["outer_replicas"], 1)
         self.assertEqual(goal_plus["inner_search_concurrency"], 3)
+        self.assertEqual(
+            json.loads((destination / "profile.json").read_text())["cell_concurrency"],
+            1,
+        )
         self.assertFalse(any(path.name in {".gp", ".goal-plus"} for path in destination.rglob("*")))
+
+    def test_cell_queue_limits_parallel_cells_and_continues_after_failure(self) -> None:
+        destination = self.temp / "campaign"
+        destination.mkdir()
+        EDGE.write_json(destination / "controller.json", {"state": "running"})
+        campaign = {
+            "cells": [
+                {"cell_id": cell_id, "task_id": cell_id}
+                for cell_id in ("a", "b", "c")
+            ]
+        }
+        started = []
+        processes = []
+        live = 0
+        max_live = 0
+
+        class FakeProcess:
+            def __init__(self, pid):
+                self.pid = pid
+                self.done = False
+
+            def poll(self):
+                return 0 if self.done else None
+
+        def fake_start(_destination, summary, **_kwargs):
+            nonlocal live, max_live
+            process = FakeProcess(100 + len(processes))
+            processes.append(process)
+            started.append(summary["cell_id"])
+            live += 1
+            max_live = max(max_live, live)
+            return {
+                "cell": {
+                    "cell_id": summary["cell_id"],
+                    "task_id": summary["task_id"],
+                    "started_at": "now",
+                },
+                "process": process,
+            }
+
+        def fake_finish(_destination, running, *, stop_requested):
+            nonlocal live
+            self.assertFalse(stop_requested)
+            live -= 1
+            return 1 if running["cell"]["cell_id"] == "b" else 0
+
+        sleeps = 0
+
+        def fake_sleep(_seconds):
+            nonlocal sleeps
+            sleeps += 1
+            if sleeps == 1:
+                processes[0].done = True
+            else:
+                for process in processes:
+                    process.done = True
+
+        original_start = EDGE.start_campaign_cell
+        original_finish = EDGE.finish_campaign_cell
+        original_sleep = EDGE.time.sleep
+        EDGE.start_campaign_cell = fake_start
+        EDGE.finish_campaign_cell = fake_finish
+        EDGE.time.sleep = fake_sleep
+        try:
+            returncode = EDGE.execute_cell_queue(
+                destination,
+                campaign,
+                {"state": "running"},
+                cell_concurrency=2,
+                judge_container_url="http://judge",
+                api_config={"api_key_source": None, "api_base_url_source": None},
+                api_key=None,
+                runtime_api_base_url=None,
+                bridge_host=None,
+                stop_requested=lambda: False,
+            )
+        finally:
+            EDGE.start_campaign_cell = original_start
+            EDGE.finish_campaign_cell = original_finish
+            EDGE.time.sleep = original_sleep
+
+        self.assertEqual(returncode, 1)
+        self.assertEqual(started, ["a", "b", "c"])
+        self.assertEqual(max_live, 2)
+        self.assertEqual(
+            json.loads((destination / "controller.json").read_text())[
+                "active_children"
+            ],
+            {},
+        )
+
+    def test_cell_queue_stop_interrupts_active_cells_without_starting_more(self) -> None:
+        destination = self.temp / "campaign"
+        destination.mkdir()
+        EDGE.write_json(destination / "controller.json", {"state": "running"})
+        campaign = {
+            "cells": [
+                {"cell_id": cell_id, "task_id": cell_id}
+                for cell_id in ("a", "b", "c")
+            ]
+        }
+        started = []
+        processes = []
+        requested = False
+
+        class FakeProcess:
+            def __init__(self, pid):
+                self.pid = pid
+                self.done = False
+                self.signals = []
+
+            def poll(self):
+                return 130 if self.done else None
+
+            def send_signal(self, value):
+                self.signals.append(value)
+                self.done = True
+
+        def fake_start(_destination, summary, **_kwargs):
+            process = FakeProcess(200 + len(processes))
+            processes.append(process)
+            started.append(summary["cell_id"])
+            return {
+                "cell": {
+                    "cell_id": summary["cell_id"],
+                    "task_id": summary["task_id"],
+                    "started_at": "now",
+                },
+                "process": process,
+            }
+
+        def fake_finish(_destination, _running, *, stop_requested):
+            self.assertTrue(stop_requested)
+            return 130
+
+        def fake_sleep(_seconds):
+            nonlocal requested
+            requested = True
+
+        original_start = EDGE.start_campaign_cell
+        original_finish = EDGE.finish_campaign_cell
+        original_sleep = EDGE.time.sleep
+        EDGE.start_campaign_cell = fake_start
+        EDGE.finish_campaign_cell = fake_finish
+        EDGE.time.sleep = fake_sleep
+        try:
+            returncode = EDGE.execute_cell_queue(
+                destination,
+                campaign,
+                {"state": "running"},
+                cell_concurrency=2,
+                judge_container_url="http://judge",
+                api_config={"api_key_source": None, "api_base_url_source": None},
+                api_key=None,
+                runtime_api_base_url=None,
+                bridge_host=None,
+                stop_requested=lambda: requested,
+            )
+        finally:
+            EDGE.start_campaign_cell = original_start
+            EDGE.finish_campaign_cell = original_finish
+            EDGE.time.sleep = original_sleep
+
+        self.assertEqual(returncode, 130)
+        self.assertEqual(started, ["a", "b"])
+        self.assertEqual(
+            [process.signals for process in processes],
+            [[EDGE.signal.SIGINT], [EDGE.signal.SIGINT]],
+        )
 
     def test_goal_plus_environment_uses_pinned_source_and_configured_k(self) -> None:
         cell = {
@@ -118,6 +305,88 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         for key in ("TMPDIR", "TMP", "TEMP"):
             self.assertTrue(Path(env[key]).is_relative_to(ROOT))
+
+    def test_api_config_prefers_sforge_then_openai_then_codex(self) -> None:
+        config = EDGE.resolve_agent_api_config(
+            {
+                "SFORGE_AGENT_API_KEY": "sforge-key",
+                "SFORGE_AGENT_API_BASE_URL": "https://sforge.example/v1",
+                "OPENAI_API_KEY": "openai-key",
+                "OPENAI_BASE_URL": "https://openai.example/v1",
+                "CODEX_API_KEY": "codex-key",
+            }
+        )
+
+        self.assertEqual(config["api_key"], "sforge-key")
+        self.assertEqual(config["api_key_source"], "SFORGE_AGENT_API_KEY")
+        self.assertEqual(config["api_base_url"], "https://sforge.example/v1")
+
+        fallback = EDGE.resolve_agent_api_config(
+            {
+                "OPENAI_API_KEY": "openai-key",
+                "OPENAI_BASE_URL": "http://127.0.0.1:3788/v1",
+                "CODEX_API_KEY": "codex-key",
+            }
+        )
+        self.assertEqual(fallback["api_key"], "openai-key")
+        self.assertEqual(fallback["api_key_source"], "OPENAI_API_KEY")
+        self.assertEqual(fallback["api_base_url_source"], "OPENAI_BASE_URL")
+
+    def test_loopback_api_bridge_preserves_base_path(self) -> None:
+        self.assertEqual(
+            EDGE.loopback_api_target("http://127.0.0.1:3788/v1"),
+            ("127.0.0.1", 3788),
+        )
+        self.assertEqual(
+            EDGE.bridged_base_url(
+                "http://127.0.0.1:3788/v1", "192.0.2.10", 45678
+            ),
+            "http://192.0.2.10:45678/v1",
+        )
+        self.assertIsNone(
+            EDGE.loopback_api_target("https://api.example.com/v1")
+        )
+
+    def test_cell_environment_maps_api_key_and_bridge(self) -> None:
+        env = EDGE.cell_environment(
+            {
+                "method": "plain-codex",
+                "reasoning_effort": "medium",
+            },
+            api_key="runtime-key",
+            api_base_url="http://192.0.2.10:45678/v1",
+            bridge_host="192.0.2.10",
+        )
+
+        self.assertEqual(env["SFORGE_AGENT_API_KEY"], "runtime-key")
+        self.assertEqual(
+            env["SFORGE_AGENT_API_BASE_URL"],
+            "http://192.0.2.10:45678/v1",
+        )
+        self.assertIn("192.0.2.10", env["SFORGE_NO_PROXY"].split(","))
+
+    def test_judge_environment_uses_fixed_model_and_runtime_api(self) -> None:
+        previous = EDGE.os.environ.pop("SFORGE_JUDGE_EXTRA_ENV", None)
+        try:
+            env = EDGE.judge_server_environment(
+                api_key="judge-key",
+                api_base_url="http://192.0.2.10:45678/v1",
+                bridge_host="192.0.2.10",
+            )
+        finally:
+            if previous is not None:
+                EDGE.os.environ["SFORGE_JUDGE_EXTRA_ENV"] = previous
+
+        values = dict(
+            item.split("=", 1)
+            for item in env["SFORGE_JUDGE_EXTRA_ENV"].split(",")
+        )
+        self.assertEqual(values["SFORGE_JUDGE_API_KEY"], "judge-key")
+        self.assertEqual(
+            values["SFORGE_JUDGE_API_BASE_URL"],
+            "http://192.0.2.10:45678/v1",
+        )
+        self.assertEqual(values["SFORGE_JUDGE_MODEL"], "gpt-5.5")
 
     def test_child_proxy_is_rewritten_for_container_access(self) -> None:
         previous = {

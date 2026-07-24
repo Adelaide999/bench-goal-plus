@@ -10,13 +10,15 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import tarfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -148,6 +150,8 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
         raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))
     if int(profile["wall_time_seconds"]) < 1 or int(profile["concurrency"]) < 1:
         raise ValueError("wall_time_seconds and concurrency must be positive")
+    if int(profile.get("cell_concurrency", 1)) < 1:
+        raise ValueError("cell_concurrency must be positive")
     return candidate, profile
 
 
@@ -205,6 +209,250 @@ def run_capture(command: list[str], *, env: dict[str, str] | None = None) -> dic
         "returncode": completed.returncode,
         "stdout": completed.stdout.strip(),
         "stderr": completed.stderr.strip(),
+    }
+
+
+def resolve_agent_api_config(
+    env: dict[str, str] | None = None,
+) -> dict[str, str | None]:
+    source = os.environ if env is None else env
+
+    def first(names: tuple[str, ...]) -> tuple[str | None, str | None]:
+        for name in names:
+            value = source.get(name)
+            if value:
+                return value, name
+        return None, None
+
+    api_key, key_source = first(
+        ("SFORGE_AGENT_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY")
+    )
+    base_url, base_source = first(
+        ("SFORGE_AGENT_API_BASE_URL", "OPENAI_BASE_URL")
+    )
+    return {
+        "api_key": api_key,
+        "api_key_source": key_source,
+        "api_base_url": base_url,
+        "api_base_url_source": base_source,
+    }
+
+
+def loopback_api_target(base_url: str) -> tuple[str, int] | None:
+    parsed = urllib.parse.urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError(f"invalid agent API base URL: {base_url!r}")
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return None
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return parsed.hostname, port
+
+
+def bridged_base_url(base_url: str, host: str, port: int) -> str:
+    parsed = urllib.parse.urlsplit(base_url)
+    netloc = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+    )
+
+
+def default_route_ipv4() -> str:
+    route = run_capture(["ip", "-j", "-4", "route", "get", "1.1.1.1"])
+    if route["returncode"] == 0:
+        try:
+            payload = json.loads(route["stdout"])
+            if payload and payload[0].get("prefsrc"):
+                return str(payload[0]["prefsrc"])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+    raise RuntimeError("could not determine the host default-route IPv4 address")
+
+
+def reserve_tcp_port(host: str) -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind((host, 0))
+        return int(listener.getsockname()[1])
+
+
+def start_socket_bridge(
+    destination: Path,
+    *,
+    name: str,
+    listen_host: str,
+    target_host: str,
+    target_port: int,
+) -> tuple[subprocess.Popen[str], dict[str, Any], Any]:
+    socket_activate = Path("/usr/bin/systemd-socket-activate")
+    socket_proxyd = Path("/lib/systemd/systemd-socket-proxyd")
+    if not socket_activate.is_file() or not socket_proxyd.is_file():
+        raise RuntimeError(
+            "rootless Docker loopback bridging requires systemd-socket-activate "
+            "and systemd-socket-proxyd"
+        )
+
+    listen_port = reserve_tcp_port(listen_host)
+    target = (
+        f"[{target_host}]:{target_port}"
+        if ":" in target_host
+        else f"{target_host}:{target_port}"
+    )
+    command = [
+        str(socket_activate),
+        f"--listen={listen_host}:{listen_port}",
+        str(socket_proxyd),
+        target,
+    ]
+    log_path = destination / "bridges" / f"{name}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log = log_path.open("a", encoding="utf-8")
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        env=dict(configure_temp_environment(dict(os.environ))),
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    log.close()
+    closed = False
+
+    def close_bridge() -> None:
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        if process.poll() is not None:
+            return
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=5)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+
+    atexit.register(close_bridge)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            break
+        try:
+            with socket.create_connection((listen_host, listen_port), timeout=0.25):
+                metadata = {
+                    "name": name,
+                    "listen_host": listen_host,
+                    "listen_port": listen_port,
+                    "target_host": target_host,
+                    "target_port": target_port,
+                    "pid": process.pid,
+                    "log": portable_path(log_path),
+                }
+                return process, metadata, close_bridge
+        except OSError:
+            time.sleep(0.1)
+    close_bridge()
+    raise RuntimeError(
+        f"{name} bridge did not become ready; inspect {portable_path(log_path)}"
+    )
+
+
+def authenticated_api_probe(base_url: str, api_key: str) -> dict[str, Any]:
+    url = base_url.rstrip("/") + "/models"
+    request = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=10) as response:
+            return {"passed": response.status == 200, "status": response.status}
+    except urllib.error.HTTPError as exc:
+        return {"passed": False, "status": exc.code, "error": str(exc)}
+    except (OSError, urllib.error.URLError) as exc:
+        return {"passed": False, "status": None, "error": str(exc)}
+
+
+def append_no_proxy(env: dict[str, str], host: str) -> None:
+    current = env.get("NO_PROXY") or env.get("no_proxy") or ""
+    entries = [item.strip() for item in current.split(",") if item.strip()]
+    if host not in entries:
+        entries.insert(0, host)
+    value = ",".join(entries)
+    env["NO_PROXY"] = value
+    env["no_proxy"] = value
+    env["SFORGE_NO_PROXY"] = value
+
+
+def judge_server_environment(
+    *,
+    api_key: str | None,
+    api_base_url: str | None,
+    bridge_host: str | None,
+    model: str = "gpt-5.5",
+) -> dict[str, str]:
+    env = dict(os.environ)
+    configure_temp_environment(env)
+    entries: dict[str, str] = {}
+    for item in env.get("SFORGE_JUDGE_EXTRA_ENV", "").split(","):
+        if "=" in item:
+            key, value = item.split("=", 1)
+            entries[key.strip()] = value.strip()
+    if api_key:
+        entries.setdefault("SFORGE_JUDGE_API_KEY", api_key)
+    if api_base_url:
+        entries.setdefault("SFORGE_JUDGE_API_BASE_URL", api_base_url)
+    entries.setdefault("SFORGE_JUDGE_MODEL", model)
+    if entries:
+        env["SFORGE_JUDGE_EXTRA_ENV"] = ",".join(
+            f"{key}={value}" for key, value in sorted(entries.items())
+        )
+    if bridge_host:
+        append_no_proxy(env, bridge_host)
+    return env
+
+
+def docker_http_probe(
+    image: str,
+    url: str,
+    *,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    env = dict(os.environ)
+    configure_temp_environment(env)
+    env["SFORGE_PROBE_URL"] = url
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "--entrypoint",
+        "/bin/sh",
+        "-e",
+        "SFORGE_PROBE_URL",
+    ]
+    if api_key:
+        env["SFORGE_PROBE_API_KEY"] = api_key
+        command.extend(["-e", "SFORGE_PROBE_API_KEY"])
+    command.extend(
+        [
+            image,
+            "-c",
+            (
+                "if [ -n \"${SFORGE_PROBE_API_KEY:-}\" ]; then "
+                "auth=\"Authorization: Bearer $SFORGE_PROBE_API_KEY\"; "
+                "code=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' "
+                "--max-time 15 -H \"$auth\" \"$SFORGE_PROBE_URL\"); "
+                "else code=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' "
+                "--max-time 15 \"$SFORGE_PROBE_URL\"); fi; "
+                "printf '%s\\n' \"$code\"; test \"$code\" = 200"
+            ),
+        ]
+    )
+    result = run_capture(command, env=env)
+    return {
+        "passed": result["returncode"] == 0,
+        "status": result["stdout"].splitlines()[-1] if result["stdout"] else None,
+        "stderr": result["stderr"][-400:] or None,
     }
 
 
@@ -367,12 +615,57 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     )
     add("runtime:repository-local-temp", ensure_temp_root().is_dir(), path=".tmp")
 
+    api_config = resolve_agent_api_config()
     auth_override = os.environ.get("SFORGE_CODEX_AUTH_FILE")
-    auth = Path(auth_override).expanduser() if auth_override else Path.home() / ".codex" / "auth.json"
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    auth = Path(auth_override).expanduser() if auth_override else codex_home / "auth.json"
+    api_key = api_config["api_key"]
+    api_base_url = api_config["api_base_url"]
     add(
         "auth:codex",
-        auth.is_file(),
-        policy="SFORGE_CODEX_AUTH_FILE or ~/.codex/auth.json",
+        bool(api_key) or auth.is_file(),
+        mode="api_key" if api_key else "oauth",
+        api_key_source=api_config["api_key_source"],
+        api_base_url_source=api_config["api_base_url_source"],
+        policy=(
+            "SFORGE_AGENT_* > OPENAI_* > CODEX_API_KEY; otherwise "
+            "SFORGE_CODEX_AUTH_FILE or CODEX_HOME/auth.json"
+        ),
+    )
+    if api_key and api_base_url:
+        api_probe = authenticated_api_probe(str(api_base_url), str(api_key))
+        add(
+            "auth:agent-api-host",
+            bool(api_probe["passed"]),
+            base_url=str(api_base_url),
+            status=api_probe.get("status"),
+            error=api_probe.get("error"),
+        )
+        try:
+            loopback = loopback_api_target(str(api_base_url)) is not None
+        except ValueError as exc:
+            loopback = False
+            add("auth:agent-api-url", False, error=str(exc))
+        if loopback:
+            add(
+                "runtime:rootless-loopback-bridge",
+                Path("/usr/bin/systemd-socket-activate").is_file()
+                and Path("/lib/systemd/systemd-socket-proxyd").is_file(),
+                mechanism="systemd-socket-proxyd",
+            )
+
+    codex_runtime = (
+        Path.home()
+        / ".cache"
+        / "sforge"
+        / "codex"
+        / "codex-0.144.1-linux-x64.tgz"
+    )
+    add(
+        "runtime:codex-host-cache",
+        codex_runtime.is_file() and codex_runtime.stat().st_size > 0,
+        path=str(codex_runtime),
+        size=codex_runtime.stat().st_size if codex_runtime.is_file() else None,
     )
 
     docker_info = run_capture(
@@ -481,10 +774,16 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))
     wall_time = int(args.wall_time_seconds or profile["wall_time_seconds"])
     concurrency = int(args.concurrency or profile["concurrency"])
+    cell_concurrency = int(
+        getattr(args, "cell_concurrency", None)
+        or profile.get("cell_concurrency", 1)
+    )
     model = args.model or profile["model"]
     reasoning = args.reasoning_effort or profile.get("reasoning_effort", "high")
-    if wall_time < 1 or concurrency < 1:
-        raise ValueError("wall time and concurrency must be positive")
+    if wall_time < 1 or concurrency < 1 or cell_concurrency < 1:
+        raise ValueError(
+            "wall time, concurrency, and cell concurrency must be positive"
+        )
 
     campaign_id = sanitize_id(
         args.campaign_id or f"{profile['id']}-{campaign_stamp()}"
@@ -562,6 +861,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "reasoning_effort": reasoning,
         "wall_time_seconds": wall_time,
         "concurrency": concurrency,
+        "cell_concurrency": cell_concurrency,
     }
     write_json(destination / "profile.json", snapshot)
     write_json(
@@ -589,6 +889,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "reasoning_effort": reasoning,
             "wall_time_seconds": wall_time,
             "concurrency": concurrency,
+            "cell_concurrency": cell_concurrency,
             "cells": cells,
         },
     )
@@ -647,7 +948,13 @@ def build_sforge_command(destination: Path, cell: dict[str, Any]) -> list[str]:
     return command
 
 
-def cell_environment(cell: dict[str, Any]) -> dict[str, str]:
+def cell_environment(
+    cell: dict[str, Any],
+    *,
+    api_key: str | None = None,
+    api_base_url: str | None = None,
+    bridge_host: str | None = None,
+) -> dict[str, str]:
     env = dict(os.environ)
     configure_temp_environment(env)
     for sforge_key, candidates in (
@@ -661,6 +968,12 @@ def cell_environment(cell: dict[str, Any]) -> dict[str, str]:
             ).replace("localhost", "host.docker.internal")
     env.setdefault("SFORGE_NODEJS_MIRROR_URL", "https://npmmirror.com/mirrors/node")
     env.setdefault("SFORGE_NPM_REGISTRY_URL", "https://registry.npmmirror.com")
+    if api_key:
+        env["SFORGE_AGENT_API_KEY"] = api_key
+    if api_base_url:
+        env["SFORGE_AGENT_API_BASE_URL"] = api_base_url
+    if bridge_host:
+        append_no_proxy(env, bridge_host)
     env["SFORGE_CODEX_REASONING_EFFORT"] = str(cell["reasoning_effort"])
     if cell["method"] == "goal-plus-codex":
         env["SFORGE_GOAL_PLUS_SOURCE_DIR"] = str(GOAL_PLUS_ROOT)
@@ -699,6 +1012,8 @@ def start_or_reuse_judge(
     destination: Path,
     port: int,
     controller: dict[str, Any],
+    *,
+    env: dict[str, str] | None = None,
 ) -> tuple[subprocess.Popen[str] | None, Any]:
     controller_path = destination / "controller.json"
     if judge_ready(port):
@@ -729,10 +1044,11 @@ def start_or_reuse_judge(
     process = subprocess.Popen(
         command,
         cwd=ROOT,
-        env=dict(configure_temp_environment(dict(os.environ))),
+        env=env or dict(configure_temp_environment(dict(os.environ))),
         stdout=log,
         stderr=subprocess.STDOUT,
         text=True,
+        start_new_session=True,
     )
     log.close()
     controller.update(
@@ -802,6 +1118,213 @@ def update_campaign_cell(
     write_json(destination / "campaign.json", campaign)
 
 
+def start_campaign_cell(
+    destination: Path,
+    cell_summary: dict[str, Any],
+    *,
+    judge_container_url: str,
+    api_config: dict[str, str | None],
+    api_key: str | None,
+    runtime_api_base_url: str | None,
+    bridge_host: str | None,
+) -> dict[str, Any] | None:
+    cell_id = str(cell_summary["cell_id"])
+    cell_path = destination / "cells" / cell_id
+    cell_file = cell_path / "cell.json"
+    cell = read_json(cell_file)
+    if cell.get("state") == "completed":
+        return None
+    cell["judge_url"] = judge_container_url
+    command = build_sforge_command(destination, cell)
+    write_json(
+        cell_path / "command.json",
+        {
+            "command": portable_command(command),
+            "environment_policy": {
+                "credentials": (
+                    "host API environment mapped to SForge; values are never persisted"
+                    if api_key
+                    else "host Codex OAuth; auth contents are never persisted"
+                ),
+                "api_key_source": api_config["api_key_source"],
+                "api_base_url_source": api_config["api_base_url_source"],
+                "temp": ".tmp",
+                "goal_plus_source": "third_party/goal-plus"
+                if cell["method"] == "goal-plus-codex"
+                else None,
+            },
+        },
+    )
+    log = (cell_path / "controller.log").open("a", encoding="utf-8")
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            env=cell_environment(
+                cell,
+                api_key=api_key,
+                api_base_url=runtime_api_base_url,
+                bridge_host=bridge_host,
+            ),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except Exception:
+        log.close()
+        raise
+    cell.update(
+        {
+            "state": "running",
+            "started_at": utc_now(),
+            "pid": process.pid,
+        }
+    )
+    write_json(cell_file, cell)
+    update_campaign_cell(destination, cell_id, "running")
+    return {
+        "cell": cell,
+        "cell_file": cell_file,
+        "log": log,
+        "process": process,
+    }
+
+
+def finish_campaign_cell(
+    destination: Path,
+    active: dict[str, Any],
+    *,
+    stop_requested: bool,
+) -> int:
+    process: subprocess.Popen[str] = active["process"]
+    returncode = process.poll()
+    if returncode is None:
+        returncode = process.wait()
+    active["log"].close()
+    cell = active["cell"]
+    scored = cell_has_scored_results(destination, cell)
+    if returncode == 0 and not stop_requested and not scored:
+        returncode = 1
+        cell["result_validation_error"] = (
+            "SForge exited without the expected scored final result"
+        )
+    cell.update(
+        {
+            "state": "interrupted"
+            if stop_requested
+            else "completed"
+            if returncode == 0
+            else "failed",
+            "returncode": returncode,
+            "finished_at": utc_now(),
+        }
+    )
+    write_json(active["cell_file"], cell)
+    update_campaign_cell(destination, str(cell["cell_id"]), str(cell["state"]))
+    return int(returncode)
+
+
+def execute_cell_queue(
+    destination: Path,
+    campaign: dict[str, Any],
+    controller: dict[str, Any],
+    *,
+    cell_concurrency: int,
+    judge_container_url: str,
+    api_config: dict[str, str | None],
+    api_key: str | None,
+    runtime_api_base_url: str | None,
+    bridge_host: str | None,
+    stop_requested: Any,
+) -> int:
+    controller_path = destination / "controller.json"
+    pending = deque(campaign["cells"])
+    active: dict[str, dict[str, Any]] = {}
+    overall_returncode = 0
+    stop_forwarded = False
+
+    def record_active() -> None:
+        controller["active_children"] = {
+            cell_id: {
+                "pid": running["process"].pid,
+                "task_id": running["cell"]["task_id"],
+                "started_at": running["cell"]["started_at"],
+            }
+            for cell_id, running in sorted(active.items())
+        }
+        write_json(controller_path, controller)
+
+    controller["cell_concurrency"] = cell_concurrency
+    record_active()
+    while pending or active:
+        while pending and len(active) < cell_concurrency and not stop_requested():
+            cell_summary = pending.popleft()
+            cell_id = str(cell_summary["cell_id"])
+            try:
+                running = start_campaign_cell(
+                    destination,
+                    cell_summary,
+                    judge_container_url=judge_container_url,
+                    api_config=api_config,
+                    api_key=api_key,
+                    runtime_api_base_url=runtime_api_base_url,
+                    bridge_host=bridge_host,
+                )
+            except Exception as exc:
+                cell_path = destination / "cells" / cell_id
+                cell_file = cell_path / "cell.json"
+                cell = read_json(cell_file)
+                cell.update(
+                    {
+                        "state": "failed",
+                        "returncode": 1,
+                        "finished_at": utc_now(),
+                        "launch_error": str(exc),
+                    }
+                )
+                write_json(cell_file, cell)
+                update_campaign_cell(destination, cell_id, "failed")
+                overall_returncode = overall_returncode or 1
+                continue
+            if running is not None:
+                active[cell_id] = running
+                record_active()
+
+        if stop_requested() and not stop_forwarded:
+            for running in active.values():
+                process = running["process"]
+                if process.poll() is None:
+                    try:
+                        process.send_signal(signal.SIGINT)
+                    except ProcessLookupError:
+                        pass
+            stop_forwarded = True
+
+        completed = [
+            cell_id
+            for cell_id, running in active.items()
+            if running["process"].poll() is not None
+        ]
+        if not completed:
+            if not active:
+                break
+            time.sleep(0.25)
+            continue
+
+        for cell_id in completed:
+            running = active.pop(cell_id)
+            returncode = finish_campaign_cell(
+                destination,
+                running,
+                stop_requested=bool(stop_requested()),
+            )
+            if returncode != 0:
+                overall_returncode = overall_returncode or returncode
+        record_active()
+
+    return overall_returncode
+
+
 def execute_campaign(destination: Path) -> int:
     controller_path = destination / "controller.json"
     controller = read_json(controller_path)
@@ -820,7 +1343,6 @@ def execute_campaign(destination: Path) -> int:
     write_json(destination / "campaign.json", campaign)
 
     stop_requested = False
-    active_child: subprocess.Popen[str] | None = None
 
     def handle_stop(signum: int, _frame: Any) -> None:
         nonlocal stop_requested
@@ -832,14 +1354,109 @@ def execute_campaign(destination: Path) -> int:
     signal.signal(signal.SIGINT, handle_stop)
     signal.signal(signal.SIGTERM, handle_stop)
 
-    judge_port = int(read_json(destination / "profile.json").get("judge_port", 8080))
+    profile = read_json(destination / "profile.json")
+    judge_port = int(profile.get("judge_port", 8080))
+    judge_process: subprocess.Popen[str] | None = None
+    close_judge = lambda: None
+    bridge_processes: list[subprocess.Popen[str]] = []
+    bridge_closers: list[Any] = []
+    controller["bridges"] = []
+    api_config = resolve_agent_api_config()
+    api_key = api_config["api_key"]
+    api_base_url = api_config["api_base_url"]
+    runtime_api_base_url = str(api_base_url) if api_base_url else None
+    bridge_host: str | None = None
+    judge_container_url = f"http://host.docker.internal:{judge_port}"
     try:
+        if runtime_api_base_url and loopback_api_target(runtime_api_base_url):
+            bridge_host = default_route_ipv4()
+            target_host, target_port = loopback_api_target(runtime_api_base_url) or ("", 0)
+            api_bridge, metadata, close_api_bridge = start_socket_bridge(
+                destination,
+                name="agent-api",
+                listen_host=bridge_host,
+                target_host=target_host,
+                target_port=target_port,
+            )
+            bridge_processes.append(api_bridge)
+            bridge_closers.append(close_api_bridge)
+            controller.setdefault("bridges", []).append(metadata)
+            runtime_api_base_url = bridged_base_url(
+                runtime_api_base_url,
+                bridge_host,
+                int(metadata["listen_port"]),
+            )
+            api_probe = authenticated_api_probe(runtime_api_base_url, str(api_key or ""))
+            if not api_key or not api_probe["passed"]:
+                raise RuntimeError(
+                    "authenticated agent API bridge probe failed "
+                    f"(HTTP {api_probe.get('status')})"
+                )
+
+        if api_key and runtime_api_base_url:
+            probe_image = task_images(str(profile["task_ids"][0]))[0]
+            container_probe = docker_http_probe(
+                probe_image,
+                runtime_api_base_url.rstrip("/") + "/models",
+                api_key=str(api_key),
+            )
+            if not container_probe["passed"]:
+                raise RuntimeError(
+                    "agent API is not reachable from an EdgeBench Work container "
+                    f"(HTTP {container_probe.get('status')}; "
+                    f"{container_probe.get('stderr') or 'no stderr'})"
+                )
+
+        judge_env = judge_server_environment(
+            api_key=str(api_key) if api_key else None,
+            api_base_url=runtime_api_base_url,
+            bridge_host=bridge_host,
+        )
         judge_process, close_judge = start_or_reuse_judge(
             destination,
             judge_port,
             controller,
+            env=judge_env,
         )
+        if sys.platform.startswith("linux"):
+            bridge_host = bridge_host or default_route_ipv4()
+            judge_bridge, metadata, close_judge_bridge = start_socket_bridge(
+                destination,
+                name="judge",
+                listen_host=bridge_host,
+                target_host="127.0.0.1",
+                target_port=judge_port,
+            )
+            bridge_processes.append(judge_bridge)
+            bridge_closers.append(close_judge_bridge)
+            controller.setdefault("bridges", []).append(metadata)
+            judge_container_url = (
+                f"http://{bridge_host}:{int(metadata['listen_port'])}"
+            )
+            judge_probe = docker_http_probe(
+                task_images(str(profile["task_ids"][0]))[0],
+                judge_container_url + "/openapi.json",
+            )
+            if not judge_probe["passed"]:
+                raise RuntimeError(
+                    "Judge is not reachable from an EdgeBench Work container "
+                    f"(HTTP {judge_probe.get('status')}; "
+                    f"{judge_probe.get('stderr') or 'no stderr'})"
+                )
+        controller.update(
+            {
+                "agent_auth_mode": "api_key" if api_key else "oauth",
+                "agent_api_key_source": api_config["api_key_source"],
+                "agent_api_base_url_source": api_config["api_base_url_source"],
+                "agent_container_api_base_url": runtime_api_base_url,
+                "judge_container_url": judge_container_url,
+            }
+        )
+        write_json(controller_path, controller)
     except Exception as exc:
+        close_judge()
+        for close_bridge in reversed(bridge_closers):
+            close_bridge()
         campaign = read_json(destination / "campaign.json")
         campaign.update(
             {
@@ -859,68 +1476,19 @@ def execute_campaign(destination: Path) -> int:
         )
         write_json(controller_path, controller)
         return 1
-    overall_returncode = 0
-    for cell_summary in list(campaign["cells"]):
-        if stop_requested:
-            break
-        cell_id = cell_summary["cell_id"]
-        cell_path = destination / "cells" / cell_id
-        cell_file = cell_path / "cell.json"
-        cell = read_json(cell_file)
-        cell["judge_url"] = f"http://host.docker.internal:{judge_port}"
-        if cell.get("state") == "completed":
-            continue
-        command = build_sforge_command(destination, cell)
-        write_json(
-            cell_path / "command.json",
-            {
-                "command": portable_command(command),
-                "environment_policy": {
-                    "credentials": "host Codex auth only; values are never persisted",
-                    "temp": ".tmp",
-                    "goal_plus_source": "third_party/goal-plus"
-                    if cell["method"] == "goal-plus-codex"
-                    else None,
-                },
-            },
-        )
-        cell.update({"state": "running", "started_at": utc_now()})
-        write_json(cell_file, cell)
-        update_campaign_cell(destination, cell_id, "running")
-        with (cell_path / "controller.log").open("a", encoding="utf-8") as log:
-            active_child = subprocess.Popen(
-                command,
-                cwd=ROOT,
-                env=cell_environment(cell),
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            cell["pid"] = active_child.pid
-            write_json(cell_file, cell)
-            returncode = active_child.wait()
-        active_child = None
-        scored = cell_has_scored_results(destination, cell)
-        if returncode == 0 and not stop_requested and not scored:
-            returncode = 1
-            cell["result_validation_error"] = (
-                "SForge exited without the expected scored final result"
-            )
-        cell.update(
-            {
-                "state": "interrupted"
-                if stop_requested
-                else "completed"
-                if returncode == 0
-                else "failed",
-                "returncode": returncode,
-                "finished_at": utc_now(),
-            }
-        )
-        write_json(cell_file, cell)
-        update_campaign_cell(destination, cell_id, cell["state"])
-        if returncode != 0:
-            overall_returncode = returncode
+    cell_concurrency = int(profile.get("cell_concurrency", 1))
+    overall_returncode = execute_cell_queue(
+        destination,
+        campaign,
+        controller,
+        cell_concurrency=cell_concurrency,
+        judge_container_url=judge_container_url,
+        api_config=api_config,
+        api_key=str(api_key) if api_key else None,
+        runtime_api_base_url=runtime_api_base_url,
+        bridge_host=bridge_host,
+        stop_requested=lambda: stop_requested,
+    )
 
     campaign = read_json(destination / "campaign.json")
     states = {cell["state"] for cell in campaign["cells"]}
@@ -938,15 +1506,20 @@ def execute_campaign(destination: Path) -> int:
     write_json(destination / "campaign.json", campaign)
     if judge_process is not None:
         close_judge()
+    for close_bridge in reversed(bridge_closers):
+        close_bridge()
     controller.update(
         {
             "state": final_state,
             "finished_at": utc_now(),
             "returncode": overall_returncode,
-            "active_child_pid": active_child.pid if active_child else None,
+            "active_children": {},
             "judge_alive_after_closeout": process_alive(
                 judge_process.pid if judge_process is not None else None
             ),
+            "bridges_alive_after_closeout": [
+                process_alive(process.pid) for process in bridge_processes
+            ],
         }
     )
     write_json(controller_path, controller)
@@ -1067,7 +1640,7 @@ def stop_campaign(destination: Path, *, wait_seconds: int) -> int:
         return 0
     if not pgid:
         raise RuntimeError("running controller has no recorded process group")
-    os.killpg(int(pgid), signal.SIGINT)
+    os.kill(int(pid), signal.SIGINT)
     controller["state"] = "stopping"
     controller["stop_requested_at"] = utc_now()
     write_json(controller_path, controller)
@@ -1416,6 +1989,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--reasoning-effort")
     prepare_parser.add_argument("--wall-time-seconds", type=int)
     prepare_parser.add_argument("--concurrency", type=int)
+    prepare_parser.add_argument("--cell-concurrency", type=int)
 
     for name in ("run", "status", "stop", "finalize", "_execute"):
         child = subparsers.add_parser(name)

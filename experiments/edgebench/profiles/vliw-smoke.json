@@ -20,7 +20,5 @@
   "eval_interval_seconds": 120,
   "judge_concurrency": 1,
   "judge_port": 8080,
-  "work_cpu_limit": 4,
-  "judge_cpu_limit": 3,
   "internet": true
 }
