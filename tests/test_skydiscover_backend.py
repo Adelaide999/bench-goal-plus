@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from adapters import skydiscover_bridge  # noqa: E402
 from experiments.backends import skydiscover  # noqa: E402
+from experiments.heurigym_compare import experiment as standalone_experiment  # noqa: E402
 from experiments.openevolve_compare import experiment, reporting  # noqa: E402
 
 
@@ -43,6 +44,19 @@ class SkyDiscoverBackendTest(unittest.TestCase):
                     skydiscover.algorithm_for_method(args.method),
                     algorithm,
                 )
+                standalone_args = standalone_experiment.build_parser().parse_args(
+                    [
+                        "prepare",
+                        "--benchmark",
+                        "heurigym",
+                        "--method",
+                        method,
+                        "--reasoning-effort",
+                        "medium",
+                    ]
+                )
+                self.assertEqual(standalone_args.method, method)
+                self.assertEqual(standalone_args.reasoning_effort, "medium")
 
     def test_config_is_secret_free_and_preserves_native_controls(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -57,6 +71,7 @@ class SkyDiscoverBackendTest(unittest.TestCase):
                 iterations_ceiling=99,
                 seed=7,
                 reasoning_effort="medium",
+                max_tokens=4096,
             )
             raw = target.read_text()
             self.assertNotRegex(raw, r"\bsk-[A-Za-z0-9_-]{16,}\b")
@@ -64,6 +79,7 @@ class SkyDiscoverBackendTest(unittest.TestCase):
             self.assertEqual(payload["max_parallel_iterations"], 2)
             self.assertEqual(payload["max_iterations"], 99)
             self.assertEqual(payload["llm"]["reasoning_effort"], "medium")
+            self.assertEqual(payload["llm"]["max_tokens"], 4096)
             self.assertFalse(payload["monitor"]["enabled"])
 
     def test_each_algorithm_gets_its_native_database_controls(self) -> None:
@@ -142,7 +158,7 @@ class SkyDiscoverBackendTest(unittest.TestCase):
                 mock.patch.dict(os.environ, environment, clear=False),
                 mock.patch.object(
                     skydiscover_bridge,
-                    "evaluate_workspace",
+                    "evaluate_controller_workspace",
                     return_value=report,
                 ) as evaluate,
             ):
@@ -154,6 +170,7 @@ class SkyDiscoverBackendTest(unittest.TestCase):
             )
             evaluate.assert_called_once()
             call_workspace = evaluate.call_args.args[0]
+            self.assertEqual(evaluate.call_args.args[2], "public")
             self.assertEqual((call_workspace / "candidate.py").read_text(), "improved\n")
             self.assertTrue((call_workspace / "skydiscover-eval.json").is_file())
             self.assertTrue(call_workspace.is_dir())
@@ -240,6 +257,52 @@ class SkyDiscoverBackendTest(unittest.TestCase):
         self.assertEqual(
             adaevolve["result"]["controller_final_primary_metric"],
             adaevolve["result"]["seed_primary_metric"],
+        )
+
+    def test_deepseek_autolab_real_smoke_evidence_is_complete(self) -> None:
+        evidence = (
+            EVIDENCE_ROOT
+            / "2026-07-25-skydiscover-deepseek-autolab-best-of-n-smoke.json"
+        )
+        raw = evidence.read_text()
+        payload = json.loads(raw)
+
+        self.assertEqual(payload["status"], "finished")
+        self.assertEqual(payload["task"]["benchmark"], "AutoLab")
+        self.assertEqual(payload["task"]["task_id"], "toy_isa_opt")
+        self.assertEqual(payload["method"]["algorithm"], "best_of_n")
+        self.assertEqual(payload["method"]["model"], "deepseek-v4-flash")
+        self.assertEqual(payload["execution"]["returncode"], 0)
+        self.assertEqual(payload["execution"]["completed_iterations"], 1)
+        self.assertFalse(payload["execution"]["deadline_reached"])
+
+        result = payload["result"]
+        self.assertTrue(result["seed"]["valid"])
+        self.assertTrue(result["candidate_public"]["valid"])
+        self.assertTrue(result["controller_final"]["valid"])
+        self.assertTrue(result["controller_final"]["all_cases_correct"])
+        self.assertEqual(
+            result["controller_final"]["verified_seeds"],
+            [0, 42, 137, 999],
+        )
+        self.assertLess(
+            result["controller_final"]["cycles"],
+            result["seed"]["cycles"],
+        )
+        self.assertEqual(result["absolute_cycle_reduction"], 4353)
+
+        candidate = ROOT / payload["evidence"]["candidate"]
+        self.assertTrue(candidate.is_file())
+        self.assertEqual(
+            hashlib.sha256(candidate.read_bytes()).hexdigest(),
+            result["candidate_sha256"],
+        )
+        self.assertNotIn("/Users/", raw)
+        self.assertIsNone(
+            re.search(
+                r"(?i)authorization\s*:|bearer\s+[A-Za-z0-9._-]{16,}",
+                raw,
+            )
         )
 
 

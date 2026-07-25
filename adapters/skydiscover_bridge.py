@@ -8,6 +8,7 @@ metrics, direction, and the shared evaluator-call ledger.
 
 from __future__ import annotations
 
+import importlib
 import json
 import math
 import os
@@ -17,11 +18,21 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from adapters.openevolve_examples.adapter import evaluate_workspace
+from adapters.openevolve_examples.adapter import (
+    evaluate_workspace as evaluate_openevolve_workspace,
+)
 
 
 TEMPLATE_ENV = "BENCH_SKYDISCOVER_TEMPLATE_WORKSPACE"
 EVALUATION_ROOT_ENV = "BENCH_SKYDISCOVER_EVALUATION_ROOT"
+STANDALONE_ADAPTERS = {
+    "ale-bench-lite-ahc027": "adapters.ale.adapter",
+    "autolab-toy-isa": "adapters.autolab.adapter",
+    "frontier-cs-problem-0": "adapters.frontier_cs.adapter",
+    "frontier-engineering-malloclab": "adapters.frontier_engineering.adapter",
+    "heurigym-operator-scheduling": "adapters.heurigym.adapter",
+    "local-vliw": "adapters.local_vliw.adapter",
+}
 
 
 def _required_path(env_name: str) -> Path:
@@ -60,6 +71,26 @@ def metrics_from_report(
     }
 
 
+def evaluate_controller_workspace(
+    workspace: Path,
+    metadata: dict[str, Any],
+    mode: str,
+) -> dict[str, Any]:
+    """Dispatch to the adapter that materialized the controller workspace."""
+    adapter_id = metadata.get("adapter")
+    module_name = STANDALONE_ADAPTERS.get(adapter_id)
+    if module_name is None:
+        return evaluate_openevolve_workspace(workspace, mode)
+
+    upstream_root = metadata.get("upstream_root")
+    if not upstream_root:
+        raise RuntimeError(
+            f"standalone SkyDiscover workspace is missing upstream_root: {adapter_id}"
+        )
+    module = importlib.import_module(module_name)
+    return module.evaluate_workspace(workspace, Path(upstream_root), mode)
+
+
 def evaluate(program_path: str) -> dict[str, float]:
     """Evaluate one SkyDiscover candidate through the existing bench adapter."""
     candidate = Path(program_path).expanduser().absolute()
@@ -76,7 +107,7 @@ def evaluate(program_path: str) -> dict[str, float]:
     artifact = call_workspace / metadata["artifact_name"]
     artifact.write_bytes(candidate.read_bytes())
 
-    report = evaluate_workspace(call_workspace, "public")
+    report = evaluate_controller_workspace(call_workspace, metadata, "public")
     (call_workspace / "skydiscover-eval.json").write_text(
         json.dumps(report, indent=2) + "\n"
     )

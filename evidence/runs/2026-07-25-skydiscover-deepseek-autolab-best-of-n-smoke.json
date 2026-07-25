@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "kind": "standalone_search_backend_functional_smoke",
+  "run_date": "2026-07-25",
+  "status": "finished",
+  "branch": "main",
+  "task": {
+    "benchmark": "AutoLab",
+    "task_id": "toy_isa_opt",
+    "primary_metric": "cycles",
+    "direction": "minimize",
+    "autolab_commit": "7aff5fe71dfbe152fb0b8e8ac8087210b4bc27d5"
+  },
+  "method": {
+    "method": "skydiscover-best-of-n",
+    "runtime": "skydiscover",
+    "runtime_commit": "4734f324c4c3909eb3c8a4bc72a4ca34e6e679ed",
+    "algorithm": "best_of_n",
+    "model": "deepseek-v4-flash",
+    "reasoning_effort": "low",
+    "provider_mode": "openai_compatible",
+    "api_base": "https://api.deepseek.com/"
+  },
+  "budget": {
+    "wall_time_seconds": 600,
+    "concurrency_cap": 1,
+    "iterations_ceiling": 1,
+    "llm_max_tokens": 8192,
+    "soft_closeout_seconds": 30,
+    "hard_kill_grace_seconds": 30
+  },
+  "execution": {
+    "started_at": "2026-07-25T02:37:09.562973+00:00",
+    "finished_at": "2026-07-25T02:38:26.570909+00:00",
+    "duration_seconds": 77.00660064000112,
+    "returncode": 0,
+    "deadline_reached": false,
+    "hard_killed": false,
+    "completed_iterations": 1,
+    "candidate_evaluation_workspace_count": 3,
+    "evaluator_calls": {
+      "total_claimed": 5,
+      "public_claimed": 4,
+      "final_claimed": 1,
+      "setup_claimed_before_t": 1,
+      "timed_plus_closeout_claimed": 4
+    },
+    "usage_coverage": "missing: SkyDiscover OpenAI-compatible client does not persist response usage metadata",
+    "actual_concurrency_coverage": "missing: runtime does not persist an observed peak"
+  },
+  "result": {
+    "seed": {
+      "valid": true,
+      "cycles": 9220,
+      "artifact_sha256": "c4c5399fdab61c5b006cc6d1ae4b66d56ccafa2af9b11a1bf7cc9d120051d45a"
+    },
+    "candidate_public": {
+      "valid": true,
+      "cycles": 4867,
+      "artifact_sha256": "6e91dcf896531fa6395f2524663540838fc8f8d01262393fc71edc061569d4b8"
+    },
+    "controller_final": {
+      "valid": true,
+      "cycles": 4867,
+      "reward": 0.5672,
+      "artifact_sha256": "6e91dcf896531fa6395f2524663540838fc8f8d01262393fc71edc061569d4b8",
+      "verified_seeds": [0, 42, 137, 999],
+      "all_cases_correct": true
+    },
+    "absolute_cycle_reduction": 4353,
+    "relative_cycle_reduction": 0.472125813449,
+    "candidate_sha256": "6e91dcf896531fa6395f2524663540838fc8f8d01262393fc71edc061569d4b8",
+    "config_sha256": "907614c3d142c9116a2da13830742d6411eb286fc6d25277ae1b015d45c61540",
+    "native_log_sha256": "09bf180bcb5ab265274f18fcf6db4d094a68c973fa3cb3c7b030fea3862e801b"
+  },
+  "reproduction": {
+    "bootstrap": "python3 scripts/repro_env.py bootstrap --only autolab",
+    "prepare": ".bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare --benchmark autolab-toy-isa --method skydiscover-best-of-n --wall-time-seconds 600 --soft-closeout-seconds 30 --hard-kill-grace-seconds 30 --concurrency 1 --iterations-ceiling 1 --seed 1 --reasoning-effort low --llm-max-tokens 8192 --model deepseek-v4-flash --run-dir runs/benchmark-compare/20260725-deepseek-v4-flash-autolab-best-of-n",
+    "run": "OPENAI_API_KEY must be inherited from the shell; run experiment.py run --run-dir runs/benchmark-compare/20260725-deepseek-v4-flash-autolab-best-of-n --model deepseek-v4-flash --api-base https://api.deepseek.com/"
+  },
+  "evidence": {
+    "candidate": "evidence/runs/2026-07-25-skydiscover-deepseek-autolab-best-of-n-candidate.s",
+    "full_run_directory": "runs/benchmark-compare/20260725-deepseek-v4-flash-autolab-best-of-n",
+    "full_run_directory_policy": "ignored, preserved locally, and does not contain credentials"
+  },
+  "limitations": [
+    "This is a single-case functional smoke, not a matched full-system comparison.",
+    "SkyDiscover still evaluates its seed and best program inside the timed native runtime.",
+    "The native OpenAI-compatible client does not persist response usage metadata.",
+    "The runtime does not persist observed peak concurrency."
+  ],
+  "secret_scan": {
+    "pattern": "credential-like API key and bearer-token patterns",
+    "scope": "full preserved run directory",
+    "result": "clean"
+  }
+}

@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
+from experiments.backends import skydiscover as sky_backend  # noqa: E402
 from experiments.openevolve_compare.experiment import (  # noqa: E402
     DEFAULT_REASONING_EFFORT,
     append_unique_lines,
@@ -37,6 +38,7 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     render_plain_prompt,
     run_controlled,
     run_controlled_many,
+    sha256_file,
     sha256_text,
     utc_now,
     write_json,
@@ -48,7 +50,17 @@ DEFAULT_CHECKOUT_ROOT = ROOT / "third_party"
 DEFAULT_VENV = ROOT / ".bench-env/venv"
 DEFAULT_RUNS = ROOT / "runs/benchmark-compare"
 DEFAULT_MODEL = "gpt-5.6-sol"
-METHODS = ("plain-codex", "goal-plus-codex")
+METHODS = ("plain-codex", "goal-plus-codex", *sky_backend.METHODS)
+SKYDISCOVER_EDIT_PROTOCOL = """
+
+## SkyDiscover candidate response contract
+
+Make one small, localized improvement per iteration. Return only one or a few
+complete SEARCH/REPLACE blocks in the exact format requested by SkyDiscover.
+Do not include prose or Markdown code fences. Do not rewrite the entire artifact:
+each SEARCH block must be a short exact excerpt from the current program, and
+each block must include its closing `>>>>>>> REPLACE` marker.
+""".rstrip()
 BENCHMARK_ADAPTERS = {
     "ale-bench-lite": "adapters.ale.adapter",
     "autolab-toy-isa": "adapters.autolab.adapter",
@@ -124,10 +136,15 @@ def checkout_dirty(path: Path) -> bool:
 
 def prepare(args: argparse.Namespace) -> int:
     configure_adapter(args.benchmark)
+    is_sky = sky_backend.is_method(args.method)
     if args.wall_time_seconds <= args.soft_closeout_seconds:
         raise ValueError("wall time must exceed the closeout reserve")
     if args.concurrency < 1:
         raise ValueError("concurrency must be positive")
+    if args.iterations_ceiling < 1:
+        raise ValueError("iterations ceiling must be positive")
+    if args.llm_max_tokens < 1:
+        raise ValueError("LLM max tokens must be positive")
     exploration_seconds = args.wall_time_seconds - args.soft_closeout_seconds
     if not 1 <= args.worker_runtime_seconds <= exploration_seconds:
         raise ValueError("worker runtime must fit inside the exploration budget")
@@ -136,6 +153,10 @@ def prepare(args: argparse.Namespace) -> int:
     checkout_root = args.checkout_root.expanduser().absolute()
     goal_plus_root = checkout_root / upstreams["goal_plus"]["checkout_dir"]
     managed_checkouts = [("goal_plus", goal_plus_root)]
+    skydiscover_root = None
+    if is_sky:
+        skydiscover_root = checkout_root / upstreams["skydiscover"]["checkout_dir"]
+        managed_checkouts.append(("skydiscover", skydiscover_root))
     if LOCAL_SOURCE_RELATIVE is None:
         benchmark_root = checkout_root / upstreams[UPSTREAM_KEY]["checkout_dir"]
         managed_checkouts.insert(0, (UPSTREAM_KEY, benchmark_root))
@@ -170,6 +191,7 @@ def prepare(args: argparse.Namespace) -> int:
     run_dir.mkdir(parents=True, exist_ok=False)
     workspaces: list[Path] = []
     workspace_commits: list[str] = []
+    search_backend: dict[str, Any] | None = None
 
     if args.method == "plain-codex":
         for lane_index in range(args.concurrency):
@@ -192,7 +214,7 @@ def prepare(args: argparse.Namespace) -> int:
         }
         workspace_value = None
         goal_plus_config = None
-    else:
+    elif args.method == "goal-plus-codex":
         workspace = run_dir / "workspace"
         materialized = materialize_workspace(
             benchmark_root,
@@ -237,6 +259,60 @@ def prepare(args: argparse.Namespace) -> int:
             "artifact_name": ARTIFACT_NAME,
             "state_at_t0": "absent; natural prompt creates all Goal Plus state inside T",
         }
+    elif is_sky:
+        workspace = run_dir / "workspace"
+        materialized = materialize_workspace(
+            benchmark_root,
+            workspace,
+        )
+        workspaces.append(workspace)
+        workspace_commits.append(materialized["workspace_commit"])
+        task_text = (workspace / "TASK.md").read_text()
+        sky_task_prompt = task_text.rstrip() + "\n\n" + SKYDISCOVER_EDIT_PROTOCOL
+        algorithm = sky_backend.algorithm_for_method(args.method)
+        sky_config_path = run_dir / "skydiscover-config.yaml"
+        sky_backend.write_config(
+            sky_config_path,
+            algorithm=algorithm,
+            task_prompt=sky_task_prompt,
+            file_suffix=Path(ARTIFACT_NAME).suffix,
+            evaluator_timeout_seconds=VERIFIER_TIMEOUT_SECONDS,
+            concurrency=args.concurrency,
+            iterations_ceiling=args.iterations_ceiling,
+            seed=args.seed,
+            reasoning_effort=args.reasoning_effort,
+            max_tokens=args.llm_max_tokens,
+        )
+        prompt_contract = {
+            "mode": "skydiscover_native_context",
+            "task_prompt_sha256": sha256_text(sky_task_prompt),
+            "backend_control_prompt": (
+                "SkyDiscover adds native search history and mutation instructions "
+                "to the fixed benchmark task prompt"
+            ),
+            "backend_config_sha256": sha256_file(sky_config_path),
+        }
+        workspace_value = str(workspace)
+        goal_plus_config = None
+        search_backend = {
+            "family": "skydiscover",
+            "algorithm": algorithm,
+            "config": str(sky_config_path),
+            "config_sha256": sha256_file(sky_config_path),
+            "llm_max_tokens": args.llm_max_tokens,
+            "native_seed_evaluation": (
+                "inside timed runtime; functional-smoke limitation"
+            ),
+            "native_best_test_evaluation": (
+                "inside timed runtime; functional-smoke limitation"
+            ),
+            "determinism_coverage": (
+                "requested seed is persisted, but the selected SkyDiscover "
+                "algorithm does not consistently seed every native random source"
+            ),
+        }
+    else:
+        raise ValueError(f"unsupported method: {args.method}")
 
     manifest = {
         "schema_version": 1,
@@ -247,13 +323,15 @@ def prepare(args: argparse.Namespace) -> int:
         "benchmark_name": BENCHMARK_NAME,
         "task_id": TASK_ID,
         "model": args.model,
-        "reasoning_effort": DEFAULT_REASONING_EFFORT,
+        "reasoning_effort": args.reasoning_effort,
+        "seed": args.seed,
         "budget": {
             "wall_time_seconds": args.wall_time_seconds,
             "concurrency": args.concurrency,
             "soft_closeout_seconds": args.soft_closeout_seconds,
             "hard_kill_grace_seconds": args.hard_kill_grace_seconds,
             "worker_runtime_seconds": args.worker_runtime_seconds,
+            "iterations_ceiling": args.iterations_ceiling,
         },
         "task": {
             "artifact_name": ARTIFACT_NAME,
@@ -287,12 +365,25 @@ def prepare(args: argparse.Namespace) -> int:
             "goal_plus_commit": git_commit(goal_plus_root),
             "goal_plus_tracking_branch": upstreams["goal_plus"]["tracking_branch"],
             "runtime_bin": str(runtime_bin(args.venv.expanduser().absolute())),
+            **(
+                {
+                    "skydiscover_root": str(skydiscover_root),
+                    "skydiscover_branch": checkout_branch(skydiscover_root),
+                    "skydiscover_commit": git_commit(skydiscover_root),
+                    "skydiscover_tracking_branch": upstreams["skydiscover"][
+                        "tracking_branch"
+                    ],
+                }
+                if skydiscover_root is not None
+                else {}
+            ),
         },
         "workspace": workspace_value,
         "workspaces": [str(path) for path in workspaces],
         "workspace_commits": workspace_commits,
         "prompt_contract": prompt_contract,
         "goal_plus_config": goal_plus_config,
+        "search_backend": search_backend,
         "secret_policy": "credentials are inherited and never serialized",
     }
     write_json(run_dir / "experiment.json", manifest)
@@ -618,6 +709,135 @@ def execute_goal_plus(
     return control
 
 
+def execute_skydiscover(
+    manifest: dict[str, Any],
+    run_dir: Path,
+    args: argparse.Namespace,
+    environment: dict[str, str],
+) -> dict[str, Any]:
+    """Run one standalone benchmark through a native SkyDiscover method."""
+    budget = manifest["budget"]
+    workspace = Path(manifest["workspace"])
+    seed = evaluate(workspace, "public")
+    write_json(run_dir / "seed-eval.json", seed)
+    setup_calls = seed["budget"]["total_claimed"]
+
+    bin_dir = Path(manifest["environment"]["runtime_bin"])
+    sky_executable = bin_dir / "skydiscover-run"
+    if not sky_executable.is_file():
+        raise FileNotFoundError(
+            f"SkyDiscover runtime is missing: {sky_executable}; "
+            "run scripts/repro_env.py bootstrap --only skydiscover"
+        )
+
+    output = run_dir / "skydiscover-output"
+    evaluation_root = run_dir / "skydiscover-evaluations"
+    evaluation_root.mkdir()
+    environment["BENCH_SKYDISCOVER_TEMPLATE_WORKSPACE"] = str(workspace)
+    environment["BENCH_SKYDISCOVER_EVALUATION_ROOT"] = str(evaluation_root)
+    environment["PYTHONPATH"] = str(ROOT) + os.pathsep + environment.get(
+        "PYTHONPATH", ""
+    )
+    algorithm = sky_backend.algorithm_for_method(manifest["method"])
+    command = [
+        str(sky_executable),
+        str(workspace / ARTIFACT_NAME),
+        str(ROOT / "adapters/skydiscover_bridge.py"),
+        "--config",
+        str(run_dir / "skydiscover-config.yaml"),
+        "--output",
+        str(output),
+        "--iterations",
+        str(budget["iterations_ceiling"]),
+        "--api-base",
+        args.api_base,
+        "--model",
+        args.model,
+        "--search",
+        algorithm,
+        "--log-level",
+        "INFO",
+    ]
+    control = run_controlled(
+        command,
+        cwd=workspace,
+        environment=environment,
+        stdin_text=None,
+        stdout_path=run_dir / "stdout.log",
+        stderr_path=run_dir / "stderr.log",
+        wall_time_seconds=budget["wall_time_seconds"],
+        hard_kill_grace_seconds=budget["hard_kill_grace_seconds"],
+    )
+
+    best = sky_backend.best_candidate(output, Path(ARTIFACT_NAME).suffix)
+    best_info = sky_backend.collect_best_info(output)
+    if best.is_file():
+        shutil.copy2(best, workspace / ARTIFACT_NAME)
+        shutil.copy2(best, run_dir / ARTIFACT_NAME)
+        final = evaluate(workspace, "final")
+        write_json(run_dir / "final-eval.json", final)
+        if final.get("valid") is not True:
+            control["result_incomplete_reason"] = (
+                "official final evaluator rejected the SkyDiscover artifact"
+            )
+    else:
+        final = seed
+        control["result_incomplete_reason"] = (
+            "SkyDiscover best candidate was not saved"
+        )
+
+    evaluation_workspace_count = sum(
+        1 for path in evaluation_root.iterdir() if path.is_dir()
+    )
+    controller_calls = final["budget"]["total_claimed"]
+    total_calls = controller_calls + evaluation_workspace_count
+    control["evaluator_calls"] = {
+        "total_claimed": total_calls,
+        "public_claimed": (
+            final["budget"]["public_claimed"] + evaluation_workspace_count
+        ),
+        "final_claimed": final["budget"]["final_claimed"],
+        "setup_claimed_before_t": setup_calls,
+        "timed_plus_closeout_claimed": total_calls - setup_calls,
+        "coverage": (
+            "controller seed/final ledger plus one preserved workspace per "
+            "SkyDiscover evaluator call"
+        ),
+    }
+    control["usage"] = {
+        "coverage": (
+            "missing: SkyDiscover OpenAI-compatible client does not persist "
+            "response usage metadata"
+        )
+    }
+    control["skydiscover"] = {
+        "algorithm": algorithm,
+        "output_dir": str(output),
+        "best_info": best_info,
+        "requested_concurrency_cap": budget["concurrency"],
+        "observed_peak_concurrency": None,
+        "evaluation_workspace_count": evaluation_workspace_count,
+        "protocol_coverage": (
+            "functional smoke: native seed and best test evaluations still "
+            "occur inside the timed SkyDiscover runtime"
+        ),
+        "determinism_coverage": manifest["search_backend"][
+            "determinism_coverage"
+        ],
+    }
+    control["telemetry_coverage"] = {
+        "evaluator_calls": control["evaluator_calls"]["coverage"],
+        "tokens": control["usage"]["coverage"],
+        "iterations": (
+            "native best_program_info is persisted when a best candidate exists"
+        ),
+        "actual_concurrency": (
+            "missing: runtime does not persist an observed peak"
+        ),
+    }
+    return control
+
+
 def execute(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.expanduser().absolute()
     manifest_path = run_dir / "experiment.json"
@@ -627,6 +847,8 @@ def execute(args: argparse.Namespace) -> int:
         raise RuntimeError(f"run is not prepared: {manifest['status']}")
     if args.model != manifest["model"]:
         raise ValueError(f"model mismatch: prepared {manifest['model']}, got {args.model}")
+    if sky_backend.is_method(manifest["method"]) and not args.api_base:
+        raise ValueError(f"--api-base is required for {manifest['method']}")
     if args.api_base and not os.environ.get("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is required with --api-base")
     environment = configure_temp_environment(os.environ.copy())
@@ -637,6 +859,8 @@ def execute(args: argparse.Namespace) -> int:
     write_json(manifest_path, manifest)
     if manifest["method"] == "plain-codex":
         control = execute_plain(manifest, run_dir, args, environment)
+    elif sky_backend.is_method(manifest["method"]):
+        control = execute_skydiscover(manifest, run_dir, args, environment)
     else:
         control = execute_goal_plus(manifest, run_dir, args, environment)
 
@@ -660,8 +884,13 @@ def execute(args: argparse.Namespace) -> int:
         "openai_compatible" if args.api_base else "codex_native_auth"
     )
     manifest["api_base"] = args.api_base
+    version_command = (
+        [str(bin_dir / "skydiscover-run"), "--version"]
+        if sky_backend.is_method(manifest["method"])
+        else [args.codex_bin, "--version"]
+    )
     version = subprocess.run(
-        [args.codex_bin, "--version"], capture_output=True, text=True, check=False
+        version_command, capture_output=True, text=True, check=False
     )
     manifest["runner_version"] = (version.stdout or version.stderr).strip() or None
     manifest["execution"] = control
@@ -788,6 +1017,12 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--soft-closeout-seconds", type=int, default=60)
     prepare_parser.add_argument("--hard-kill-grace-seconds", type=int, default=30)
     prepare_parser.add_argument("--worker-runtime-seconds", type=int, default=120)
+    prepare_parser.add_argument("--iterations-ceiling", type=int, default=1)
+    prepare_parser.add_argument("--seed", type=int, default=1)
+    prepare_parser.add_argument(
+        "--reasoning-effort", default=DEFAULT_REASONING_EFFORT
+    )
+    prepare_parser.add_argument("--llm-max-tokens", type=int, default=8192)
     prepare_parser.add_argument("--run-dir", type=Path)
     prepare_parser.add_argument(
         "--environment-manifest", type=Path, default=DEFAULT_ENV_MANIFEST

@@ -65,6 +65,7 @@ def write_config(
     iterations_ceiling: int,
     seed: int,
     reasoning_effort: str,
+    max_tokens: int = 32000,
 ) -> dict[str, Any]:
     """Write a secret-free SkyDiscover config owned by the experiment."""
     if algorithm not in SUPPORTED_ALGORITHMS:
@@ -73,6 +74,8 @@ def write_config(
         raise ValueError("SkyDiscover concurrency must be positive")
     if iterations_ceiling < 1:
         raise ValueError("SkyDiscover iteration ceiling must be positive")
+    if max_tokens < 1:
+        raise ValueError("SkyDiscover max tokens must be positive")
 
     try:
         import yaml
@@ -93,7 +96,7 @@ def write_config(
             # The CLI replaces this placeholder with the explicit run model.
             "models": [{"name": "bench-model-placeholder", "weight": 1.0}],
             "temperature": 0.7,
-            "max_tokens": 32000,
+            "max_tokens": max_tokens,
             "timeout": 600,
             "retries": 1,
             "retry_delay": 1,
