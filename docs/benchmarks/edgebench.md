@@ -78,6 +78,19 @@ Plain Codex、`gpt-5.6-sol/medium`、每题 `T=7200s`、题内 `K=1`、跨题
 rootless Docker 上的宿主 loopback API 和 Judge 通过 campaign-owned 随机端口桥
 提供给容器；桥随 controller 生命周期关闭，API 密钥不落盘。
 
+两小时 run 的普通任务可从原生 auto-eval 历史批量提取 1 小时等中间点，无需
+重跑模型或 verifier：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/timecurve.py extract \
+  --campaign <campaign-id> --checkpoint-hours 1
+```
+
+输出为 campaign 内的 `timecurve/timecurve.json` 和 `timecurve/timecurve.csv`。
+文字冒险的 game mode 没有 auto-eval，必须在 checkpoint 前另行启动 detached
+watcher；完整命令、边界语义和缺失数据处理见
+[`experiments/edgebench/README.md`](../../experiments/edgebench/README.md)。
+
 ### 无 Docker 的 local replica
 
 仓内 [`local_examples/vliw_kernel_optimization`](../../local_examples/vliw_kernel_optimization/README.md)

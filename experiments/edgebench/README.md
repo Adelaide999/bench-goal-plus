@@ -159,6 +159,51 @@ Fork 让 Codex 以 JSONL 输出，并在容器 closeout 时只归档
 `usage.coverage` 会明确写成 `agent_output_only` 或 unavailable，不能把零 token
 解释为零成本。
 
+## 从长运行批量提取中间时间点
+
+普通任务的 SForge `run_history.json` 会保留定时 auto-eval 边界，因此一个两小时
+campaign 完成后，可以一次性离线生成 0.5、1、1.5 和 2 小时的逐题数据，不需要
+重新采样、调用模型或重跑 verifier：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/timecurve.py extract \
+  --campaign <campaign-id> \
+  --checkpoint-hours 0.5 1 1.5 2
+```
+
+默认输出写到 `runs/edgebench/<campaign-id>/timecurve/`：
+
+- `timecurve.json`：逐题记录、覆盖率、各 checkpoint 的 0–100 均分和状态计数；
+- `timecurve.csv`：便于表格分析的逐题平面数据。
+
+小于总预算 `T` 的普通 checkpoint 必须与 `eval_interval_seconds` 对齐。例如当前
+30 分钟 auto-eval 配置中，`auto-1/2/3` 分别是 0.5/1/1.5 小时；边界是 inclusive，
+并按 `submission_id` 合并稍后才完成的 Judge report。恰好等于 `T` 的 checkpoint
+使用已完成 cell 的原生 closeout 历史，不要求可能与超时竞态的最后一次 auto-eval。
+每行的 `strict_checkpoint`、`status` 和 `reason` 用于区分严格边界、未到达边界和
+缺失 artifact；聚合只纳入 `valid=true` 且有合法 `score_0_100` 的行。
+
+三个文字冒险任务使用原生 game mode，没有 auto-eval 历史。要得到它们的精确
+中间点，必须在目标时间到达前启动只读 watcher，通常紧接 `run --detach` 执行：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/timecurve.py watch \
+  --campaign <campaign-id> \
+  --checkpoint-hours 1 \
+  --poll-seconds 5 \
+  --detach
+```
+
+watcher 的 PID、剩余 checkpoint 和日志分别记录在 `timecurve/watcher.json` 与
+`timecurve/watcher.log`；连接断开后仍会继续。它只快照 Judge 已写的
+`steps.jsonl`/`game_result.json`，不会影响 campaign。若历史运行没有提前启动
+watcher，精确的 game-mode 中间分无法事后恢复，`extract` 会明确记录
+`missing_game_snapshot`，不会用 0 分代替。watcher 完成后再执行上面的 `extract`，
+即可把普通任务和 game-mode 快照统一写入 JSON/CSV。
+
+这些小于 2 小时的曲线是本地开发 checkpoint，不自动声称可与公开 reference
+curve 比较；正式对比仍需先对齐 task revision、环境、`T` 和 `K`。
+
 ## Profile 扩展
 
 `profiles/vliw-smoke.json` 是一题接线 profile。扩到正式 8–12 题时复制一个新
