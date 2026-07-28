@@ -104,6 +104,20 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(profile["concurrency"], 1)
         self.assertEqual(profile["cell_concurrency"], 2)
 
+    def test_validation_regression_profile_targets_suspicious_legacy_cells(self) -> None:
+        _, profile = EDGE.load_profile("validation-regression-codex-2h-c4")
+
+        self.assertEqual(len(profile["task_ids"]), 17)
+        self.assertEqual(len(set(profile["task_ids"])), 17)
+        self.assertEqual(profile["task_ids"][-1], "integer_compression_codec")
+        self.assertEqual(profile["methods"], ["plain-codex"])
+        self.assertEqual(profile["model"], "gpt-5.6-sol")
+        self.assertEqual(profile["reasoning_effort"], "medium")
+        self.assertEqual(profile["wall_time_seconds"], 7200)
+        self.assertEqual(profile["concurrency"], 1)
+        self.assertEqual(profile["cell_concurrency"], 4)
+        self.assertEqual(profile["judge_concurrency"], 1)
+
     def test_official_codex_protocol_covers_all_tasks_and_overrides(self) -> None:
         protocol = EDGE.load_official_codex_protocol()
         _, full_profile = EDGE.load_profile("full-codex-2h")
@@ -298,6 +312,50 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertIn("2/2 cells with at least one valid score", rendered)
         self.assertIn("summaries without it are legacy development evidence", rendered)
         self.assertIn("audit protocol-sensitive advantages first", rendered)
+
+    def test_score_task_run_counts_game_sessions_without_run_history(self) -> None:
+        task_run = self.temp / "game-run"
+        task_run.mkdir()
+        EDGE.write_json(
+            task_run / "final_result.json",
+            {
+                "runtime_seconds": 120,
+                "total_rounds": 2,
+                "agent_submissions": 2,
+                "auto_submissions": 0,
+                "resume_count": 0,
+                "timed_out": True,
+            },
+        )
+        EDGE.write_json(
+            task_run / "game_history.json",
+            {
+                "entries": [
+                    {"type": "game", "round": "game-1"},
+                    {"type": "game", "round": "game-2"},
+                ]
+            },
+        )
+        original_run_capture = EDGE.run_capture
+        EDGE.run_capture = lambda *_args, **_kwargs: {
+            "returncode": 0,
+            "stdout": json.dumps(
+                {
+                    "source": str(task_run / "final_result.json"),
+                    "edgebench_score": 25,
+                }
+            ),
+            "stderr": "",
+        }
+        try:
+            observation = EDGE.score_task_run(
+                task_run,
+                {"model": "gpt-test", "wall_time_seconds": 120},
+            )
+        finally:
+            EDGE.run_capture = original_run_capture
+
+        self.assertEqual(observation["evaluator_calls"], 2)
 
     def test_prepare_encodes_plain_outer_and_goal_plus_inner_concurrency(self) -> None:
         args = SimpleNamespace(

@@ -2391,17 +2391,21 @@ def score_task_run(task_run: Path, cell: dict[str, Any]) -> dict[str, Any]:
     observation["auto_submissions"] = final.get("auto_submissions")
     observation["resume_count"] = final.get("resume_count")
     observation["timed_out"] = final.get("timed_out")
-    history = read_json(task_run / "run_history.json")
-    entries = history.get("entries", [])
-    evaluator_calls = (
-        sum(
-            1
-            for entry in entries
-            if isinstance(entry, dict) and entry.get("type") == "submission"
-        )
-        if isinstance(entries, list)
-        else 0
-    )
+    evaluator_calls = 0
+    for history_name, entry_type in (
+        ("run_history.json", "submission"),
+        ("game_history.json", "game"),
+    ):
+        history_path = task_run / history_name
+        if not history_path.is_file():
+            continue
+        entries = read_json(history_path).get("entries", [])
+        if isinstance(entries, list):
+            evaluator_calls += sum(
+                1
+                for entry in entries
+                if isinstance(entry, dict) and entry.get("type") == entry_type
+            )
     if not evaluator_calls:
         evaluator_calls = len(list((task_run / "submissions").glob("*/report.json")))
     observation["evaluator_calls"] = evaluator_calls

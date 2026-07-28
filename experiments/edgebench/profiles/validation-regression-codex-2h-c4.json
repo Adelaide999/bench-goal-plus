@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "validation-regression-codex-2h-c4",
+  "description": "Seventeen-task Codex-only regression for legacy protocol contamination and large same-budget score gaps.",
+  "protocol_source": "edgebench-official-codex",
+  "backend": "docker",
+  "dataset_repository": "ByteDance-Seed/EdgeBench",
+  "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+  "registry": "docker.jiaxin.site/seededge",
+  "task_ids": [
+    "combinatorial_games_formalization",
+    "flt_regular_formalization",
+    "new_foundations_consistency",
+    "pfr_formalization",
+    "sphere_eversion_formalization",
+    "openttd_transport_ai",
+    "openrct2_theme_park_ai",
+    "tree_block_partitioning",
+    "warehouse_forklift_routing",
+    "ordinal_notation_well_foundedness",
+    "git_rewrite_in_zig",
+    "college_english_exam_bank",
+    "molecular_self_assembly",
+    "nethack_dungeon_agent",
+    "cta_risk_budget_optimization",
+    "portfolio_risk_calibration",
+    "integer_compression_codec"
+  ],
+  "methods": [
+    "plain-codex"
+  ],
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "medium",
+  "wall_time_seconds": 7200,
+  "concurrency": 1,
+  "cell_concurrency": 4,
+  "worker_runtime_seconds": 7200,
+  "judge_concurrency": 1,
+  "judge_port": 8080,
+  "protocol_override_reasons": {
+    "backend": "local regression uses Docker instead of the official Kubernetes backend",
+    "model": "the regression evaluates gpt-5.6-sol instead of the paper model",
+    "reasoning_effort": "reasoning effort is pinned explicitly for reproducibility",
+    "timeout": "the regression uses a two-hour task budget instead of twelve hours",
+    "attempts_per_task": "the regression runs one trajectory per task instead of three",
+    "cell_concurrency": "the local controller runs at most four different tasks concurrently",
+    "judge_concurrency": "each independent SForge replica group runs at most one Judge evaluation at a time"
+  }
+}
