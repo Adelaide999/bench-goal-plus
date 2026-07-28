@@ -66,6 +66,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                 "workspace": Path("workspace"),
                 "output_last_message": Path("final-message.txt"),
                 "model": "gpt-5.6-terra",
+                "reasoning_effort": "medium",
                 "api_base": "http://proxy.example/v1",
                 "sandbox": "workspace-write",
                 "ephemeral": False,
@@ -74,6 +75,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             plain = experiment.codex_command(goal_plus=False, **common)
             self.assertNotIn("--ignore-user-config", goal_plus)
             self.assertIn("--ignore-user-config", plain)
+            self.assertIn('model_reasoning_effort="medium"', goal_plus)
 
     def test_autolab_parser_requires_successful_verification(self) -> None:
         self.assertEqual(autolab.parse_result("cycles=1547 verify=ok"), (1547, True))

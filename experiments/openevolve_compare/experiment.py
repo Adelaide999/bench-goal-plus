@@ -236,6 +236,7 @@ def render_goal(
     worker_model: str,
     reasoning_effort: str = DEFAULT_REASONING_EFFORT,
     worker_runtime_seconds: int | None = None,
+    worker_min_runtime_seconds: int | None = None,
     verifier_timeout_seconds: int = 60,
 ) -> str:
     """Add the natural Goal Plus entrypoint and config to the common Codex prompt."""
@@ -247,6 +248,10 @@ def render_goal(
     )
     if dispatch_seconds < 1 or dispatch_seconds > exploration_seconds:
         raise ValueError("worker runtime must fit inside the exploration budget")
+    if worker_min_runtime_seconds is not None and not (
+        1 <= worker_min_runtime_seconds <= dispatch_seconds
+    ):
+        raise ValueError("worker minimum runtime must fit inside the worker budget")
     if verifier_timeout_seconds < 1:
         raise ValueError("verifier timeout must be positive")
     common_prompt = render_common_task_prompt(
@@ -267,7 +272,14 @@ def render_goal(
         f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
         "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "
         "lineages while useful work and outer time remain.\n"
-        f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
+        + (
+            f"- `strategy.worker_budget.min_runtime_seconds={worker_min_runtime_seconds}` "
+            "and `strategy.worker_budget.min_verifier_runs=1`; preserve this minimum "
+            "AutoResearch lease so SubagentStop blocks an early worker return.\n"
+            if worker_min_runtime_seconds is not None
+            else ""
+        )
+        + f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
         f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
         f"- Metric: `{metric_name}` with direction `{metric_direction}`.\n"
         "- Process verifier: `python3 .goal-plus-verifiers/primary_metric.py`, role "
@@ -283,7 +295,7 @@ def render_goal(
         f"- Edit surface: allow only `{artifact_name}`; deny `evaluate.py`, "
         "`.goal-plus-verifiers/**`, `task.json`, `TASK.md`, `AGENTS.md`, and `GOAL.md`; "
         "allow at most one changed file.\n"
-        "- Workspace: use `source_path=\".\"` and `workspace.backend=\"copy\"`.\n"
+        "- Workspace: use `source_path=\".\"` and `workspace.backend=\"git_worktree\"`.\n"
         "- Constraints: no network; preserve the artifact's controller-checked fixed regions.\n"
         f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
         f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "

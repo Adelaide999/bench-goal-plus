@@ -377,7 +377,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("deny `evaluate.py`", prompt)
         self.assertIn("`.goal-plus-verifiers/**`", prompt)
         self.assertIn("allow at most one changed file", prompt)
-        self.assertIn('workspace.backend="copy"', prompt)
+        self.assertIn('workspace.backend="git_worktree"', prompt)
         self.assertIn("strategy.worker_budget.max_runtime_seconds=60", prompt)
         self.assertIn("total budget, not a success criterion", prompt)
 
