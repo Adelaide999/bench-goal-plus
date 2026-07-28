@@ -361,6 +361,16 @@ def codex_goal_plus_mcp_args() -> list[str]:
     ]
 
 
+def configure_isolated_codex_home(
+    environment: dict[str, str], run_dir: Path
+) -> Path:
+    """Load project hooks without inheriting the user's Codex configuration."""
+    codex_home = run_dir / "controller-runtime" / "codex-home"
+    codex_home.mkdir(parents=True, exist_ok=False)
+    environment["CODEX_HOME"] = str(codex_home)
+    return codex_home
+
+
 def write_pi_models_config(
     target: Path,
     *,
@@ -1667,6 +1677,8 @@ def execute(args: argparse.Namespace) -> int:
     environment = configure_temp_environment(os.environ.copy())
     bin_dir = runtime_bin(args.venv.expanduser().absolute())
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
+    if method == "goal-plus-codex":
+        configure_isolated_codex_home(environment, run_dir)
 
     if args.api_base and not environment.get("OPENAI_API_KEY"):
         raise RuntimeError(
@@ -2002,7 +2014,6 @@ def execute(args: argparse.Namespace) -> int:
                 str(workspace),
                 "--output-last-message",
                 str(run_dir / "final-message.txt"),
-                "--ignore-user-config",
                 "--color",
                 "never",
                 "--dangerously-bypass-hook-trust",

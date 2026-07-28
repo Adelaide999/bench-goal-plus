@@ -29,6 +29,7 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     codex_provider_args,
     collect_goal_plus_state,
     commit_workspace,
+    configure_isolated_codex_home,
     copy_goal_plus_assets,
     finalize_goal_plus_search,
     goal_plus_incomplete_reason,
@@ -466,12 +467,17 @@ def codex_command(
         str(workspace),
         "--output-last-message",
         str(output_last_message),
-        "--ignore-user-config",
-        "--color",
-        "never",
-        "--config",
-        f'model_reasoning_effort="{DEFAULT_REASONING_EFFORT}"',
     ]
+    if not goal_plus:
+        command.append("--ignore-user-config")
+    command.extend(
+        [
+            "--color",
+            "never",
+            "--config",
+            f'model_reasoning_effort="{DEFAULT_REASONING_EFFORT}"',
+        ]
+    )
     if not goal_plus:
         command.extend(["--config", 'approval_policy="never"'])
     if ephemeral:
@@ -622,6 +628,7 @@ def execute_goal_plus(
     environment["GOAL_PLUS_VERIFIER_TMPDIR"] = str(
         run_dir / "controller-runtime/goal-plus"
     )
+    configure_isolated_codex_home(environment, run_dir)
     prompt = render_goal(
         task_text=(workspace / "TASK.md").read_text(),
         artifact_name=ARTIFACT_NAME,
