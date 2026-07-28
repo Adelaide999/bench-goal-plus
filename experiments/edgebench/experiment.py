@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -34,6 +36,16 @@ EDGE_ROOT = ROOT / "third_party" / "edgebench"
 GOAL_PLUS_ROOT = ROOT / "third_party" / "goal-plus"
 TASKS_DIR = EDGE_ROOT / "tasks"
 PROFILE_DIR = ROOT / "experiments" / "edgebench" / "profiles"
+OFFICIAL_CODEX_PROTOCOL_PATH = (
+    EDGE_ROOT / "examples" / "all-tasks-k8s" / "experiment-codex.yaml"
+)
+PAPER_REFERENCE_PATH = (
+    ROOT
+    / "experiments"
+    / "edgebench"
+    / "references"
+    / "paper-gpt-5.5-codex-12h.json"
+)
 RUNS_ROOT = ROOT / "runs" / "edgebench"
 UPSTREAM_MANIFEST = ROOT / "environment" / "upstreams.json"
 VENV = ROOT / ".bench-env" / "venv"
@@ -53,6 +65,58 @@ METHODS = {
         "inner_search": True,
     },
 }
+PAPER_LARGE_GAP_THRESHOLD_PP = 20.0
+LEGACY_PAPER_PROTOCOL_ISSUES = {
+    "borden_source_inversion": "no cooldown; unusually high evaluator-call frequency",
+    "exchange_core_throughput": "Internet access and unbounded CPU/hardware-sensitive score",
+    "schemathesis_config_modernization": "Internet access used by the agent; no official cooldown",
+    "schemathesis_datagen_pipeline": "Internet access used by the agent; no official cooldown",
+    "schemathesis_reporting_observability": "Internet access used by the agent; no official cooldown",
+}
+OFFICIAL_PROTOCOL_FIELDS = frozenset(
+    {
+        "agent",
+        "backend",
+        "disable_auto_eval",
+        "disable_auto_resume",
+        "disable_stop_hook",
+        "eval_interval",
+        "judge_cpu_limit",
+        "judge_mem_limit",
+        "max_submissions",
+        "submission_cooldown",
+        "timeout",
+        "work_cpu_limit",
+        "work_mem_limit",
+    }
+)
+OFFICIAL_REQUIRED_DEFAULTS = frozenset(
+    {
+        "agent",
+        "backend",
+        "eval_interval",
+        "judge_cpu_limit",
+        "judge_mem_limit",
+        "submission_cooldown",
+        "timeout",
+        "work_cpu_limit",
+        "work_mem_limit",
+    }
+)
+ALLOWED_PROTOCOL_OVERRIDE_FIELDS = frozenset(
+    {
+        "agent",
+        "attempts_per_task",
+        "backend",
+        "cell_concurrency",
+        "judge_concurrency",
+        "model",
+        "reasoning_effort",
+        "timeout",
+    }
+)
+OFFICIAL_TASK_COUNT = 51
+OFFICIAL_SCHEDULED_RUNS = 3
 
 
 def utc_now() -> str:
@@ -73,6 +137,25 @@ def write_json(path: Path, payload: Any) -> None:
 
 def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_paper_reference(path: Path = PAPER_REFERENCE_PATH) -> dict[str, Any]:
+    payload = read_json(path)
+    reference = payload.get("reference", {})
+    tasks = payload.get("tasks", {})
+    if (
+        payload.get("schema_version") != 1
+        or reference.get("agent") != "Codex"
+        or reference.get("model") != "GPT-5.5"
+        or reference.get("budget_hours") != 12
+        or not isinstance(tasks, dict)
+        or not tasks
+    ):
+        raise ValueError(f"invalid EdgeBench paper reference: {path}")
+    for task, score in tasks.items():
+        if not isinstance(score, dict) or not isinstance(score.get("mean"), (int, float)):
+            raise ValueError(f"invalid paper score for {task}: {path}")
+    return payload
 
 
 def sha256_text(value: str) -> str:
@@ -152,7 +235,162 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
         raise ValueError("wall_time_seconds and concurrency must be positive")
     if int(profile.get("cell_concurrency", 1)) < 1:
         raise ValueError("cell_concurrency must be positive")
+    if profile.get("protocol_source") != "edgebench-official-codex":
+        raise ValueError("EdgeBench profile must use edgebench-official-codex")
+    reasons = profile.get("protocol_override_reasons")
+    if not isinstance(reasons, dict) or not reasons:
+        raise ValueError("EdgeBench profile must record protocol_override_reasons")
+    unknown_reasons = set(reasons) - ALLOWED_PROTOCOL_OVERRIDE_FIELDS
+    if unknown_reasons:
+        raise ValueError(
+            "EdgeBench profile has unsupported protocol override reasons: "
+            f"{sorted(unknown_reasons)}"
+        )
+    invalid_reasons = sorted(
+        key
+        for key, reason in reasons.items()
+        if not isinstance(reason, str) or not reason.strip()
+    )
+    if invalid_reasons:
+        raise ValueError(
+            "EdgeBench profile has invalid protocol override reasons: "
+            f"{invalid_reasons}"
+        )
     return candidate, profile
+
+
+def _normalize_protocol_fields(data: Any, *, context: str) -> dict[str, Any]:
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} must be a mapping")
+    unknown = set(data) - OFFICIAL_PROTOCOL_FIELDS
+    if unknown:
+        raise ValueError(f"{context} has unsupported fields: {sorted(unknown)}")
+    result: dict[str, Any] = {}
+    for key, value in data.items():
+        if key in {
+            "disable_auto_eval",
+            "disable_auto_resume",
+            "disable_stop_hook",
+        }:
+            if not isinstance(value, bool):
+                raise ValueError(f"{context}.{key} must be boolean")
+        elif key in {
+            "eval_interval",
+            "judge_cpu_limit",
+            "max_submissions",
+            "submission_cooldown",
+            "timeout",
+            "work_cpu_limit",
+        }:
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{context}.{key} must be a non-negative integer")
+        elif key in {"judge_mem_limit", "work_mem_limit", "agent", "backend"}:
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{context}.{key} must be a non-empty string")
+        result[key] = value
+    return result
+
+
+def load_official_codex_protocol(
+    path: Path = OFFICIAL_CODEX_PROTOCOL_PATH,
+) -> dict[str, Any]:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"official EdgeBench protocol must be a mapping: {path}")
+    allowed_top = {"defaults", "env", "model", "stagger", "tasks"}
+    unknown_top = {
+        key for key in raw if key not in allowed_top and not str(key).startswith("x-")
+    }
+    if unknown_top:
+        raise ValueError(
+            f"official EdgeBench protocol has unsupported top-level fields: "
+            f"{sorted(unknown_top)}"
+        )
+    defaults = _normalize_protocol_fields(
+        raw.get("defaults"), context="official defaults"
+    )
+    missing_defaults = OFFICIAL_REQUIRED_DEFAULTS - set(defaults)
+    if missing_defaults:
+        raise ValueError(
+            f"official EdgeBench defaults are missing: {sorted(missing_defaults)}"
+        )
+    tasks_raw = raw.get("tasks")
+    if not isinstance(tasks_raw, dict) or not tasks_raw:
+        raise ValueError("official EdgeBench protocol must define tasks")
+    tasks = {
+        str(task_id): _normalize_protocol_fields(
+            overrides, context=f"official task {task_id}"
+        )
+        for task_id, overrides in tasks_raw.items()
+    }
+    if len(tasks) != OFFICIAL_TASK_COUNT:
+        raise ValueError(
+            "official EdgeBench protocol must define exactly "
+            f"{OFFICIAL_TASK_COUNT} tasks, found {len(tasks)}"
+        )
+    model_raw = raw.get("model")
+    if not isinstance(model_raw, dict) or not isinstance(model_raw.get("model"), str):
+        raise ValueError("official EdgeBench protocol must define model.model")
+    stagger = raw.get("stagger", 0)
+    if not isinstance(stagger, int) or isinstance(stagger, bool) or stagger < 0:
+        raise ValueError("official EdgeBench protocol stagger must be a non-negative integer")
+    return {
+        "schema_version": 1,
+        "source": portable_path(path),
+        "source_sha256": sha256_file(path),
+        "official_model": str(model_raw["model"]),
+        "stagger_seconds": stagger,
+        "defaults": defaults,
+        "tasks": tasks,
+    }
+
+
+def official_task_protocol(
+    protocol: dict[str, Any], task_id: str, config: dict[str, Any]
+) -> dict[str, Any]:
+    if task_id not in protocol["tasks"]:
+        raise ValueError(f"official EdgeBench protocol is missing task {task_id}")
+    internet = config.get("internet")
+    if not isinstance(internet, bool):
+        raise ValueError(f"task {task_id} must define boolean internet")
+    resolved = {**protocol["defaults"], **protocol["tasks"][task_id]}
+    resolved.setdefault("disable_auto_eval", False)
+    resolved.setdefault("disable_auto_resume", False)
+    resolved.setdefault("disable_stop_hook", False)
+    resolved.setdefault("max_submissions", None)
+    resolved["internet"] = internet
+    return resolved
+
+
+def _protocol_diff(
+    *,
+    official: dict[str, Any],
+    effective: dict[str, Any],
+    reasons: dict[str, Any],
+) -> list[dict[str, Any]]:
+    fields = sorted(set(official) | set(effective))
+    result: list[dict[str, Any]] = []
+    for field in fields:
+        before = official.get(field)
+        after = effective.get(field)
+        if before == after:
+            continue
+        if field not in ALLOWED_PROTOCOL_OVERRIDE_FIELDS:
+            raise ValueError(f"unsupported EdgeBench protocol override: {field}")
+        reason = reasons.get(field)
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"protocol override {field!r} is missing a reason")
+        result.append(
+            {
+                "field": field,
+                "official": before,
+                "effective": after,
+                "reason": reason,
+            }
+        )
+    return result
 
 
 def campaign_dir(value: str | Path) -> Path:
@@ -456,6 +694,105 @@ def docker_http_probe(
     }
 
 
+def _docker_memory_bytes(value: str) -> int:
+    match = re.fullmatch(r"([0-9]+)([kmgt]?)(?:i?b)?", value.strip().lower())
+    if not match:
+        raise ValueError(f"unsupported Docker memory limit: {value}")
+    amount = int(match.group(1))
+    exponent = {"": 0, "k": 1, "m": 2, "g": 3, "t": 4}[match.group(2)]
+    return amount * (1024**exponent)
+
+
+def docker_resource_limit_probe(
+    image: str, *, cpu_limit: int, mem_limit: str
+) -> dict[str, Any]:
+    name = f"edgebench-resource-probe-{os.getpid()}-{time.time_ns()}"
+    expected_nano_cpus = int(cpu_limit * 1_000_000_000)
+    expected_memory = _docker_memory_bytes(mem_limit)
+    started = run_capture(
+        [
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            name,
+            "--cpus",
+            str(cpu_limit),
+            "--memory",
+            mem_limit,
+            "--entrypoint",
+            "/bin/sh",
+            image,
+            "-c",
+            "while :; do sleep 60; done",
+        ]
+    )
+    inspected: dict[str, Any] | None = None
+    inspect_result: dict[str, Any] | None = None
+    try:
+        if started["returncode"] == 0:
+            inspect_result = run_capture(
+                [
+                    "docker",
+                    "inspect",
+                    "--format",
+                    "{{json .HostConfig}}",
+                    name,
+                ]
+            )
+            if inspect_result["returncode"] == 0:
+                try:
+                    inspected = json.loads(inspect_result["stdout"])
+                except json.JSONDecodeError:
+                    inspected = None
+    finally:
+        run_capture(["docker", "rm", "--force", name])
+
+    actual_nano_cpus = inspected.get("NanoCpus") if inspected else None
+    actual_memory = inspected.get("Memory") if inspected else None
+    return {
+        "passed": (
+            started["returncode"] == 0
+            and inspect_result is not None
+            and inspect_result["returncode"] == 0
+            and actual_nano_cpus == expected_nano_cpus
+            and actual_memory == expected_memory
+        ),
+        "image": image,
+        "cpu_limit": cpu_limit,
+        "mem_limit": mem_limit,
+        "expected_nano_cpus": expected_nano_cpus,
+        "actual_nano_cpus": actual_nano_cpus,
+        "expected_memory_bytes": expected_memory,
+        "actual_memory_bytes": actual_memory,
+        "stderr": (
+            started["stderr"][-400:]
+            or ((inspect_result or {}).get("stderr") or "")[-400:]
+            or None
+        ),
+    }
+
+
+def sforge_iptables_permission_probe() -> dict[str, Any]:
+    if not VENV_PYTHON.is_file():
+        return {"passed": False, "stderr": "benchmark virtualenv is missing"}
+    result = run_capture(
+        [
+            str(VENV_PYTHON),
+            "-c",
+            (
+                "from sforge.harness.network_isolation import "
+                "check_iptables_permission; "
+                "raise SystemExit(0 if check_iptables_permission() else 1)"
+            ),
+        ]
+    )
+    return {
+        "passed": result["returncode"] == 0,
+        "stderr": result["stderr"][-400:] or None,
+    }
+
+
 def task_config(task_id: str) -> dict[str, Any]:
     path = TASKS_DIR / f"{task_id}.json"
     if not path.is_file():
@@ -587,6 +924,34 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     def add(name: str, passed: bool, **details: Any) -> None:
         checks.append({"name": name, "passed": bool(passed), **details})
 
+    official_protocol: dict[str, Any] | None = None
+    try:
+        official_protocol = load_official_codex_protocol()
+        add(
+            "protocol:official-source",
+            True,
+            path=official_protocol["source"],
+            sha256=official_protocol["source_sha256"],
+            task_count=len(official_protocol["tasks"]),
+        )
+        missing_protocol_tasks = sorted(
+            set(profile["task_ids"]) - set(official_protocol["tasks"])
+        )
+        add(
+            "protocol:task-coverage",
+            not missing_protocol_tasks,
+            profile_task_count=len(profile["task_ids"]),
+            official_task_count=len(official_protocol["tasks"]),
+            missing_tasks=missing_protocol_tasks,
+        )
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        add(
+            "protocol:official-source",
+            False,
+            path=portable_path(OFFICIAL_CODEX_PROTOCOL_PATH),
+            error=str(exc),
+        )
+
     add(
         "checkout:edgebench",
         git_branch(EDGE_ROOT) == expected_edge and git_dirty(EDGE_ROOT) is False,
@@ -668,13 +1033,17 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         size=codex_runtime.stat().st_size if codex_runtime.is_file() else None,
     )
 
-    docker_info = run_capture(
-        ["docker", "info", "--format", "{{.Architecture}}"]
-    )
-    architecture = docker_info["stdout"].strip().lower()
+    docker_info = run_capture(["docker", "info", "--format", "{{json .}}"])
+    docker_details: dict[str, Any] = {}
+    if docker_info["returncode"] == 0:
+        try:
+            docker_details = json.loads(docker_info["stdout"])
+        except json.JSONDecodeError:
+            docker_details = {}
+    architecture = str(docker_details.get("Architecture") or "").lower()
     add(
         "docker:engine",
-        docker_info["returncode"] == 0,
+        docker_info["returncode"] == 0 and bool(docker_details),
         architecture=architecture or None,
         stderr=docker_info["stderr"][-400:] or None,
     )
@@ -686,6 +1055,9 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     )
 
     rust_archive: dict[str, Any] | None = None
+    resource_probe_image: str | None = None
+    effective_protocols: list[dict[str, Any]] = []
+    offline_task_ids: list[str] = []
 
     for task_id in profile["task_ids"]:
         task_path = TASKS_DIR / f"{task_id}.json"
@@ -700,6 +1072,22 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         if not task_path.is_file():
             continue
         config = task_config(task_id)
+        if official_protocol is not None:
+            try:
+                effective = official_task_protocol(
+                    official_protocol, task_id, config
+                )
+                effective_protocols.append(effective)
+                if effective["internet"] is False:
+                    offline_task_ids.append(task_id)
+                add(
+                    f"protocol-effective:{task_id}",
+                    True,
+                    internet=effective["internet"],
+                    submission_cooldown=effective["submission_cooldown"],
+                )
+            except ValueError as exc:
+                add(f"protocol-effective:{task_id}", False, error=str(exc))
         if config.get("base_image") == "rust" and rust_archive is None:
             rust_archive = rust_runtime_archive_status()
             rust_details = {
@@ -712,13 +1100,19 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                 bool(rust_archive["passed"]),
                 **rust_details,
             )
-        for image in task_images(task_id):
+        for image_index, image in enumerate(task_images(task_id)):
             inspected = run_capture(["docker", "image", "inspect", image])
             add(
                 f"image:{image}",
                 inspected["returncode"] == 0,
                 image=image,
             )
+            if (
+                image_index == 0
+                and inspected["returncode"] == 0
+                and resource_probe_image is None
+            ):
+                resource_probe_image = image
             if config.get("base_image") == "rust" and inspected["returncode"] == 0:
                 assert rust_archive is not None
                 version = str(rust_archive.get("version") or "")
@@ -742,6 +1136,54 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                     stdout=probe["stdout"][-400:] or None,
                     stderr=probe["stderr"][-400:] or None,
                 )
+
+    if effective_protocols:
+        work_cpu_limit = max(
+            max(int(item["work_cpu_limit"]), int(item["judge_cpu_limit"]))
+            for item in effective_protocols
+        )
+        work_mem_limit = max(
+            (
+                str(limit)
+                for item in effective_protocols
+                for limit in (item["work_mem_limit"], item["judge_mem_limit"])
+            ),
+            key=_docker_memory_bytes,
+        )
+        daemon_cpu_support = docker_details.get("CpuCfsQuota")
+        daemon_memory_support = docker_details.get("MemoryLimit")
+        daemon_resource_support = (
+            daemon_cpu_support is not False and daemon_memory_support is not False
+        )
+        if resource_probe_image:
+            resource_probe = docker_resource_limit_probe(
+                resource_probe_image,
+                cpu_limit=work_cpu_limit,
+                mem_limit=work_mem_limit,
+            )
+        else:
+            resource_probe = {
+                "passed": False,
+                "error": "no prepared Work image is available for the resource probe",
+            }
+        add(
+            "docker:official-resource-limits",
+            daemon_resource_support and bool(resource_probe["passed"]),
+            daemon_cpu_cfs_quota=daemon_cpu_support,
+            daemon_memory_limit=daemon_memory_support,
+            **{key: value for key, value in resource_probe.items() if key != "passed"},
+        )
+
+    if offline_task_ids:
+        isolation_probe = sforge_iptables_permission_probe()
+        add(
+            "network:offline-task-isolation",
+            bool(isolation_probe["passed"]),
+            mechanism="SForge passwordless sudo iptables allowlist",
+            offline_task_count=len(offline_task_ids),
+            sample_task=offline_task_ids[0],
+            stderr=isolation_probe.get("stderr"),
+        )
 
     return {
         "schema_version": 1,
@@ -768,6 +1210,7 @@ def sanitize_id(value: str) -> str:
 
 
 def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
+    official_protocol = load_official_codex_protocol()
     methods = args.method or list(profile["methods"])
     unknown = set(methods) - set(METHODS)
     if unknown:
@@ -780,6 +1223,9 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     )
     model = args.model or profile["model"]
     reasoning = args.reasoning_effort or profile.get("reasoning_effort", "high")
+    backend = str(profile.get("backend") or "docker")
+    judge_concurrency = int(profile.get("judge_concurrency", 1))
+    override_reasons = dict(profile["protocol_override_reasons"])
     if wall_time < 1 or concurrency < 1 or cell_concurrency < 1:
         raise ValueError(
             "wall time, concurrency, and cell concurrency must be positive"
@@ -798,6 +1244,17 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     cells: list[dict[str, Any]] = []
     for task_id in profile["task_ids"]:
         config = task_config(task_id)
+        official_effective = official_task_protocol(
+            official_protocol, task_id, config
+        )
+        official_contract = {
+            **official_effective,
+            "attempts_per_task": OFFICIAL_SCHEDULED_RUNS,
+            "cell_concurrency": None,
+            "judge_concurrency": None,
+            "model": official_protocol["official_model"],
+            "reasoning_effort": None,
+        }
         prompt = str(config["work"]["agent_query"])
         for method in methods:
             method_config = METHODS[method]
@@ -807,12 +1264,29 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 if method_config["outer_replicas"] == "concurrency"
                 else int(method_config["outer_replicas"])
             )
+            effective_contract = {
+                **official_effective,
+                "agent": method_config["agent"],
+                "attempts_per_task": outer_replicas,
+                "backend": backend,
+                "cell_concurrency": cell_concurrency,
+                "judge_concurrency": judge_concurrency,
+                "model": model,
+                "reasoning_effort": reasoning,
+                "timeout": wall_time,
+            }
+            protocol_diff = _protocol_diff(
+                official=official_contract,
+                effective=effective_contract,
+                reasons=override_reasons,
+            )
             cell = {
                 "schema_version": 1,
                 "cell_id": cell_id,
                 "task_id": task_id,
                 "method": method,
                 "sforge_agent": method_config["agent"],
+                "backend": backend,
                 "model": model,
                 "reasoning_effort": reasoning,
                 "wall_time_seconds": wall_time,
@@ -826,14 +1300,50 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                     wall_time,
                     int(profile.get("worker_runtime_seconds", wall_time)),
                 ),
-                "eval_interval_seconds": int(
-                    profile.get("eval_interval_seconds", 300)
-                ),
-                "judge_concurrency": int(profile.get("judge_concurrency", 1)),
+                "eval_interval_seconds": int(effective_contract["eval_interval"]),
+                "judge_concurrency": judge_concurrency,
                 "judge_port": int(profile.get("judge_port", 8080)),
-                "work_cpu_limit": profile.get("work_cpu_limit"),
-                "judge_cpu_limit": profile.get("judge_cpu_limit"),
-                "internet": bool(profile.get("internet", True)),
+                "work_cpu_limit": effective_contract["work_cpu_limit"],
+                "work_mem_limit": effective_contract["work_mem_limit"],
+                "judge_cpu_limit": effective_contract["judge_cpu_limit"],
+                "judge_mem_limit": effective_contract["judge_mem_limit"],
+                "submission_cooldown": effective_contract[
+                    "submission_cooldown"
+                ],
+                "max_submissions": effective_contract["max_submissions"],
+                "auto_eval_enabled": not effective_contract[
+                    "disable_auto_eval"
+                ],
+                "auto_resume_enabled": not effective_contract[
+                    "disable_auto_resume"
+                ],
+                "stop_hook_enabled": not effective_contract[
+                    "disable_stop_hook"
+                ],
+                "internet": effective_contract["internet"],
+                "internet_source": f"tasks/{task_id}.json",
+                "protocol_source": {
+                    "path": official_protocol["source"],
+                    "sha256": official_protocol["source_sha256"],
+                },
+                "official_defaults": official_protocol["defaults"],
+                "official_task_overrides": official_protocol["tasks"][task_id],
+                "official_effective_protocol": official_contract,
+                "effective_protocol": effective_contract,
+                "intentional_overrides": {
+                    entry["field"]: {
+                        "value": entry["effective"],
+                        "reason": entry["reason"],
+                    }
+                    for entry in protocol_diff
+                },
+                "protocol_diff": protocol_diff,
+                "protocol_classification": (
+                    "official_protocol"
+                    if not protocol_diff
+                    else "official_protocol_with_intentional_overrides"
+                ),
+                "official_edgebench_comparable": not protocol_diff,
                 "prompt_sha256": sha256_text(prompt),
                 "metric_direction": config["judge"].get("score_direction", "maximize"),
                 "sforge_run_id": sanitize_id(
@@ -851,6 +1361,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                     "task_id": task_id,
                     "method": method,
                     "state": "prepared",
+                    "official_edgebench_comparable": not protocol_diff,
                 }
             )
 
@@ -862,6 +1373,10 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "wall_time_seconds": wall_time,
         "concurrency": concurrency,
         "cell_concurrency": cell_concurrency,
+        "protocol_source": {
+            "path": official_protocol["source"],
+            "sha256": official_protocol["source_sha256"],
+        },
     }
     write_json(destination / "profile.json", snapshot)
     write_json(
@@ -890,6 +1405,16 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "wall_time_seconds": wall_time,
             "concurrency": concurrency,
             "cell_concurrency": cell_concurrency,
+            "protocol_source": {
+                "path": official_protocol["source"],
+                "sha256": official_protocol["source_sha256"],
+                "official_model": official_protocol["official_model"],
+                "stagger_seconds": official_protocol["stagger_seconds"],
+            },
+            "protocol_classification": "official_protocol_with_intentional_overrides",
+            "official_edgebench_comparable": all(
+                item["official_edgebench_comparable"] for item in cells
+            ),
             "cells": cells,
         },
     )
@@ -916,6 +1441,8 @@ def build_sforge_command(destination: Path, cell: dict[str, Any]) -> list[str]:
         "--tasks-dir",
         str(TASKS_DIR),
         "run",
+        "--backend",
+        str(cell.get("backend") or "docker"),
         "--task",
         str(cell["task_id"]),
         "--agent",
@@ -940,11 +1467,29 @@ def build_sforge_command(destination: Path, cell: dict[str, Any]) -> list[str]:
             or f"http://host.docker.internal:{cell.get('judge_port', 8080)}"
         ),
     ]
-    if cell.get("work_cpu_limit"):
+    if cell.get("work_cpu_limit") is not None:
         command.extend(["--work-cpu-limit", str(cell["work_cpu_limit"])])
-    if cell.get("judge_cpu_limit"):
+    if cell.get("work_mem_limit") is not None:
+        command.extend(["--work-mem-limit", str(cell["work_mem_limit"])])
+    if cell.get("judge_cpu_limit") is not None:
         command.extend(["--judge-cpu-limit", str(cell["judge_cpu_limit"])])
-    command.append("--enable-internet" if cell.get("internet", True) else "--disable-internet")
+    if cell.get("judge_mem_limit") is not None:
+        command.extend(["--judge-mem-limit", str(cell["judge_mem_limit"])])
+    if cell.get("submission_cooldown") is not None:
+        command.extend(
+            ["--submission-cooldown", str(cell["submission_cooldown"])]
+        )
+    if cell.get("max_submissions") is not None:
+        command.extend(["--max-submissions", str(cell["max_submissions"])])
+    if not cell.get("auto_eval_enabled", True):
+        command.append("--disable-auto-eval")
+    if not cell.get("auto_resume_enabled", True):
+        command.append("--disable-auto-resume")
+    if not cell.get("stop_hook_enabled", True):
+        command.append("--disable-stop-hook")
+    command.append(
+        "--enable-internet" if cell["internet"] else "--disable-internet"
+    )
     return command
 
 
@@ -957,15 +1502,35 @@ def cell_environment(
 ) -> dict[str, str]:
     env = dict(os.environ)
     configure_temp_environment(env)
-    for sforge_key, candidates in (
-        ("SFORGE_HTTP_PROXY", ("SFORGE_HTTP_PROXY", "HTTP_PROXY", "http_proxy")),
-        ("SFORGE_HTTPS_PROXY", ("SFORGE_HTTPS_PROXY", "HTTPS_PROXY", "https_proxy")),
-    ):
-        value = next((env[key] for key in candidates if env.get(key)), None)
-        if value:
-            env[sforge_key] = value.replace(
-                "127.0.0.1", "host.docker.internal"
-            ).replace("localhost", "host.docker.internal")
+    internet = bool(cell.get("internet", True))
+    if internet:
+        for sforge_key, candidates in (
+            (
+                "SFORGE_HTTP_PROXY",
+                ("SFORGE_HTTP_PROXY", "HTTP_PROXY", "http_proxy"),
+            ),
+            (
+                "SFORGE_HTTPS_PROXY",
+                ("SFORGE_HTTPS_PROXY", "HTTPS_PROXY", "https_proxy"),
+            ),
+        ):
+            value = next((env[key] for key in candidates if env.get(key)), None)
+            if value:
+                env[sforge_key] = value.replace(
+                    "127.0.0.1", "host.docker.internal"
+                ).replace("localhost", "host.docker.internal")
+    else:
+        for key in (
+            "ALL_PROXY",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "SFORGE_HTTP_PROXY",
+            "SFORGE_HTTPS_PROXY",
+            "all_proxy",
+            "http_proxy",
+            "https_proxy",
+        ):
+            env.pop(key, None)
     env.setdefault("SFORGE_NODEJS_MIRROR_URL", "https://npmmirror.com/mirrors/node")
     env.setdefault("SFORGE_NPM_REGISTRY_URL", "https://registry.npmmirror.com")
     if api_key:
@@ -1873,13 +2438,84 @@ def summarize_cell(destination: Path, cell: dict[str, Any]) -> dict[str, Any]:
         "valid_trajectories": len(valid),
         "observations": observations,
         "best": best,
+        "protocol_classification": cell.get("protocol_classification"),
+        "official_edgebench_comparable": cell.get(
+            "official_edgebench_comparable", False
+        ),
+        "protocol_diff": cell.get("protocol_diff", []),
+        "known_protocol_issue": paper_protocol_issue(cell),
         "finalized_at": utc_now(),
     }
     write_json(cell_path / "summary.json", summary)
     return summary
 
 
+def paper_protocol_issue(cell: dict[str, Any]) -> str | None:
+    task_id = str(cell["task_id"])
+    if task_id == "borden_source_inversion":
+        if cell.get("submission_cooldown") != 120:
+            return LEGACY_PAPER_PROTOCOL_ISSUES[task_id]
+    elif task_id == "exchange_core_throughput":
+        resources = (
+            cell.get("work_cpu_limit"),
+            cell.get("work_mem_limit"),
+            cell.get("judge_cpu_limit"),
+            cell.get("judge_mem_limit"),
+        )
+        if cell.get("internet") is not False or any(value is None for value in resources):
+            return LEGACY_PAPER_PROTOCOL_ISSUES[task_id]
+    elif task_id.startswith("schemathesis_"):
+        if cell.get("internet") is not False or cell.get("submission_cooldown") != 216:
+            return LEGACY_PAPER_PROTOCOL_ISSUES.get(task_id)
+    return None
+
+
 def render_comparison(payload: dict[str, Any]) -> str:
+    paper = payload["paper_reference"]
+    paper_source = paper["source"]
+    paper_contract = paper["reference"]
+    paper_tasks = paper["tasks"]
+    cells = payload["cells"]
+    models = sorted({str(cell.get("model") or "unknown") for cell in cells})
+    reasoning_levels = sorted(
+        {str(cell.get("reasoning_effort") or "unspecified") for cell in cells}
+    )
+    wall_times = sorted({int(cell["wall_time_seconds"]) for cell in cells})
+    valid_cells = sum(1 for cell in cells if int(cell.get("valid_trajectories") or 0) > 0)
+    protocol_evidence = sum(
+        1 for cell in cells if cell.get("protocol_classification") is not None
+    )
+    valid_pairs_by_method: dict[
+        str, list[tuple[str, float, float, float | None]]
+    ] = defaultdict(list)
+    for cell in cells:
+        current = (cell.get("best") or {}).get("edgebench_score")
+        reference = paper_tasks.get(cell["task_id"])
+        if current is not None and reference is not None:
+            valid_pairs_by_method[cell["method"]].append(
+                (
+                    cell["task_id"],
+                    float(current),
+                    float(reference["mean"]),
+                    float(reference["sample_stddev"])
+                    if reference.get("sample_stddev") is not None
+                    else None,
+                )
+            )
+    method_summaries: list[str] = []
+    for method, valid_pairs in sorted(valid_pairs_by_method.items()):
+        current_mean = sum(item[1] for item in valid_pairs) / len(valid_pairs)
+        paper_mean = sum(item[2] for item in valid_pairs) / len(valid_pairs)
+        review_count = sum(
+            1
+            for _, current, reference, _ in valid_pairs
+            if abs(current - reference) >= PAPER_LARGE_GAP_THRESHOLD_PP
+        )
+        method_summaries.append(
+            f"`{method}` over {len(valid_pairs)} tasks: current `{current_mean:.2f}`, "
+            f"paper GPT-5.5 `{paper_mean:.2f}`, delta "
+            f"`{current_mean - paper_mean:+.2f}` pp, {review_count} flagged gaps"
+        )
     lines = [
         f"# EdgeBench campaign: {payload['campaign_id']}",
         "",
@@ -1889,10 +2525,49 @@ def render_comparison(payload: dict[str, Any]) -> str:
             "one outer trajectory with K internal search workers."
         ),
         "",
-        "| Task | Method | T | K | Outer trajectories | Valid | Best raw | EdgeBench 0-100 | Evaluator calls | Runtime | Tokens | Usage coverage |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "## Paper reference boundary",
+        "",
+        (
+            "This is a diagnostic reference, not an apples-to-apples leaderboard "
+            "comparison. Current campaign contract: model(s) "
+            f"`{', '.join(models)}`, reasoning `{'/'.join(reasoning_levels)}`, wall "
+            f"budget(s) `{', '.join(str(value) for value in wall_times)}s`, and "
+            f"{valid_cells}/{len(cells)} cells with at least one valid score. "
+            f"Protocol metadata is available for {protocol_evidence}/{len(cells)} "
+            "cells; summaries without it are legacy development evidence."
+        ),
+        "",
+        (
+            f"The paper reference is {paper_contract['agent']} + "
+            f"{paper_contract['model']} at {paper_contract['budget_hours']}h: mean +/- "
+            f"sample standard deviation across {paper_contract['scheduled_runs']} "
+            "independent valid runs after per-run 0-100 rescaling. It comes from "
+            f"arXiv `{paper_source['arxiv_id']}` `{paper_source['source_file']}` "
+            f"(TeX SHA256 `{paper_source['source_file_sha256']}`)."
+        ),
+        "",
+        (
+            "Coverage-matched unweighted means by method: "
+            + "; ".join(method_summaries)
+            + f". The final `Issue marker` column always marks known protocol "
+            f"violations and flags otherwise unexplained `|delta| >= "
+            f"{PAPER_LARGE_GAP_THRESHOLD_PP:g}` pp; the gap threshold is a triage "
+            "heuristic, not a significance test."
+        ),
+        "",
+        (
+            "For positive flagged gaps, audit protocol-sensitive advantages first: "
+            "Internet access, CPU/memory quotas, submission cooldown, evaluator-call "
+            "frequency, hardware, and score mapping. For negative gaps, the 2h versus "
+            "12h budget and single-run variance are expected contributors, but wiring "
+            "and closeout still need inspection. Paper `s` is sample standard deviation, "
+            "not an acceptance interval."
+        ),
+        "",
+        "| Task | Method | T | K | Outer trajectories | Valid | Best raw | EdgeBench 0-100 | Paper Codex + GPT-5.5 @12h mean +/- s | Delta vs paper (pp) | Evaluator calls | Runtime | Tokens | Usage coverage | Issue marker |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
     ]
-    for cell in payload["cells"]:
+    for cell in cells:
         best = cell.get("best") or {}
         observations = cell.get("observations", [])
         evaluator_calls = sum(int(item.get("evaluator_calls") or 0) for item in observations)
@@ -1909,9 +2584,31 @@ def render_comparison(payload: dict[str, Any]) -> str:
                 coverage.add(str(usage["coverage"]))
         raw = best.get("raw_score", "-")
         normalized = best.get("edgebench_score", "-")
+        paper_score = paper_tasks[cell["task_id"]]
+        paper_display = f"{float(paper_score['mean']):.1f}"
+        if paper_score.get("sample_stddev") is not None:
+            paper_display += f" +/- {float(paper_score['sample_stddev']):.1f}"
+        if normalized == "-":
+            paper_delta = "-"
+            issue_marker = "**MISSING_CURRENT**"
+        else:
+            delta = float(normalized) - float(paper_score["mean"])
+            paper_delta = f"{delta:+.1f}"
+            known_issue = cell.get("known_protocol_issue")
+            if "known_protocol_issue" not in cell:
+                known_issue = LEGACY_PAPER_PROTOCOL_ISSUES.get(cell["task_id"])
+            if known_issue:
+                issue_marker = f"**KNOWN_PROTOCOL**: {known_issue}"
+            elif delta >= PAPER_LARGE_GAP_THRESHOLD_PP:
+                issue_marker = "**REVIEW_HIGH**"
+            elif delta <= -PAPER_LARGE_GAP_THRESHOLD_PP:
+                issue_marker = "**REVIEW_LOW**"
+            else:
+                issue_marker = "-"
         lines.append(
             "| {task} | {method} | {time} | {concurrency} | {outer} | {valid} | "
-            "{raw} | {normalized} | {calls} | {runtime:.1f}s | {tokens} | {coverage} |".format(
+            "{raw} | {normalized} | {paper} | {delta} | {calls} | "
+            "{runtime:.1f}s | {tokens} | {coverage} | {issue_marker} |".format(
                 task=cell["task_id"],
                 method=cell["method"],
                 time=cell["wall_time_seconds"],
@@ -1920,6 +2617,9 @@ def render_comparison(payload: dict[str, Any]) -> str:
                 valid=cell["valid_trajectories"],
                 raw=raw,
                 normalized=normalized,
+                paper=paper_display,
+                delta=paper_delta,
+                issue_marker=issue_marker,
                 calls=evaluator_calls,
                 runtime=runtime,
                 tokens=f"{input_tokens}/{output_tokens}",
@@ -1939,6 +2639,15 @@ def render_comparison(payload: dict[str, Any]) -> str:
 
 def finalize_campaign(destination: Path) -> dict[str, Any]:
     campaign = read_json(destination / "campaign.json")
+    paper_reference = load_paper_reference()
+    missing_paper_tasks = sorted(
+        set(campaign["task_ids"]) - set(paper_reference["tasks"])
+    )
+    if missing_paper_tasks:
+        raise ValueError(
+            "paper GPT-5.5 reference is missing campaign tasks: "
+            + ", ".join(missing_paper_tasks)
+        )
     summaries: list[dict[str, Any]] = []
     for item in campaign["cells"]:
         cell_path = destination / "cells" / item["cell_id"]
@@ -1961,6 +2670,7 @@ def finalize_campaign(destination: Path) -> dict[str, Any]:
         "edgebench_commit": campaign.get("edgebench_commit"),
         "goal_plus_commit": campaign.get("goal_plus_commit"),
         "dataset_revision": campaign.get("dataset_revision"),
+        "paper_reference": paper_reference,
         "cells": summaries,
         "finalized_at": utc_now(),
     }

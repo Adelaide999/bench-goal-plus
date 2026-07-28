@@ -1,5 +1,26 @@
 # EdgeBench 官方协议对齐 TODO
 
+## 2026-07-27 实现状态
+
+控制面映射已完成，适用于新建 campaign：
+
+- `prepare` 安全读取官方 Codex YAML，验证 51-task coverage，只保留 allowlisted
+  protocol 字段并记录 source SHA256；
+- 每题继承官方 defaults/override 与 task JSON 自有的 `internet`，不再使用全局
+  `internet=true`；
+- CPU/memory、cooldown（包括 `0`）、lifecycle 和 network flag 已映射到 SForge
+  命令；
+- cell manifest 记录 official/effective protocol、逐字段 diff、reason 和
+  `official_edgebench_comparable`；
+- `doctor` 用 disposable Work container 验证 Docker CPU/memory HostConfig，并调用
+  SForge `check_iptables_permission()` 验证离线任务的网络隔离前提；
+- model-free 51-task dry-run 已验证 50 个 `--disable-internet`、1 个
+  `--enable-internet`，以及 D-ABIC/Schemathesis/game/graph/Lean/SMT override。
+
+当前主机尚不能执行协议对齐 run：rootless Docker 报告
+`CpuCfsQuota=false`，且 `sudo -n iptables` 需要密码。剩余工作是修复主机能力后执行
+本文末尾的真实 lifecycle smoke；旧 campaign 不回写、不重标。
+
 ## 背景
 
 当前开发 campaign

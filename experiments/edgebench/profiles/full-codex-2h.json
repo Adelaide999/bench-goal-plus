@@ -2,6 +2,8 @@
   "schema_version": 1,
   "id": "full-codex-2h",
   "description": "All 51 public EdgeBench tasks, two concurrent Plain Codex cells, two hours per task.",
+  "protocol_source": "edgebench-official-codex",
+  "backend": "docker",
   "dataset_repository": "ByteDance-Seed/EdgeBench",
   "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
   "registry": "seededge",
@@ -67,8 +69,15 @@
   "concurrency": 1,
   "cell_concurrency": 2,
   "worker_runtime_seconds": 7200,
-  "eval_interval_seconds": 1800,
   "judge_concurrency": 1,
   "judge_port": 8080,
-  "internet": true
+  "protocol_override_reasons": {
+    "backend": "local development uses the Docker backend instead of the official Kubernetes backend",
+    "model": "the development campaign evaluates gpt-5.6-sol instead of the paper model",
+    "reasoning_effort": "reasoning effort is pinned explicitly for reproducibility",
+    "timeout": "the development campaign uses a two-hour task budget instead of twelve hours",
+    "attempts_per_task": "the development campaign runs one independent trajectory per task instead of three",
+    "cell_concurrency": "the local controller runs at most two different tasks concurrently",
+    "judge_concurrency": "the local shared Judge serializes ephemeral Judge containers"
+  }
 }

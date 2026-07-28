@@ -34,6 +34,12 @@ images。`doctor` 检查：
 - SForge entrypoint；
 - Codex auth 文件存在性，但不读取或记录其内容；
 - Docker daemon 与 `linux/amd64`；
+- 官方 Codex YAML 的 source SHA256、51-task coverage，以及 profile 中每题的
+  effective protocol；
+- 用一个自动回收的 Work container 实测官方 CPU/memory limit 已由 Docker 接受并
+  写入 HostConfig；
+- profile 含 `internet=false` 任务时，调用 SForge 自身的 preflight 验证
+  passwordless `sudo iptables` 权限；
 - HuggingFace dataset revision；
 - profile 中每题的精确 work/judge image tag。
 - profile 含 Rust 任务时，启动实际 Work/Judge image，用非登录 shell 核对
@@ -84,6 +90,14 @@ runs/edgebench/vliw-matched-01/
         └── sforge/runs/...     SForge 原始运行目录
 ```
 
+每个 cell 从 managed EdgeBench checkout 的官方
+`examples/all-tasks-k8s/experiment-codex.yaml` 继承 eval interval、Work/Judge
+CPU 与 memory、submission cooldown 和 task override，再从 task JSON 继承
+`internet`。官方配置文件路径、SHA256、resolved defaults/override、effective
+protocol 和逐字段 diff 都写入 manifest；loader 不保留 YAML 的 `env` 或
+`model.api_key`。当前开发 profile 只允许显式改变 agent、backend、model、reasoning、
+timeout、attempt 数和控制面并发字段。
+
 `concurrency=K` 控制同一题内的 Plain Codex replicas 或 Goal Plus workers；
 `cell_concurrency` 控制同时运行的不同 task × method cells，默认是 1。为了避免
 无意中把两个并发层相乘，需要跨题并行时应在同一个 campaign profile 中显式设置
@@ -108,9 +122,10 @@ manifest 或命令记录。`college_english_exam_bank` 的 Judge 使用同一 AP
 ```
 
 该 profile 固定 `concurrency=1`、`cell_concurrency=2`，即每题一个 Codex
-trajectory、同时跑两道不同题。它不设置 Docker CPU quota；在不支持 CFS quota
-的 rootless daemon 上，两个 Work cell 和 Judge 使用宿主可调度 CPU，结果必须
-记录为无 CPU quota 的本机运行。
+trajectory、同时跑两道不同题。它仍继承官方每题 CPU/memory quota、cooldown 和
+联网策略；不支持 CFS quota 或无法执行 SForge iptables isolation 的 Docker 主机
+会令 `doctor` 失败，不能继续作为协议对齐实验。此时应修复 cgroup delegation 与
+passwordless iptables、改用能执行这些限制的 Docker，或使用官方 K8s backend。
 
 ## 监控、停止与恢复
 
@@ -153,6 +168,13 @@ fork 内的官方 score reporter，保留：
 - evaluator calls；
 - Codex input/cached/output tokens 与 coverage；
 - Goal Plus search runs、candidates、agent sessions 和 worker verifier runs。
+
+Markdown 汇总还会加载带 source tar/TeX SHA256 的论文参考快照，逐题显示
+Codex + GPT-5.5 的 12 小时、3 次独立 run 的 `mean +/- sample stddev`、本次差值，
+并用 `REVIEW` 标记绝对差至少 20 个百分点的排查项。该列只用于诊断；开发 campaign
+与论文在模型、时间和 run 数上不同，不构成 leaderboard 同口径比较。2026-07-24
+完成的 51-task campaign 还使用了旧的全局联网/无配额/无 cooldown 配置；它保持为
+development evidence，不会因后续修复而被回写为官方可比结果。
 
 Fork 让 Codex 以 JSONL 输出，并在容器 closeout 时只归档
 `~/.codex/sessions/`，不复制 auth/config。若旧 run 没有这些 artifacts，

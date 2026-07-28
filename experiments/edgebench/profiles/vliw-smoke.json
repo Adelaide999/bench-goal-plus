@@ -2,6 +2,8 @@
   "schema_version": 1,
   "id": "vliw-smoke",
   "description": "CPU-only EdgeBench wiring smoke for Plain Codex and Goal Plus + Codex.",
+  "protocol_source": "edgebench-official-codex",
+  "backend": "docker",
   "dataset_repository": "ByteDance-Seed/EdgeBench",
   "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
   "registry": "seededge",
@@ -17,8 +19,16 @@
   "wall_time_seconds": 300,
   "concurrency": 2,
   "worker_runtime_seconds": 240,
-  "eval_interval_seconds": 120,
   "judge_concurrency": 1,
   "judge_port": 8080,
-  "internet": true
+  "protocol_override_reasons": {
+    "agent": "the smoke includes Goal Plus wiring in addition to the official plain Codex agent",
+    "backend": "the local smoke uses Docker instead of the official Kubernetes backend",
+    "model": "the smoke uses the selected development model",
+    "reasoning_effort": "reasoning effort is pinned explicitly for reproducibility",
+    "timeout": "the lifecycle smoke uses a five-minute task budget",
+    "attempts_per_task": "the smoke concurrency is a wiring check rather than three paper trajectories",
+    "cell_concurrency": "the local controller runs one task-method cell at a time",
+    "judge_concurrency": "the local shared Judge serializes ephemeral Judge containers"
+  }
 }
