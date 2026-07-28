@@ -29,6 +29,7 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     codex_provider_args,
     collect_goal_plus_state,
     commit_workspace,
+    configure_isolated_codex_home,
     copy_goal_plus_assets,
     finalize_goal_plus_search,
     goal_plus_incomplete_reason,
@@ -148,6 +149,10 @@ def prepare(args: argparse.Namespace) -> int:
     exploration_seconds = args.wall_time_seconds - args.soft_closeout_seconds
     if not 1 <= args.worker_runtime_seconds <= exploration_seconds:
         raise ValueError("worker runtime must fit inside the exploration budget")
+    if args.worker_min_runtime_seconds is not None and not (
+        1 <= args.worker_min_runtime_seconds <= args.worker_runtime_seconds
+    ):
+        raise ValueError("worker minimum runtime must fit inside the worker budget")
     environment = load_json(args.environment_manifest)
     upstreams = environment["upstreams"]
     checkout_root = args.checkout_root.expanduser().absolute()
@@ -233,7 +238,9 @@ def prepare(args: argparse.Namespace) -> int:
             concurrency=args.concurrency,
             worker_host="codex",
             worker_model=args.model,
+            reasoning_effort=args.reasoning_effort,
             worker_runtime_seconds=args.worker_runtime_seconds,
+            worker_min_runtime_seconds=args.worker_min_runtime_seconds,
         )
         (workspace / "GOAL.md").write_text(goal_prompt)
         workspaces.append(workspace)
@@ -331,6 +338,7 @@ def prepare(args: argparse.Namespace) -> int:
             "soft_closeout_seconds": args.soft_closeout_seconds,
             "hard_kill_grace_seconds": args.hard_kill_grace_seconds,
             "worker_runtime_seconds": args.worker_runtime_seconds,
+            "worker_min_runtime_seconds": args.worker_min_runtime_seconds,
             "iterations_ceiling": args.iterations_ceiling,
         },
         "task": {
@@ -451,6 +459,7 @@ def codex_command(
     workspace: Path,
     output_last_message: Path,
     model: str,
+    reasoning_effort: str,
     api_base: str | None,
     sandbox: str,
     goal_plus: bool,
@@ -466,12 +475,17 @@ def codex_command(
         str(workspace),
         "--output-last-message",
         str(output_last_message),
-        "--ignore-user-config",
-        "--color",
-        "never",
-        "--config",
-        f'model_reasoning_effort="{DEFAULT_REASONING_EFFORT}"',
     ]
+    if not goal_plus:
+        command.append("--ignore-user-config")
+    command.extend(
+        [
+            "--color",
+            "never",
+            "--config",
+            f'model_reasoning_effort="{reasoning_effort}"',
+        ]
+    )
     if not goal_plus:
         command.extend(["--config", 'approval_policy="never"'])
     if ephemeral:
@@ -518,6 +532,9 @@ def execute_plain(
             workspace=workspace,
             output_last_message=lane_dir / "final-message.txt",
             model=args.model,
+            reasoning_effort=manifest.get(
+                "reasoning_effort", DEFAULT_REASONING_EFFORT
+            ),
             api_base=args.api_base,
             sandbox=CODEX_SANDBOX,
             goal_plus=False,
@@ -622,6 +639,7 @@ def execute_goal_plus(
     environment["GOAL_PLUS_VERIFIER_TMPDIR"] = str(
         run_dir / "controller-runtime/goal-plus"
     )
+    configure_isolated_codex_home(environment, run_dir)
     prompt = render_goal(
         task_text=(workspace / "TASK.md").read_text(),
         artifact_name=ARTIFACT_NAME,
@@ -632,7 +650,11 @@ def execute_goal_plus(
         concurrency=budget["concurrency"],
         worker_host="codex",
         worker_model=args.model,
+        reasoning_effort=manifest.get(
+            "reasoning_effort", DEFAULT_REASONING_EFFORT
+        ),
         worker_runtime_seconds=budget["worker_runtime_seconds"],
+        worker_min_runtime_seconds=budget.get("worker_min_runtime_seconds"),
         verifier_timeout_seconds=VERIFIER_TIMEOUT_SECONDS,
     )
     (run_dir / "prompt.md").write_text(prompt)
@@ -641,6 +663,9 @@ def execute_goal_plus(
         workspace=workspace,
         output_last_message=run_dir / "final-message.txt",
         model=args.model,
+        reasoning_effort=manifest.get(
+            "reasoning_effort", DEFAULT_REASONING_EFFORT
+        ),
         api_base=args.api_base,
         sandbox=CODEX_SANDBOX,
         goal_plus=True,
@@ -1017,6 +1042,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--soft-closeout-seconds", type=int, default=60)
     prepare_parser.add_argument("--hard-kill-grace-seconds", type=int, default=30)
     prepare_parser.add_argument("--worker-runtime-seconds", type=int, default=120)
+    prepare_parser.add_argument("--worker-min-runtime-seconds", type=int)
     prepare_parser.add_argument("--iterations-ceiling", type=int, default=1)
     prepare_parser.add_argument("--seed", type=int, default=1)
     prepare_parser.add_argument(

@@ -48,6 +48,35 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
         experiment.configure_adapter("heurigym")
         self.assertTrue(experiment.OFFICIAL_BENCHMARK_COMPARABLE)
 
+    def test_goal_plus_codex_loads_project_hooks_from_an_isolated_home(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = Path(temporary) / "run"
+            run_dir.mkdir()
+            environment = {"CODEX_HOME": "/personal/codex-home"}
+            codex_home = openevolve_experiment.configure_isolated_codex_home(
+                environment, run_dir
+            )
+
+            self.assertEqual(environment["CODEX_HOME"], str(codex_home))
+            self.assertEqual(codex_home.parent, run_dir / "controller-runtime")
+            self.assertEqual(list(codex_home.iterdir()), [])
+
+            common = {
+                "codex_bin": "codex",
+                "workspace": Path("workspace"),
+                "output_last_message": Path("final-message.txt"),
+                "model": "gpt-5.6-terra",
+                "reasoning_effort": "medium",
+                "api_base": "http://proxy.example/v1",
+                "sandbox": "workspace-write",
+                "ephemeral": False,
+            }
+            goal_plus = experiment.codex_command(goal_plus=True, **common)
+            plain = experiment.codex_command(goal_plus=False, **common)
+            self.assertNotIn("--ignore-user-config", goal_plus)
+            self.assertIn("--ignore-user-config", plain)
+            self.assertIn('model_reasoning_effort="medium"', goal_plus)
+
     def test_autolab_parser_requires_successful_verification(self) -> None:
         self.assertEqual(autolab.parse_result("cycles=1547 verify=ok"), (1547, True))
         self.assertEqual(

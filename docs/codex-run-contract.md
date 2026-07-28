@@ -26,7 +26,8 @@ Goal Plus 位于 controller 层：选择父候选、创建独立 workspace、启
 - `--cd` 固定工作根目录；默认要求它是 Git 仓库。
 - `--output-last-message` 单独保存最终消息。
 - `codex exec resume <thread-id>` 可续接既有 session。
-- `--ignore-user-config` 可避免个人 `config.toml` 影响可复现实验；项目 `AGENTS.md` 仍用于任务约束。
+- Plain Codex 使用 `--ignore-user-config`，避免个人 `config.toml` 影响可复现实验；项目 `AGENTS.md` 仍用于任务约束。
+- Goal Plus + Codex 使用 run 内独立的 `CODEX_HOME`，不继承个人配置，同时保留项目 `.codex/config.toml` 和 `.codex/hooks.json`；`--ignore-user-config` 会连项目 Hook 一起跳过，因此该模式不得使用。
 
 中央 runner 的初始命令形态：
 
