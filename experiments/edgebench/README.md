@@ -80,7 +80,7 @@ runs/edgebench/vliw-matched-01/
 ├── profile.json
 ├── controller.log
 ├── comparison.json
-├── comparison.md
+├── <campaign-id>.xlsx
 └── cells/
     └── <task>--<method>/
         ├── cell.json
@@ -225,6 +225,33 @@ watcher，精确的 game-mode 中间分无法事后恢复，`extract` 会明确�
 
 这些小于 2 小时的曲线是本地开发 checkpoint，不自动声称可与公开 reference
 curve 比较；正式对比仍需先对齐 task revision、环境、`T` 和 `K`。
+
+若要把多批半小时和一小时 checkpoint 汇成可复用 fast-test reference，必须
+显式列出输入，不能隐式扫描本机 `runs/`。收集器只接受 `strict_checkpoint=true`、
+`valid=true` 且有合法 0–100 分数的行；同一任务优先使用带协议证据的 campaign，
+再在同一证据等级内取最高分。边界是 inclusive，分别表示 `<=0.5h` 和 `<=1h`；
+边界之后产生的 submission 不纳入，但已在边界内提交的候选允许稍后完成 Judge：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/timecurve.py \
+  collect-fast-reference \
+  --timecurve runs/edgebench/<campaign-a>/timecurve/timecurve.json \
+  --timecurve runs/edgebench/<campaign-b>/timecurve/timecurve.json \
+  --checkpoint-hours 0.5 1 \
+  --model gpt-5.6-sol \
+  --reasoning-effort medium \
+  --output runs/edgebench/local-fast-reference/reference.json
+```
+
+将 reference 显式加入最终 XLSX；`comparison.json` 会保存完整 reference 和来源，
+主表只显示 checkpoint、local best 与当前结果差值，详细证据位于 `Local Fast`
+sheet：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/experiment.py finalize \
+  --campaign <campaign-id> \
+  --local-fast-reference runs/edgebench/local-fast-reference/reference.json
+```
 
 ## Profile 扩展
 
