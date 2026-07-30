@@ -1410,6 +1410,26 @@ def _existing_promotion(
     return run_data, candidate_id, selection, {"artifact_path": str(patch_path)}
 
 
+def _existing_selection(
+    run_path: Path,
+) -> tuple[dict[str, Any], str, dict[str, Any]] | None:
+    run_data = load_json(run_path)
+    if run_data.get("state") != "ready_to_promote":
+        return None
+    candidate_id = run_data.get("selected_candidate_id")
+    if not candidate_id:
+        raise RuntimeError("ready-to-promote Search run has no selected candidate")
+    selection = {
+        "selected_candidate_id": candidate_id,
+        "selected_score": run_data.get("selected_score"),
+        "selected_iteration": run_data.get("selected_iteration"),
+        "selected_git_head": run_data.get("selected_git_head"),
+        "selected_artifact_hash": run_data.get("selected_artifact_hash"),
+        "reused_existing_selection": True,
+    }
+    return run_data, candidate_id, selection
+
+
 def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
     """Controller-owned post-deadline drain/select/promote, outside search T."""
     from goal_plus.goal_plus import FileGoalPlusRuntime
@@ -1452,23 +1472,33 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
                 run_data, candidate_id, selection, promotion = existing
             else:
                 try:
-                    for candidate_path in candidate_paths:
-                        candidate = load_json(candidate_path)
-                        if not candidate.get("iterations"):
-                            tools.search_run_verifier(
-                                run_id,
-                                candidate["candidate_id"],
-                                hypothesis="controller post-deadline final verification",
-                            )
-                            verified_in_closeout.append(candidate["candidate_id"])
-                    selection = tools.search_select(run_id)
-                    candidate_id = selection["selected_candidate_id"]
+                    selected = _existing_selection(run_path)
+                    if selected is None:
+                        for candidate_path in candidate_paths:
+                            candidate = load_json(candidate_path)
+                            if not candidate.get("iterations"):
+                                tools.search_run_verifier(
+                                    run_id,
+                                    candidate["candidate_id"],
+                                    hypothesis="controller post-deadline final verification",
+                                )
+                                verified_in_closeout.append(candidate["candidate_id"])
+                        selection = tools.search_select(run_id)
+                        candidate_id = selection["selected_candidate_id"]
+                        run_data = load_json(run_path)
+                    else:
+                        run_data, candidate_id, selection = selected
                     promotion = tools.search_promote(run_id, candidate_id)
                 except RuntimeError:
                     existing = _existing_promotion(run_path)
-                    if existing is None:
-                        raise
-                    run_data, candidate_id, selection, promotion = existing
+                    if existing is not None:
+                        run_data, candidate_id, selection, promotion = existing
+                    else:
+                        selected = _existing_selection(run_path)
+                        if selected is None:
+                            raise
+                        run_data, candidate_id, selection = selected
+                        promotion = tools.search_promote(run_id, candidate_id)
             patch_status = apply_promotion_patch(
                 Path(run_data["source_path"]), Path(promotion["artifact_path"])
             )

@@ -447,7 +447,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             run_path = run_dir / "run.json"
             run_data = {
                 "run_id": "run_test",
-                "state": "ready_to_promote",
+                "state": "waiting_for_workers",
                 "source_path": str(workspace),
                 "selected_candidate_id": "c001",
                 "selected_score": 2.0,
@@ -498,6 +498,73 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             )
             apply_patch.assert_called_once_with(workspace, patch_path)
             tools.search_promote.assert_not_called()
+
+    def test_controller_closeout_reuses_selection_completed_before_closeout(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "workspace"
+            workspace.mkdir()
+            root = workspace / ".gp"
+            goal_dir = root / "goal-plus/gp_0001"
+            run_dir = root / "runs/run_test"
+            candidate_dir = run_dir / "candidates/c001"
+            promotion_dir = run_dir / "promotion"
+            goal_dir.mkdir(parents=True)
+            candidate_dir.mkdir(parents=True)
+            promotion_dir.mkdir()
+            (goal_dir / "goal.json").write_text("{}\n")
+            run_path = run_dir / "run.json"
+            run_path.write_text(
+                json.dumps(
+                    {
+                        "run_id": "run_test",
+                        "state": "ready_to_promote",
+                        "source_path": str(workspace),
+                        "selected_candidate_id": "c001",
+                        "selected_score": 2.0,
+                        "selected_iteration": 1,
+                    }
+                )
+                + "\n"
+            )
+            (candidate_dir / "candidate.json").write_text(
+                json.dumps({"candidate_id": "c001", "iterations": [{}]}) + "\n"
+            )
+            patch_path = promotion_dir / "c001.patch"
+            patch_path.write_text("promotion\n")
+
+            goal = mock.Mock()
+            goal.goal_plus_id = "gp_0001"
+            goal.linked_search.run_id = "run_test"
+            goal.linked_search.selected_candidate_id = None
+            goal.status = "active"
+            goal_runtime = mock.Mock()
+            goal_runtime.status.return_value = goal
+            tools = mock.Mock()
+            tools.search_promote.return_value = {"artifact_path": str(patch_path)}
+            tools.search_report.return_value = {"report_path": "report.md"}
+
+            with (
+                mock.patch(
+                    "goal_plus.goal_plus.FileGoalPlusRuntime",
+                    return_value=goal_runtime,
+                ),
+                mock.patch("goal_plus.runtime.FileSearchRuntime"),
+                mock.patch("goal_plus.tools.SearchTools", return_value=tools),
+                mock.patch.object(
+                    experiment, "apply_promotion_patch", return_value="applied"
+                ),
+            ):
+                result = experiment.finalize_goal_plus_search(workspace)
+
+            self.assertTrue(result["completed"], result)
+            self.assertTrue(
+                result["runs"][0]["selection"]["reused_existing_selection"]
+            )
+            tools.search_select.assert_not_called()
+            tools.search_run_verifier.assert_not_called()
+            tools.search_promote.assert_called_once_with("run_test", "c001")
 
     def test_evaluator_budget_snapshot_uses_controller_runtime_at_t0(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
