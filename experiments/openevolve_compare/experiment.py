@@ -62,6 +62,7 @@ REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 CODEX_SANDBOX = "danger-full-access"
 CODEX_PROVIDER_ID = "bench_proxy"
 PI_PROVIDER_ID = "bench-openai"
+ANNOTATOR_PROVIDER_ID = "bench_evidence"
 
 
 def utc_now() -> str:
@@ -357,11 +358,26 @@ def codex_execution_args() -> list[str]:
 
 def codex_goal_plus_mcp_args() -> list[str]:
     """Register and non-interactively approve Goal Plus for `codex exec`."""
+    env_vars = [
+        "CODEX_HOME",
+        "OPENAI_API_KEY",
+        "SFORGE_AGENT_API_KEY",
+        "GOAL_PLUS_OUTER_DEADLINE_AT",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API",
+    ]
     return [
         "--config",
         'mcp_servers.goal-plus.command="goal-plus"',
         "--config",
         'mcp_servers.goal-plus.args=["--root", ".gp"]',
+        "--config",
+        f"mcp_servers.goal-plus.env_vars={json.dumps(env_vars)}",
         "--config",
         "mcp_servers.goal-plus.startup_timeout_sec=10",
         "--config",
@@ -381,6 +397,31 @@ def configure_isolated_codex_home(
     codex_home.mkdir(parents=True, exist_ok=False)
     environment["CODEX_HOME"] = str(codex_home)
     return codex_home
+
+
+def configure_evidence_annotator_environment(
+    environment: dict[str, str],
+    *,
+    model: str,
+    reasoning_effort: str,
+    api_base: str | None,
+) -> None:
+    environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"] = model
+    environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT"] = (
+        reasoning_effort
+    )
+    if api_base:
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL"] = api_base
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID"] = (
+            ANNOTATOR_PROVIDER_ID
+        )
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME"] = (
+            "Benchmark Evidence provider"
+        )
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV"] = (
+            "OPENAI_API_KEY"
+        )
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API"] = "responses"
 
 
 def write_pi_models_config(
@@ -1007,6 +1048,36 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
         "models": sorted(models),
         "providers": sorted(providers),
         "coverage": "top-level Pi JSON usage plus Goal Plus worker metadata under workspace/.gp",
+    }
+
+
+def collect_evidence_annotator_usage(workspace: Path) -> dict[str, Any]:
+    totals: dict[str, int | float] = {}
+    tasks = 0
+    attempts = 0
+    states: dict[str, int] = {}
+    for path in sorted(
+        (workspace / ".gp" / "runs").glob(
+            "run_*/candidates/*/evidence-annotations/iteration-*.json"
+        )
+    ):
+        task = load_json(path)
+        tasks += 1
+        attempts += int(task.get("attempts") or 0)
+        state = str(task.get("state") or "unknown")
+        states[state] = states.get(state, 0) + 1
+        usage = task.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        for key, value in usage.items():
+            if isinstance(value, (int, float)):
+                totals[key] = totals.get(key, 0) + value
+    return {
+        **totals,
+        "tasks": tasks,
+        "attempts": attempts,
+        "states": states,
+        "coverage": "persisted Goal Plus Evidence annotator turns",
     }
 
 
@@ -1689,8 +1760,14 @@ def execute(args: argparse.Namespace) -> int:
     environment = configure_temp_environment(os.environ.copy())
     bin_dir = runtime_bin(args.venv.expanduser().absolute())
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
-    if method == "goal-plus-codex":
+    if method in {"goal-plus-codex", "goal-plus-pi"}:
         configure_isolated_codex_home(environment, run_dir)
+        configure_evidence_annotator_environment(
+            environment,
+            model=args.model,
+            reasoning_effort=reasoning_effort,
+            api_base=args.api_base,
+        )
 
     if args.api_base and not environment.get("OPENAI_API_KEY"):
         raise RuntimeError(
@@ -2120,6 +2197,9 @@ def execute(args: argparse.Namespace) -> int:
         )
         control["evaluator_calls"] = evaluator_calls
         control["goal_plus"] = collect_goal_plus_state(workspace)
+        control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
+            workspace
+        )
         if control["hard_killed"]:
             control["result_incomplete_reason"] = (
                 f"{method} process group exceeded the shutdown grace"
@@ -2214,6 +2294,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
         workspace
     )
     control["goal_plus"] = collect_goal_plus_state(workspace)
+    control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
+        workspace
+    )
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=manifest["budget"]["concurrency"],

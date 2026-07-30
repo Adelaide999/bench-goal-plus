@@ -74,6 +74,12 @@ def collect_usage(execution: dict[str, Any]) -> dict[str, Any]:
     if isinstance(pi, dict) and isinstance(pi.get("usage"), dict):
         usages.append(pi["usage"])
         coverage = pi.get("coverage", coverage)
+    annotator = execution.get("evidence_annotator_usage")
+    if isinstance(annotator, dict):
+        usages.append(annotator)
+        coverage = (
+            "top-level agent usage plus persisted Goal Plus Evidence annotator turns"
+        )
 
     aliases = {
         "input_tokens": ("input_tokens", "input"),
@@ -81,7 +87,7 @@ def collect_usage(execution: dict[str, Any]) -> dict[str, Any]:
         "output_tokens": ("output_tokens", "output"),
         "reasoning_output_tokens": ("reasoning_output_tokens",),
     }
-    totals: dict[str, int] = {}
+    totals: dict[str, int | float] = {}
     for target, candidates in aliases.items():
         total = 0
         found = False
@@ -94,6 +100,13 @@ def collect_usage(execution: dict[str, Any]) -> dict[str, Any]:
                     break
         if found:
             totals[target] = total
+    costs = [
+        numeric(usage.get("cost_usd"))
+        for usage in usages
+        if numeric(usage.get("cost_usd")) is not None
+    ]
+    if costs:
+        totals["cost_usd"] = sum(float(value) for value in costs)
     return {
         **totals,
         "coverage": coverage

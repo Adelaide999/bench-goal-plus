@@ -473,6 +473,54 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn('wire_api="responses"', joined)
         self.assertIn('env_key="OPENAI_API_KEY"', joined)
 
+    def test_evidence_annotator_uses_benchmark_provider_and_persisted_usage(
+        self,
+    ) -> None:
+        environment: dict[str, str] = {}
+        experiment.configure_evidence_annotator_environment(
+            environment,
+            model="gpt-test",
+            reasoning_effort="medium",
+            api_base="http://proxy.example/v1",
+        )
+        self.assertEqual(
+            environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"], "gpt-test"
+        )
+        self.assertEqual(
+            environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL"],
+            "http://proxy.example/v1",
+        )
+        self.assertEqual(
+            environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID"],
+            experiment.ANNOTATOR_PROVIDER_ID,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            task_dir = (
+                workspace
+                / ".gp/runs/run_test/candidates/c001/evidence-annotations"
+            )
+            task_dir.mkdir(parents=True)
+            (task_dir / "iteration-0001.json").write_text(
+                json.dumps(
+                    {
+                        "state": "completed",
+                        "attempts": 1,
+                        "usage": {
+                            "input_tokens": 11,
+                            "output_tokens": 4,
+                            "cost_usd": 0.0012,
+                        },
+                    }
+                )
+            )
+            usage = experiment.collect_evidence_annotator_usage(workspace)
+        self.assertEqual(usage["input_tokens"], 11)
+        self.assertEqual(usage["output_tokens"], 4)
+        self.assertEqual(usage["cost_usd"], 0.0012)
+        self.assertEqual(usage["states"], {"completed": 1})
+
     def test_codex_model_args_pin_native_auth_model_and_reasoning(self) -> None:
         args = experiment.codex_model_args("gpt-5.6-terra", None)
         joined = "\n".join(args)
@@ -498,6 +546,15 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             'mcp_servers.goal-plus.default_tools_approval_mode="approve"', joined
         )
         self.assertIn("mcp_servers.goal-plus.enabled=true", joined)
+        self.assertIn("mcp_servers.goal-plus.env_vars=", joined)
+        for variable in (
+            "CODEX_HOME",
+            "OPENAI_API_KEY",
+            "SFORGE_AGENT_API_KEY",
+            "GOAL_PLUS_OUTER_DEADLINE_AT",
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL",
+        ):
+            self.assertIn(variable, joined)
 
     def test_codex_execution_args_use_unrestricted_noninteractive_mode(self) -> None:
         args = experiment.codex_execution_args()

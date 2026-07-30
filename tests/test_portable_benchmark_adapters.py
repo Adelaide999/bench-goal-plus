@@ -5,8 +5,10 @@ import os
 import subprocess
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import ANY, patch
 
 from adapters.ale import adapter as ale
 from adapters.autolab import adapter as autolab
@@ -76,6 +78,107 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             self.assertNotIn("--ignore-user-config", goal_plus)
             self.assertIn("--ignore-user-config", plain)
             self.assertIn('model_reasoning_effort="medium"', goal_plus)
+
+    def test_local_vliw_goal_plus_wires_annotator_provider_and_usage(self) -> None:
+        experiment.configure_adapter("local-vliw")
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                run_dir = root / "run"
+                workspace = run_dir / "workspace"
+                workspace.mkdir(parents=True)
+                (workspace / "TASK.md").write_text("optimize\n", encoding="utf-8")
+                (workspace / experiment.ARTIFACT_NAME).write_text(
+                    "# candidate\n", encoding="utf-8"
+                )
+                manifest = {
+                    "workspace": str(workspace),
+                    "reasoning_effort": "medium",
+                    "environment": {"runtime_bin": str(root / "bin")},
+                    "budget": {
+                        "wall_time_seconds": 300,
+                        "soft_closeout_seconds": 30,
+                        "hard_kill_grace_seconds": 5,
+                        "concurrency": 1,
+                        "worker_runtime_seconds": 240,
+                    },
+                }
+                args = SimpleNamespace(
+                    model="gpt-test",
+                    api_base="http://proxy.example/v1",
+                    codex_bin="codex",
+                )
+                seed = {"budget": {"total_claimed": 1}}
+                final = {"valid": True, "budget": {"total_claimed": 1}}
+                annotator_usage = {
+                    "input_tokens": 9,
+                    "output_tokens": 3,
+                    "tasks": 1,
+                    "attempts": 1,
+                    "states": {"completed": 1},
+                }
+
+                with (
+                    patch.object(
+                        experiment,
+                        "evaluate_with_controller_runtime",
+                        side_effect=[seed, final],
+                    ),
+                    patch.object(experiment, "configure_isolated_codex_home"),
+                    patch.object(
+                        experiment, "configure_evidence_annotator_environment"
+                    ) as configure_annotator,
+                    patch.object(experiment, "render_goal", return_value="prompt"),
+                    patch.object(experiment, "codex_command", return_value=["codex"]),
+                    patch.object(
+                        experiment,
+                        "run_controlled",
+                        return_value={"hard_killed": False},
+                    ),
+                    patch.object(
+                        experiment,
+                        "parse_codex_events",
+                        return_value={"top_level_usage": {}},
+                    ),
+                    patch.object(
+                        experiment,
+                        "controller_subprocess_environment",
+                        return_value=nullcontext(),
+                    ),
+                    patch.object(
+                        experiment,
+                        "finalize_goal_plus_search",
+                        return_value={"completed": True},
+                    ),
+                    patch.object(
+                        experiment,
+                        "collect_goal_plus_state",
+                        return_value={"runs": []},
+                    ),
+                    patch.object(
+                        experiment,
+                        "collect_evidence_annotator_usage",
+                        return_value=annotator_usage,
+                    ),
+                    patch.object(
+                        experiment, "goal_plus_incomplete_reason", return_value=None
+                    ),
+                ):
+                    control = experiment.execute_goal_plus(
+                        manifest, run_dir, args, {}
+                    )
+
+                configure_annotator.assert_called_once_with(
+                    ANY,
+                    model="gpt-test",
+                    reasoning_effort="medium",
+                    api_base="http://proxy.example/v1",
+                )
+                self.assertEqual(
+                    control["evidence_annotator_usage"], annotator_usage
+                )
+        finally:
+            experiment.configure_adapter("heurigym")
 
     def test_autolab_parser_requires_successful_verification(self) -> None:
         self.assertEqual(autolab.parse_result("cycles=1547 verify=ok"), (1547, True))

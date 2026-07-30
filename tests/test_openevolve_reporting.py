@@ -60,6 +60,12 @@ class OpenEvolveReportingTest(unittest.TestCase):
                                 },
                             ],
                         },
+                        "evidence_annotator_usage": {
+                            "input_tokens": 11,
+                            "output_tokens": 4,
+                            "cost_usd": 0.0012,
+                            "coverage": "persisted annotator turns",
+                        },
                     },
                 }
             )
@@ -142,8 +148,11 @@ class OpenEvolveReportingTest(unittest.TestCase):
             self.assertEqual(finished["score"]["seed_best"], 8.0)
             self.assertEqual(finished["score"]["final"], 6.0)
             self.assertEqual(finished["score"]["directional_gain"], 2.0)
-            self.assertEqual(finished["execution"]["usage"]["input_tokens"], 300)
-            self.assertEqual(finished["execution"]["usage"]["output_tokens"], 30)
+            self.assertEqual(finished["execution"]["usage"]["input_tokens"], 311)
+            self.assertEqual(finished["execution"]["usage"]["output_tokens"], 34)
+            self.assertEqual(
+                finished["execution"]["usage"]["cost_usd"], 0.0012
+            )
             pending = next(
                 item for item in report["records"] if item["method"] == "another-agent"
             )
