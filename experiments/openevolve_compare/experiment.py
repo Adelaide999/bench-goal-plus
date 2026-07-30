@@ -62,6 +62,7 @@ REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 CODEX_SANDBOX = "danger-full-access"
 CODEX_PROVIDER_ID = "bench_proxy"
 PI_PROVIDER_ID = "bench-openai"
+ANNOTATOR_PROVIDER_ID = "bench_evidence"
 
 
 def utc_now() -> str:
@@ -357,11 +358,26 @@ def codex_execution_args() -> list[str]:
 
 def codex_goal_plus_mcp_args() -> list[str]:
     """Register and non-interactively approve Goal Plus for `codex exec`."""
+    env_vars = [
+        "CODEX_HOME",
+        "OPENAI_API_KEY",
+        "SFORGE_AGENT_API_KEY",
+        "GOAL_PLUS_OUTER_DEADLINE_AT",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API",
+    ]
     return [
         "--config",
         'mcp_servers.goal-plus.command="goal-plus"',
         "--config",
         'mcp_servers.goal-plus.args=["--root", ".gp"]',
+        "--config",
+        f"mcp_servers.goal-plus.env_vars={json.dumps(env_vars)}",
         "--config",
         "mcp_servers.goal-plus.startup_timeout_sec=10",
         "--config",
@@ -381,6 +397,31 @@ def configure_isolated_codex_home(
     codex_home.mkdir(parents=True, exist_ok=False)
     environment["CODEX_HOME"] = str(codex_home)
     return codex_home
+
+
+def configure_evidence_annotator_environment(
+    environment: dict[str, str],
+    *,
+    model: str,
+    reasoning_effort: str,
+    api_base: str | None,
+) -> None:
+    environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"] = model
+    environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT"] = (
+        reasoning_effort
+    )
+    if api_base:
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL"] = api_base
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID"] = (
+            ANNOTATOR_PROVIDER_ID
+        )
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME"] = (
+            "Benchmark Evidence provider"
+        )
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV"] = (
+            "OPENAI_API_KEY"
+        )
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API"] = "responses"
 
 
 def write_pi_models_config(
@@ -1010,6 +1051,36 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
     }
 
 
+def collect_evidence_annotator_usage(workspace: Path) -> dict[str, Any]:
+    totals: dict[str, int | float] = {}
+    tasks = 0
+    attempts = 0
+    states: dict[str, int] = {}
+    for path in sorted(
+        (workspace / ".gp" / "runs").glob(
+            "run_*/candidates/*/evidence-annotations/iteration-*.json"
+        )
+    ):
+        task = load_json(path)
+        tasks += 1
+        attempts += int(task.get("attempts") or 0)
+        state = str(task.get("state") or "unknown")
+        states[state] = states.get(state, 0) + 1
+        usage = task.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        for key, value in usage.items():
+            if isinstance(value, (int, float)):
+                totals[key] = totals.get(key, 0) + value
+    return {
+        **totals,
+        "tasks": tasks,
+        "attempts": attempts,
+        "states": states,
+        "coverage": "persisted Goal Plus Evidence annotator turns",
+    }
+
+
 def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
     root = workspace / ".gp"
     goals = []
@@ -1318,6 +1389,27 @@ def apply_promotion_patch(source_workspace: Path, patch_path: Path) -> str:
     )
 
 
+def _existing_promotion(
+    run_path: Path,
+) -> tuple[dict[str, Any], str, dict[str, Any], dict[str, str]] | None:
+    run_data = load_json(run_path)
+    if run_data.get("state") != "promoted":
+        return None
+    candidate_id = run_data.get("selected_candidate_id")
+    if not candidate_id:
+        raise RuntimeError("promoted Search run has no selected candidate")
+    patch_path = run_path.parent / "promotion" / f"{candidate_id}.patch"
+    if not patch_path.is_file():
+        raise RuntimeError("promoted Search run has no promotion artifact")
+    selection = {
+        "selected_candidate_id": candidate_id,
+        "selected_score": run_data.get("selected_score"),
+        "selected_iteration": run_data.get("selected_iteration"),
+        "reused_existing_promotion": True,
+    }
+    return run_data, candidate_id, selection, {"artifact_path": str(patch_path)}
+
+
 def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
     """Controller-owned post-deadline drain/select/promote, outside search T."""
     from goal_plus.goal_plus import FileGoalPlusRuntime
@@ -1348,38 +1440,35 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
         for run_id, goal_ids in goals_by_run.items():
             run_path = root / "runs" / run_id / "run.json"
             run_data = load_json(run_path)
+            initial_state = run_data.get("state")
             candidate_paths = sorted(
                 (run_path.parent / "candidates").glob("*/candidate.json")
             )
             if not candidate_paths:
                 continue
             verified_in_closeout: list[str] = []
-            if run_data.get("state") == "promoted":
-                candidate_id = run_data["selected_candidate_id"]
-                selection = {
-                    "selected_candidate_id": candidate_id,
-                    "selected_score": run_data.get("selected_score"),
-                    "selected_iteration": run_data.get("selected_iteration"),
-                    "reused_existing_promotion": True,
-                }
-                promotion = {
-                    "artifact_path": str(
-                        run_path.parent / "promotion" / f"{candidate_id}.patch"
-                    )
-                }
+            existing = _existing_promotion(run_path)
+            if existing is not None:
+                run_data, candidate_id, selection, promotion = existing
             else:
-                for candidate_path in candidate_paths:
-                    candidate = load_json(candidate_path)
-                    if not candidate.get("iterations"):
-                        tools.search_run_verifier(
-                            run_id,
-                            candidate["candidate_id"],
-                            hypothesis="controller post-deadline final verification",
-                        )
-                        verified_in_closeout.append(candidate["candidate_id"])
-                selection = tools.search_select(run_id)
-                candidate_id = selection["selected_candidate_id"]
-                promotion = tools.search_promote(run_id, candidate_id)
+                try:
+                    for candidate_path in candidate_paths:
+                        candidate = load_json(candidate_path)
+                        if not candidate.get("iterations"):
+                            tools.search_run_verifier(
+                                run_id,
+                                candidate["candidate_id"],
+                                hypothesis="controller post-deadline final verification",
+                            )
+                            verified_in_closeout.append(candidate["candidate_id"])
+                    selection = tools.search_select(run_id)
+                    candidate_id = selection["selected_candidate_id"]
+                    promotion = tools.search_promote(run_id, candidate_id)
+                except RuntimeError:
+                    existing = _existing_promotion(run_path)
+                    if existing is None:
+                        raise
+                    run_data, candidate_id, selection, promotion = existing
             patch_status = apply_promotion_patch(
                 Path(run_data["source_path"]), Path(promotion["artifact_path"])
             )
@@ -1416,7 +1505,7 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
                 {
                     "goal_plus_ids": goal_ids,
                     "run_id": run_id,
-                    "initial_state": run_data.get("state"),
+                    "initial_state": initial_state,
                     "candidate_count": len(candidate_paths),
                     "verified_in_closeout": verified_in_closeout,
                     "selection": selection,
@@ -1689,8 +1778,14 @@ def execute(args: argparse.Namespace) -> int:
     environment = configure_temp_environment(os.environ.copy())
     bin_dir = runtime_bin(args.venv.expanduser().absolute())
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
-    if method == "goal-plus-codex":
+    if method in {"goal-plus-codex", "goal-plus-pi"}:
         configure_isolated_codex_home(environment, run_dir)
+        configure_evidence_annotator_environment(
+            environment,
+            model=args.model,
+            reasoning_effort=reasoning_effort,
+            api_base=args.api_base,
+        )
 
     if args.api_base and not environment.get("OPENAI_API_KEY"):
         raise RuntimeError(
@@ -2120,6 +2215,9 @@ def execute(args: argparse.Namespace) -> int:
         )
         control["evaluator_calls"] = evaluator_calls
         control["goal_plus"] = collect_goal_plus_state(workspace)
+        control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
+            workspace
+        )
         if control["hard_killed"]:
             control["result_incomplete_reason"] = (
                 f"{method} process group exceeded the shutdown grace"
@@ -2214,6 +2312,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
         workspace
     )
     control["goal_plus"] = collect_goal_plus_state(workspace)
+    control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
+        workspace
+    )
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=manifest["budget"]["concurrency"],

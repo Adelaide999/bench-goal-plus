@@ -53,6 +53,7 @@ PAPER_REFERENCE_PATH = (
 )
 RUNS_ROOT = ROOT / "runs" / "edgebench"
 UPSTREAM_MANIFEST = ROOT / "environment" / "upstreams.json"
+EVIDENCE_ANNOTATOR_PROVIDER_ID = "edgebench-evidence"
 VENV = ROOT / ".bench-env" / "venv"
 VENV_BIN = VENV / ("Scripts" if sys.platform == "win32" else "bin")
 VENV_PYTHON = VENV_BIN / ("python.exe" if sys.platform == "win32" else "python")
@@ -1576,12 +1577,34 @@ def cell_environment(
     env["SFORGE_CODEX_REASONING_EFFORT"] = str(cell["reasoning_effort"])
     if cell["method"] == "goal-plus-codex":
         env["SFORGE_GOAL_PLUS_SOURCE_DIR"] = str(GOAL_PLUS_ROOT)
+        extra_env = {
+            "SFORGE_GOAL_PLUS_MAX_PARALLEL": cell["inner_search_concurrency"],
+            "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS": cell[
+                "worker_runtime_seconds"
+            ],
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": cell["model"],
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": cell[
+                "reasoning_effort"
+            ],
+        }
+        if api_base_url:
+            extra_env.update(
+                {
+                    "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL": api_base_url,
+                    "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID": (
+                        EVIDENCE_ANNOTATOR_PROVIDER_ID
+                    ),
+                    "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME": (
+                        "EdgeBench Evidence provider"
+                    ),
+                    "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV": (
+                        "SFORGE_AGENT_API_KEY"
+                    ),
+                    "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API": "responses",
+                }
+            )
         env["SFORGE_AGENT_EXTRA_ENV"] = ",".join(
-            [
-                f"SFORGE_GOAL_PLUS_MAX_PARALLEL={cell['inner_search_concurrency']}",
-                "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS="
-                f"{cell['worker_runtime_seconds']}",
-            ]
+            f"{key}={value}" for key, value in extra_env.items()
         )
     return env
 
@@ -2351,6 +2374,10 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
     verifier_runs = 0
     search_runs: set[str] = set()
     search_run_states: dict[str, int] = defaultdict(int)
+    annotation_usage: dict[str, int | float] = {}
+    annotation_tasks = 0
+    annotation_attempts = 0
+    annotation_states: dict[str, int] = defaultdict(int)
     try:
         with tarfile.open(archive_path) as archive:
             for member in archive:
@@ -2385,6 +2412,32 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                             )
                         except (json.JSONDecodeError, TypeError, ValueError):
                             pass
+                if (
+                    "/evidence-annotations/" in member.name
+                    and member.name.endswith(".json")
+                ):
+                    extracted = archive.extractfile(member)
+                    if extracted:
+                        try:
+                            payload = json.loads(
+                                extracted.read().decode("utf-8", errors="replace")
+                            )
+                            annotation_tasks += 1
+                            annotation_attempts += int(payload.get("attempts") or 0)
+                            state = str(payload.get("state") or "unknown")
+                            annotation_states[state] += 1
+                            task_usage = payload.get("usage")
+                            if not isinstance(task_usage, dict):
+                                task_usage = {}
+                            for key, value in task_usage.items():
+                                if isinstance(value, (int, float)) and not isinstance(
+                                    value, bool
+                                ):
+                                    annotation_usage[key] = (
+                                        annotation_usage.get(key, 0) + value
+                                    )
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            pass
     except tarfile.TarError:
         return {"archive": "invalid"}
     return {
@@ -2393,6 +2446,13 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         "agent_sessions": sessions,
         "worker_verifier_runs": verifier_runs,
         "search_run_states": dict(sorted(search_run_states.items())),
+        "evidence_annotator_usage": {
+            **annotation_usage,
+            "tasks": annotation_tasks,
+            "attempts": annotation_attempts,
+            "states": dict(sorted(annotation_states.items())),
+            "coverage": "persisted Goal Plus Evidence annotator turns",
+        },
     }
 
 
@@ -2527,6 +2587,13 @@ def comparison_record(
         output_tokens += int(tokens.get("output_tokens") or 0)
         if usage.get("coverage"):
             coverage.add(str(usage["coverage"]))
+        annotator = (item.get("goal_plus") or {}).get(
+            "evidence_annotator_usage"
+        ) or {}
+        input_tokens += int(annotator.get("input_tokens") or 0)
+        output_tokens += int(annotator.get("output_tokens") or 0)
+        if annotator.get("tasks"):
+            coverage.add(str(annotator.get("coverage")))
 
     normalized = best.get("edgebench_score")
     official = best.get("official_comparison") or {}

@@ -27,8 +27,10 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     append_unique_lines,
     codex_goal_plus_mcp_args,
     codex_provider_args,
+    collect_evidence_annotator_usage,
     collect_goal_plus_state,
     commit_workspace,
+    configure_evidence_annotator_environment,
     configure_isolated_codex_home,
     copy_goal_plus_assets,
     finalize_goal_plus_search,
@@ -464,6 +466,7 @@ def codex_command(
     sandbox: str,
     goal_plus: bool,
     ephemeral: bool,
+    max_concurrent_threads_per_session: int = 5,
 ) -> list[str]:
     command = [
         codex_bin,
@@ -493,8 +496,16 @@ def codex_command(
     if api_base:
         command.extend(codex_provider_args(api_base))
     if goal_plus:
+        if max_concurrent_threads_per_session < 2:
+            raise ValueError("Goal Plus Codex requires at least two agent threads")
         command.extend(
-            ["--dangerously-bypass-hook-trust", *codex_goal_plus_mcp_args()]
+            [
+                "--config",
+                "features.multi_agent_v2.max_concurrent_threads_per_session="
+                f"{max_concurrent_threads_per_session}",
+                "--dangerously-bypass-hook-trust",
+                *codex_goal_plus_mcp_args(),
+            ]
         )
     command.extend(["--model", model, "-"])
     return command
@@ -640,6 +651,14 @@ def execute_goal_plus(
         run_dir / "controller-runtime/goal-plus"
     )
     configure_isolated_codex_home(environment, run_dir)
+    configure_evidence_annotator_environment(
+        environment,
+        model=args.model,
+        reasoning_effort=manifest.get(
+            "reasoning_effort", DEFAULT_REASONING_EFFORT
+        ),
+        api_base=args.api_base,
+    )
     prompt = render_goal(
         task_text=(workspace / "TASK.md").read_text(),
         artifact_name=ARTIFACT_NAME,
@@ -670,6 +689,7 @@ def execute_goal_plus(
         sandbox=CODEX_SANDBOX,
         goal_plus=True,
         ephemeral=False,
+        max_concurrent_threads_per_session=budget["concurrency"] + 1,
     )
     control = run_controlled(
         command,
@@ -695,6 +715,9 @@ def execute_goal_plus(
     shutil.copy2(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
     control["codex"] = parse_codex_events(run_dir / "events.jsonl")
     control["goal_plus"] = collect_goal_plus_state(workspace)
+    control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
+        workspace
+    )
     goal_runs = control["goal_plus"]["runs"]
     process_calls = sum(
         item.get("process_verifier_command_count", 0) for item in goal_runs
@@ -974,6 +997,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
     write_json(run_dir / "final-eval.json", final)
     shutil.copy2(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
     control["goal_plus"] = collect_goal_plus_state(workspace)
+    control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
+        workspace
+    )
     goal_runs = control["goal_plus"]["runs"]
     process_calls = sum(
         item.get("process_verifier_command_count", 0) for item in goal_runs

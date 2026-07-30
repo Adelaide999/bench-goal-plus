@@ -717,18 +717,37 @@ class EdgeBenchExperimentTest(unittest.TestCase):
     def test_goal_plus_environment_uses_pinned_source_and_configured_k(self) -> None:
         cell = {
             "method": "goal-plus-codex",
+            "model": "gpt-5.6-sol",
             "reasoning_effort": "xhigh",
             "inner_search_concurrency": 4,
             "worker_runtime_seconds": 600,
         }
 
-        env = EDGE.cell_environment(cell)
+        env = EDGE.cell_environment(
+            cell,
+            api_key="runtime-key",
+            api_base_url="http://192.0.2.10:45678/v1",
+        )
 
         self.assertEqual(env["SFORGE_GOAL_PLUS_SOURCE_DIR"], str(EDGE.GOAL_PLUS_ROOT))
-        self.assertIn("SFORGE_GOAL_PLUS_MAX_PARALLEL=4", env["SFORGE_AGENT_EXTRA_ENV"])
-        self.assertIn(
-            "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS=600",
-            env["SFORGE_AGENT_EXTRA_ENV"],
+        extra = dict(
+            item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_MAX_PARALLEL"], "4")
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "600")
+        self.assertEqual(
+            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"], "gpt-5.6-sol"
+        )
+        self.assertEqual(
+            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT"], "xhigh"
+        )
+        self.assertEqual(
+            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL"],
+            "http://192.0.2.10:45678/v1",
+        )
+        self.assertEqual(
+            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV"],
+            "SFORGE_AGENT_API_KEY",
         )
         for key in ("TMPDIR", "TMP", "TEMP"):
             self.assertTrue(Path(env[key]).is_relative_to(ROOT))
@@ -976,8 +995,25 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         payload = b'{"run_id":"run-1","state":"running"}'
         member = tarfile.TarInfo(".goal-plus/runs/run-1/run.json")
         member.size = len(payload)
+        annotation = json.dumps(
+            {
+                "state": "completed",
+                "attempts": 1,
+                "usage": {
+                    "input_tokens": 13,
+                    "output_tokens": 5,
+                    "cost_usd": 0.001,
+                },
+            }
+        ).encode()
+        annotation_member = tarfile.TarInfo(
+            ".goal-plus/runs/run-1/candidates/c001/"
+            "evidence-annotations/iteration-0001.json"
+        )
+        annotation_member.size = len(annotation)
         with tarfile.open(run / "goal-plus-state.tar", "w") as archive:
             archive.addfile(member, io.BytesIO(payload))
+            archive.addfile(annotation_member, io.BytesIO(annotation))
 
         stats = EDGE.goal_plus_stats(run)
 
@@ -986,6 +1022,18 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(stats["search_runs"], 1)
         self.assertEqual(stats["candidates"], 0)
         self.assertEqual(stats["search_run_states"], {"running": 1})
+        self.assertEqual(
+            stats["evidence_annotator_usage"],
+            {
+                "input_tokens": 13,
+                "output_tokens": 5,
+                "cost_usd": 0.001,
+                "tasks": 1,
+                "attempts": 1,
+                "states": {"completed": 1},
+                "coverage": "persisted Goal Plus Evidence annotator turns",
+            },
+        )
 
     def test_provision_excludes_downloaded_tasks_from_git_status(self) -> None:
         exclude = EDGE.EDGE_ROOT / ".git" / "info" / "exclude"
