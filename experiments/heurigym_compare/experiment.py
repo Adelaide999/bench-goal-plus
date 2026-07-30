@@ -466,6 +466,7 @@ def codex_command(
     sandbox: str,
     goal_plus: bool,
     ephemeral: bool,
+    max_concurrent_threads_per_session: int = 5,
 ) -> list[str]:
     command = [
         codex_bin,
@@ -495,8 +496,16 @@ def codex_command(
     if api_base:
         command.extend(codex_provider_args(api_base))
     if goal_plus:
+        if max_concurrent_threads_per_session < 2:
+            raise ValueError("Goal Plus Codex requires at least two agent threads")
         command.extend(
-            ["--dangerously-bypass-hook-trust", *codex_goal_plus_mcp_args()]
+            [
+                "--config",
+                "features.multi_agent_v2.max_concurrent_threads_per_session="
+                f"{max_concurrent_threads_per_session}",
+                "--dangerously-bypass-hook-trust",
+                *codex_goal_plus_mcp_args(),
+            ]
         )
     command.extend(["--model", model, "-"])
     return command
@@ -680,6 +689,7 @@ def execute_goal_plus(
         sandbox=CODEX_SANDBOX,
         goal_plus=True,
         ephemeral=False,
+        max_concurrent_threads_per_session=budget["concurrency"] + 1,
     )
     control = run_controlled(
         command,

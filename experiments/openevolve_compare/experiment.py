@@ -1389,6 +1389,27 @@ def apply_promotion_patch(source_workspace: Path, patch_path: Path) -> str:
     )
 
 
+def _existing_promotion(
+    run_path: Path,
+) -> tuple[dict[str, Any], str, dict[str, Any], dict[str, str]] | None:
+    run_data = load_json(run_path)
+    if run_data.get("state") != "promoted":
+        return None
+    candidate_id = run_data.get("selected_candidate_id")
+    if not candidate_id:
+        raise RuntimeError("promoted Search run has no selected candidate")
+    patch_path = run_path.parent / "promotion" / f"{candidate_id}.patch"
+    if not patch_path.is_file():
+        raise RuntimeError("promoted Search run has no promotion artifact")
+    selection = {
+        "selected_candidate_id": candidate_id,
+        "selected_score": run_data.get("selected_score"),
+        "selected_iteration": run_data.get("selected_iteration"),
+        "reused_existing_promotion": True,
+    }
+    return run_data, candidate_id, selection, {"artifact_path": str(patch_path)}
+
+
 def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
     """Controller-owned post-deadline drain/select/promote, outside search T."""
     from goal_plus.goal_plus import FileGoalPlusRuntime
@@ -1419,38 +1440,35 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
         for run_id, goal_ids in goals_by_run.items():
             run_path = root / "runs" / run_id / "run.json"
             run_data = load_json(run_path)
+            initial_state = run_data.get("state")
             candidate_paths = sorted(
                 (run_path.parent / "candidates").glob("*/candidate.json")
             )
             if not candidate_paths:
                 continue
             verified_in_closeout: list[str] = []
-            if run_data.get("state") == "promoted":
-                candidate_id = run_data["selected_candidate_id"]
-                selection = {
-                    "selected_candidate_id": candidate_id,
-                    "selected_score": run_data.get("selected_score"),
-                    "selected_iteration": run_data.get("selected_iteration"),
-                    "reused_existing_promotion": True,
-                }
-                promotion = {
-                    "artifact_path": str(
-                        run_path.parent / "promotion" / f"{candidate_id}.patch"
-                    )
-                }
+            existing = _existing_promotion(run_path)
+            if existing is not None:
+                run_data, candidate_id, selection, promotion = existing
             else:
-                for candidate_path in candidate_paths:
-                    candidate = load_json(candidate_path)
-                    if not candidate.get("iterations"):
-                        tools.search_run_verifier(
-                            run_id,
-                            candidate["candidate_id"],
-                            hypothesis="controller post-deadline final verification",
-                        )
-                        verified_in_closeout.append(candidate["candidate_id"])
-                selection = tools.search_select(run_id)
-                candidate_id = selection["selected_candidate_id"]
-                promotion = tools.search_promote(run_id, candidate_id)
+                try:
+                    for candidate_path in candidate_paths:
+                        candidate = load_json(candidate_path)
+                        if not candidate.get("iterations"):
+                            tools.search_run_verifier(
+                                run_id,
+                                candidate["candidate_id"],
+                                hypothesis="controller post-deadline final verification",
+                            )
+                            verified_in_closeout.append(candidate["candidate_id"])
+                    selection = tools.search_select(run_id)
+                    candidate_id = selection["selected_candidate_id"]
+                    promotion = tools.search_promote(run_id, candidate_id)
+                except RuntimeError:
+                    existing = _existing_promotion(run_path)
+                    if existing is None:
+                        raise
+                    run_data, candidate_id, selection, promotion = existing
             patch_status = apply_promotion_patch(
                 Path(run_data["source_path"]), Path(promotion["artifact_path"])
             )
@@ -1487,7 +1505,7 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
                 {
                     "goal_plus_ids": goal_ids,
                     "run_id": run_id,
-                    "initial_state": run_data.get("state"),
+                    "initial_state": initial_state,
                     "candidate_count": len(candidate_paths),
                     "verified_in_closeout": verified_in_closeout,
                     "selection": selection,

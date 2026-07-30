@@ -429,6 +429,76 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 "already_applied",
             )
 
+    def test_controller_closeout_reuses_promotion_completed_during_selection(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "workspace"
+            workspace.mkdir()
+            root = workspace / ".gp"
+            goal_dir = root / "goal-plus/gp_0001"
+            run_dir = root / "runs/run_test"
+            candidate_dir = run_dir / "candidates/c001"
+            promotion_dir = run_dir / "promotion"
+            goal_dir.mkdir(parents=True)
+            candidate_dir.mkdir(parents=True)
+            promotion_dir.mkdir()
+            (goal_dir / "goal.json").write_text("{}\n")
+            run_path = run_dir / "run.json"
+            run_data = {
+                "run_id": "run_test",
+                "state": "ready_to_promote",
+                "source_path": str(workspace),
+                "selected_candidate_id": "c001",
+                "selected_score": 2.0,
+                "selected_iteration": 1,
+            }
+            run_path.write_text(json.dumps(run_data) + "\n")
+            (candidate_dir / "candidate.json").write_text(
+                json.dumps({"candidate_id": "c001", "iterations": [{}]}) + "\n"
+            )
+            patch_path = promotion_dir / "c001.patch"
+            patch_path.write_text("promotion\n")
+
+            goal = mock.Mock()
+            goal.goal_plus_id = "gp_0001"
+            goal.linked_search.run_id = "run_test"
+            goal.linked_search.selected_candidate_id = None
+            goal.status = "active"
+            goal_runtime = mock.Mock()
+            goal_runtime.status.return_value = goal
+            tools = mock.Mock()
+            tools.search_report.return_value = {"report_path": "report.md"}
+
+            def finish_promotion_then_fail(_run_id: str) -> None:
+                run_data["state"] = "promoted"
+                run_path.write_text(json.dumps(run_data) + "\n")
+                raise RuntimeError(
+                    "cannot record verifier result: run run_test is in state promoted"
+                )
+
+            tools.search_select.side_effect = finish_promotion_then_fail
+            with (
+                mock.patch(
+                    "goal_plus.goal_plus.FileGoalPlusRuntime",
+                    return_value=goal_runtime,
+                ),
+                mock.patch("goal_plus.runtime.FileSearchRuntime"),
+                mock.patch("goal_plus.tools.SearchTools", return_value=tools),
+                mock.patch.object(
+                    experiment, "apply_promotion_patch", return_value="applied"
+                ) as apply_patch,
+            ):
+                result = experiment.finalize_goal_plus_search(workspace)
+
+            self.assertTrue(result["completed"], result)
+            self.assertEqual(result["runs"][0]["source_patch_status"], "applied")
+            self.assertTrue(
+                result["runs"][0]["selection"]["reused_existing_promotion"]
+            )
+            apply_patch.assert_called_once_with(workspace, patch_path)
+            tools.search_promote.assert_not_called()
+
     def test_evaluator_budget_snapshot_uses_controller_runtime_at_t0(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)

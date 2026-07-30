@@ -78,6 +78,13 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             self.assertNotIn("--ignore-user-config", goal_plus)
             self.assertIn("--ignore-user-config", plain)
             self.assertIn('model_reasoning_effort="medium"', goal_plus)
+            self.assertIn(
+                "features.multi_agent_v2.max_concurrent_threads_per_session=5",
+                goal_plus,
+            )
+            self.assertFalse(
+                any("max_concurrent_threads_per_session" in arg for arg in plain)
+            )
 
     def test_local_vliw_goal_plus_wires_annotator_provider_and_usage(self) -> None:
         experiment.configure_adapter("local-vliw")
@@ -129,7 +136,9 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                         experiment, "configure_evidence_annotator_environment"
                     ) as configure_annotator,
                     patch.object(experiment, "render_goal", return_value="prompt"),
-                    patch.object(experiment, "codex_command", return_value=["codex"]),
+                    patch.object(
+                        experiment, "codex_command", return_value=["codex"]
+                    ) as codex_command,
                     patch.object(
                         experiment,
                         "run_controlled",
@@ -173,6 +182,12 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                     model="gpt-test",
                     reasoning_effort="medium",
                     api_base="http://proxy.example/v1",
+                )
+                self.assertEqual(
+                    codex_command.call_args.kwargs[
+                        "max_concurrent_threads_per_session"
+                    ],
+                    2,
                 )
                 self.assertEqual(
                     control["evidence_annotator_usage"], annotator_usage
