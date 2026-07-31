@@ -57,6 +57,35 @@ Rust distribution 到 `~/.cache/sforge/rust/`，最终统一核对官方 SHA256�
 
 ## 准备和启动
 
+先在本地验证 Codex、Docker、Judge 和报告链路时，使用固定的 VLIW smoke preset：
+
+```bash
+python3 scripts/bench.py launch \
+  --preset edgebench-vliw-codex-local-smoke
+```
+
+该 preset 固定 `plain-codex`、`gpt-5.6-sol/medium`、`T=300s`、`K=1`、
+`cell_concurrency=1`。由于官方 1800 秒 auto-eval 周期长于 smoke 总预算，它在
+profile 中显式改为每 60 秒评测一次；macOS 本地 OAuth 路径也显式使用
+`internet=true`。这两个差异都有逐字段原因并把结果标成
+`official_protocol_with_intentional_overrides`，不能当作官方同口径结果。
+
+2026-07-31 已用 campaign
+`edgebench-vliw-codex-gpt-5-6-sol-medium-local-smoke-5m-k1-c1-20260731-1532`
+完成端到端验证：4 次 hidden Judge 均通过 9/9，controller 最终状态为
+`completed`，并成功生成 `report.md` 与同名 xlsx。
+
+完整 51 题 Codex-only 固定协议是通用 dispatcher 中的一个 preset：
+
+```bash
+python3 .agents/skills/benchmark-run/scripts/run_benchmark.py launch \
+  --preset edgebench-codex-2h
+```
+
+该 preset 固定 `gpt-5.6-sol/medium`、每题 `T=2h`、题内 `K=1`、跨题
+`cell_concurrency=2`，并依次执行 bootstrap、provision、doctor、prepare 和 detached
+run。它不会覆盖同名 campaign；加 `--dry-run` 可审查 resolved contract 和完整命令链。
+
 ```bash
 .bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
   --profile vliw-smoke \
@@ -96,8 +125,10 @@ runs/edgebench/vliw-matched-01/
 CPU 与 memory、submission cooldown 和 task override，再从 task JSON 继承
 `internet`。官方配置文件路径、SHA256、resolved defaults/override、effective
 protocol 和逐字段 diff 都写入 manifest；loader 不保留 YAML 的 `env` 或
-`model.api_key`。当前开发 profile 只允许显式改变 agent、backend、model、reasoning、
-timeout、attempt 数和控制面并发字段。
+`model.api_key`。实验轴只允许显式改变 agent、backend、model、reasoning、
+timeout、attempt 数和控制面并发字段；profile 的 `protocol_overrides` 只允许
+`eval_interval` 与 `internet`，每个值都必须有非空原因。任何实际差异都会进入
+manifest 并令 campaign 失去官方同口径标记。
 
 `concurrency=K` 控制同一题内的 Plain Codex replicas 或 Goal Plus workers；
 `cell_concurrency` 控制同时运行的不同 task × method cells，默认是 1。为了避免
@@ -210,6 +241,15 @@ Codex + GPT-5.5 的 12 小时、3 次独立 run 的 `mean +/- sample stddev`、�
 与论文在模型、时间和 run 数上不同，不构成 leaderboard 同口径比较。2026-07-24
 完成的 51-task campaign 还使用了旧的全局联网/无配额/无 cooldown 配置；它保持为
 development evidence，不会因后续修复而被回写为官方可比结果。
+
+native finalize 完成后，生成面向交付的 Markdown 和 Excel：
+
+```bash
+python3 scripts/benchmark_report.py --campaign runs/edgebench/<campaign-id>
+```
+
+默认输出 `report.md` 和 `<campaign-id>.xlsx`；缺失 telemetry 保持为空并附 coverage，
+不被转换成 0。
 
 Fork 让 Codex 以 JSONL 输出，并在容器 closeout 时只归档
 `~/.codex/sessions/`，不复制 auth/config。若旧 run 没有这些 artifacts，

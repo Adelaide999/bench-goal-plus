@@ -209,6 +209,65 @@ def ensure_compile_container() -> None:
             raise RuntimeError(started.stderr.strip() or "failed to start judge container")
 
 
+def doctor_environment(upstream_root: Path) -> dict[str, Any]:
+    """Check the preserved judge without changing image or container state."""
+    docker = run(["docker", "info"])
+    if docker.returncode != 0:
+        raise RuntimeError(docker.stderr.strip() or "Docker daemon is unavailable")
+    image = run(["docker", "image", "inspect", IMAGE])
+    if image.returncode != 0:
+        raise RuntimeError(f"missing Docker image {IMAGE}")
+    inspected = run(["docker", "inspect", CONTAINER_NAME, "--format", "{{json .}}"])
+    if inspected.returncode != 0:
+        raise RuntimeError(f"missing Docker container {CONTAINER_NAME}")
+    payload = json.loads(inspected.stdout)
+    expected_source = str(ROOT.resolve())
+    mounts = payload.get("Mounts") or []
+    if not any(
+        item.get("Destination") == "/bench"
+        and str(Path(item.get("Source", "")).resolve()) == expected_source
+        for item in mounts
+    ):
+        raise RuntimeError(
+            f"preserved container {CONTAINER_NAME} is bound to another checkout"
+        )
+    if not payload.get("State", {}).get("Running"):
+        raise RuntimeError(f"Docker container {CONTAINER_NAME} is not running")
+    dockerfile = upstream_root.expanduser().resolve() / "algorithmic/Dockerfile"
+    if not dockerfile.is_file():
+        raise RuntimeError(f"Frontier-CS Dockerfile is missing: {dockerfile}")
+    return {
+        "image": IMAGE,
+        "container": CONTAINER_NAME,
+        "container_running": True,
+        "dockerfile": str(dockerfile),
+    }
+
+
+def provision_environment(upstream_root: Path) -> dict[str, Any]:
+    """Build the pinned image when absent and create/start its evaluator container."""
+    upstream_root = upstream_root.expanduser().resolve()
+    dockerfile = upstream_root / "algorithmic/Dockerfile"
+    if not dockerfile.is_file():
+        raise RuntimeError(f"Frontier-CS Dockerfile is missing: {dockerfile}")
+    docker = run(["docker", "info"])
+    if docker.returncode != 0:
+        raise RuntimeError(docker.stderr.strip() or "Docker daemon is unavailable")
+    image = run(["docker", "image", "inspect", IMAGE])
+    built = image.returncode != 0
+    if built:
+        completed = subprocess.run(
+            ["docker", "build", "-t", IMAGE, str(dockerfile.parent)],
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr.strip() or "failed to build judge image")
+    ensure_compile_container()
+    return {**doctor_environment(upstream_root), "image_built": built}
+
+
 def container_path(host_path: Path) -> str:
     relative = host_path.resolve().relative_to(ROOT.resolve())
     return "/bench/" + relative.as_posix()

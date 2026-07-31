@@ -21,6 +21,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from bench_artifacts import read_json as load_json  # noqa: E402
+from bench_artifacts import utc_now, write_json  # noqa: E402
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
     describe_task,
@@ -65,24 +67,12 @@ PI_PROVIDER_ID = "bench-openai"
 ANNOTATOR_PROVIDER_ID = "bench_evidence"
 
 
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
-
-
-def load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
-
-
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
 def refresh_campaign_report(run_root: Path) -> None:
@@ -239,6 +229,8 @@ def render_goal(
     worker_runtime_seconds: int | None = None,
     worker_min_runtime_seconds: int | None = None,
     verifier_timeout_seconds: int = 60,
+    coordination_condition: str | None = None,
+    search_space_mode: str | None = None,
 ) -> str:
     """Add the natural Goal Plus entrypoint and config to the common Codex prompt."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
@@ -255,6 +247,28 @@ def render_goal(
         raise ValueError("worker minimum runtime must fit inside the worker budget")
     if verifier_timeout_seconds < 1:
         raise ValueError("verifier timeout must be positive")
+    if search_space_mode not in {None, "observe", "enforce"}:
+        raise ValueError(f"unsupported search-space mode: {search_space_mode}")
+    if coordination_condition in {"B3", "B4"} and search_space_mode is None:
+        raise ValueError(
+            f"{coordination_condition} requires an explicit search-space mode"
+        )
+    coordination_text = ""
+    if search_space_mode is not None:
+        mode_behavior = (
+            "Observe mode records plan visibility, reviewer decisions, and Evidence updates "
+            "but must not block a candidate when the reviewer would reject it.\n"
+            if search_space_mode == "observe"
+            else "Enforce mode must reject duplicate or colliding plans and reserve accepted work.\n"
+        )
+        coordination_text = (
+            f"- Ablation condition: `{coordination_condition}`. After creating the Search run "
+            "and before dispatching workers, call `search_space_open` exactly once with "
+            f"`mode=\"{search_space_mode}\"`, `reviewer_model=\"{worker_model}\"`, and "
+            f"`reviewer_reasoning_effort=\"{reasoning_effort}\"`. Every candidate must propose one minimal "
+            "AtomicPlan before each material edit or evaluator call and close an accepted plan "
+            f"with its verifier result. {mode_behavior}"
+        )
     minimum_lease_enforcement = (
         "the Pi pool supervisor automatically resumes the same native session "
         "until the cumulative minimum is satisfied"
@@ -289,6 +303,14 @@ def render_goal(
         )
         + f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
         f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
+        "- A successful `search_start_agent_session` only allocates a durable Goal Plus "
+        "session and returns a launch payload; it does not start a Codex worker. For every "
+        "initial candidate, immediately map that payload to an actual `spawn_agent` call. "
+        "Only bind the handle returned by the successful spawn. Do not claim workers are "
+        "running or call `wait_agent` until all initial spawn calls have returned real agent "
+        "handles. If a spawn is unavailable or fails, leave the run incomplete and report "
+        "the launch failure instead of simulating worker progress.\n"
+        f"{coordination_text}"
         f"- Metric: `{metric_name}` with direction `{metric_direction}`.\n"
         "- Process verifier: `python3 .goal-plus-verifiers/primary_metric.py`, role "
         "`ranking_signal`, feedback policy `summary_only`, timeout "
@@ -416,20 +438,14 @@ def configure_evidence_annotator_environment(
     api_base: str | None,
 ) -> None:
     environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"] = model
-    environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT"] = (
-        reasoning_effort
-    )
+    environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT"] = reasoning_effort
     if api_base:
         environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL"] = api_base
-        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID"] = (
-            ANNOTATOR_PROVIDER_ID
-        )
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID"] = ANNOTATOR_PROVIDER_ID
         environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME"] = (
             "Benchmark Evidence provider"
         )
-        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV"] = (
-            "OPENAI_API_KEY"
-        )
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV"] = "OPENAI_API_KEY"
         environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API"] = "responses"
 
 
@@ -975,7 +991,10 @@ def parse_codex_events(path: Path) -> dict[str, Any]:
     usage = None
     terminal_event = None
     event_count = 0
-    for line in path.read_text().splitlines():
+    collaboration_tool_counts: dict[str, dict[str, int]] = {}
+    spawned_agent_thread_ids: set[str] = set()
+    targetless_wait_count = 0
+    for line in path.read_text().splitlines() if path.is_file() else []:
         if not line.strip():
             continue
         event_count += 1
@@ -990,13 +1009,40 @@ def parse_codex_events(path: Path) -> dict[str, Any]:
             terminal_event = event_type
             if isinstance(event.get("usage"), dict):
                 usage = event["usage"]
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "collab_tool_call":
+            continue
+        tool = item.get("tool")
+        if not isinstance(tool, str):
+            continue
+        status = item.get("status")
+        if not isinstance(status, str):
+            status = event_type.removeprefix("item.")
+        counts = collaboration_tool_counts.setdefault(tool, {})
+        counts[status] = counts.get(status, 0) + 1
+        if tool == "spawn_agent" and status == "completed":
+            receiver_ids = item.get("receiver_thread_ids")
+            if isinstance(receiver_ids, list):
+                spawned_agent_thread_ids.update(
+                    value for value in receiver_ids if isinstance(value, str) and value
+                )
+        if tool in {"wait", "wait_agent"} and status == "completed":
+            receiver_ids = item.get("receiver_thread_ids")
+            if isinstance(receiver_ids, list) and not receiver_ids:
+                targetless_wait_count += 1
+    spawn_counts = collaboration_tool_counts.get("spawn_agent") or {}
     return {
         "thread_id": thread_id,
         "terminal_event": terminal_event,
         "top_level_usage": usage,
         "event_count": event_count,
+        "collaboration_tool_counts": collaboration_tool_counts,
+        "spawn_agent_completed_count": spawn_counts.get("completed", 0),
+        "spawned_agent_thread_ids": sorted(spawned_agent_thread_ids),
+        "targetless_wait_count": targetless_wait_count,
         "coverage": (
-            "top-level Codex usage only; Goal Plus worker observability remains in workspace/.gp"
+            "top-level Codex usage and collaboration tool calls; Goal Plus worker details "
+            "remain in workspace/.gp"
         ),
     }
 
@@ -1090,6 +1136,119 @@ def collect_evidence_annotator_usage(workspace: Path) -> dict[str, Any]:
     }
 
 
+def _plan_footprint(plan: dict[str, Any]) -> set[str]:
+    footprint = (plan.get("proposal") or {}).get("footprint") or {}
+    return {
+        f"{view}:{value}"
+        for view, values in footprint.items()
+        if isinstance(values, list)
+        for value in values
+        if isinstance(value, str)
+    }
+
+
+def collect_search_space_state(run_dir: Path) -> dict[str, Any]:
+    """Collect coordination metrics without invoking or mutating the runtime."""
+    roots = [run_dir / "search-space", run_dir / "space-experiment"]
+    root = next((path for path in roots if (path / "config.json").is_file()), None)
+    if root is None:
+        return {"exists": False}
+    config = load_json(root / "config.json")
+    state = load_json(root / "state.json") if (root / "state.json").is_file() else {}
+    plans = [load_json(path) for path in sorted((root / "plans").glob("*.json"))]
+    events = [load_json(path) for path in sorted((root / "events").glob("*.json"))]
+    plan_counts: dict[str, int] = {}
+    for plan in plans:
+        status = str(plan.get("status", "unknown"))
+        plan_counts[status] = plan_counts.get(status, 0) + 1
+
+    event_candidates = {
+        event.get("event_id"): event.get("candidate_id")
+        for event in events
+        if isinstance(event.get("event_id"), str)
+    }
+    evidence_references = 0
+    cross_lineage_references = 0
+    for plan in plans:
+        proposal = plan.get("proposal") or {}
+        refs = [
+            ref
+            for key in ("evidence_refs", "relation_evidence_refs")
+            for ref in proposal.get(key, [])
+            if isinstance(ref, str)
+        ]
+        evidence_references += len(refs)
+        cross_lineage_references += sum(
+            event_candidates.get(ref) not in {None, plan.get("candidate_id")}
+            for ref in refs
+        )
+
+    overlaps: list[float] = []
+    for index, left in enumerate(plans):
+        left_footprint = _plan_footprint(left)
+        if not left_footprint:
+            continue
+        for right in plans[index + 1 :]:
+            if left.get("candidate_id") == right.get("candidate_id"):
+                continue
+            right_footprint = _plan_footprint(right)
+            union = left_footprint | right_footprint
+            if union:
+                overlaps.append(len(left_footprint & right_footprint) / len(union))
+
+    reviewed = [plan for plan in plans if isinstance(plan.get("review"), dict)]
+    duplicate_reviews = [
+        plan
+        for plan in reviewed
+        if (plan.get("review") or {}).get("decision") == "reject"
+    ]
+    reviewer_usage: dict[str, int | float] = {}
+    for source in [
+        *(plan.get("reviewer_usage") or {} for plan in plans),
+        state.get("schema_reviewer_usage") or {},
+    ]:
+        if not isinstance(source, dict):
+            continue
+        for key, value in source.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                reviewer_usage[key] = reviewer_usage.get(key, 0) + value
+    return {
+        "exists": True,
+        "root": str(root),
+        "mode": config.get("mode"),
+        "protocol_version": config.get("protocol_version"),
+        "reviewer_model": config.get("reviewer_model"),
+        "reviewer_reasoning_effort": config.get("reviewer_reasoning_effort"),
+        "reviewer_timeout_seconds": config.get("reviewer_timeout_seconds"),
+        "reviewer_usage": reviewer_usage,
+        "plans_total": len(plans),
+        "plan_counts": plan_counts,
+        "reviewed_plans": len(reviewed),
+        "semantic_duplicate_reviews": len(duplicate_reviews),
+        "semantic_duplicate_probability": (
+            len(duplicate_reviews) / len(reviewed) if reviewed else None
+        ),
+        "enforced_rejections": sum(plan.get("status") == "rejected" for plan in plans),
+        "evidence_event_count": len(events),
+        "evidence_revision": state.get("evidence_revision"),
+        "evidence_references": evidence_references,
+        "cross_lineage_evidence_references": cross_lineage_references,
+        "cross_lineage_evidence_reuse_rate": (
+            cross_lineage_references / evidence_references
+            if evidence_references
+            else None
+        ),
+        "cross_lineage_footprint_pairs": len(overlaps),
+        "mean_cross_lineage_footprint_jaccard": (
+            sum(overlaps) / len(overlaps) if overlaps else None
+        ),
+        "shared_tool_reuse": None,
+        "shared_tool_reuse_coverage": (
+            "not yet attributable: tool provenance is not persisted in Search Evidence"
+        ),
+    }
+
+
 def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
     root = workspace / ".gp"
     pi_pool_jobs_by_run: dict[str, list[dict[str, Any]]] = {}
@@ -1154,6 +1313,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
         unbound_agent_session_count = 0
         session_counts_by_candidate: dict[str, int] = {}
         bound_session_counts_by_candidate: dict[str, int] = {}
+        same_agent_continuation_session_count = 0
         for candidate_path in candidate_paths:
             candidate = load_json(candidate_path)
             iterations = candidate.get("iterations")
@@ -1176,6 +1336,9 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                     session_counts_by_candidate.get(candidate_id, 0) + 1
                 )
             host_handle = session.get("host_handle") or {}
+            launch = session.get("launch") or {}
+            if launch.get("tool") in {"followup_task", "pi_search_pool_continue"}:
+                same_agent_continuation_session_count += 1
             external_id = host_handle.get("external_id")
             task_name = host_handle.get("task_name")
             is_bound = (
@@ -1202,6 +1365,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 and counters["verifier_runs"] > 0
             ):
                 worker_verified_candidate_ids.add(candidate_id)
+        search_space = collect_search_space_state(run_dir)
         runs.append(
             {
                 "run_id": payload.get("run_id"),
@@ -1223,6 +1387,9 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "bound_session_counts_by_candidate": (
                     bound_session_counts_by_candidate
                 ),
+                "same_agent_continuation_session_count": (
+                    same_agent_continuation_session_count
+                ),
                 "iteration_count": iteration_count,
                 "process_verifier_command_count": len(process_verifier_logs),
                 "promotion_verifier_command_count": len(promotion_verifier_logs),
@@ -1240,6 +1407,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "selected_score": payload.get("selected_score"),
                 "hosts": sorted(hosts),
                 "report_exists": (run_dir / "report.md").is_file(),
+                "search_space": search_space,
             }
         )
     return {
@@ -1259,6 +1427,7 @@ def goal_plus_incomplete_reason(
     expected_worker_min_verifier_runs: int | None = None,
     expected_goal_plus_id: str | None = None,
     expected_run_id: str | None = None,
+    codex_events: dict[str, Any] | None = None,
 ) -> str | None:
     goals = state.get("goals") or []
     if not goals:
@@ -1347,6 +1516,14 @@ def goal_plus_incomplete_reason(
                     "for jobs: " + ", ".join(unsatisfied)
                 )
     if expected_concurrency is not None:
+        if codex_events is not None:
+            completed_spawns = codex_events.get("spawn_agent_completed_count", 0)
+            if completed_spawns < expected_concurrency:
+                return (
+                    "Codex completed "
+                    f"{completed_spawns} spawn_agent calls; expected at least "
+                    f"{expected_concurrency} actual workers"
+                )
         required_worker_evidence = (
             expected_concurrency
             if minimum_worker_verified_candidates is None
@@ -1684,6 +1861,7 @@ def run_controlled(
     started = time.monotonic()
     soft_stopped = False
     hard_killed = False
+    controller_interrupted = False
     with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
         process = subprocess.Popen(
             command,
@@ -1709,6 +1887,16 @@ def run_controlled(
                 hard_killed = True
                 send_hard_stop(process)
                 process.wait()
+        except KeyboardInterrupt:
+            controller_interrupted = True
+            soft_stopped = True
+            send_soft_stop(process)
+            try:
+                process.wait(timeout=hard_kill_grace_seconds)
+            except subprocess.TimeoutExpired:
+                hard_killed = True
+                send_hard_stop(process)
+                process.wait()
 
     return {
         "started_at": started_at,
@@ -1716,6 +1904,7 @@ def run_controlled(
         "duration_seconds": time.monotonic() - started,
         "returncode": process.returncode,
         "deadline_reached": soft_stopped,
+        "controller_interrupted": controller_interrupted,
         "soft_stop_signal": "SIGTERM" if soft_stopped else None,
         "hard_killed": hard_killed,
         "hard_kill_grace_seconds": hard_kill_grace_seconds,
@@ -1761,10 +1950,14 @@ def run_controlled_many(
         )
 
     deadline = started + wall_time_seconds
-    while time.monotonic() < deadline and any(
-        item["process"].poll() is None for item in running
-    ):
-        time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+    controller_interrupted = False
+    try:
+        while time.monotonic() < deadline and any(
+            item["process"].poll() is None for item in running
+        ):
+            time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+    except KeyboardInterrupt:
+        controller_interrupted = True
 
     soft_stopped = []
     for item in running:
@@ -1800,7 +1993,7 @@ def run_controlled_many(
                     "SIGTERM" if item["name"] in soft_stopped else None
                 ),
                 "hard_killed": item["name"] in hard_killed,
-                "command": item["command"],
+                "command": item.get("recorded_command") or item["command"],
             }
         )
     return {
@@ -1808,6 +2001,7 @@ def run_controlled_many(
         "finished_at": utc_now(),
         "duration_seconds": time.monotonic() - started,
         "deadline_reached": bool(soft_stopped),
+        "controller_interrupted": controller_interrupted,
         "soft_stopped_lanes": soft_stopped,
         "hard_killed_lanes": hard_killed,
         "hard_kill_grace_seconds": hard_kill_grace_seconds,
@@ -2331,6 +2525,9 @@ def execute(args: argparse.Namespace) -> int:
         goal_reason = goal_plus_incomplete_reason(
             control["goal_plus"],
             expected_concurrency=budget["concurrency"],
+            codex_events=(
+                control.get("codex") if method == "goal-plus-codex" else None
+            ),
             expected_worker_min_runtime_seconds=budget.get(
                 "worker_min_runtime_seconds"
             ),
@@ -2430,6 +2627,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=manifest["budget"]["concurrency"],
+        codex_events=(
+            control.get("codex") if method == "goal-plus-codex" else None
+        ),
         expected_worker_min_runtime_seconds=manifest["budget"].get(
             "worker_min_runtime_seconds"
         ),

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Benchmark Adaptation"
+  short_description: "Integrate a new benchmark into the control plane"
+  default_prompt: "Use $benchmark-adapt to add a new benchmark integration with reproducible setup, execution, and scoring."

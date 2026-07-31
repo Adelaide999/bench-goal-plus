@@ -1,0 +1,254 @@
+from __future__ import annotations
+
+import unittest
+import json
+import tempfile
+from pathlib import Path
+from unittest import mock
+
+from adapters.registry import adapter_modules
+from adapters.registry import load_adapter
+from bench_goal_plus.application import BenchmarkAgent
+from bench_goal_plus.catalog import Catalog
+from bench_goal_plus.errors import ContractError
+from bench_goal_plus.runners.factory import create_runner
+from bench_goal_plus.models import CampaignRef
+from bench_goal_plus.runtime import RuntimeManager
+from bench_goal_plus.state import create_agent_state
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class RecordingExecutor:
+    def __init__(self) -> None:
+        self.commands: list[list[str]] = []
+
+    def execute(self, commands: list[list[str]], *, dry_run: bool) -> None:
+        self.commands.extend(commands)
+
+
+class BenchmarkAgentContractTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.catalog = Catalog()
+        self.executor = RecordingExecutor()
+        self.agent = BenchmarkAgent(catalog=self.catalog, executor=self.executor)
+
+    def test_catalog_reuses_runner_families_and_covers_common_adapters(self) -> None:
+        common = {
+            target.adapter_id
+            for target in self.catalog.targets.values()
+            if target.runner_id == "common-matrix"
+        }
+        self.assertEqual(common, set(adapter_modules()))
+        self.assertEqual(self.catalog.targets["edgebench"].runner_id, "edgebench-native")
+        self.assertIn("openevolve-cpu-portable", self.catalog.targets)
+        self.assertEqual(len(self.catalog.runners), 3)
+
+    def test_every_target_has_an_explicit_docker_owner_and_mode(self) -> None:
+        for target in self.catalog.targets.values():
+            self.assertIn(target.docker.owner, {"runner", "adapter", "host"})
+            self.assertIn(
+                target.docker.provision_mode, {"eager", "lazy", "external", "none"}
+            )
+            self.assertTrue(target.docker.scope)
+            if target.docker.owner == "adapter" and target.docker.provision_mode == "eager":
+                loaded = load_adapter(target.adapter_id)
+                self.assertTrue(callable(getattr(loaded.module, "provision_environment", None)))
+                self.assertTrue(callable(getattr(loaded.module, "doctor_environment", None)))
+
+    def test_skip_bootstrap_does_not_require_uv(self) -> None:
+        target = self.catalog.targets["local-vliw"]
+
+        def available(name: str) -> str | None:
+            return None if name == "uv" else f"/bin/{name}"
+
+        with mock.patch("bench_goal_plus.runtime.shutil.which", side_effect=available):
+            self.assertEqual(
+                RuntimeManager().validate_host(
+                    (target,), dry_run=False, require_uv=False
+                ),
+                [],
+            )
+            with self.assertRaisesRegex(ContractError, "uv"):
+                RuntimeManager().validate_host(
+                    (target,), dry_run=False, require_uv=True
+                )
+
+    def test_edgebench_example_resolves_to_explicit_reproducible_values(self) -> None:
+        spec = self.agent.resolve_spec(preset_id="edgebench-codex-2h")
+        self.assertEqual(spec.model, "gpt-5.6-sol")
+        self.assertEqual(spec.methods, ("plain-codex",))
+        self.assertEqual(spec.concurrency(), {"T": 7200, "K": 1, "C": 2, "R": 1})
+        result = self.agent.start(
+            spec,
+            skip_bootstrap=False,
+            skip_provision=False,
+            prepare_only=False,
+            foreground=False,
+            dry_run=True,
+        )
+        rendered = "\n".join(result["commands"])
+        self.assertIn("experiments/edgebench/experiment.py provision", rendered)
+        self.assertIn("--cell-concurrency 2", rendered)
+        self.assertIn("--detach", rendered)
+
+    def test_edgebench_local_smoke_resolves_to_frozen_plain_codex_values(self) -> None:
+        spec = self.agent.resolve_spec(
+            preset_id="edgebench-vliw-codex-local-smoke"
+        )
+
+        self.assertEqual(spec.model, "gpt-5.6-sol")
+        self.assertEqual(spec.reasoning_effort, "medium")
+        self.assertEqual(spec.methods, ("plain-codex",))
+        self.assertEqual(spec.concurrency(), {"T": 300, "K": 1, "C": 1, "R": 1})
+        result = self.agent.start(
+            spec,
+            skip_bootstrap=False,
+            skip_provision=False,
+            prepare_only=False,
+            foreground=False,
+            dry_run=True,
+        )
+        rendered = "\n".join(result["commands"])
+        self.assertIn(
+            "experiments/edgebench/experiment.py doctor "
+            "--profile vliw-codex-sol-medium-local-smoke",
+            rendered,
+        )
+        self.assertIn("--method plain-codex", rendered)
+        self.assertIn("--detach", rendered)
+
+    def test_common_matrix_defaults_controller_concurrency_to_one(self) -> None:
+        spec = self.agent.resolve_spec(
+            target_ids=("local-vliw",),
+            campaign_id="generic-smoke",
+            conditions=("B0",),
+            model="test-model",
+            reasoning_effort="medium",
+            wall_time_seconds=60,
+            live_search_concurrency=2,
+        )
+        self.assertEqual(spec.concurrency(), {"T": 60, "K": 2, "C": 1, "R": 1})
+        runner = create_runner(spec.runner)
+        commands, campaign = runner.prepare_commands(spec)
+        self.assertIn("--benchmarks", commands[0])
+        self.assertEqual(campaign.path, ROOT / "runs/benchmark-campaigns/generic-smoke")
+
+    def test_common_matrix_can_select_a_method_without_an_ablation_condition(self) -> None:
+        spec = self.agent.resolve_spec(
+            target_ids=("local-vliw",),
+            campaign_id="goal-plus-smoke",
+            methods=("goal-plus-codex",),
+            model="test-model",
+            reasoning_effort="medium",
+            wall_time_seconds=180,
+            live_search_concurrency=2,
+            worker_runtime_seconds=150,
+            worker_min_runtime_seconds=60,
+        )
+        command, _ = create_runner(spec.runner).prepare_commands(spec)
+        self.assertIn("--methods", command[0])
+        self.assertIn("goal-plus-codex", command[0])
+        self.assertNotIn("--conditions", command[0])
+        self.assertIn("--worker-runtime-seconds", command[0])
+        self.assertIn("150", command[0])
+        self.assertIn("--worker-min-runtime-seconds", command[0])
+        self.assertIn("60", command[0])
+
+    def test_unproven_common_cell_concurrency_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ContractError, "use C=1"):
+            self.agent.resolve_spec(
+                target_ids=("local-vliw",),
+                model="test-model",
+                reasoning_effort="medium",
+                wall_time_seconds=60,
+                live_search_concurrency=1,
+                cell_concurrency=2,
+            )
+
+    def test_preset_rejects_overrides_that_would_mislabel_campaign(self) -> None:
+        with self.assertRaisesRegex(ContractError, "preset.*is frozen"):
+            self.agent.resolve_spec(
+                preset_id="edgebench-codex-2h", model="different-model"
+            )
+
+    def test_openevolve_batch_preserves_native_controller_and_resume(self) -> None:
+        spec = self.agent.resolve_spec(
+            target_ids=("openevolve-cpu-portable",),
+            campaign_id="oe-smoke",
+            model="test-model",
+            reasoning_effort="medium",
+            wall_time_seconds=60,
+            live_search_concurrency=2,
+        )
+        runner = create_runner(spec.runner)
+        commands, campaign = runner.prepare_commands(spec)
+        rendered = " ".join(commands[0])
+        self.assertIn("prepare-batch", rendered)
+        self.assertIn("--task-set cpu_portable", rendered)
+        self.assertTrue(spec.runner.capabilities.resume)
+        self.assertEqual(campaign.path, ROOT / "runs/openevolve-campaigns/oe-smoke")
+
+    def test_campaign_directory_cannot_escape_runs(self) -> None:
+        spec = self.agent.resolve_spec(
+            target_ids=("local-vliw",),
+            campaign_dir=ROOT.parent / "outside-runs",
+            model="test-model",
+            reasoning_effort="medium",
+            wall_time_seconds=60,
+            live_search_concurrency=1,
+        )
+        with self.assertRaisesRegex(ContractError, "must stay under"):
+            create_runner(spec.runner).prepare_commands(spec)
+
+    def test_agent_state_tracks_runner_status_and_resume_command(self) -> None:
+        (ROOT / "runs").mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="agent-state-", dir=ROOT / "runs") as temporary:
+            campaign_path = Path(temporary)
+            spec = self.agent.resolve_spec(
+                target_ids=("local-vliw",),
+                campaign_id="state-smoke",
+                model="test-model",
+                reasoning_effort="medium",
+                wall_time_seconds=60,
+                live_search_concurrency=1,
+            )
+            manifest = {
+                "schema_version": 1,
+                "campaign_id": "state-smoke",
+                "state": "prepared",
+                "model": "test-model",
+                "cells": [{"state": "prepared"}],
+            }
+            (campaign_path / "campaign.json").write_text(json.dumps(manifest) + "\n")
+            ref = CampaignRef(
+                "state-smoke", campaign_path, "local-vliw", "common-matrix"
+            )
+            create_agent_state(spec, ref, commands=["prepare"], follow_up={})
+
+            status = self.agent.status(campaign_path)
+            self.assertEqual(status["agent_phase"], "prepared")
+            self.assertEqual(status["runner"]["state"], "pending")
+            resumed = self.agent.resume(campaign_path, benchmark=None, dry_run=True)
+            self.assertIn("experiment.py run", resumed["command"])
+            self.assertIn("--model test-model", resumed["command"])
+
+            manifest["state"] = "finished"
+            manifest["cells"][0]["state"] = "finished"
+            (campaign_path / "campaign.json").write_text(json.dumps(manifest) + "\n")
+            finished = self.agent.finish(
+                campaign_path,
+                benchmark=None,
+                markdown_out=None,
+                xlsx_out=None,
+                dry_run=True,
+            )
+            self.assertEqual(
+                finished["artifacts"]["xlsx"],
+                str(campaign_path / f"{campaign_path.name}.xlsx"),
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

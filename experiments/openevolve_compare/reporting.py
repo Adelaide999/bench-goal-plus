@@ -8,21 +8,11 @@ import os
 from pathlib import Path
 from typing import Any, Iterable
 
+from bench_artifacts import portable_path, read_json as load_json
+
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT_SCHEMA_VERSION = 1
-
-
-def load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
-
-
-def portable_path(path: Path) -> str:
-    resolved = path.expanduser().absolute()
-    try:
-        return resolved.relative_to(ROOT).as_posix()
-    except ValueError:
-        return str(resolved)
 
 
 def numeric(value: Any) -> float | None:
@@ -236,6 +226,7 @@ def collect_run(
         or ledger.get("task_id"),
         "method": manifest.get("method") or entry.get("method") or ledger.get("method"),
         "status": status,
+        "incomplete_reason": execution.get("result_incomplete_reason"),
         "returncode": ledger.get("returncode", execution.get("returncode")),
         "error": ledger.get("error"),
         "model": manifest.get("model") or campaign.get("model"),

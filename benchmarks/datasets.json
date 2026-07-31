@@ -1,0 +1,388 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-29",
+  "panel_status_values": [
+    "selection_pending",
+    "upstream_defined",
+    "frozen"
+  ],
+  "adapter_status_values": [
+    "source_pending",
+    "cataloged",
+    "adapter_pending",
+    "ready"
+  ],
+  "datasets": [
+    {
+      "id": "swe-evo",
+      "display_name": "SWE-EVO",
+      "domain": "software",
+      "task_count": 48,
+      "claim_role": "primary",
+      "recommended_stages": [1, 2, 3, 4],
+      "source": {
+        "repository": "https://github.com/SWE-EVO/SWE-EVO",
+        "data": "https://github.com/SWE-EVO/SWE-EVO/tree/main/hf_out/hf_dataset",
+        "revision": null,
+        "revision_policy": "Pin a reviewed upstream commit before materializing any panel."
+      },
+      "evaluator": {
+        "kind": "repository_tests",
+        "metrics": ["resolved_rate", "patch_apply_rate", "fix_rate"]
+      },
+      "environment": {
+        "lane_kind": "repository_container",
+        "docker_requirement": "required",
+        "notes": "One long-lived repository container per lane; preserve test and patch ledgers."
+      },
+      "integration": {
+        "harness": "swe-evo-native",
+        "adapter_status": "adapter_pending",
+        "next_step": "Bootstrap the official 48-task source, audit build stability, then freeze the development panel."
+      },
+      "panels": [
+        {
+          "id": "development-12",
+          "purpose": "T1 software mechanism calibration",
+          "target_size": 12,
+          "status": "selection_pending",
+          "selection": "Stratify across projects, change size, test density, and baseline difficulty.",
+          "task_ids": []
+        },
+        {
+          "id": "full-48",
+          "purpose": "Primary paired software result",
+          "target_size": 48,
+          "status": "upstream_defined",
+          "selection": "Use the complete upstream test split at the pinned revision.",
+          "task_ids": []
+        }
+      ]
+    },
+    {
+      "id": "roadmapbench",
+      "display_name": "RoadmapBench",
+      "domain": "software",
+      "task_count": 115,
+      "claim_role": "confirmatory",
+      "recommended_stages": [3, 4],
+      "source": {
+        "repository": null,
+        "data": "https://arxiv.org/abs/2605.15846",
+        "revision": null,
+        "revision_policy": "Do not materialize until the authors publish a versioned task source."
+      },
+      "evaluator": {
+        "kind": "repository_subtasks",
+        "metrics": ["resolved_rate", "completion_score"]
+      },
+      "environment": {
+        "lane_kind": "repository_container",
+        "docker_requirement": "unresolved",
+        "notes": "Long-horizon version upgrades require native multi-language environments."
+      },
+      "integration": {
+        "harness": "roadmapbench-native",
+        "adapter_status": "source_pending",
+        "next_step": "Locate the official versioned dataset and harness before selecting tasks."
+      },
+      "panels": [
+        {
+          "id": "selected-20",
+          "purpose": "Long-horizon T2 confirmation",
+          "target_size": 20,
+          "status": "selection_pending",
+          "selection": "Select 15-30 tasks across repositories, languages, and subtask counts after source release.",
+          "task_ids": []
+        },
+        {
+          "id": "full-115",
+          "purpose": "Late-stage full benchmark",
+          "target_size": 115,
+          "status": "selection_pending",
+          "selection": "Blocked on an official versioned task source.",
+          "task_ids": []
+        }
+      ]
+    },
+    {
+      "id": "swe-bench-pro-clean",
+      "display_name": "SWE-bench Pro audited subset",
+      "domain": "software",
+      "task_count": 731,
+      "claim_role": "audit_required",
+      "recommended_stages": [1, 3],
+      "source": {
+        "repository": null,
+        "data": "https://huggingface.co/datasets/ScaleAI/SWE-bench_Pro",
+        "revision": null,
+        "revision_policy": "Pin the dataset revision together with public audit labels and local exclusion decisions."
+      },
+      "evaluator": {
+        "kind": "hidden_repository_tests",
+        "metrics": ["resolved_rate", "patch_apply_rate", "task_validity_rate"]
+      },
+      "environment": {
+        "lane_kind": "repository_container",
+        "docker_requirement": "required",
+        "notes": "Only audited tasks may enter a panel; preserve exclusion reason per task."
+      },
+      "integration": {
+        "harness": "swe-bench-pro-native",
+        "adapter_status": "cataloged",
+        "next_step": "Import public audit labels, define exclusion rules, and publish the selected task IDs."
+      },
+      "panels": [
+        {
+          "id": "audited-clean",
+          "purpose": "Supplemental contamination-aware software result",
+          "target_size": null,
+          "status": "selection_pending",
+          "selection": "Include only tasks passing public audit labels and a second local validity review.",
+          "task_ids": []
+        }
+      ]
+    },
+    {
+      "id": "swe-bench-verified",
+      "display_name": "SWE-bench Verified",
+      "domain": "software",
+      "task_count": 500,
+      "claim_role": "smoke_only",
+      "recommended_stages": [0, 1],
+      "source": {
+        "repository": "https://github.com/SWE-bench/SWE-bench",
+        "data": "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
+        "revision": null,
+        "revision_policy": "Pin a Hugging Face revision and use only for harness smoke or regression."
+      },
+      "evaluator": {
+        "kind": "hidden_repository_tests",
+        "metrics": ["resolved_rate", "patch_apply_rate"]
+      },
+      "environment": {
+        "lane_kind": "repository_container",
+        "docker_requirement": "required",
+        "notes": "Known test-quality and contamination risks prohibit primary-effect claims."
+      },
+      "integration": {
+        "harness": "swe-bench-native",
+        "adapter_status": "adapter_pending",
+        "next_step": "Use a small pinned smoke panel to validate repository-lane reset and final judging."
+      },
+      "panels": [
+        {
+          "id": "smoke-10",
+          "purpose": "Repository harness regression",
+          "target_size": 10,
+          "status": "selection_pending",
+          "selection": "Choose stable, fast tasks across repositories; do not report as a main benchmark result.",
+          "task_ids": []
+        },
+        {
+          "id": "full-500",
+          "purpose": "Upstream compatibility only",
+          "target_size": 500,
+          "status": "upstream_defined",
+          "selection": "Complete upstream test split; not approved for Goal Plus primary claims.",
+          "task_ids": []
+        }
+      ]
+    },
+    {
+      "id": "cybench",
+      "display_name": "Cybench",
+      "domain": "security",
+      "task_count": 40,
+      "claim_role": "mechanism",
+      "recommended_stages": [0, 1, 2],
+      "source": {
+        "repository": "https://github.com/andyzorigin/cybench",
+        "data": "https://github.com/andyzorigin/cybench/blob/main/task_list.txt",
+        "revision": null,
+        "revision_policy": "Pin the repository commit and all task container image digests."
+      },
+      "evaluator": {
+        "kind": "flag_and_subtasks",
+        "metrics": ["task_success_rate", "subtask_score", "time_to_flag"]
+      },
+      "environment": {
+        "lane_kind": "isolated_ctf_container",
+        "docker_requirement": "required",
+        "notes": "Run only inside authorized benchmark networks with one resettable environment per lane."
+      },
+      "integration": {
+        "harness": "cybench-native",
+        "adapter_status": "adapter_pending",
+        "next_step": "Pin task images and implement reset, action, observation, and flag-verifier events."
+      },
+      "panels": [
+        {
+          "id": "full-40",
+          "purpose": "Low-cost security mechanism experiment",
+          "target_size": 40,
+          "status": "upstream_defined",
+          "selection": "Use the complete upstream task list with multiple paired seeds.",
+          "task_ids": []
+        }
+      ]
+    },
+    {
+      "id": "cybergym",
+      "display_name": "CyberGym",
+      "domain": "security",
+      "task_count": 1507,
+      "claim_role": "primary",
+      "recommended_stages": [0, 1, 2, 3, 4],
+      "source": {
+        "repository": "https://github.com/sunblaze-ucb/cybergym",
+        "data": "https://huggingface.co/datasets/sunblaze-ucb/cybergym",
+        "revision": null,
+        "revision_policy": "Pin dataset revision, repository commit, compiler images, and server artifacts together."
+      },
+      "evaluator": {
+        "kind": "pre_post_patch_crash",
+        "metrics": ["poc_success_rate", "time_to_poc", "environment_failure_rate"]
+      },
+      "environment": {
+        "lane_kind": "vulnerability_container",
+        "docker_requirement": "required",
+        "notes": "Full server data is multi-terabyte; start with the official ten-task download subset."
+      },
+      "integration": {
+        "harness": "cybergym-native",
+        "adapter_status": "adapter_pending",
+        "next_step": "Run the official ten-task subset, measure build reliability, then stratify a development panel."
+      },
+      "panels": [
+        {
+          "id": "official-smoke-10",
+          "purpose": "Environment and verifier shakedown",
+          "target_size": 10,
+          "status": "upstream_defined",
+          "selection": "Tasks published by the upstream download_subset.py workflow.",
+          "task_ids": [
+            "arvo:47101",
+            "arvo:3938",
+            "arvo:24993",
+            "arvo:1065",
+            "arvo:10400",
+            "arvo:368",
+            "oss-fuzz:42535201",
+            "oss-fuzz:42535468",
+            "oss-fuzz:370689421",
+            "oss-fuzz:385167047"
+          ]
+        },
+        {
+          "id": "development-75",
+          "purpose": "T1 security mechanism and ablation",
+          "target_size": 75,
+          "status": "selection_pending",
+          "selection": "Stratify 50-100 tasks by project, vulnerability class, PoC length, language, and difficulty.",
+          "task_ids": []
+        },
+        {
+          "id": "fixed-300",
+          "purpose": "Primary paired security result",
+          "target_size": 300,
+          "status": "selection_pending",
+          "selection": "Publish explicit task IDs; do not assume the paper's random 300-task ablation is an official split.",
+          "task_ids": []
+        }
+      ]
+    },
+    {
+      "id": "webarena",
+      "display_name": "WebArena",
+      "domain": "web",
+      "task_count": 812,
+      "claim_role": "mechanism",
+      "recommended_stages": [0, 1, 2, 3],
+      "source": {
+        "repository": "https://github.com/web-arena-x/webarena",
+        "data": "https://github.com/web-arena-x/webarena/tree/main/config_files",
+        "revision": null,
+        "revision_policy": "Pin WebArena, BrowserGym, website images, task configs, and evaluator revisions together."
+      },
+      "evaluator": {
+        "kind": "browser_state",
+        "metrics": ["task_success_rate", "action_count", "invalid_action_rate", "repeated_state_rate"]
+      },
+      "environment": {
+        "lane_kind": "browser_service_stack",
+        "docker_requirement": "required",
+        "notes": "Each lane needs isolated browser state and resettable self-hosted websites."
+      },
+      "integration": {
+        "harness": "browsergym-webarena",
+        "adapter_status": "adapter_pending",
+        "next_step": "Build a BrowserGym lane adapter and select multi-path, cross-page, recovery-heavy tasks."
+      },
+      "panels": [
+        {
+          "id": "mechanism-50",
+          "purpose": "Low-cost Shared Pane and AtomicPlan experiment",
+          "target_size": 50,
+          "status": "selection_pending",
+          "selection": "Choose 30-100 multi-page tasks with failed-path recovery and state-based verification.",
+          "task_ids": []
+        },
+        {
+          "id": "full-812",
+          "purpose": "Late-stage web confirmation",
+          "target_size": 812,
+          "status": "upstream_defined",
+          "selection": "Complete upstream config set at the pinned service revision.",
+          "task_ids": []
+        }
+      ]
+    },
+    {
+      "id": "workarena-l1",
+      "display_name": "WorkArena L1",
+      "domain": "web",
+      "task_count": 330,
+      "claim_role": "mechanism",
+      "recommended_stages": [0, 1, 2, 3],
+      "source": {
+        "repository": "https://github.com/ServiceNow/BrowserGym",
+        "data": "https://github.com/ServiceNow/BrowserGym/tree/main/browsergym/workarena",
+        "revision": null,
+        "revision_policy": "Pin BrowserGym, WorkArena package, ServiceNow release, and task definitions together."
+      },
+      "evaluator": {
+        "kind": "browser_state",
+        "metrics": ["task_success_rate", "action_count", "invalid_action_rate", "repeated_state_rate"]
+      },
+      "environment": {
+        "lane_kind": "browser_service_stack",
+        "docker_requirement": "required",
+        "notes": "ServiceNow state and credentials must be isolated per lane and reset between cells."
+      },
+      "integration": {
+        "harness": "browsergym-workarena",
+        "adapter_status": "adapter_pending",
+        "next_step": "Reuse the WebArena lane adapter and freeze L1 tasks with reliable reset and evaluator behavior."
+      },
+      "panels": [
+        {
+          "id": "mechanism-50",
+          "purpose": "Low-cost enterprise interaction mechanism experiment",
+          "target_size": 50,
+          "status": "selection_pending",
+          "selection": "Choose 30-100 L1 tasks with multiple valid action paths and failure recovery.",
+          "task_ids": []
+        },
+        {
+          "id": "full-330",
+          "purpose": "L1 confirmation",
+          "target_size": 330,
+          "status": "upstream_defined",
+          "selection": "Complete upstream L1 task set at the pinned revision.",
+          "task_ids": []
+        }
+      ]
+    }
+  ]
+}

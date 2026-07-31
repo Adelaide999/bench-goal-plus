@@ -168,6 +168,7 @@ ALLOWED_PROTOCOL_OVERRIDE_FIELDS = frozenset(
         "timeout",
     }
 )
+PROFILE_PROTOCOL_OVERRIDE_FIELDS = frozenset({"eval_interval", "internet"})
 OFFICIAL_TASK_COUNT = 51
 OFFICIAL_SCHEDULED_RUNS = 3
 
@@ -345,7 +346,36 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
     reasons = profile.get("protocol_override_reasons")
     if not isinstance(reasons, dict) or not reasons:
         raise ValueError("EdgeBench profile must record protocol_override_reasons")
-    unknown_reasons = set(reasons) - ALLOWED_PROTOCOL_OVERRIDE_FIELDS
+    protocol_overrides = profile.get("protocol_overrides", {})
+    if not isinstance(protocol_overrides, dict):
+        raise ValueError("EdgeBench profile protocol_overrides must be an object")
+    unknown_overrides = set(protocol_overrides) - PROFILE_PROTOCOL_OVERRIDE_FIELDS
+    if unknown_overrides:
+        raise ValueError(
+            "EdgeBench profile has unsupported protocol overrides: "
+            f"{sorted(unknown_overrides)}"
+        )
+    if "internet" in protocol_overrides and not isinstance(
+        protocol_overrides["internet"], bool
+    ):
+        raise ValueError("EdgeBench profile internet override must be boolean")
+    if "eval_interval" in protocol_overrides and (
+        not isinstance(protocol_overrides["eval_interval"], int)
+        or isinstance(protocol_overrides["eval_interval"], bool)
+        or protocol_overrides["eval_interval"] < 1
+    ):
+        raise ValueError(
+            "EdgeBench profile eval_interval override must be a positive integer"
+        )
+    missing_override_reasons = set(protocol_overrides) - set(reasons)
+    if missing_override_reasons:
+        raise ValueError(
+            "EdgeBench profile protocol overrides are missing reasons: "
+            f"{sorted(missing_override_reasons)}"
+        )
+    unknown_reasons = set(reasons) - (
+        ALLOWED_PROTOCOL_OVERRIDE_FIELDS | PROFILE_PROTOCOL_OVERRIDE_FIELDS
+    )
     if unknown_reasons:
         raise ValueError(
             "EdgeBench profile has unsupported protocol override reasons: "
@@ -469,12 +499,31 @@ def official_task_protocol(
     return resolved
 
 
+def profile_task_protocol(
+    profile: dict[str, Any],
+    protocol: dict[str, Any],
+    task_id: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    resolved = official_task_protocol(protocol, task_id, config)
+    return {
+        **resolved,
+        **dict(profile.get("protocol_overrides") or {}),
+    }
+
+
 def _protocol_diff(
     *,
     official: dict[str, Any],
     effective: dict[str, Any],
     reasons: dict[str, Any],
+    allowed_fields: frozenset[str] | set[str] | None = None,
 ) -> list[dict[str, Any]]:
+    permitted = (
+        ALLOWED_PROTOCOL_OVERRIDE_FIELDS
+        if allowed_fields is None
+        else frozenset(allowed_fields)
+    )
     fields = sorted(set(official) | set(effective))
     result: list[dict[str, Any]] = []
     for field in fields:
@@ -482,7 +531,7 @@ def _protocol_diff(
         after = effective.get(field)
         if before == after:
             continue
-        if field not in ALLOWED_PROTOCOL_OVERRIDE_FIELDS:
+        if field not in permitted:
             raise ValueError(f"unsupported EdgeBench protocol override: {field}")
         reason = reasons.get(field)
         if not isinstance(reason, str) or not reason.strip():
@@ -1278,8 +1327,8 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         config = task_config(task_id)
         if official_protocol is not None:
             try:
-                effective = official_task_protocol(
-                    official_protocol, task_id, config
+                effective = profile_task_protocol(
+                    profile, official_protocol, task_id, config
                 )
                 effective_protocols.append(effective)
                 if effective["internet"] is False:
@@ -1288,6 +1337,11 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                     f"protocol-effective:{task_id}",
                     True,
                     internet=effective["internet"],
+                    internet_source=(
+                        f"profiles/{profile['id']}.protocol_overrides.internet"
+                        if "internet" in profile.get("protocol_overrides", {})
+                        else f"tasks/{task_id}.json"
+                    ),
                     submission_cooldown=effective["submission_cooldown"],
                 )
             except ValueError as exc:
@@ -1442,6 +1496,10 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     backend = str(profile.get("backend") or "docker")
     judge_concurrency = int(profile.get("judge_concurrency", 1))
     override_reasons = dict(profile["protocol_override_reasons"])
+    profile_protocol_overrides = dict(profile.get("protocol_overrides") or {})
+    allowed_protocol_override_fields = (
+        ALLOWED_PROTOCOL_OVERRIDE_FIELDS | set(profile_protocol_overrides)
+    )
     if wall_time < 1 or concurrency < 1 or cell_concurrency < 1:
         raise ValueError(
             "wall time, concurrency, and cell concurrency must be positive"
@@ -1463,6 +1521,9 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         official_effective = official_task_protocol(
             official_protocol, task_id, config
         )
+        profile_effective = profile_task_protocol(
+            profile, official_protocol, task_id, config
+        )
         official_contract = {
             **official_effective,
             "attempts_per_task": OFFICIAL_SCHEDULED_RUNS,
@@ -1481,7 +1542,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 else int(method_config["outer_replicas"])
             )
             effective_contract = {
-                **official_effective,
+                **profile_effective,
                 "agent": method_config["agent"],
                 "attempts_per_task": outer_replicas,
                 "backend": backend,
@@ -1495,6 +1556,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 official=official_contract,
                 effective=effective_contract,
                 reasons=override_reasons,
+                allowed_fields=allowed_protocol_override_fields,
             )
             cell = {
                 "schema_version": 1,
@@ -1545,7 +1607,11 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                     "disable_stop_hook"
                 ],
                 "internet": effective_contract["internet"],
-                "internet_source": f"tasks/{task_id}.json",
+                "internet_source": (
+                    f"profiles/{profile['id']}.protocol_overrides.internet"
+                    if "internet" in profile_protocol_overrides
+                    else f"tasks/{task_id}.json"
+                ),
                 "protocol_source": {
                     "path": official_protocol["source"],
                     "sha256": official_protocol["source_sha256"],
@@ -1605,6 +1671,9 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         },
     }
     write_json(destination / "profile.json", snapshot)
+    campaign_official_comparable = all(
+        item["official_edgebench_comparable"] for item in cells
+    )
     write_json(
         destination / "campaign.json",
         {
@@ -1639,10 +1708,12 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "official_model": official_protocol["official_model"],
                 "stagger_seconds": official_protocol["stagger_seconds"],
             },
-            "protocol_classification": "official_protocol_with_intentional_overrides",
-            "official_edgebench_comparable": all(
-                item["official_edgebench_comparable"] for item in cells
+            "protocol_classification": (
+                "official_protocol"
+                if campaign_official_comparable
+                else "official_protocol_with_intentional_overrides"
             ),
+            "official_edgebench_comparable": campaign_official_comparable,
             "cells": cells,
         },
     )
@@ -2823,6 +2894,7 @@ def summarize_cell(destination: Path, cell: dict[str, Any]) -> dict[str, Any]:
         "method": cell["method"],
         "model": cell["model"],
         "reasoning_effort": cell["reasoning_effort"],
+        "metric_direction": cell["metric_direction"],
         "wall_time_seconds": cell["wall_time_seconds"],
         "live_search_concurrency": cell["live_search_concurrency"],
         "outer_replicas": cell["outer_replicas"],
@@ -3227,6 +3299,9 @@ def finalize_campaign(
         "edgebench_commit": campaign.get("edgebench_commit"),
         "goal_plus_commit": campaign.get("goal_plus_commit"),
         "dataset_revision": campaign.get("dataset_revision"),
+        "wall_time_seconds": campaign.get("wall_time_seconds"),
+        "live_search_concurrency": campaign.get("concurrency"),
+        "cell_concurrency": campaign.get("cell_concurrency"),
         "paper_reference": paper_reference,
         "cells": summaries,
         "finalized_at": utc_now(),

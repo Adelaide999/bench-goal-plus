@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from adapters import skydiscover_bridge  # noqa: E402
 from experiments.backends import skydiscover  # noqa: E402
-from experiments.heurigym_compare import experiment as standalone_experiment  # noqa: E402
+from experiments.benchmark_compare import experiment as standalone_experiment  # noqa: E402
 from experiments.openevolve_compare import experiment, reporting  # noqa: E402
 
 

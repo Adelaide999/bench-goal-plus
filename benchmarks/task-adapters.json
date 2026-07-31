@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "adapters": [
+    {
+      "id": "ale-bench-lite",
+      "module": "adapters.ale.adapter"
+    },
+    {
+      "id": "autolab-toy-isa",
+      "module": "adapters.autolab.adapter"
+    },
+    {
+      "id": "frontier-cs-problem-0",
+      "module": "adapters.frontier_cs.adapter"
+    },
+    {
+      "id": "frontier-engineering-malloclab",
+      "module": "adapters.frontier_engineering.adapter"
+    },
+    {
+      "id": "heurigym",
+      "module": "adapters.heurigym.adapter"
+    },
+    {
+      "id": "local-vliw",
+      "module": "adapters.local_vliw.adapter"
+    }
+  ]
+}

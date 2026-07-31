@@ -1,0 +1,4 @@
+interface:
+  display_name: "Benchmark Run"
+  short_description: "Dispatch registered reproducible benchmark campaigns"
+  default_prompt: "Use $benchmark-run to plan and launch a registered benchmark campaign with explicit T/K/C/R."

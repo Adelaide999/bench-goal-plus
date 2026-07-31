@@ -154,19 +154,24 @@ workspace。它不会进入正式 benchmark 数量，也不能替代 SForge hidd
 
 ```text
 benchmarks/registry.json       唯一状态源：上游、fork、branch、门禁、证据、下一步
+benchmarks/datasets.json       SWE/Web/Security 数据集来源、实验角色与 panel 冻结状态
+benchmarks/task-adapters.json  standalone task ID 到经校验 adapter 模块的注册表
 docs/roadmap.md                分 benchmark 的推进计划与完成定义
 docs/experiment-taxonomy.md    Agent 方案、搜索方法、runtime、benchmark 与 task pack 分类
 docs/codex-run-contract.md     所有 benchmark 共用的 Codex 执行/证据契约
 docs/docker-storage-plan.md    单 case 实测镜像、全量空间预算与 Linux campaign 规划
 docs/benchmarks/               规模/时间总览与每套 benchmark 的代表 case 导读
 docs/goal-plus-benchmark-experiment.md  Goal Plus 接入、并发、公平预算与逐 benchmark 对标协议
+docs/generic-benchmark-support.md       通用 adapter/campaign、B0-B4 映射和未支持边界
+docs/benchmark-datasets.md              SWE-EVO、CyberGym、WebArena 等数据集与 panel 目录
 docs/openevolve-cpu-examples.md         OpenEvolve 无特殊硬件示例的主实验/诊断/暂缓分级
 docs/reproducible-environment.md         新机器 bootstrap、doctor、workspace 与实验执行手册
 environment/                             Python lock 与受管 fork branch manifest
 third_party/                             所有 branch-tracked benchmark/search runtime 的统一 ignored checkout 根目录
 local_examples/                          无 Docker 的固定 task replica；只作方法实验，不冒充正式 benchmark
 experiments/openevolve_compare/          native OE / Plain Codex / Goal Plus+Codex / Goal Plus+Pi 同任务时限入口
-experiments/benchmark_compare/             standalone benchmark 与 local task 的 Plain Codex / Goal Plus+Codex 统一入口
+experiments/benchmark_compare/             standalone benchmark 与 local task 的 Plain Codex / Goal Plus+Codex/Pi 统一入口
+experiments/benchmark_campaign/            benchmark × condition × seed 通用 campaign、状态与报告
 experiments/heurigym_compare/              上述通用实现的兼容入口
 experiments/edgebench/                      SForge 原生 runtime/judge 的 campaign 控制、监控、停止与汇总
 adapters/heurigym/                        HeuriGym workspace、官方 evaluator 与数据固定层
@@ -185,6 +190,18 @@ tests/                         不调用真实模型的 runner/registry 测试
 上游仓库不作为 submodule 纳入；后续需要修改 fork 时，在 `.worktrees/` 创建干净工作区并 push 到 registry 指定 branch。下一次 `bootstrap` 会 fast-forward；历史实验仍由各自 manifest 中的 resolved commit 定位。
 
 ## 使用
+
+统一 Agent Skill 入口和迁移边界见
+[Agent Skill architecture](docs/agent-skill-architecture.md)。查看已登记 runner、target 和
+Docker owner 后，可先做不执行的计划检查：
+
+```bash
+python3 scripts/bench.py catalog
+python3 scripts/bench.py plan --preset edgebench-codex-2h
+```
+
+`start` 在 prepare 成功后写 `agent-run.json`；后续只需要 campaign path 即可执行
+`status`、capability 允许的 `stop/resume`，以及终态后的 `finish`。
 
 新机器先执行：
 
@@ -218,6 +235,41 @@ python3 scripts/run_codex.py \
 ```
 
 runner 不保存环境变量值；模型/provider、任务 commit 和 evaluator 仍必须由 benchmark adapter 写入 run manifest 扩展字段。
+
+对已登记的 standalone benchmark 做 B0/B1/B3/B4 配对 campaign：
+
+```bash
+.bench-env/venv/bin/python experiments/benchmark_campaign/experiment.py prepare \
+  --campaign-dir runs/benchmark-campaigns/local-vliw-shakedown \
+  --benchmarks local-vliw --conditions B0 B1 B3 B4 --seeds 1 2 \
+  --wall-time-seconds 360 --concurrency 2 --model gpt-5.6-sol
+
+.bench-env/venv/bin/python experiments/benchmark_campaign/experiment.py run \
+  --campaign runs/benchmark-campaigns/local-vliw-shakedown \
+  --model gpt-5.6-sol
+
+.bench-env/venv/bin/python experiments/benchmark_campaign/experiment.py status \
+  --campaign runs/benchmark-campaigns/local-vliw-shakedown
+```
+
+B3 映射到 Goal Plus Search Space `observe`，B4 映射到 `enforce`；B2 和
+way0 因运行时缺少对应的可见性开关而明确拒绝。完整设计、指标覆盖和后续
+WebArena/SWE-EVO/CyberGym 接入边界见
+[通用 Benchmark 支持](docs/generic-benchmark-support.md)。
+
+场景候选数据集已经进入独立的可校验目录；这不会把尚未实现 native harness 的
+SWE-EVO、CyberGym 或 BrowserGym 任务冒充成 standalone adapter：
+
+```bash
+python3 scripts/datasets.py validate
+python3 scripts/datasets.py list --domain software --stage 1
+python3 scripts/datasets.py show swe-evo
+```
+
+目录当前登记 SWE-EVO、RoadmapBench、SWE-bench Pro audited policy、
+SWE-bench Verified、Cybench、CyberGym、WebArena 和 WorkArena L1。panel 状态、
+revision/task-ID 冻结门槛及接入顺序见
+[Benchmark 数据集目录](docs/benchmark-datasets.md)。
 
 OpenEvolve task 的四路径对比入口见 [实验目录](experiments/openevolve_compare/README.md)。`prepare-batch` / `run-batch` 可一次展开并执行 12-task × 多方法 campaign；主实验固定相同 task/evaluator/model、总 wall budget `T` 和 live concurrency `K`。各方法的 evaluator calls、iterations 与 tokens/cost 在运行后报告，不用强行改造 Goal Plus 去模拟 OpenEvolve round。
 

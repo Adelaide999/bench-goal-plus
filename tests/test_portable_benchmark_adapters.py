@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import nullcontext
@@ -16,7 +17,8 @@ from adapters.frontier_cs import adapter as frontier_cs
 from adapters.frontier_engineering import adapter as frontier
 from adapters.local_vliw import adapter as local_vliw
 from adapters.portable import candidate_changed_paths
-from experiments.heurigym_compare import experiment
+from experiments.benchmark_compare import experiment
+from experiments.heurigym_compare import experiment as legacy_experiment
 from experiments.openevolve_compare import experiment as openevolve_experiment
 
 
@@ -24,31 +26,53 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PortableBenchmarkAdapterTest(unittest.TestCase):
-    def test_registry_exposes_all_standalone_adapters(self) -> None:
-        self.assertEqual(
-            set(experiment.BENCHMARK_ADAPTERS),
-            {
-                "ale-bench-lite",
-                "autolab-toy-isa",
-                "frontier-cs-problem-0",
-                "frontier-engineering-malloclab",
-                "heurigym",
-                "local-vliw",
-            },
+    def test_generic_runner_keeps_goal_plus_pi_entrypoints(self) -> None:
+        self.assertIn("goal-plus-pi", experiment.METHODS)
+        config = experiment.RunConfig(
+            run_dir=Path("run"),
+            pi_bin="pi-test",
         )
+        self.assertEqual(config.to_namespace().pi_bin, "pi-test")
 
-    def test_docker_backed_tasks_use_host_capable_codex_sandbox(self) -> None:
-        experiment.configure_adapter("ale-bench-lite")
-        self.assertEqual(experiment.CODEX_SANDBOX, "danger-full-access")
-        experiment.configure_adapter("frontier-cs-problem-0")
-        self.assertEqual(experiment.CODEX_SANDBOX, "danger-full-access")
-        experiment.configure_adapter("autolab-toy-isa")
-        self.assertEqual(experiment.CODEX_SANDBOX, "workspace-write")
-        experiment.configure_adapter("local-vliw")
-        self.assertEqual(experiment.CODEX_SANDBOX, "workspace-write")
-        self.assertFalse(experiment.OFFICIAL_BENCHMARK_COMPARABLE)
-        experiment.configure_adapter("heurigym")
-        self.assertTrue(experiment.OFFICIAL_BENCHMARK_COMPARABLE)
+        args = experiment.build_parser().parse_args(
+            ["run", "--run-dir", "run", "--pi-bin", "pi-test"]
+        )
+        self.assertEqual(args.pi_bin, "pi-test")
+
+    def test_legacy_heurigym_entrypoint_delegates_adapter_state(self) -> None:
+        self.addCleanup(experiment.configure_adapter, "heurigym")
+        legacy_experiment.configure_adapter("local-vliw")
+        self.assertEqual(legacy_experiment.TASK_ID, "vliw_kernel_optimization")
+        self.assertEqual(legacy_experiment.TASK_ID, experiment.TASK_ID)
+
+    def test_legacy_heurigym_entrypoint_remains_directly_executable(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "experiments/heurigym_compare/experiment.py"),
+                "--help",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("{prepare,run,seed-smoke,closeout}", completed.stdout)
+
+    def test_codex_command_uses_frozen_reasoning_effort(self) -> None:
+        command = experiment.codex_command(
+            codex_bin="codex",
+            workspace=Path("workspace"),
+            output_last_message=Path("final-message.txt"),
+            model="test-model",
+            reasoning_effort="low",
+            api_base=None,
+            sandbox="workspace-write",
+            goal_plus=False,
+            ephemeral=True,
+        )
+        self.assertIn('model_reasoning_effort="low"', command)
+        self.assertNotIn('model_reasoning_effort="high"', command)
 
     def test_goal_plus_codex_loads_project_hooks_from_an_isolated_home(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -78,10 +102,13 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             self.assertNotIn("--ignore-user-config", goal_plus)
             self.assertIn("--ignore-user-config", plain)
             self.assertIn('model_reasoning_effort="medium"', goal_plus)
+            self.assertIn("features.multi_agent=true", goal_plus)
+            self.assertIn("agents.enabled=true", goal_plus)
             self.assertIn(
-                "features.multi_agent_v2.max_concurrent_threads_per_session=5",
+                "agents.max_concurrent_threads_per_session=5",
                 goal_plus,
             )
+            self.assertFalse(any("multi_agent_v2" in arg for arg in goal_plus))
             self.assertFalse(
                 any("max_concurrent_threads_per_session" in arg for arg in plain)
             )
@@ -194,6 +221,37 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                 )
         finally:
             experiment.configure_adapter("heurigym")
+
+    def test_recorded_codex_command_redacts_provider_url(self) -> None:
+        provider_url = "https://provider.example/v1"
+        command = experiment.codex_command(
+            codex_bin="codex",
+            workspace=Path("workspace"),
+            output_last_message=Path("final-message.txt"),
+            model="test-model",
+            reasoning_effort="low",
+            api_base=provider_url,
+            sandbox="workspace-write",
+            goal_plus=False,
+            ephemeral=True,
+        )
+        recorded = experiment.command_for_manifest(command, provider_url)
+        self.assertTrue(any("<provider-url>" in part for part in recorded))
+        self.assertFalse(any(provider_url in part for part in recorded))
+        self.assertTrue(any(provider_url in part for part in command))
+
+    def test_docker_backed_tasks_use_host_capable_codex_sandbox(self) -> None:
+        experiment.configure_adapter("ale-bench-lite")
+        self.assertEqual(experiment.CODEX_SANDBOX, "danger-full-access")
+        experiment.configure_adapter("frontier-cs-problem-0")
+        self.assertEqual(experiment.CODEX_SANDBOX, "danger-full-access")
+        experiment.configure_adapter("autolab-toy-isa")
+        self.assertEqual(experiment.CODEX_SANDBOX, "workspace-write")
+        experiment.configure_adapter("local-vliw")
+        self.assertEqual(experiment.CODEX_SANDBOX, "workspace-write")
+        self.assertFalse(experiment.OFFICIAL_BENCHMARK_COMPARABLE)
+        experiment.configure_adapter("heurigym")
+        self.assertTrue(experiment.OFFICIAL_BENCHMARK_COMPARABLE)
 
     def test_autolab_parser_requires_successful_verification(self) -> None:
         self.assertEqual(autolab.parse_result("cycles=1547 verify=ok"), (1547, True))
