@@ -83,6 +83,36 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertNotIn("work_cpu_limit", profile)
         self.assertNotIn("judge_cpu_limit", profile)
 
+    def test_vliw_codex_local_smoke_is_explicit_and_reproducible(self) -> None:
+        _, profile = EDGE.load_profile("vliw-codex-sol-medium-local-smoke")
+
+        self.assertEqual(profile["task_ids"], ["vliw_kernel_optimization"])
+        self.assertEqual(profile["methods"], ["plain-codex"])
+        self.assertEqual(profile["model"], "gpt-5.6-sol")
+        self.assertEqual(profile["reasoning_effort"], "medium")
+        self.assertEqual(profile["wall_time_seconds"], 300)
+        self.assertEqual(profile["concurrency"], 1)
+        self.assertEqual(profile["cell_concurrency"], 1)
+        self.assertEqual(
+            profile["protocol_overrides"],
+            {"eval_interval": 60, "internet": True},
+        )
+        self.assertTrue(profile["protocol_override_reasons"]["eval_interval"])
+        self.assertTrue(profile["protocol_override_reasons"]["internet"])
+
+    def test_profile_rejects_invalid_eval_interval_override(self) -> None:
+        _, profile = EDGE.load_profile("vliw-codex-sol-medium-local-smoke")
+        for value in (0, "60"):
+            with self.subTest(value=value):
+                profile["protocol_overrides"]["eval_interval"] = value
+                path = self.temp / f"invalid-eval-interval-{value}.json"
+                path.write_text(json.dumps(profile), encoding="utf-8")
+
+                with self.assertRaisesRegex(
+                    ValueError, "eval_interval override must be a positive integer"
+                ):
+                    EDGE.load_profile(path)
+
     def test_vliw_glm_profile_pins_claude_thinking_effort_and_budget(self) -> None:
         _, profile = EDGE.load_profile("vliw-glm-5-2-high-20m-k1")
 
@@ -280,6 +310,28 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                         effective={field: effective},
                         reasons={field: "not permitted"},
                     )
+
+    def test_protocol_diff_accepts_only_explicitly_allowed_network_override(self) -> None:
+        diff = EDGE._protocol_diff(
+            official={"internet": False},
+            effective={"internet": True},
+            reasons={"internet": "local development smoke"},
+            allowed_fields=(
+                EDGE.ALLOWED_PROTOCOL_OVERRIDE_FIELDS | {"internet"}
+            ),
+        )
+
+        self.assertEqual(
+            diff,
+            [
+                {
+                    "field": "internet",
+                    "official": False,
+                    "effective": True,
+                    "reason": "local development smoke",
+                }
+            ],
+        )
 
     def test_paper_gpt55_reference_covers_profile_and_records_provenance(self) -> None:
         _, profile = EDGE.load_profile("full-codex-2h")
@@ -578,6 +630,47 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             1,
         )
         self.assertFalse(any(path.name in {".gp", ".goal-plus"} for path in destination.rglob("*")))
+
+    def test_prepare_applies_local_smoke_network_override_with_provenance(self) -> None:
+        _, profile = EDGE.load_profile("vliw-codex-sol-medium-local-smoke")
+        args = SimpleNamespace(
+            method=None,
+            wall_time_seconds=None,
+            concurrency=None,
+            cell_concurrency=None,
+            model=None,
+            reasoning_effort=None,
+            campaign_id="unit-local-codex-smoke",
+        )
+
+        destination = EDGE.prepare(args, profile)
+        cell = json.loads(
+            (
+                destination
+                / "cells"
+                / "vliw_kernel_optimization--plain-codex"
+                / "cell.json"
+            ).read_text()
+        )
+        command = EDGE.build_sforge_command(destination, cell)
+
+        self.assertTrue(cell["internet"])
+        self.assertEqual(cell["eval_interval_seconds"], 60)
+        self.assertEqual(
+            cell["internet_source"],
+            "profiles/vliw-codex-sol-medium-local-smoke.protocol_overrides.internet",
+        )
+        self.assertTrue(
+            {"eval_interval", "internet"}
+            <= {item["field"] for item in cell["protocol_diff"]}
+        )
+        self.assertFalse(cell["official_edgebench_comparable"])
+        self.assertEqual(
+            command[command.index("--eval-interval") + 1],
+            "60",
+        )
+        self.assertIn("--enable-internet", command)
+        self.assertNotIn("--disable-internet", command)
 
     def test_prepare_encodes_plain_claude_api_and_thinking_contract(self) -> None:
         _, profile = EDGE.load_profile("vliw-glm-5-2-high-20m-k1")

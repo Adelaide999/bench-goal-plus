@@ -57,6 +57,24 @@ Rust distribution 到 `~/.cache/sforge/rust/`，最终统一核对官方 SHA256�
 
 ## 准备和启动
 
+先在本地验证 Codex、Docker、Judge 和报告链路时，使用固定的 VLIW smoke preset：
+
+```bash
+python3 scripts/bench.py launch \
+  --preset edgebench-vliw-codex-local-smoke
+```
+
+该 preset 固定 `plain-codex`、`gpt-5.6-sol/medium`、`T=300s`、`K=1`、
+`cell_concurrency=1`。由于官方 1800 秒 auto-eval 周期长于 smoke 总预算，它在
+profile 中显式改为每 60 秒评测一次；macOS 本地 OAuth 路径也显式使用
+`internet=true`。这两个差异都有逐字段原因并把结果标成
+`official_protocol_with_intentional_overrides`，不能当作官方同口径结果。
+
+2026-07-31 已用 campaign
+`edgebench-vliw-codex-gpt-5-6-sol-medium-local-smoke-5m-k1-c1-20260731-1532`
+完成端到端验证：4 次 hidden Judge 均通过 9/9，controller 最终状态为
+`completed`，并成功生成 `report.md` 与同名 xlsx。
+
 完整 51 题 Codex-only 固定协议是通用 dispatcher 中的一个 preset：
 
 ```bash
@@ -107,8 +125,10 @@ runs/edgebench/vliw-matched-01/
 CPU 与 memory、submission cooldown 和 task override，再从 task JSON 继承
 `internet`。官方配置文件路径、SHA256、resolved defaults/override、effective
 protocol 和逐字段 diff 都写入 manifest；loader 不保留 YAML 的 `env` 或
-`model.api_key`。当前开发 profile 只允许显式改变 agent、backend、model、reasoning、
-timeout、attempt 数和控制面并发字段。
+`model.api_key`。实验轴只允许显式改变 agent、backend、model、reasoning、
+timeout、attempt 数和控制面并发字段；profile 的 `protocol_overrides` 只允许
+`eval_interval` 与 `internet`，每个值都必须有非空原因。任何实际差异都会进入
+manifest 并令 campaign 失去官方同口径标记。
 
 `concurrency=K` 控制同一题内的 Plain Codex replicas 或 Goal Plus workers；
 `cell_concurrency` 控制同时运行的不同 task × method cells，默认是 1。为了避免

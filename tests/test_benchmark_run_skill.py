@@ -93,6 +93,32 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertIn("--cell-concurrency 2", rendered)
         self.assertIn("--detach", rendered)
 
+    def test_edgebench_local_smoke_resolves_to_frozen_plain_codex_values(self) -> None:
+        spec = self.agent.resolve_spec(
+            preset_id="edgebench-vliw-codex-local-smoke"
+        )
+
+        self.assertEqual(spec.model, "gpt-5.6-sol")
+        self.assertEqual(spec.reasoning_effort, "medium")
+        self.assertEqual(spec.methods, ("plain-codex",))
+        self.assertEqual(spec.concurrency(), {"T": 300, "K": 1, "C": 1, "R": 1})
+        result = self.agent.start(
+            spec,
+            skip_bootstrap=False,
+            skip_provision=False,
+            prepare_only=False,
+            foreground=False,
+            dry_run=True,
+        )
+        rendered = "\n".join(result["commands"])
+        self.assertIn(
+            "experiments/edgebench/experiment.py doctor "
+            "--profile vliw-codex-sol-medium-local-smoke",
+            rendered,
+        )
+        self.assertIn("--method plain-codex", rendered)
+        self.assertIn("--detach", rendered)
+
     def test_common_matrix_defaults_controller_concurrency_to_one(self) -> None:
         spec = self.agent.resolve_spec(
             target_ids=("local-vliw",),
