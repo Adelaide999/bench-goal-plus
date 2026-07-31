@@ -515,6 +515,29 @@ def host_pi_check(manifest: dict[str, Any], *, required: bool = False) -> dict[s
     }
 
 
+def host_codex_check(
+    manifest: dict[str, Any], *, required: bool = False
+) -> dict[str, Any]:
+    codex_path = shutil.which("codex")
+    codex_text = None
+    codex_version = None
+    if codex_path:
+        result = run([codex_path, "--version"], check=False)
+        codex_text = (result.stdout or result.stderr).strip()
+        codex_version = parse_codex_version(codex_text)
+    minimum = tuple(int(part) for part in manifest["codex_min_version"].split("."))
+    compatible = bool(codex_version and codex_version >= minimum)
+    return {
+        "name": "host:codex",
+        "passed": compatible if required else True,
+        "required": required,
+        "available": codex_path is not None,
+        "compatible": compatible,
+        "version": codex_text,
+        "minimum": manifest["codex_min_version"],
+    }
+
+
 def collect_doctor(
     manifest: dict[str, Any],
     checkout_root: Path,
@@ -522,6 +545,7 @@ def collect_doctor(
     lock: Path = DEFAULT_LOCK,
     only: list[str] | None = None,
     require_pi: bool = False,
+    require_codex: bool = False,
 ) -> dict[str, Any]:
     ensure_temp_root()
     python = venv_python(venv)
@@ -640,23 +664,7 @@ def collect_doctor(
             }
         )
 
-    codex_path = shutil.which("codex")
-    codex_text = None
-    codex_version = None
-    if codex_path:
-        result = run([codex_path, "--version"], check=False)
-        codex_text = (result.stdout or result.stderr).strip()
-        codex_version = parse_codex_version(codex_text)
-    minimum = tuple(int(part) for part in manifest["codex_min_version"].split("."))
-    checks.append(
-        {
-            "name": "host:codex",
-            "passed": bool(codex_version and codex_version >= minimum),
-            "version": codex_text,
-            "minimum": manifest["codex_min_version"],
-        }
-    )
-
+    checks.append(host_codex_check(manifest, required=require_codex))
     checks.append(host_pi_check(manifest, required=require_pi))
 
     return {
@@ -735,6 +743,7 @@ def bootstrap(args: argparse.Namespace) -> int:
         args.lock,
         only=args.only,
         require_pi=args.require_pi,
+        require_codex=args.require_codex,
     )
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(payload, indent=2) + "\n")
@@ -750,6 +759,7 @@ def doctor(args: argparse.Namespace) -> int:
         args.lock,
         only=args.only,
         require_pi=args.require_pi,
+        require_codex=args.require_codex,
     )
     print(json.dumps(payload, indent=2))
     return 0 if payload["ok"] else 1
@@ -767,6 +777,7 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap_parser.add_argument("--uv", default="uv")
     bootstrap_parser.add_argument("--skip-install", action="store_true")
     bootstrap_parser.add_argument("--require-pi", action="store_true")
+    bootstrap_parser.add_argument("--require-codex", action="store_true")
     bootstrap_parser.add_argument(
         "--only",
         action="append",
@@ -776,6 +787,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument("--only", action="append")
     doctor_parser.add_argument("--require-pi", action="store_true")
+    doctor_parser.add_argument("--require-codex", action="store_true")
     return parser
 
 

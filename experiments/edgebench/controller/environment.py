@@ -30,6 +30,43 @@ from .profiles import (
 )
 
 
+PI_BUILTIN_PROVIDER_API_KEYS: dict[str, tuple[str, ...]] = {
+    "github-copilot": ("COPILOT_GITHUB_TOKEN",),
+    "anthropic": ("ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"),
+    "ant-ling": ("ANT_LING_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+    "azure-openai-responses": ("AZURE_OPENAI_API_KEY",),
+    "nvidia": ("NVIDIA_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "google": ("GEMINI_API_KEY",),
+    "google-vertex": ("GOOGLE_CLOUD_API_KEY",),
+    "groq": ("GROQ_API_KEY",),
+    "cerebras": ("CEREBRAS_API_KEY",),
+    "xai": ("XAI_API_KEY",),
+    "openrouter": ("OPENROUTER_API_KEY",),
+    "vercel-ai-gateway": ("AI_GATEWAY_API_KEY",),
+    "zai": ("ZAI_API_KEY",),
+    "zai-coding-cn": ("ZAI_CODING_CN_API_KEY",),
+    "mistral": ("MISTRAL_API_KEY",),
+    "minimax": ("MINIMAX_API_KEY",),
+    "minimax-cn": ("MINIMAX_CN_API_KEY",),
+    "moonshotai": ("MOONSHOT_API_KEY",),
+    "moonshotai-cn": ("MOONSHOT_API_KEY",),
+    "huggingface": ("HF_TOKEN",),
+    "fireworks": ("FIREWORKS_API_KEY",),
+    "together": ("TOGETHER_API_KEY",),
+    "opencode": ("OPENCODE_API_KEY",),
+    "opencode-go": ("OPENCODE_API_KEY",),
+    "kimi-coding": ("KIMI_API_KEY",),
+    "cloudflare-workers-ai": ("CLOUDFLARE_API_KEY",),
+    "cloudflare-ai-gateway": ("CLOUDFLARE_API_KEY",),
+    "xiaomi": ("XIAOMI_API_KEY",),
+    "xiaomi-token-plan-cn": ("XIAOMI_TOKEN_PLAN_CN_API_KEY",),
+    "xiaomi-token-plan-ams": ("XIAOMI_TOKEN_PLAN_AMS_API_KEY",),
+    "xiaomi-token-plan-sgp": ("XIAOMI_TOKEN_PLAN_SGP_API_KEY",),
+}
+
+
 def resolve_agent_api_config(
     env: dict[str, str] | None = None,
     *,
@@ -99,7 +136,7 @@ def pi_api_key_env_name(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     match = re.fullmatch(
-        r"(?:\$\{([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*)|([A-Z][A-Z0-9_]*))",
+        r"(?:\$\{([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*))",
         value,
     )
     if not match:
@@ -126,16 +163,18 @@ def resolve_pi_provider(
     if not separator or not provider or not model_id:
         result["error"] = "model must be PROVIDER/MODEL"
         return result
-    builtin_keys = {"zai": "ZAI_API_KEY"}
-    if provider in builtin_keys:
-        key_name = builtin_keys[provider]
+    builtin_keys = PI_BUILTIN_PROVIDER_API_KEYS.get(provider)
+    if builtin_keys:
+        key_name = next((name for name in builtin_keys if source.get(name)), None)
+        expected = " or ".join(builtin_keys)
         result.update(
             {
                 "model_registered": True,
                 "credential_mode": "environment",
-                "credential_env": key_name,
-                "valid": bool(source.get(key_name)),
-                "error": None if source.get(key_name) else f"missing {key_name}",
+                "credential_env": key_name or builtin_keys[0],
+                "credential_env_candidates": list(builtin_keys),
+                "valid": key_name is not None,
+                "error": None if key_name else f"missing {expected}",
             }
         )
         return result
@@ -179,12 +218,23 @@ def resolve_pi_provider(
                 "error": None if source.get(key_name) else f"missing {key_name}",
             }
         )
+    elif api_key is not None:
+        result.update(
+            {
+                "credential_mode": "invalid-models-file-reference",
+                "valid": False,
+                "error": (
+                    "provider apiKey must use $NAME or ${NAME}; "
+                    "literal credentials are not allowed"
+                ),
+            }
+        )
     else:
         result.update(
             {
-                "credential_mode": "models-file" if api_key else "none",
-                "valid": True,
-                "error": None,
+                "credential_mode": "missing-models-file-reference",
+                "valid": False,
+                "error": "custom provider requires apiKey as $NAME or ${NAME}",
             }
         )
     return result

@@ -31,7 +31,7 @@ offline/network-isolated protocol 已满足；正式 Linux 运行也不能跳过
 | --- | --- | --- | --- |
 | EdgeBench Plain/Goal Plus Codex | Codex OAuth 或 OpenAI-compatible API | OAuth auth file，或 `SFORGE_AGENT_*` / `OPENAI_*` env | custom loopback API 只在具备 Linux bridge 时可用 |
 | EdgeBench Plain/Goal Plus Pi OAuth | Pi 的 `openai-codex` 登录 | `SFORGE_PI_AUTH_FILE` 或 `~/.pi/agent/auth.json` | 只适用于 `plain-pi` / `goal-plus-pi` |
-| EdgeBench Goal Plus + Pi provider API | Pi 显式 provider/model 与 API credential | `SFORGE_PI_MODELS_FILE` 或 `~/.pi/agent/models.json`；built-in `zai` 使用 `ZAI_API_KEY` | 使用 `goal-plus-pi-provider`；model 必须写成 `PROVIDER/MODEL` |
+| EdgeBench Goal Plus + Pi provider API | Pi 显式 provider/model 与 API credential | Pi built-in provider 使用标准 key env；自定义 endpoint 使用 `SFORGE_PI_MODELS_FILE` 或 `~/.pi/agent/models.json` | 使用 `goal-plus-pi-provider`；model 必须写成 `PROVIDER/MODEL` |
 | EdgeBench Claude | Anthropic-compatible API | `SFORGE_AGENT_*` 或 `ANTHROPIC_*` env | key 和 base URL 都必需 |
 | Common/OpenEvolve 的 Codex 路径 | Codex native login，或显式 OpenAI-compatible endpoint | 省略 `--api-base` 使用 native login；显式 endpoint 使用 `OPENAI_API_KEY` | custom provider 使用 Responses wire API |
 | Common/OpenEvolve 的 Pi、native OpenEvolve、SkyDiscover | OpenAI-compatible API | `--api-base` + `OPENAI_API_KEY` | 不是 Codex OAuth 路径 |
@@ -91,12 +91,27 @@ export SFORGE_PI_AUTH_FILE=/path/to/pi-auth.json
 ### EdgeBench Pi provider API
 
 `goal-plus-pi-provider` 不使用 `openai-codex` OAuth。profile 必须冻结精确的
-`PROVIDER/MODEL`，例如 `glm-proxy/GLM-5.2` 或 `zai/glm-5.2`。自定义 provider
-从 `SFORGE_PI_MODELS_FILE`（默认 `~/.pi/agent/models.json`）读取 endpoint、wire API
-和 model registration；built-in `zai` 直接读取 `ZAI_API_KEY`。
+`PROVIDER/MODEL`，例如 `glm-proxy/GLM-5.2`、`zai/glm-5.2` 或
+`deepseek/deepseek-chat`。
+
+Pi built-in provider 不需要额外 registry。adapter 跟随锁定 Pi 版本的标准 key env，
+包括 `ZAI_API_KEY`、`DEEPSEEK_API_KEY`、`OPENAI_API_KEY`、
+`ANTHROPIC_OAUTH_TOKEN`/`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`、
+`OPENROUTER_API_KEY`、`GROQ_API_KEY`、`MISTRAL_API_KEY`、
+`MOONSHOT_API_KEY` 等；Anthropic OAuth token 优先于 API key。完整映射以 controller
+的 `PI_BUILTIN_PROVIDER_API_KEYS` 和受管 EdgeBench adapter 的
+`BUILTIN_PROVIDER_API_KEYS` 为可执行事实源。
+
+自定义 endpoint 才从 `SFORGE_PI_MODELS_FILE`（默认
+`~/.pi/agent/models.json`）读取 `baseUrl`、wire API 和 model registration。Pi 没有一套
+适用于所有 provider 的通用 base-URL 环境变量，因此这条路径通常只需两个 host env：
+`SFORGE_PI_MODELS_FILE` 和 registry 中 `apiKey` 引用的 credential env。更换 DeepSeek
+等 Pi built-in provider 时不需要把 adapter 或 provider 名改成 `glm-proxy`；直接使用其
+真实 `PROVIDER/MODEL` 与标准 key env。
 
 这条路径与宿主操作系统无关：macOS 和 Linux 都使用 `pathlib` 解析 host registry，
-再由 SForge 把它复制到 Linux Work container 的固定 Pi 配置目录；实现中没有
+再由 SForge 只把选中的 provider/model 配置物化到 Linux Work container 的固定 Pi
+配置目录；实现中没有
 OrbStack socket、`/Users/...` 或其他 macOS 专用路径。服务器可通过
 `SFORGE_PI_MODELS_FILE` 指向自己的 registry。
 
@@ -105,10 +120,11 @@ wire API 由 Pi registry 中 provider 的 `api` 字段决定。Pi 0.80.6 能识�
 `goal-plus-pi-provider` adapter；bench 控制面只验证 provider/model/credential，
 不会把远程 Claude API 或 OpenAI-compatible API 写成不同 method。
 
-如果 models registry 的 `apiKey` 是环境变量引用（支持 `NAME`、`$NAME`、`${NAME}`），
-adapter 只把该变量的运行时值传入 Work container；profile、command 和 doctor 输出只
-记录变量名，不记录值。控制面在 plan 阶段拒绝裸 model ID，在 doctor 阶段检查
-provider、model 和 credential source；它不会把 Pi provider 错配为 `openai-codex`。
+models registry 的 `apiKey` 必须写成 `$NAME` 或 `${NAME}`。裸 `NAME` 在 Pi 中是字面值，
+不是环境变量引用；明文 credential 和命令型 credential 都会被 adapter 拒绝。adapter
+只把引用变量的运行时值传入 Work container；profile、command 和 doctor 输出只记录
+变量名，不记录值。控制面在 plan 阶段拒绝裸 model ID，在 doctor 阶段检查 provider、
+model 和 credential source；它不会把 Pi provider 错配为 `openai-codex`。
 
 ### EdgeBench Goal Plus / Pi runtime cache
 

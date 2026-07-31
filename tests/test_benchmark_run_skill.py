@@ -80,6 +80,9 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         api_provider = self.agent.resolve_spec(
             preset_id="edgebench-vliw-goal-plus-pi-glm-provider-1h"
         )
+        zai_provider = self.agent.resolve_spec(
+            preset_id="edgebench-vliw-goal-plus-pi-zai-glm-5-2-1h"
+        )
 
         self.assertEqual(plain.methods, ("plain-pi",))
         self.assertEqual(plain.concurrency(), {"T": 300, "K": 1, "C": 1, "R": 1})
@@ -93,6 +96,12 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertEqual(api_provider.model, "glm-proxy/GLM-5.2")
         self.assertEqual(
             api_provider.concurrency(),
+            {"T": 3600, "K": 2, "C": 1, "R": 1},
+        )
+        self.assertEqual(zai_provider.methods, ("goal-plus-pi-provider",))
+        self.assertEqual(zai_provider.model, "zai/glm-5.2")
+        self.assertEqual(
+            zai_provider.concurrency(),
             {"T": 3600, "K": 2, "C": 1, "R": 1},
         )
 

@@ -249,6 +249,22 @@
         "concurrency": 2,
         "cell_concurrency": 1
       }
+    },
+    {
+      "id": "edgebench-vliw-goal-plus-pi-zai-glm-5-2-1h",
+      "description": "One-task Goal Plus + Pi campaign using Pi's built-in zai/glm-5.2 provider with T=3600, K=2, C=1, R=1.",
+      "benchmarks": ["edgebench"],
+      "profile": "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1",
+      "campaign_id_template": "edgebench-vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi-provider"],
+        "model": "zai/glm-5.2",
+        "reasoning_effort": "high",
+        "wall_time_seconds": 3600,
+        "concurrency": 2,
+        "cell_concurrency": 1
+      }
     }
   ]
 }

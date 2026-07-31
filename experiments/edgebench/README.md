@@ -105,16 +105,18 @@ python3 scripts/bench.py plan --preset edgebench-vliw-goal-plus-pi-local-smoke
 确认 host `openai-codex` 登录和 resolved contract 后，把 `plan` 改成 `start`。
 当前只声明 wiring-ready；真实 Pi E2E evidence 生成前不得标为 pass。
 
-显式 Pi provider/API 路径使用单独的方法与 preset：
+Pi built-in Z.AI provider/API 路径使用单独的方法与 preset：
 
 ```bash
 python3 scripts/bench.py plan \
-  --preset edgebench-vliw-goal-plus-pi-glm-provider-1h
+  --preset edgebench-vliw-goal-plus-pi-zai-glm-5-2-1h
 ```
 
-该 preset 固定 `glm-proxy/GLM-5.2/high`、`T=3600,K=2,C=1,R=1`。这里的 provider
-可以是远端 Z.AI、Anthropic-compatible 或 OpenAI-compatible endpoint；“provider”
-描述的是 Pi 的 provider/model 与 API credential 路径，不表示模型运行在本机。
+该 preset 固定 `zai/glm-5.2/high`、`T=3600,K=2,C=1,R=1`，直接使用 Pi 标准
+`ZAI_API_KEY`。`edgebench-vliw-goal-plus-pi-glm-provider-1h` 保留给自定义
+`models.json` endpoint；“provider”描述的是 Pi 的 provider/model 与 API credential
+路径，不表示模型运行在本机。Pi built-in DeepSeek、OpenAI、Anthropic 等 provider
+直接使用真实 `PROVIDER/MODEL` 和各自标准 key env，不需要另造 provider 名称。
 macOS/OrbStack 与 Linux/Docker 使用同一 adapter；provider registry 中的 `api`
 可以是 Pi 支持的 Anthropic 或 OpenAI wire API，控制面不按 wire API 分叉 method。
 
@@ -168,6 +170,10 @@ protocol 和逐字段 diff 都写入 manifest；loader 不保留 YAML 的 `env` 
 timeout、attempt 数和控制面并发字段；profile 的 `protocol_overrides` 只允许
 `eval_interval` 与 `internet`，每个值都必须有非空原因。任何实际差异都会进入
 manifest 并令 campaign 失去官方同口径标记。
+
+因此 profile 中的 `protocol_source=edgebench-official-codex` 只是上述官方协议 YAML
+的资源来源标签，不是 runtime agent 选择。Pi campaign 仍由 `goal-plus-pi-provider`
+和 `PROVIDER/MODEL` 决定，完全不会因为该字段改用 Codex。
 
 `concurrency=K` 控制同一题内的 Plain Codex replicas 或 Goal Plus workers；
 `cell_concurrency` 控制同时运行的不同 task × method cells，默认是 1。为了避免

@@ -220,6 +220,9 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         _, api_provider = EDGE.load_profile(
             "vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1"
         )
+        _, zai_provider = EDGE.load_profile(
+            "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1"
+        )
 
         self.assertEqual(EDGE.METHODS["plain-pi"]["agent"], "pi")
         self.assertEqual(EDGE.METHODS["goal-plus-pi"]["agent"], "pi-goal-plus")
@@ -239,6 +242,11 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(api_provider["wall_time_seconds"], 3600)
         self.assertEqual(api_provider["concurrency"], 2)
         self.assertEqual(api_provider["cell_concurrency"], 1)
+        self.assertEqual(zai_provider["methods"], ["goal-plus-pi-provider"])
+        self.assertEqual(zai_provider["model"], "zai/glm-5.2")
+        self.assertEqual(zai_provider["wall_time_seconds"], 3600)
+        self.assertEqual(zai_provider["concurrency"], 2)
+        self.assertEqual(zai_provider["cell_concurrency"], 1)
 
     def test_pi_provider_profile_requires_qualified_provider_model(self) -> None:
         _, profile = EDGE.load_profile(
@@ -1260,6 +1268,72 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertFalse(missing["valid"])
         self.assertEqual(missing["error"], "missing GLM_PROXY_API_KEY")
+
+    def test_pi_provider_rejects_literal_or_bare_api_key(self) -> None:
+        for api_key in ("GLM_PROXY_API_KEY", "literal-secret"):
+            with self.subTest(api_key=api_key):
+                models = self.temp / f"models-{len(api_key)}.json"
+                models.write_text(
+                    json.dumps(
+                        {
+                            "providers": {
+                                "custom": {
+                                    "apiKey": api_key,
+                                    "models": [{"id": "model"}],
+                                }
+                            }
+                        }
+                    )
+                )
+                status = EDGE.resolve_pi_provider(
+                    "custom/model", {"SFORGE_PI_MODELS_FILE": str(models)}
+                )
+                self.assertFalse(status["valid"])
+                self.assertIn("$NAME", status["error"])
+                self.assertNotIn("literal-secret", json.dumps(status))
+
+    def test_pi_provider_requires_custom_api_key_reference(self) -> None:
+        models = self.temp / "models-missing-api-key.json"
+        models.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "custom": {"models": [{"id": "model"}]}
+                    }
+                }
+            )
+        )
+
+        status = EDGE.resolve_pi_provider(
+            "custom/model", {"SFORGE_PI_MODELS_FILE": str(models)}
+        )
+
+        self.assertFalse(status["valid"])
+        self.assertIn("apiKey as $NAME", status["error"])
+
+    def test_pi_provider_uses_builtin_deepseek_environment(self) -> None:
+        status = EDGE.resolve_pi_provider(
+            "deepseek/deepseek-chat",
+            {"DEEPSEEK_API_KEY": "secret-value"},
+        )
+
+        self.assertTrue(status["valid"])
+        self.assertEqual(status["credential_env"], "DEEPSEEK_API_KEY")
+        self.assertNotIn("secret-value", json.dumps(status))
+
+    def test_pi_provider_prefers_anthropic_oauth_environment(self) -> None:
+        status = EDGE.resolve_pi_provider(
+            "anthropic/claude-sonnet-4-20250514",
+            {
+                "ANTHROPIC_OAUTH_TOKEN": "oauth-secret",
+                "ANTHROPIC_API_KEY": "api-secret",
+            },
+        )
+
+        self.assertTrue(status["valid"])
+        self.assertEqual(status["credential_env"], "ANTHROPIC_OAUTH_TOKEN")
+        self.assertNotIn("oauth-secret", json.dumps(status))
+        self.assertNotIn("api-secret", json.dumps(status))
 
     def test_claude_environment_pins_effort_and_preserves_extra_env(self) -> None:
         previous = EDGE.os.environ.get("SFORGE_AGENT_EXTRA_ENV")

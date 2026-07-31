@@ -23,11 +23,11 @@ benchmark 依赖和命令路由。macOS/Linux、OAuth/direct API、agent/provide
 git --version
 python3 --version
 uv --version
-codex --version
-docker info
 ```
 
-Only run `docker info` as a required gate for `required`/relevant `mixed` paths.
+再按实际 method 检查 agent runtime：Codex 路径运行 `codex --version`，Pi 路径运行
+`pi --version`。未选中的 agent 只能是 diagnostic。Only run `docker info` as a required
+gate for `required`/relevant `mixed` paths.
 
 ## Mirrors and pinned assets
 

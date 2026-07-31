@@ -31,15 +31,20 @@ provider 的 wire API 由 Pi registry 决定：`anthropic-messages` 和
 也使用同一 adapter；host 只提供 registry/credential，实际 agent 始终运行在
 EdgeBench Linux Work container 中。
 
-一小时 VLIW provider preset：
+一小时 VLIW Z.AI built-in provider preset：
 
 ```bash
 python3 scripts/bench.py plan \
-  --preset edgebench-vliw-goal-plus-pi-glm-provider-1h
+  --preset edgebench-vliw-goal-plus-pi-zai-glm-5-2-1h
 ```
 
-它固定 `T=3600,K=2,C=1,R=1`，使用 `glm-proxy/GLM-5.2`；实际 launch 前仍需按
-K/C 门禁展示并确认解析结果。
+它固定 `T=3600,K=2,C=1,R=1`，使用 Pi built-in `zai/glm-5.2`，只要求
+`ZAI_API_KEY`。`edgebench-vliw-goal-plus-pi-glm-provider-1h` 保留为自定义
+`models.json` endpoint 路径；实际 launch 前仍需按 K/C 门禁展示并确认解析结果。
+
+profile 中的 `protocol_source=edgebench-official-codex` 只表示资源、网络、评测周期等
+协议默认值来自 EdgeBench 官方 `experiment-codex.yaml`。实际 agent/provider 仍由
+method 和 model 决定；该字段不把 Pi campaign 变成 Codex campaign。
 
 ## 完整 Codex campaign
 

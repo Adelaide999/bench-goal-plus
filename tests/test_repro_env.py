@@ -189,6 +189,37 @@ class ReproEnvironmentTest(unittest.TestCase):
         self.assertFalse(check["passed"])
         self.assertTrue(check["required"])
 
+    def test_codex_is_diagnostic_by_default(self) -> None:
+        manifest = repro_env.load_manifest(ROOT / "environment/upstreams.json")
+        with patch.object(repro_env.shutil, "which", return_value=None):
+            check = repro_env.host_codex_check(manifest)
+        self.assertTrue(check["passed"])
+        self.assertFalse(check["required"])
+        self.assertFalse(check["available"])
+        self.assertFalse(check["compatible"])
+
+    def test_codex_can_be_required_for_codex_methods(self) -> None:
+        manifest = repro_env.load_manifest(ROOT / "environment/upstreams.json")
+        with patch.object(repro_env.shutil, "which", return_value=None):
+            check = repro_env.host_codex_check(manifest, required=True)
+        self.assertFalse(check["passed"])
+        self.assertTrue(check["required"])
+
+    def test_repro_parser_exposes_agent_specific_requirements(self) -> None:
+        parser = repro_env.build_parser()
+
+        bootstrap = parser.parse_args(
+            ["bootstrap", "--require-pi", "--require-codex"]
+        )
+        doctor = parser.parse_args(
+            ["doctor", "--require-pi", "--require-codex"]
+        )
+
+        self.assertTrue(bootstrap.require_pi)
+        self.assertTrue(bootstrap.require_codex)
+        self.assertTrue(doctor.require_pi)
+        self.assertTrue(doctor.require_codex)
+
     def test_repository_normalization_equates_https_and_ssh_remotes(self) -> None:
         expected = "https://github.com/example/project"
 
