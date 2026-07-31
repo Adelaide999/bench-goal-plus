@@ -550,6 +550,30 @@ def finalize_campaign(
         campaign["incomplete_cells"] = incomplete
         campaign["updated_at"] = io.utc_now()
     else:
+        previously_incomplete = dict(campaign.get("incomplete_cells") or {})
+        for item in campaign["cells"]:
+            if item["cell_id"] not in previously_incomplete:
+                continue
+            item["state"] = "completed"
+            item.pop("incomplete_reason", None)
+            cell_path = destination / "cells" / item["cell_id"] / "cell.json"
+            cell = io.read_json(cell_path)
+            cell["state"] = "completed"
+            cell.pop("incomplete_reason", None)
+            io.write_json(cell_path, cell)
+        if previously_incomplete and all(
+            item.get("state") == "completed" for item in campaign["cells"]
+        ):
+            campaign["state"] = "completed"
+            campaign.pop("incomplete_cells", None)
+            controller_path = destination / "controller.json"
+            if controller_path.is_file():
+                controller = io.read_json(controller_path)
+                if controller.get("state") == "partial":
+                    controller["state"] = "completed"
+                    controller["returncode"] = 0
+                    controller["completion_evidence_passed"] = True
+                    io.write_json(controller_path, controller)
         campaign["completion_evidence_passed"] = True
         campaign["updated_at"] = io.utc_now()
     io.write_json(destination / "campaign.json", campaign)

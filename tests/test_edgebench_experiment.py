@@ -1692,6 +1692,86 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "partial",
         )
 
+    def test_finalize_recovers_prior_evidence_downgrade(self) -> None:
+        destination = self.temp / "campaign-recover"
+        cell_id = "vliw--goal-plus-pi"
+        cell_dir = destination / "cells" / cell_id
+        cell_dir.mkdir(parents=True)
+        incomplete_reason = "missing promotion evidence"
+        campaign = {
+            "campaign_id": "campaign-recover",
+            "state": "partial",
+            "completion_evidence_passed": True,
+            "incomplete_cells": {cell_id: incomplete_reason},
+            "task_ids": ["vliw_kernel_optimization"],
+            "cells": [
+                {
+                    "cell_id": cell_id,
+                    "task_id": "vliw_kernel_optimization",
+                    "method": "goal-plus-pi",
+                    "state": "partial",
+                    "incomplete_reason": incomplete_reason,
+                }
+            ],
+        }
+        cell = {
+            "cell_id": cell_id,
+            "task_id": "vliw_kernel_optimization",
+            "method": "goal-plus-pi",
+            "state": "partial",
+            "incomplete_reason": incomplete_reason,
+        }
+        controller = {
+            "state": "partial",
+            "returncode": 2,
+            "completion_evidence_passed": False,
+        }
+        (destination / "campaign.json").write_text(json.dumps(campaign))
+        (destination / "controller.json").write_text(json.dumps(controller))
+        (cell_dir / "cell.json").write_text(json.dumps(cell))
+        original_summary = EDGE_REPORTING.summarize_cell
+        original_reference = EDGE_REPORTING.load_paper_reference
+        original_workbook = EDGE_REPORTING.write_comparison_workbook
+        EDGE_REPORTING.summarize_cell = lambda *_args, **_kwargs: {
+            "cell_id": cell_id,
+            "task_id": "vliw_kernel_optimization",
+            "model": "gpt-test",
+            "reasoning_effort": "medium",
+            "wall_time_seconds": 60,
+            "live_search_concurrency": 2,
+            "completion_evidence": {"passed": True},
+            "incomplete_reason": None,
+        }
+        EDGE_REPORTING.load_paper_reference = lambda: {
+            "tasks": {"vliw_kernel_optimization": {}}
+        }
+        EDGE_REPORTING.write_comparison_workbook = lambda *_args, **_kwargs: None
+        try:
+            payload = EDGE.finalize_campaign(destination)
+        finally:
+            EDGE_REPORTING.summarize_cell = original_summary
+            EDGE_REPORTING.load_paper_reference = original_reference
+            EDGE_REPORTING.write_comparison_workbook = original_workbook
+
+        recovered_campaign = json.loads(
+            (destination / "campaign.json").read_text()
+        )
+        recovered_cell = json.loads((cell_dir / "cell.json").read_text())
+        recovered_controller = json.loads(
+            (destination / "controller.json").read_text()
+        )
+        self.assertTrue(payload["completion_evidence_passed"])
+        self.assertEqual(recovered_campaign["state"], "completed")
+        self.assertTrue(recovered_campaign["completion_evidence_passed"])
+        self.assertNotIn("incomplete_cells", recovered_campaign)
+        self.assertEqual(recovered_campaign["cells"][0]["state"], "completed")
+        self.assertNotIn("incomplete_reason", recovered_campaign["cells"][0])
+        self.assertEqual(recovered_cell["state"], "completed")
+        self.assertNotIn("incomplete_reason", recovered_cell)
+        self.assertEqual(recovered_controller["state"], "completed")
+        self.assertEqual(recovered_controller["returncode"], 0)
+        self.assertTrue(recovered_controller["completion_evidence_passed"])
+
 
 if __name__ == "__main__":
     unittest.main()
