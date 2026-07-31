@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bench Goal Plus"
+  short_description: "Run benchmark campaigns end to end"
+  default_prompt: "Use $bench-goal-plus to set up, run, monitor, finalize, and report a registered benchmark campaign."

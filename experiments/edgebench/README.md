@@ -56,6 +56,17 @@ Rust distribution 到 `~/.cache/sforge/rust/`，最终统一核对官方 SHA256�
 
 ## 准备和启动
 
+完整 51 题 Codex-only 固定协议是通用 dispatcher 中的一个 preset：
+
+```bash
+python3 .agents/skills/benchmark-run/scripts/run_benchmark.py launch \
+  --preset edgebench-codex-2h
+```
+
+该 preset 固定 `gpt-5.6-sol/medium`、每题 `T=2h`、题内 `K=1`、跨题
+`cell_concurrency=2`，并依次执行 bootstrap、provision、doctor、prepare 和 detached
+run。它不会覆盖同名 campaign；加 `--dry-run` 可审查 resolved contract 和完整命令链。
+
 ```bash
 .bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
   --profile vliw-smoke \
@@ -80,7 +91,7 @@ runs/edgebench/vliw-matched-01/
 ├── profile.json
 ├── controller.log
 ├── comparison.json
-├── comparison.md
+├── <campaign-id>.xlsx
 └── cells/
     └── <task>--<method>/
         ├── cell.json
@@ -176,6 +187,15 @@ Codex + GPT-5.5 的 12 小时、3 次独立 run 的 `mean +/- sample stddev`、�
 完成的 51-task campaign 还使用了旧的全局联网/无配额/无 cooldown 配置；它保持为
 development evidence，不会因后续修复而被回写为官方可比结果。
 
+native finalize 完成后，生成面向交付的 Markdown 和 Excel：
+
+```bash
+python3 scripts/benchmark_report.py --campaign runs/edgebench/<campaign-id>
+```
+
+默认输出 `report.md` 和 `<campaign-id>.xlsx`；缺失 telemetry 保持为空并附 coverage，
+不被转换成 0。
+
 Fork 让 Codex 以 JSONL 输出，并在容器 closeout 时只归档
 `~/.codex/sessions/`，不复制 auth/config。若旧 run 没有这些 artifacts，
 `usage.coverage` 会明确写成 `agent_output_only` 或 unavailable，不能把零 token
@@ -225,6 +245,33 @@ watcher，精确的 game-mode 中间分无法事后恢复，`extract` 会明确�
 
 这些小于 2 小时的曲线是本地开发 checkpoint，不自动声称可与公开 reference
 curve 比较；正式对比仍需先对齐 task revision、环境、`T` 和 `K`。
+
+若要把多批半小时和一小时 checkpoint 汇成可复用 fast-test reference，必须
+显式列出输入，不能隐式扫描本机 `runs/`。收集器只接受 `strict_checkpoint=true`、
+`valid=true` 且有合法 0–100 分数的行；同一任务优先使用带协议证据的 campaign，
+再在同一证据等级内取最高分。边界是 inclusive，分别表示 `<=0.5h` 和 `<=1h`；
+边界之后产生的 submission 不纳入，但已在边界内提交的候选允许稍后完成 Judge：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/timecurve.py \
+  collect-fast-reference \
+  --timecurve runs/edgebench/<campaign-a>/timecurve/timecurve.json \
+  --timecurve runs/edgebench/<campaign-b>/timecurve/timecurve.json \
+  --checkpoint-hours 0.5 1 \
+  --model gpt-5.6-sol \
+  --reasoning-effort medium \
+  --output runs/edgebench/local-fast-reference/reference.json
+```
+
+将 reference 显式加入最终 XLSX；`comparison.json` 会保存完整 reference 和来源，
+主表只显示 checkpoint、local best 与当前结果差值，详细证据位于 `Local Fast`
+sheet：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/experiment.py finalize \
+  --campaign <campaign-id> \
+  --local-fast-reference runs/edgebench/local-fast-reference/reference.json
+```
 
 ## Profile 扩展
 

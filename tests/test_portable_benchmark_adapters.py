@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import ANY, patch
 
 from adapters.ale import adapter as ale
 from adapters.autolab import adapter as autolab
@@ -14,7 +17,8 @@ from adapters.frontier_cs import adapter as frontier_cs
 from adapters.frontier_engineering import adapter as frontier
 from adapters.local_vliw import adapter as local_vliw
 from adapters.portable import candidate_changed_paths
-from experiments.heurigym_compare import experiment
+from experiments.benchmark_compare import experiment
+from experiments.heurigym_compare import experiment as legacy_experiment
 from experiments.openevolve_compare import experiment as openevolve_experiment
 
 
@@ -22,18 +26,203 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PortableBenchmarkAdapterTest(unittest.TestCase):
-    def test_registry_exposes_all_standalone_adapters(self) -> None:
-        self.assertEqual(
-            set(experiment.BENCHMARK_ADAPTERS),
-            {
-                "ale-bench-lite",
-                "autolab-toy-isa",
-                "frontier-cs-problem-0",
-                "frontier-engineering-malloclab",
-                "heurigym",
-                "local-vliw",
-            },
+    def test_legacy_heurigym_entrypoint_delegates_adapter_state(self) -> None:
+        self.addCleanup(experiment.configure_adapter, "heurigym")
+        legacy_experiment.configure_adapter("local-vliw")
+        self.assertEqual(legacy_experiment.TASK_ID, "vliw_kernel_optimization")
+        self.assertEqual(legacy_experiment.TASK_ID, experiment.TASK_ID)
+
+    def test_legacy_heurigym_entrypoint_remains_directly_executable(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "experiments/heurigym_compare/experiment.py"),
+                "--help",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("{prepare,run,seed-smoke,closeout}", completed.stdout)
+
+    def test_codex_command_uses_frozen_reasoning_effort(self) -> None:
+        command = experiment.codex_command(
+            codex_bin="codex",
+            workspace=Path("workspace"),
+            output_last_message=Path("final-message.txt"),
+            model="test-model",
+            reasoning_effort="low",
+            api_base=None,
+            sandbox="workspace-write",
+            goal_plus=False,
+            ephemeral=True,
+        )
+        self.assertIn('model_reasoning_effort="low"', command)
+        self.assertNotIn('model_reasoning_effort="high"', command)
+
+    def test_goal_plus_codex_loads_project_hooks_from_an_isolated_home(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = Path(temporary) / "run"
+            run_dir.mkdir()
+            environment = {"CODEX_HOME": "/personal/codex-home"}
+            codex_home = openevolve_experiment.configure_isolated_codex_home(
+                environment, run_dir
+            )
+
+            self.assertEqual(environment["CODEX_HOME"], str(codex_home))
+            self.assertEqual(codex_home.parent, run_dir / "controller-runtime")
+            self.assertEqual(list(codex_home.iterdir()), [])
+
+            common = {
+                "codex_bin": "codex",
+                "workspace": Path("workspace"),
+                "output_last_message": Path("final-message.txt"),
+                "model": "gpt-5.6-terra",
+                "reasoning_effort": "medium",
+                "api_base": "http://proxy.example/v1",
+                "sandbox": "workspace-write",
+                "ephemeral": False,
+            }
+            goal_plus = experiment.codex_command(goal_plus=True, **common)
+            plain = experiment.codex_command(goal_plus=False, **common)
+            self.assertNotIn("--ignore-user-config", goal_plus)
+            self.assertIn("--ignore-user-config", plain)
+            self.assertIn('model_reasoning_effort="medium"', goal_plus)
+            self.assertIn(
+                "features.multi_agent_v2.max_concurrent_threads_per_session=5",
+                goal_plus,
+            )
+            self.assertFalse(
+                any("max_concurrent_threads_per_session" in arg for arg in plain)
+            )
+
+    def test_local_vliw_goal_plus_wires_annotator_provider_and_usage(self) -> None:
+        experiment.configure_adapter("local-vliw")
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                run_dir = root / "run"
+                workspace = run_dir / "workspace"
+                workspace.mkdir(parents=True)
+                (workspace / "TASK.md").write_text("optimize\n", encoding="utf-8")
+                (workspace / experiment.ARTIFACT_NAME).write_text(
+                    "# candidate\n", encoding="utf-8"
+                )
+                manifest = {
+                    "workspace": str(workspace),
+                    "reasoning_effort": "medium",
+                    "environment": {"runtime_bin": str(root / "bin")},
+                    "budget": {
+                        "wall_time_seconds": 300,
+                        "soft_closeout_seconds": 30,
+                        "hard_kill_grace_seconds": 5,
+                        "concurrency": 1,
+                        "worker_runtime_seconds": 240,
+                    },
+                }
+                args = SimpleNamespace(
+                    model="gpt-test",
+                    api_base="http://proxy.example/v1",
+                    codex_bin="codex",
+                )
+                seed = {"budget": {"total_claimed": 1}}
+                final = {"valid": True, "budget": {"total_claimed": 1}}
+                annotator_usage = {
+                    "input_tokens": 9,
+                    "output_tokens": 3,
+                    "tasks": 1,
+                    "attempts": 1,
+                    "states": {"completed": 1},
+                }
+
+                with (
+                    patch.object(
+                        experiment,
+                        "evaluate_with_controller_runtime",
+                        side_effect=[seed, final],
+                    ),
+                    patch.object(experiment, "configure_isolated_codex_home"),
+                    patch.object(
+                        experiment, "configure_evidence_annotator_environment"
+                    ) as configure_annotator,
+                    patch.object(experiment, "render_goal", return_value="prompt"),
+                    patch.object(
+                        experiment, "codex_command", return_value=["codex"]
+                    ) as codex_command,
+                    patch.object(
+                        experiment,
+                        "run_controlled",
+                        return_value={"hard_killed": False},
+                    ),
+                    patch.object(
+                        experiment,
+                        "parse_codex_events",
+                        return_value={"top_level_usage": {}},
+                    ),
+                    patch.object(
+                        experiment,
+                        "controller_subprocess_environment",
+                        return_value=nullcontext(),
+                    ),
+                    patch.object(
+                        experiment,
+                        "finalize_goal_plus_search",
+                        return_value={"completed": True},
+                    ),
+                    patch.object(
+                        experiment,
+                        "collect_goal_plus_state",
+                        return_value={"runs": []},
+                    ),
+                    patch.object(
+                        experiment,
+                        "collect_evidence_annotator_usage",
+                        return_value=annotator_usage,
+                    ),
+                    patch.object(
+                        experiment, "goal_plus_incomplete_reason", return_value=None
+                    ),
+                ):
+                    control = experiment.execute_goal_plus(
+                        manifest, run_dir, args, {}
+                    )
+
+                configure_annotator.assert_called_once_with(
+                    ANY,
+                    model="gpt-test",
+                    reasoning_effort="medium",
+                    api_base="http://proxy.example/v1",
+                )
+                self.assertEqual(
+                    codex_command.call_args.kwargs[
+                        "max_concurrent_threads_per_session"
+                    ],
+                    2,
+                )
+                self.assertEqual(
+                    control["evidence_annotator_usage"], annotator_usage
+                )
+        finally:
+            experiment.configure_adapter("heurigym")
+
+    def test_recorded_codex_command_redacts_provider_url(self) -> None:
+        provider_url = "https://provider.example/v1"
+        command = experiment.codex_command(
+            codex_bin="codex",
+            workspace=Path("workspace"),
+            output_last_message=Path("final-message.txt"),
+            model="test-model",
+            reasoning_effort="low",
+            api_base=provider_url,
+            sandbox="workspace-write",
+            goal_plus=False,
+            ephemeral=True,
+        )
+        recorded = experiment.command_for_manifest(command, provider_url)
+        self.assertTrue(any("<provider-url>" in part for part in recorded))
+        self.assertFalse(any(provider_url in part for part in recorded))
+        self.assertTrue(any(provider_url in part for part in command))
 
     def test_docker_backed_tasks_use_host_capable_codex_sandbox(self) -> None:
         experiment.configure_adapter("ale-bench-lite")

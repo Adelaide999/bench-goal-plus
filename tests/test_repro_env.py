@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -171,6 +172,22 @@ class ReproEnvironmentTest(unittest.TestCase):
             repro_env.parse_codex_version("codex-cli 0.144.6"), (0, 144, 6)
         )
         self.assertIsNone(repro_env.parse_codex_version("unknown"))
+
+    def test_pi_is_diagnostic_by_default(self) -> None:
+        manifest = repro_env.load_manifest(ROOT / "environment/upstreams.json")
+        with patch.object(repro_env.shutil, "which", return_value=None):
+            check = repro_env.host_pi_check(manifest)
+        self.assertTrue(check["passed"])
+        self.assertFalse(check["required"])
+        self.assertFalse(check["available"])
+        self.assertFalse(check["compatible"])
+
+    def test_pi_can_be_required_for_goal_plus_pi(self) -> None:
+        manifest = repro_env.load_manifest(ROOT / "environment/upstreams.json")
+        with patch.object(repro_env.shutil, "which", return_value=None):
+            check = repro_env.host_pi_check(manifest, required=True)
+        self.assertFalse(check["passed"])
+        self.assertTrue(check["required"])
 
     def test_repository_normalization_equates_https_and_ssh_remotes(self) -> None:
         expected = "https://github.com/example/project"

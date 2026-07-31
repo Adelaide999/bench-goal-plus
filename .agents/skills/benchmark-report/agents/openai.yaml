@@ -1,0 +1,4 @@
+interface:
+  display_name: "Benchmark Report"
+  short_description: "Export evidence-backed benchmark reports"
+  default_prompt: "Use $benchmark-report to finalize this campaign and export report.md and XLSX results."

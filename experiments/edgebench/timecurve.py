@@ -669,6 +669,198 @@ def write_timecurve(output_dir: Path, payload: dict[str, Any]) -> tuple[Path, Pa
     return json_path, csv_path
 
 
+def campaign_path_from_timecurve(path: Path, payload: dict[str, Any]) -> Path:
+    recorded = payload.get("campaign")
+    if isinstance(recorded, str) and recorded:
+        candidate = Path(recorded).expanduser()
+        candidate = candidate if candidate.is_absolute() else ROOT / candidate
+        if (candidate / "campaign.json").is_file():
+            return candidate.resolve()
+    candidate = path.resolve().parent.parent
+    if (candidate / "campaign.json").is_file():
+        return candidate
+    raise FileNotFoundError(f"campaign for timecurve is unavailable: {path}")
+
+
+def comparison_cells(campaign: Path) -> dict[tuple[str, str], dict[str, Any]]:
+    path = campaign / "comparison.json"
+    if not path.is_file():
+        return {}
+    payload = read_json(path)
+    return {
+        (str(cell.get("task_id")), str(cell.get("method"))): cell
+        for cell in payload.get("cells", [])
+        if isinstance(cell, dict)
+    }
+
+
+def collect_local_fast_reference(
+    timecurve_paths: list[Path],
+    *,
+    checkpoint_hours: list[float],
+    model: str,
+    reasoning_effort: str,
+    method: str = "plain-codex",
+) -> dict[str, Any]:
+    boundaries = {
+        checkpoint_label(hours): {
+            "hours": hours,
+            "seconds": checkpoint_seconds(hours),
+        }
+        for hours in sorted(set(checkpoint_hours))
+    }
+    candidates: dict[str, dict[str, list[dict[str, Any]]]] = {
+        label: {} for label in boundaries
+    }
+    unavailable: dict[str, dict[str, list[dict[str, Any]]]] = {
+        label: {} for label in boundaries
+    }
+    expected_tasks: set[str] = set()
+    sources: list[dict[str, Any]] = []
+
+    for supplied_path in timecurve_paths:
+        path = supplied_path.expanduser().resolve()
+        payload = read_json(path)
+        if payload.get("model") != model:
+            raise ValueError(
+                f"timecurve model mismatch: expected {model}, got {payload.get('model')}: {path}"
+            )
+        if payload.get("reasoning_effort") != reasoning_effort:
+            raise ValueError(
+                "timecurve reasoning mismatch: expected "
+                f"{reasoning_effort}, got {payload.get('reasoning_effort')}: {path}"
+            )
+        campaign = campaign_path_from_timecurve(path, payload)
+        protocol_cells = comparison_cells(campaign)
+        campaign_id = str(payload.get("campaign_id") or campaign.name)
+        sources.append(
+            {
+                "campaign_id": campaign_id,
+                "campaign": portable_path(campaign),
+                "timecurve": portable_path(path),
+                "generated_at": payload.get("generated_at"),
+                "edgebench_commit": payload.get("edgebench_commit"),
+            }
+        )
+        for row in payload.get("rows", []):
+            if not isinstance(row, dict) or row.get("method") != method:
+                continue
+            task_id = str(row.get("task_id") or "")
+            if not task_id:
+                continue
+            expected_tasks.add(task_id)
+            seconds = int(row.get("checkpoint_seconds") or 0)
+            score = finite_float(row.get("score_0_100"))
+            base_eligible = bool(
+                row.get("strict_checkpoint") is True
+                and row.get("valid") is True
+                and row.get("status") == "available"
+                and score is not None
+            )
+            protocol = protocol_cells.get((task_id, method), {})
+            known_issue = protocol.get("known_protocol_issue")
+            classification = protocol.get("protocol_classification")
+            evidence_tier = 1 if classification is not None else 0
+            record = {
+                "task_id": task_id,
+                "method": method,
+                "model": model,
+                "reasoning_effort": reasoning_effort,
+                "checkpoint_hours": row.get("checkpoint_hours"),
+                "checkpoint_seconds": seconds,
+                "raw_score": finite_float(row.get("raw_score")),
+                "edgebench_score": score,
+                "normalization_source": row.get("normalization_source"),
+                "best_round": row.get("best_round"),
+                "campaign_id": campaign_id,
+                "campaign": portable_path(campaign),
+                "timecurve": portable_path(path),
+                "source": row.get("source"),
+                "protocol_classification": classification,
+                "protocol_evidence_tier": evidence_tier,
+            }
+            for label, boundary in boundaries.items():
+                if not 0 < seconds <= int(boundary["seconds"]):
+                    continue
+                if base_eligible and not known_issue:
+                    candidates[label].setdefault(task_id, []).append(record)
+                else:
+                    unavailable[label].setdefault(task_id, []).append(
+                        {
+                            "campaign_id": campaign_id,
+                            "checkpoint_hours": row.get("checkpoint_hours"),
+                            "status": row.get("status"),
+                            "strict_checkpoint": row.get("strict_checkpoint"),
+                            "valid": row.get("valid"),
+                            "known_protocol_issue": known_issue,
+                            "reason": row.get("reason"),
+                        }
+                    )
+
+    checkpoint_payloads: dict[str, Any] = {}
+    for label, boundary in boundaries.items():
+        selected = {
+            task_id: max(
+                rows,
+                key=lambda row: (
+                    int(row["protocol_evidence_tier"]),
+                    float(row["edgebench_score"]),
+                    int(row["checkpoint_seconds"]),
+                    str(row["campaign_id"]),
+                ),
+            )
+            for task_id, rows in sorted(candidates[label].items())
+        }
+        scores = [float(record["edgebench_score"]) for record in selected.values()]
+        missing = sorted(expected_tasks - set(selected))
+        checkpoint_payloads[label] = {
+            "boundary_hours": boundary["hours"],
+            "boundary_seconds": boundary["seconds"],
+            "inclusive": True,
+            "available_count": len(selected),
+            "coverage": len(selected) / len(expected_tasks) if expected_tasks else 0.0,
+            "mean_score_0_100": sum(scores) / len(scores) if scores else None,
+            "tasks": selected,
+            "missing_tasks": {
+                task_id: unavailable[label].get(task_id, []) for task_id in missing
+            },
+        }
+    return {
+        "schema_version": 2,
+        "generated_at": utc_now(),
+        "reference": {
+            "label": f"Local Codex + {model} best at inclusive checkpoints",
+            "agent": "Codex",
+            "model": model,
+            "reasoning_effort": reasoning_effort,
+            "method": method,
+            "checkpoint_hours": [
+                boundary["hours"] for boundary in boundaries.values()
+            ],
+            "selection": (
+                "highest protocol-evidence tier, then highest EdgeBench 0-100 score; "
+                "only strict, valid, normalized submissions at or before each boundary"
+            ),
+            "boundary_semantics": (
+                "submission time is bounded by the inclusive auto-eval anchor; a later "
+                "Judge report may score that existing submission, but submissions created "
+                "after the boundary are excluded"
+            ),
+            "official_comparison": False,
+        },
+        "task_count": len(expected_tasks),
+        "sources": sources,
+        "checkpoints": checkpoint_payloads,
+    }
+
+
+def write_local_fast_reference(path: Path, payload: dict[str, Any]) -> Path:
+    destination = path.expanduser()
+    destination = destination if destination.is_absolute() else ROOT / destination
+    write_json_atomic(destination, payload)
+    return destination.resolve()
+
+
 def last_json_line(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
@@ -981,11 +1173,51 @@ def build_parser() -> argparse.ArgumentParser:
     hidden = commands.add_parser("_watch", help=argparse.SUPPRESS)
     add_common_arguments(hidden)
     hidden.add_argument("--poll-seconds", type=float, default=5.0)
+    collect = commands.add_parser(
+        "collect-fast-reference",
+        help="collect local best references at inclusive checkpoint boundaries",
+    )
+    collect.add_argument("--timecurve", type=Path, action="append", required=True)
+    collect.add_argument(
+        "--checkpoint-hours", nargs="+", type=float, default=[0.5, 1.0]
+    )
+    collect.add_argument("--model", required=True)
+    collect.add_argument("--reasoning-effort", required=True)
+    collect.add_argument("--method", default="plain-codex")
+    collect.add_argument("--output", type=Path, required=True)
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.command == "collect-fast-reference":
+        payload = collect_local_fast_reference(
+            args.timecurve,
+            checkpoint_hours=args.checkpoint_hours,
+            model=args.model,
+            reasoning_effort=args.reasoning_effort,
+            method=args.method,
+        )
+        path = write_local_fast_reference(args.output, payload)
+        print(
+            json.dumps(
+                {
+                    "json": portable_path(path),
+                    "task_count": payload["task_count"],
+                    "checkpoints": {
+                        label: {
+                            "available_count": checkpoint["available_count"],
+                            "coverage": checkpoint["coverage"],
+                            "mean_score_0_100": checkpoint["mean_score_0_100"],
+                            "missing_tasks": sorted(checkpoint["missing_tasks"]),
+                        }
+                        for label, checkpoint in payload["checkpoints"].items()
+                    },
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
     campaign = resolve_campaign(args.campaign)
     output_dir = resolve_output_dir(campaign, args.output_dir)
     hours = sorted(set(args.checkpoint_hours))

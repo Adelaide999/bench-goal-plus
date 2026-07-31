@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from openpyxl import load_workbook
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -103,6 +105,20 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(profile["wall_time_seconds"], 7200)
         self.assertEqual(profile["concurrency"], 1)
         self.assertEqual(profile["cell_concurrency"], 2)
+
+    def test_validation_regression_profile_targets_suspicious_legacy_cells(self) -> None:
+        _, profile = EDGE.load_profile("validation-regression-codex-2h-c4")
+
+        self.assertEqual(len(profile["task_ids"]), 17)
+        self.assertEqual(len(set(profile["task_ids"])), 17)
+        self.assertEqual(profile["task_ids"][-1], "integer_compression_codec")
+        self.assertEqual(profile["methods"], ["plain-codex"])
+        self.assertEqual(profile["model"], "gpt-5.6-sol")
+        self.assertEqual(profile["reasoning_effort"], "medium")
+        self.assertEqual(profile["wall_time_seconds"], 7200)
+        self.assertEqual(profile["concurrency"], 1)
+        self.assertEqual(profile["cell_concurrency"], 4)
+        self.assertEqual(profile["judge_concurrency"], 1)
 
     def test_official_codex_protocol_covers_all_tasks_and_overrides(self) -> None:
         protocol = EDGE.load_official_codex_protocol()
@@ -250,16 +266,76 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "8193aeb41a3474690a40fac82e2ecbd53e651ab6b4759984b4c6845c04fbfd29",
         )
 
-    def test_comparison_marks_large_paper_gap_as_diagnostic(self) -> None:
+    def test_comparison_workbook_uses_same_budget_gap_for_issue_marker(self) -> None:
         paper = EDGE.load_paper_reference()
         payload = {
             "campaign_id": "comparison-test",
             "matched_protocol": True,
             "paper_reference": paper,
+            "finalized_at": "2026-07-29T00:00:00+00:00",
+            "local_fast_reference": {
+                "schema_version": 2,
+                "reference": {
+                    "label": "Local Codex + gpt-5.6-sol inclusive checkpoints",
+                    "selection": "strict local checkpoint",
+                    "official_comparison": False,
+                },
+                "task_count": 2,
+                "checkpoints": {
+                    "0.5h": {
+                        "boundary_hours": 0.5,
+                        "boundary_seconds": 1800,
+                        "available_count": 1,
+                        "tasks": {
+                            "portfolio_risk_calibration": {
+                                "task_id": "portfolio_risk_calibration",
+                                "checkpoint_hours": 0.5,
+                                "checkpoint_seconds": 1800,
+                                "raw_score": 19.83,
+                                "edgebench_score": 19.83,
+                                "model": "gpt-5.6-sol",
+                                "reasoning_effort": "medium",
+                                "campaign_id": "fast-campaign",
+                                "source": "runs/evidence.json",
+                            }
+                        },
+                        "missing_tasks": {
+                            "borden_source_inversion": [
+                                {"status": "no_scored_submission"}
+                            ]
+                        },
+                    },
+                    "1h": {
+                        "boundary_hours": 1,
+                        "boundary_seconds": 3600,
+                        "available_count": 1,
+                        "tasks": {
+                            "portfolio_risk_calibration": {
+                                "task_id": "portfolio_risk_calibration",
+                                "checkpoint_hours": 1,
+                                "checkpoint_seconds": 3600,
+                                "raw_score": 30,
+                                "edgebench_score": 30,
+                                "model": "gpt-5.6-sol",
+                                "reasoning_effort": "medium",
+                                "campaign_id": "fast-campaign",
+                                "source": "runs/evidence-1h.json",
+                            }
+                        },
+                        "missing_tasks": {
+                            "borden_source_inversion": [
+                                {"status": "no_scored_submission"}
+                            ]
+                        },
+                    }
+                },
+            },
             "cells": [
                 {
                     "task_id": "borden_source_inversion",
                     "method": "plain-codex",
+                    "model": "gpt-5.6-sol",
+                    "reasoning_effort": "medium",
                     "wall_time_seconds": 7200,
                     "live_search_concurrency": 1,
                     "completed_trajectories": 1,
@@ -268,36 +344,127 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                     "best": {
                         "raw_score": 78.502,
                         "edgebench_score": 78.502,
+                        "official_comparison": {
+                            "checkpoint_hours": 2,
+                            "references": {"GPT-5.5": 38.5},
+                        },
                     },
                 },
                 {
-                    "task_id": "schemathesis_config_modernization",
+                    "task_id": "portfolio_risk_calibration",
                     "method": "plain-codex",
+                    "model": "gpt-5.6-sol",
+                    "reasoning_effort": "medium",
                     "wall_time_seconds": 7200,
                     "live_search_concurrency": 1,
                     "completed_trajectories": 1,
                     "valid_trajectories": 1,
                     "observations": [],
                     "best": {
-                        "raw_score": 1.0,
-                        "edgebench_score": 100.0,
+                        "raw_score": 44.97,
+                        "edgebench_score": 44.97,
+                        "official_comparison": {
+                            "checkpoint_hours": 2,
+                            "references": {"GPT-5.5": 17.3},
+                        },
                     },
                 },
             ],
         }
+        destination = self.temp / "comparison.xlsx"
 
-        rendered = EDGE.render_comparison(payload)
+        EDGE.write_comparison_workbook(payload, destination)
 
-        self.assertIn("Paper Codex + GPT-5.5 @12h mean +/- s", rendered)
-        self.assertIn("38.5 +/- 14.3", rendered)
-        self.assertIn("+40.0", rendered)
-        self.assertIn("Issue marker |", rendered)
-        self.assertIn("**KNOWN_PROTOCOL**: no cooldown", rendered)
-        self.assertIn("**KNOWN_PROTOCOL**: Internet access used", rendered)
-        self.assertIn("not an apples-to-apples leaderboard comparison", rendered)
-        self.assertIn("2/2 cells with at least one valid score", rendered)
-        self.assertIn("summaries without it are legacy development evidence", rendered)
-        self.assertIn("audit protocol-sensitive advantages first", rendered)
+        workbook = load_workbook(destination, data_only=True)
+        self.assertEqual(
+            workbook.sheetnames,
+            ["Overview", "Results", "Local Fast", "Protocol"],
+        )
+        results = workbook["Results"]
+        headers = [cell.value for cell in results[1]]
+        rows = {
+            row[headers.index("Task")].value: {
+                header: row[index].value for index, header in enumerate(headers)
+            }
+            for row in results.iter_rows(min_row=2)
+        }
+        portfolio = rows["portfolio_risk_calibration"]
+        self.assertEqual(portfolio["Current budget (h)"], 2)
+        self.assertEqual(portfolio["T (s)"], 7200)
+        self.assertEqual(portfolio["Current EdgeBench 0-100"], 44.97)
+        self.assertEqual(portfolio["Local <=0.5h best"], 19.83)
+        self.assertAlmostEqual(portfolio["Delta vs local <=0.5h (pp)"], 25.14)
+        self.assertEqual(portfolio["Local <=1h best"], 30)
+        self.assertAlmostEqual(portfolio["Delta vs local <=1h (pp)"], 14.97)
+        self.assertEqual(portfolio["GPT-5.5 checkpoint (h)"], 2)
+        self.assertEqual(portfolio["GPT-5.5 same-budget"], 17.3)
+        self.assertAlmostEqual(portfolio["Delta vs same-budget (pp)"], 27.67)
+        self.assertEqual(portfolio["Paper Codex + GPT-5.5 @12h mean"], 25.0)
+        self.assertEqual(portfolio["Paper sample stddev"], 6.5)
+        self.assertAlmostEqual(portfolio["Delta vs paper 12h (pp)"], 19.97)
+        self.assertEqual(portfolio["Issue marker"], "REVIEW_HIGH")
+        self.assertIn("KNOWN_PROTOCOL", rows["borden_source_inversion"]["Issue marker"])
+        self.assertEqual(results.freeze_panes, "A2")
+        self.assertEqual(len(results.tables), 1)
+        overview_values = {row[0].value: row[1].value for row in workbook["Overview"]}
+        self.assertIn("not an apples-to-apples", overview_values["Paper reference role"])
+        self.assertEqual(
+            overview_values["Local fast coverage"],
+            "<=0.5h: 1/2; <=1h: 1/2",
+        )
+        local_fast_rows = list(workbook["Local Fast"].iter_rows(values_only=True))
+        self.assertEqual(
+            local_fast_rows[1][0:3],
+            (0.5, "portfolio_risk_calibration", "available"),
+        )
+        self.assertEqual(
+            local_fast_rows[2][0:3],
+            (0.5, "borden_source_inversion", "missing"),
+        )
+
+    def test_score_task_run_counts_game_sessions_without_run_history(self) -> None:
+        task_run = self.temp / "game-run"
+        task_run.mkdir()
+        EDGE.write_json(
+            task_run / "final_result.json",
+            {
+                "runtime_seconds": 120,
+                "total_rounds": 2,
+                "agent_submissions": 2,
+                "auto_submissions": 0,
+                "resume_count": 0,
+                "timed_out": True,
+            },
+        )
+        EDGE.write_json(
+            task_run / "game_history.json",
+            {
+                "entries": [
+                    {"type": "game", "round": "game-1"},
+                    {"type": "game", "round": "game-2"},
+                ]
+            },
+        )
+        original_run_capture = EDGE.run_capture
+        EDGE.run_capture = lambda *_args, **_kwargs: {
+            "returncode": 0,
+            "stdout": json.dumps(
+                {
+                    "source": str(task_run / "final_result.json"),
+                    "edgebench_score": 25,
+                }
+            ),
+            "stderr": "",
+        }
+        try:
+            observation = EDGE.score_task_run(
+                task_run,
+                {"model": "gpt-test", "wall_time_seconds": 120},
+            )
+        finally:
+            EDGE.run_capture = original_run_capture
+
+        self.assertEqual(observation["evaluator_calls"], 2)
 
     def test_prepare_encodes_plain_outer_and_goal_plus_inner_concurrency(self) -> None:
         args = SimpleNamespace(
@@ -550,18 +717,37 @@ class EdgeBenchExperimentTest(unittest.TestCase):
     def test_goal_plus_environment_uses_pinned_source_and_configured_k(self) -> None:
         cell = {
             "method": "goal-plus-codex",
+            "model": "gpt-5.6-sol",
             "reasoning_effort": "xhigh",
             "inner_search_concurrency": 4,
             "worker_runtime_seconds": 600,
         }
 
-        env = EDGE.cell_environment(cell)
+        env = EDGE.cell_environment(
+            cell,
+            api_key="runtime-key",
+            api_base_url="http://192.0.2.10:45678/v1",
+        )
 
         self.assertEqual(env["SFORGE_GOAL_PLUS_SOURCE_DIR"], str(EDGE.GOAL_PLUS_ROOT))
-        self.assertIn("SFORGE_GOAL_PLUS_MAX_PARALLEL=4", env["SFORGE_AGENT_EXTRA_ENV"])
-        self.assertIn(
-            "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS=600",
-            env["SFORGE_AGENT_EXTRA_ENV"],
+        extra = dict(
+            item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_MAX_PARALLEL"], "4")
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "600")
+        self.assertEqual(
+            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"], "gpt-5.6-sol"
+        )
+        self.assertEqual(
+            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT"], "xhigh"
+        )
+        self.assertEqual(
+            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL"],
+            "http://192.0.2.10:45678/v1",
+        )
+        self.assertEqual(
+            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV"],
+            "SFORGE_AGENT_API_KEY",
         )
         for key in ("TMPDIR", "TMP", "TEMP"):
             self.assertTrue(Path(env[key]).is_relative_to(ROOT))
@@ -809,8 +995,25 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         payload = b'{"run_id":"run-1","state":"running"}'
         member = tarfile.TarInfo(".goal-plus/runs/run-1/run.json")
         member.size = len(payload)
+        annotation = json.dumps(
+            {
+                "state": "completed",
+                "attempts": 1,
+                "usage": {
+                    "input_tokens": 13,
+                    "output_tokens": 5,
+                    "cost_usd": 0.001,
+                },
+            }
+        ).encode()
+        annotation_member = tarfile.TarInfo(
+            ".goal-plus/runs/run-1/candidates/c001/"
+            "evidence-annotations/iteration-0001.json"
+        )
+        annotation_member.size = len(annotation)
         with tarfile.open(run / "goal-plus-state.tar", "w") as archive:
             archive.addfile(member, io.BytesIO(payload))
+            archive.addfile(annotation_member, io.BytesIO(annotation))
 
         stats = EDGE.goal_plus_stats(run)
 
@@ -819,6 +1022,18 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(stats["search_runs"], 1)
         self.assertEqual(stats["candidates"], 0)
         self.assertEqual(stats["search_run_states"], {"running": 1})
+        self.assertEqual(
+            stats["evidence_annotator_usage"],
+            {
+                "input_tokens": 13,
+                "output_tokens": 5,
+                "cost_usd": 0.001,
+                "tasks": 1,
+                "attempts": 1,
+                "states": {"completed": 1},
+                "coverage": "persisted Goal Plus Evidence annotator turns",
+            },
+        )
 
     def test_provision_excludes_downloaded_tasks_from_git_status(self) -> None:
         exclude = EDGE.EDGE_ROOT / ".git" / "info" / "exclude"

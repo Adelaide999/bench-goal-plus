@@ -1,0 +1,163 @@
+{
+  "schema_version": 2,
+  "runners": [
+    {
+      "id": "edgebench-native",
+      "kind": "native-profile",
+      "controller": "experiments/edgebench/experiment.py",
+      "capabilities": {
+        "provision": true,
+        "detach": true,
+        "stop": true,
+        "resume": false,
+        "cell_concurrency": true,
+        "official_evaluator": true,
+        "resume_semantics": "stopped campaigns are finalized as partial; retry uses a new campaign"
+      }
+    },
+    {
+      "id": "common-matrix",
+      "kind": "common-matrix",
+      "controller": "experiments/benchmark_campaign/experiment.py",
+      "capabilities": {
+        "provision": false,
+        "detach": false,
+        "stop": false,
+        "resume": true,
+        "cell_concurrency": false,
+        "official_evaluator": true,
+        "resume_semantics": "rerun only prepared or interrupted cells"
+      }
+    },
+    {
+      "id": "openevolve-batch",
+      "kind": "openevolve-batch",
+      "controller": "experiments/openevolve_compare/experiment.py",
+      "capabilities": {
+        "provision": false,
+        "detach": false,
+        "stop": false,
+        "resume": true,
+        "cell_concurrency": false,
+        "official_evaluator": true,
+        "resume_semantics": "run-batch skips cells already present in campaign-results.json"
+      }
+    }
+  ],
+  "targets": [
+    {
+      "id": "edgebench",
+      "runner": "edgebench-native",
+      "adapter": null,
+      "bootstrap_targets": ["edgebench"],
+      "docker": {
+        "requirement": "required",
+        "owner": "runner",
+        "provision_mode": "eager",
+        "scope": "Native SForge owns task work containers, hidden judges, image provisioning, and official finalization."
+      }
+    },
+    {
+      "id": "ale-bench-lite",
+      "runner": "common-matrix",
+      "adapter": "ale-bench-lite",
+      "bootstrap_targets": ["ale_bench"],
+      "docker": {
+        "requirement": "required",
+        "owner": "adapter",
+        "provision_mode": "lazy",
+        "scope": "The adapter invokes the benchmark-owned C++ and judge images when evaluation starts."
+      }
+    },
+    {
+      "id": "autolab-toy-isa",
+      "runner": "common-matrix",
+      "adapter": "autolab-toy-isa",
+      "bootstrap_targets": ["autolab"],
+      "docker": {
+        "requirement": "not_required",
+        "owner": "host",
+        "provision_mode": "none",
+        "scope": "The integrated toy_isa_opt task uses the host compiler and make; other AutoLab tasks may declare their own Docker contract later."
+      }
+    },
+    {
+      "id": "frontier-cs-problem-0",
+      "runner": "common-matrix",
+      "adapter": "frontier-cs-problem-0",
+      "bootstrap_targets": ["frontier_cs"],
+      "docker": {
+        "requirement": "required",
+        "owner": "adapter",
+        "provision_mode": "eager",
+        "scope": "Setup builds the pinned Frontier-CS judge image and creates its preserved isolated evaluator container through adapter hooks."
+      }
+    },
+    {
+      "id": "frontier-engineering-malloclab",
+      "runner": "common-matrix",
+      "adapter": "frontier-engineering-malloclab",
+      "bootstrap_targets": ["frontier_engineering"],
+      "docker": {
+        "requirement": "not_required",
+        "owner": "host",
+        "provision_mode": "none",
+        "scope": "The integrated MallocLab path uses the host C compiler and make."
+      }
+    },
+    {
+      "id": "heurigym",
+      "runner": "common-matrix",
+      "adapter": "heurigym",
+      "bootstrap_targets": ["heurigym"],
+      "docker": {
+        "requirement": "not_required",
+        "owner": "host",
+        "provision_mode": "none",
+        "scope": "The registered task runs in the repository-managed Python environment."
+      }
+    },
+    {
+      "id": "local-vliw",
+      "runner": "common-matrix",
+      "adapter": "local-vliw",
+      "bootstrap_targets": ["goal_plus"],
+      "docker": {
+        "requirement": "not_required",
+        "owner": "host",
+        "provision_mode": "none",
+        "scope": "This local diagnostic task uses repository-hosted fixtures and tools."
+      }
+    },
+    {
+      "id": "openevolve-cpu-portable",
+      "runner": "openevolve-batch",
+      "adapter": null,
+      "bootstrap_targets": ["openevolve"],
+      "docker": {
+        "requirement": "not_required",
+        "owner": "host",
+        "provision_mode": "none",
+        "scope": "The screened cpu_portable task set runs in the locked NumPy/SciPy environment without Docker."
+      }
+    }
+  ],
+  "presets": [
+    {
+      "id": "edgebench-codex-2h",
+      "description": "Example full 51-task Plain Codex campaign; not a benchmark-run default.",
+      "benchmarks": ["edgebench"],
+      "profile": "full-codex-2h",
+      "campaign_id_template": "edgebench-51-codex-gpt-5-6-sol-medium-2h-k1-c2-{timestamp}",
+      "expected_profile": {
+        "task_count": 51,
+        "methods": ["plain-codex"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 7200,
+        "concurrency": 1,
+        "cell_concurrency": 2
+      }
+    }
+  ]
+}

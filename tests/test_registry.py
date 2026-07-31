@@ -16,6 +16,9 @@ class RegistryTest(unittest.TestCase):
     def test_registry_is_valid(self) -> None:
         self.assertEqual(STATUS.validate(STATUS.load_registry()), [])
 
+    def test_dataset_catalog_is_valid(self) -> None:
+        self.assertEqual(STATUS.validate_datasets(), [])
+
     def test_every_item_has_explicit_docker_requirement(self) -> None:
         data = STATUS.load_registry()
         requirements = {

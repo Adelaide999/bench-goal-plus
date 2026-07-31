@@ -58,6 +58,13 @@ The same command shape works for every table row:
   --worker-runtime-seconds 120 --concurrency 2 --model gpt-5.6-sol
 ```
 
+These historical commands keep their previous behavior. For a claimable B3 or
+B4 ablation cell, pass `--condition B3 --coordination-variant way2` or
+`--condition B4 --coordination-variant way1`; the runner then requires the
+matching `observe` or `enforce` Search Space to exist before marking the cell
+finished. Use `experiments/benchmark_campaign/experiment.py` for a paired
+B0/B1/B3/B4 matrix.
+
 Preparation prints a new ignored run directory. For Goal Plus, confirm that
 `workspace/.gp` is absent before `run`; Goal Plus state is created only by the
 timed natural `/goal-plus` prompt. Seed evaluation uses a controller runtime

@@ -1,0 +1,190 @@
+"""Typed contracts shared by catalogs, runners, state, and CLI code."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+@dataclass(frozen=True)
+class RunnerCapabilities:
+    provision: bool
+    detach: bool
+    stop: bool
+    resume: bool
+    cell_concurrency: bool
+    official_evaluator: bool
+    resume_semantics: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class DockerContract:
+    requirement: str
+    owner: str
+    provision_mode: str
+    scope: str
+
+    @property
+    def required(self) -> bool:
+        return self.requirement == "required"
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class RunnerDefinition:
+    runner_id: str
+    kind: str
+    controller: Path
+    capabilities: RunnerCapabilities
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.runner_id,
+            "kind": self.kind,
+            "controller": str(self.controller),
+            "capabilities": self.capabilities.as_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class TargetDefinition:
+    target_id: str
+    runner_id: str
+    adapter_id: str | None
+    bootstrap_targets: tuple[str, ...]
+    docker: DockerContract
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.target_id,
+            "runner": self.runner_id,
+            "adapter": self.adapter_id,
+            "bootstrap_targets": list(self.bootstrap_targets),
+            "docker": self.docker.as_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class PresetDefinition:
+    preset_id: str
+    description: str
+    benchmarks: tuple[str, ...]
+    profile: str | None
+    campaign_id_template: str | None
+    expected_profile: dict[str, Any]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.preset_id,
+            "description": self.description,
+            "benchmarks": list(self.benchmarks),
+            "profile": self.profile,
+            "campaign_id_template": self.campaign_id_template,
+            "expected_profile": self.expected_profile,
+        }
+
+
+@dataclass(frozen=True)
+class CampaignSpec:
+    campaign_id: str
+    targets: tuple[TargetDefinition, ...]
+    runner: RunnerDefinition
+    preset_id: str | None = None
+    profile: str | None = None
+    methods: tuple[str, ...] = ()
+    conditions: tuple[str, ...] = ()
+    seeds: tuple[int, ...] = (1,)
+    model: str | None = None
+    reasoning_effort: str | None = None
+    wall_time_seconds: int | None = None
+    live_search_concurrency: int | None = None
+    cell_concurrency: int | None = None
+    worker_runtime_seconds: int | None = None
+    worker_min_runtime_seconds: int | None = None
+    campaign_dir: Path | None = None
+
+    @property
+    def target_ids(self) -> tuple[str, ...]:
+        return tuple(item.target_id for item in self.targets)
+
+    def concurrency(self) -> dict[str, Any]:
+        return {
+            "T": self.wall_time_seconds if self.wall_time_seconds is not None else "profile",
+            "K": (
+                self.live_search_concurrency
+                if self.live_search_concurrency is not None
+                else "profile"
+            ),
+            "C": self.cell_concurrency if self.cell_concurrency is not None else "profile",
+            "R": len(self.seeds),
+        }
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "campaign_id": self.campaign_id,
+            "targets": list(self.target_ids),
+            "runner_id": self.runner.runner_id,
+            "runner_kind": self.runner.kind,
+            "preset": self.preset_id,
+            "profile": self.profile,
+            "methods": list(self.methods),
+            "conditions": list(self.conditions),
+            "seeds": list(self.seeds),
+            "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
+            "worker_runtime_seconds": self.worker_runtime_seconds,
+            "worker_min_runtime_seconds": self.worker_min_runtime_seconds,
+            "concurrency": self.concurrency(),
+        }
+
+
+@dataclass(frozen=True)
+class CampaignRef:
+    campaign_id: str
+    path: Path
+    target_id: str
+    runner_id: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "campaign_id": self.campaign_id,
+            "path": str(self.path),
+            "target_id": self.target_id,
+            "runner_id": self.runner_id,
+        }
+
+
+@dataclass(frozen=True)
+class StatusSnapshot:
+    state: str
+    raw_state: str
+    terminal: bool
+    controller_pid: int | None = None
+    controller_alive: bool | None = None
+    counts: dict[str, int] = field(default_factory=dict)
+    can_resume: bool = False
+    can_stop: bool = False
+    can_finalize: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class EvidenceBundle:
+    source: Path
+    markdown: Path
+    workbook: Path
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "source": str(self.source),
+            "markdown": str(self.markdown),
+            "xlsx": str(self.workbook),
+        }

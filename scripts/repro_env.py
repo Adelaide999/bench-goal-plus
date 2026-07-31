@@ -494,12 +494,34 @@ def parse_codex_version(text: str) -> tuple[int, ...] | None:
     return tuple(int(part) for part in match.groups()) if match else None
 
 
+def host_pi_check(manifest: dict[str, Any], *, required: bool = False) -> dict[str, Any]:
+    pi_path = shutil.which("pi")
+    pi_text = None
+    pi_version = None
+    if pi_path:
+        result = run([pi_path, "--version"], check=False)
+        pi_text = (result.stdout or result.stderr).strip()
+        pi_version = parse_codex_version(pi_text)
+    pi_minimum = tuple(int(part) for part in manifest["pi_min_version"].split("."))
+    compatible = bool(pi_version and pi_version >= pi_minimum)
+    return {
+        "name": "host:pi",
+        "passed": compatible if required else True,
+        "required": required,
+        "available": pi_path is not None,
+        "compatible": compatible,
+        "version": pi_text,
+        "minimum": manifest["pi_min_version"],
+    }
+
+
 def collect_doctor(
     manifest: dict[str, Any],
     checkout_root: Path,
     venv: Path,
     lock: Path = DEFAULT_LOCK,
     only: list[str] | None = None,
+    require_pi: bool = False,
 ) -> dict[str, Any]:
     ensure_temp_root()
     python = venv_python(venv)
@@ -635,22 +657,7 @@ def collect_doctor(
         }
     )
 
-    pi_path = shutil.which("pi")
-    pi_text = None
-    pi_version = None
-    if pi_path:
-        result = run([pi_path, "--version"], check=False)
-        pi_text = (result.stdout or result.stderr).strip()
-        pi_version = parse_codex_version(pi_text)
-    pi_minimum = tuple(int(part) for part in manifest["pi_min_version"].split("."))
-    checks.append(
-        {
-            "name": "host:pi",
-            "passed": bool(pi_version and pi_version >= pi_minimum),
-            "version": pi_text,
-            "minimum": manifest["pi_min_version"],
-        }
-    )
+    checks.append(host_pi_check(manifest, required=require_pi))
 
     return {
         "schema_version": 2,
@@ -722,7 +729,12 @@ def bootstrap(args: argparse.Namespace) -> int:
             )
 
     payload = collect_doctor(
-        manifest, checkout_root, venv, args.lock, only=args.only
+        manifest,
+        checkout_root,
+        venv,
+        args.lock,
+        only=args.only,
+        require_pi=args.require_pi,
     )
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(payload, indent=2) + "\n")
@@ -737,6 +749,7 @@ def doctor(args: argparse.Namespace) -> int:
         args.venv.expanduser().absolute(),
         args.lock,
         only=args.only,
+        require_pi=args.require_pi,
     )
     print(json.dumps(payload, indent=2))
     return 0 if payload["ok"] else 1
@@ -753,6 +766,7 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap_parser = subparsers.add_parser("bootstrap")
     bootstrap_parser.add_argument("--uv", default="uv")
     bootstrap_parser.add_argument("--skip-install", action="store_true")
+    bootstrap_parser.add_argument("--require-pi", action="store_true")
     bootstrap_parser.add_argument(
         "--only",
         action="append",
@@ -761,6 +775,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument("--only", action="append")
+    doctor_parser.add_argument("--require-pi", action="store_true")
     return parser
 
 

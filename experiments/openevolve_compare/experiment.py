@@ -21,6 +21,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from bench_artifacts import read_json as load_json  # noqa: E402
+from bench_artifacts import utc_now, write_json  # noqa: E402
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
     describe_task,
@@ -62,10 +64,7 @@ REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 CODEX_SANDBOX = "danger-full-access"
 CODEX_PROVIDER_ID = "bench_proxy"
 PI_PROVIDER_ID = "bench-openai"
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+ANNOTATOR_PROVIDER_ID = "bench_evidence"
 
 
 def sha256_file(path: Path) -> str:
@@ -74,14 +73,6 @@ def sha256_file(path: Path) -> str:
 
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
-
-
-def load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
-
-
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
 def refresh_campaign_report(run_root: Path) -> None:
@@ -236,7 +227,10 @@ def render_goal(
     worker_model: str,
     reasoning_effort: str = DEFAULT_REASONING_EFFORT,
     worker_runtime_seconds: int | None = None,
+    worker_min_runtime_seconds: int | None = None,
     verifier_timeout_seconds: int = 60,
+    coordination_condition: str | None = None,
+    search_space_mode: str | None = None,
 ) -> str:
     """Add the natural Goal Plus entrypoint and config to the common Codex prompt."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
@@ -247,8 +241,34 @@ def render_goal(
     )
     if dispatch_seconds < 1 or dispatch_seconds > exploration_seconds:
         raise ValueError("worker runtime must fit inside the exploration budget")
+    if worker_min_runtime_seconds is not None and not (
+        1 <= worker_min_runtime_seconds <= dispatch_seconds
+    ):
+        raise ValueError("worker minimum runtime must fit inside the worker budget")
     if verifier_timeout_seconds < 1:
         raise ValueError("verifier timeout must be positive")
+    if search_space_mode not in {None, "observe", "enforce"}:
+        raise ValueError(f"unsupported search-space mode: {search_space_mode}")
+    if coordination_condition in {"B3", "B4"} and search_space_mode is None:
+        raise ValueError(
+            f"{coordination_condition} requires an explicit search-space mode"
+        )
+    coordination_text = ""
+    if search_space_mode is not None:
+        mode_behavior = (
+            "Observe mode records plan visibility, reviewer decisions, and Evidence updates "
+            "but must not block a candidate when the reviewer would reject it.\n"
+            if search_space_mode == "observe"
+            else "Enforce mode must reject duplicate or colliding plans and reserve accepted work.\n"
+        )
+        coordination_text = (
+            f"- Ablation condition: `{coordination_condition}`. After creating the Search run "
+            "and before dispatching workers, call `search_space_open` exactly once with "
+            f"`mode=\"{search_space_mode}\"`, `reviewer_model=\"{worker_model}\"`, and "
+            f"`reviewer_reasoning_effort=\"{reasoning_effort}\"`. Every candidate must propose one minimal "
+            "AtomicPlan before each material edit or evaluator call and close an accepted plan "
+            f"with its verifier result. {mode_behavior}"
+        )
     common_prompt = render_common_task_prompt(
         task_text,
         wall_seconds,
@@ -267,8 +287,16 @@ def render_goal(
         f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
         "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "
         "lineages while useful work and outer time remain.\n"
-        f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
+        + (
+            f"- `strategy.worker_budget.min_runtime_seconds={worker_min_runtime_seconds}` "
+            "and `strategy.worker_budget.min_verifier_runs=1`; preserve this minimum "
+            "AutoResearch lease so SubagentStop blocks an early worker return.\n"
+            if worker_min_runtime_seconds is not None
+            else ""
+        )
+        + f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
         f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
+        f"{coordination_text}"
         f"- Metric: `{metric_name}` with direction `{metric_direction}`.\n"
         "- Process verifier: `python3 .goal-plus-verifiers/primary_metric.py`, role "
         "`ranking_signal`, feedback policy `summary_only`, timeout "
@@ -283,7 +311,7 @@ def render_goal(
         f"- Edit surface: allow only `{artifact_name}`; deny `evaluate.py`, "
         "`.goal-plus-verifiers/**`, `task.json`, `TASK.md`, `AGENTS.md`, and `GOAL.md`; "
         "allow at most one changed file.\n"
-        "- Workspace: use `source_path=\".\"` and `workspace.backend=\"copy\"`.\n"
+        "- Workspace: use `source_path=\".\"` and `workspace.backend=\"git_worktree\"`.\n"
         "- Constraints: no network; preserve the artifact's controller-checked fixed regions.\n"
         f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
         f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
@@ -345,11 +373,26 @@ def codex_execution_args() -> list[str]:
 
 def codex_goal_plus_mcp_args() -> list[str]:
     """Register and non-interactively approve Goal Plus for `codex exec`."""
+    env_vars = [
+        "CODEX_HOME",
+        "OPENAI_API_KEY",
+        "SFORGE_AGENT_API_KEY",
+        "GOAL_PLUS_OUTER_DEADLINE_AT",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API",
+    ]
     return [
         "--config",
         'mcp_servers.goal-plus.command="goal-plus"',
         "--config",
         'mcp_servers.goal-plus.args=["--root", ".gp"]',
+        "--config",
+        f"mcp_servers.goal-plus.env_vars={json.dumps(env_vars)}",
         "--config",
         "mcp_servers.goal-plus.startup_timeout_sec=10",
         "--config",
@@ -359,6 +402,35 @@ def codex_goal_plus_mcp_args() -> list[str]:
         "--config",
         "mcp_servers.goal-plus.enabled=true",
     ]
+
+
+def configure_isolated_codex_home(
+    environment: dict[str, str], run_dir: Path
+) -> Path:
+    """Load project hooks without inheriting the user's Codex configuration."""
+    codex_home = run_dir / "controller-runtime" / "codex-home"
+    codex_home.mkdir(parents=True, exist_ok=False)
+    environment["CODEX_HOME"] = str(codex_home)
+    return codex_home
+
+
+def configure_evidence_annotator_environment(
+    environment: dict[str, str],
+    *,
+    model: str,
+    reasoning_effort: str,
+    api_base: str | None,
+) -> None:
+    environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"] = model
+    environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT"] = reasoning_effort
+    if api_base:
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL"] = api_base
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID"] = ANNOTATOR_PROVIDER_ID
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME"] = (
+            "Benchmark Evidence provider"
+        )
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV"] = "OPENAI_API_KEY"
+        environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API"] = "responses"
 
 
 def write_pi_models_config(
@@ -988,6 +1060,149 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
     }
 
 
+def collect_evidence_annotator_usage(workspace: Path) -> dict[str, Any]:
+    totals: dict[str, int | float] = {}
+    tasks = 0
+    attempts = 0
+    states: dict[str, int] = {}
+    for path in sorted(
+        (workspace / ".gp" / "runs").glob(
+            "run_*/candidates/*/evidence-annotations/iteration-*.json"
+        )
+    ):
+        task = load_json(path)
+        tasks += 1
+        attempts += int(task.get("attempts") or 0)
+        state = str(task.get("state") or "unknown")
+        states[state] = states.get(state, 0) + 1
+        usage = task.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        for key, value in usage.items():
+            if isinstance(value, (int, float)):
+                totals[key] = totals.get(key, 0) + value
+    return {
+        **totals,
+        "tasks": tasks,
+        "attempts": attempts,
+        "states": states,
+        "coverage": "persisted Goal Plus Evidence annotator turns",
+    }
+
+
+def _plan_footprint(plan: dict[str, Any]) -> set[str]:
+    footprint = (plan.get("proposal") or {}).get("footprint") or {}
+    return {
+        f"{view}:{value}"
+        for view, values in footprint.items()
+        if isinstance(values, list)
+        for value in values
+        if isinstance(value, str)
+    }
+
+
+def collect_search_space_state(run_dir: Path) -> dict[str, Any]:
+    """Collect coordination metrics without invoking or mutating the runtime."""
+    roots = [run_dir / "search-space", run_dir / "space-experiment"]
+    root = next((path for path in roots if (path / "config.json").is_file()), None)
+    if root is None:
+        return {"exists": False}
+    config = load_json(root / "config.json")
+    state = load_json(root / "state.json") if (root / "state.json").is_file() else {}
+    plans = [load_json(path) for path in sorted((root / "plans").glob("*.json"))]
+    events = [load_json(path) for path in sorted((root / "events").glob("*.json"))]
+    plan_counts: dict[str, int] = {}
+    for plan in plans:
+        status = str(plan.get("status", "unknown"))
+        plan_counts[status] = plan_counts.get(status, 0) + 1
+
+    event_candidates = {
+        event.get("event_id"): event.get("candidate_id")
+        for event in events
+        if isinstance(event.get("event_id"), str)
+    }
+    evidence_references = 0
+    cross_lineage_references = 0
+    for plan in plans:
+        proposal = plan.get("proposal") or {}
+        refs = [
+            ref
+            for key in ("evidence_refs", "relation_evidence_refs")
+            for ref in proposal.get(key, [])
+            if isinstance(ref, str)
+        ]
+        evidence_references += len(refs)
+        cross_lineage_references += sum(
+            event_candidates.get(ref) not in {None, plan.get("candidate_id")}
+            for ref in refs
+        )
+
+    overlaps: list[float] = []
+    for index, left in enumerate(plans):
+        left_footprint = _plan_footprint(left)
+        if not left_footprint:
+            continue
+        for right in plans[index + 1 :]:
+            if left.get("candidate_id") == right.get("candidate_id"):
+                continue
+            right_footprint = _plan_footprint(right)
+            union = left_footprint | right_footprint
+            if union:
+                overlaps.append(len(left_footprint & right_footprint) / len(union))
+
+    reviewed = [plan for plan in plans if isinstance(plan.get("review"), dict)]
+    duplicate_reviews = [
+        plan
+        for plan in reviewed
+        if (plan.get("review") or {}).get("decision") == "reject"
+    ]
+    reviewer_usage: dict[str, int | float] = {}
+    for source in [
+        *(plan.get("reviewer_usage") or {} for plan in plans),
+        state.get("schema_reviewer_usage") or {},
+    ]:
+        if not isinstance(source, dict):
+            continue
+        for key, value in source.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                reviewer_usage[key] = reviewer_usage.get(key, 0) + value
+    return {
+        "exists": True,
+        "root": str(root),
+        "mode": config.get("mode"),
+        "protocol_version": config.get("protocol_version"),
+        "reviewer_model": config.get("reviewer_model"),
+        "reviewer_reasoning_effort": config.get("reviewer_reasoning_effort"),
+        "reviewer_timeout_seconds": config.get("reviewer_timeout_seconds"),
+        "reviewer_usage": reviewer_usage,
+        "plans_total": len(plans),
+        "plan_counts": plan_counts,
+        "reviewed_plans": len(reviewed),
+        "semantic_duplicate_reviews": len(duplicate_reviews),
+        "semantic_duplicate_probability": (
+            len(duplicate_reviews) / len(reviewed) if reviewed else None
+        ),
+        "enforced_rejections": sum(plan.get("status") == "rejected" for plan in plans),
+        "evidence_event_count": len(events),
+        "evidence_revision": state.get("evidence_revision"),
+        "evidence_references": evidence_references,
+        "cross_lineage_evidence_references": cross_lineage_references,
+        "cross_lineage_evidence_reuse_rate": (
+            cross_lineage_references / evidence_references
+            if evidence_references
+            else None
+        ),
+        "cross_lineage_footprint_pairs": len(overlaps),
+        "mean_cross_lineage_footprint_jaccard": (
+            sum(overlaps) / len(overlaps) if overlaps else None
+        ),
+        "shared_tool_reuse": None,
+        "shared_tool_reuse_coverage": (
+            "not yet attributable: tool provenance is not persisted in Search Evidence"
+        ),
+    }
+
+
 def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
     root = workspace / ".gp"
     goals = []
@@ -1030,6 +1245,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
         unbound_agent_session_count = 0
         session_counts_by_candidate: dict[str, int] = {}
         bound_session_counts_by_candidate: dict[str, int] = {}
+        same_agent_continuation_session_count = 0
         for candidate_path in candidate_paths:
             candidate = load_json(candidate_path)
             iterations = candidate.get("iterations")
@@ -1051,6 +1267,9 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                     session_counts_by_candidate.get(candidate_id, 0) + 1
                 )
             host_handle = session.get("host_handle") or {}
+            launch = session.get("launch") or {}
+            if launch.get("tool") in {"followup_task", "pi_search_pool_continue"}:
+                same_agent_continuation_session_count += 1
             external_id = host_handle.get("external_id")
             task_name = host_handle.get("task_name")
             is_bound = (
@@ -1077,6 +1296,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 and counters["verifier_runs"] > 0
             ):
                 worker_verified_candidate_ids.add(candidate_id)
+        search_space = collect_search_space_state(run_dir)
         runs.append(
             {
                 "run_id": payload.get("run_id"),
@@ -1098,6 +1318,9 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "bound_session_counts_by_candidate": (
                     bound_session_counts_by_candidate
                 ),
+                "same_agent_continuation_session_count": (
+                    same_agent_continuation_session_count
+                ),
                 "iteration_count": iteration_count,
                 "process_verifier_command_count": len(process_verifier_logs),
                 "promotion_verifier_command_count": len(promotion_verifier_logs),
@@ -1112,6 +1335,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "selected_score": payload.get("selected_score"),
                 "hosts": sorted(hosts),
                 "report_exists": (run_dir / "report.md").is_file(),
+                "search_space": search_space,
             }
         )
     return {
@@ -1296,6 +1520,47 @@ def apply_promotion_patch(source_workspace: Path, patch_path: Path) -> str:
     )
 
 
+def _existing_promotion(
+    run_path: Path,
+) -> tuple[dict[str, Any], str, dict[str, Any], dict[str, str]] | None:
+    run_data = load_json(run_path)
+    if run_data.get("state") != "promoted":
+        return None
+    candidate_id = run_data.get("selected_candidate_id")
+    if not candidate_id:
+        raise RuntimeError("promoted Search run has no selected candidate")
+    patch_path = run_path.parent / "promotion" / f"{candidate_id}.patch"
+    if not patch_path.is_file():
+        raise RuntimeError("promoted Search run has no promotion artifact")
+    selection = {
+        "selected_candidate_id": candidate_id,
+        "selected_score": run_data.get("selected_score"),
+        "selected_iteration": run_data.get("selected_iteration"),
+        "reused_existing_promotion": True,
+    }
+    return run_data, candidate_id, selection, {"artifact_path": str(patch_path)}
+
+
+def _existing_selection(
+    run_path: Path,
+) -> tuple[dict[str, Any], str, dict[str, Any]] | None:
+    run_data = load_json(run_path)
+    if run_data.get("state") != "ready_to_promote":
+        return None
+    candidate_id = run_data.get("selected_candidate_id")
+    if not candidate_id:
+        raise RuntimeError("ready-to-promote Search run has no selected candidate")
+    selection = {
+        "selected_candidate_id": candidate_id,
+        "selected_score": run_data.get("selected_score"),
+        "selected_iteration": run_data.get("selected_iteration"),
+        "selected_git_head": run_data.get("selected_git_head"),
+        "selected_artifact_hash": run_data.get("selected_artifact_hash"),
+        "reused_existing_selection": True,
+    }
+    return run_data, candidate_id, selection
+
+
 def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
     """Controller-owned post-deadline drain/select/promote, outside search T."""
     from goal_plus.goal_plus import FileGoalPlusRuntime
@@ -1326,38 +1591,45 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
         for run_id, goal_ids in goals_by_run.items():
             run_path = root / "runs" / run_id / "run.json"
             run_data = load_json(run_path)
+            initial_state = run_data.get("state")
             candidate_paths = sorted(
                 (run_path.parent / "candidates").glob("*/candidate.json")
             )
             if not candidate_paths:
                 continue
             verified_in_closeout: list[str] = []
-            if run_data.get("state") == "promoted":
-                candidate_id = run_data["selected_candidate_id"]
-                selection = {
-                    "selected_candidate_id": candidate_id,
-                    "selected_score": run_data.get("selected_score"),
-                    "selected_iteration": run_data.get("selected_iteration"),
-                    "reused_existing_promotion": True,
-                }
-                promotion = {
-                    "artifact_path": str(
-                        run_path.parent / "promotion" / f"{candidate_id}.patch"
-                    )
-                }
+            existing = _existing_promotion(run_path)
+            if existing is not None:
+                run_data, candidate_id, selection, promotion = existing
             else:
-                for candidate_path in candidate_paths:
-                    candidate = load_json(candidate_path)
-                    if not candidate.get("iterations"):
-                        tools.search_run_verifier(
-                            run_id,
-                            candidate["candidate_id"],
-                            hypothesis="controller post-deadline final verification",
-                        )
-                        verified_in_closeout.append(candidate["candidate_id"])
-                selection = tools.search_select(run_id)
-                candidate_id = selection["selected_candidate_id"]
-                promotion = tools.search_promote(run_id, candidate_id)
+                try:
+                    selected = _existing_selection(run_path)
+                    if selected is None:
+                        for candidate_path in candidate_paths:
+                            candidate = load_json(candidate_path)
+                            if not candidate.get("iterations"):
+                                tools.search_run_verifier(
+                                    run_id,
+                                    candidate["candidate_id"],
+                                    hypothesis="controller post-deadline final verification",
+                                )
+                                verified_in_closeout.append(candidate["candidate_id"])
+                        selection = tools.search_select(run_id)
+                        candidate_id = selection["selected_candidate_id"]
+                        run_data = load_json(run_path)
+                    else:
+                        run_data, candidate_id, selection = selected
+                    promotion = tools.search_promote(run_id, candidate_id)
+                except RuntimeError:
+                    existing = _existing_promotion(run_path)
+                    if existing is not None:
+                        run_data, candidate_id, selection, promotion = existing
+                    else:
+                        selected = _existing_selection(run_path)
+                        if selected is None:
+                            raise
+                        run_data, candidate_id, selection = selected
+                        promotion = tools.search_promote(run_id, candidate_id)
             patch_status = apply_promotion_patch(
                 Path(run_data["source_path"]), Path(promotion["artifact_path"])
             )
@@ -1394,7 +1666,7 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
                 {
                     "goal_plus_ids": goal_ids,
                     "run_id": run_id,
-                    "initial_state": run_data.get("state"),
+                    "initial_state": initial_state,
                     "candidate_count": len(candidate_paths),
                     "verified_in_closeout": verified_in_closeout,
                     "selection": selection,
@@ -1467,6 +1739,7 @@ def run_controlled(
     started = time.monotonic()
     soft_stopped = False
     hard_killed = False
+    controller_interrupted = False
     with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
         process = subprocess.Popen(
             command,
@@ -1492,6 +1765,16 @@ def run_controlled(
                 hard_killed = True
                 send_hard_stop(process)
                 process.wait()
+        except KeyboardInterrupt:
+            controller_interrupted = True
+            soft_stopped = True
+            send_soft_stop(process)
+            try:
+                process.wait(timeout=hard_kill_grace_seconds)
+            except subprocess.TimeoutExpired:
+                hard_killed = True
+                send_hard_stop(process)
+                process.wait()
 
     return {
         "started_at": started_at,
@@ -1499,6 +1782,7 @@ def run_controlled(
         "duration_seconds": time.monotonic() - started,
         "returncode": process.returncode,
         "deadline_reached": soft_stopped,
+        "controller_interrupted": controller_interrupted,
         "soft_stop_signal": "SIGTERM" if soft_stopped else None,
         "hard_killed": hard_killed,
         "hard_kill_grace_seconds": hard_kill_grace_seconds,
@@ -1544,10 +1828,14 @@ def run_controlled_many(
         )
 
     deadline = started + wall_time_seconds
-    while time.monotonic() < deadline and any(
-        item["process"].poll() is None for item in running
-    ):
-        time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+    controller_interrupted = False
+    try:
+        while time.monotonic() < deadline and any(
+            item["process"].poll() is None for item in running
+        ):
+            time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+    except KeyboardInterrupt:
+        controller_interrupted = True
 
     soft_stopped = []
     for item in running:
@@ -1583,7 +1871,7 @@ def run_controlled_many(
                     "SIGTERM" if item["name"] in soft_stopped else None
                 ),
                 "hard_killed": item["name"] in hard_killed,
-                "command": item["command"],
+                "command": item.get("recorded_command") or item["command"],
             }
         )
     return {
@@ -1591,6 +1879,7 @@ def run_controlled_many(
         "finished_at": utc_now(),
         "duration_seconds": time.monotonic() - started,
         "deadline_reached": bool(soft_stopped),
+        "controller_interrupted": controller_interrupted,
         "soft_stopped_lanes": soft_stopped,
         "hard_killed_lanes": hard_killed,
         "hard_kill_grace_seconds": hard_kill_grace_seconds,
@@ -1667,6 +1956,14 @@ def execute(args: argparse.Namespace) -> int:
     environment = configure_temp_environment(os.environ.copy())
     bin_dir = runtime_bin(args.venv.expanduser().absolute())
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
+    if method in {"goal-plus-codex", "goal-plus-pi"}:
+        configure_isolated_codex_home(environment, run_dir)
+        configure_evidence_annotator_environment(
+            environment,
+            model=args.model,
+            reasoning_effort=reasoning_effort,
+            api_base=args.api_base,
+        )
 
     if args.api_base and not environment.get("OPENAI_API_KEY"):
         raise RuntimeError(
@@ -2002,7 +2299,6 @@ def execute(args: argparse.Namespace) -> int:
                 str(workspace),
                 "--output-last-message",
                 str(run_dir / "final-message.txt"),
-                "--ignore-user-config",
                 "--color",
                 "never",
                 "--dangerously-bypass-hook-trust",
@@ -2097,6 +2393,9 @@ def execute(args: argparse.Namespace) -> int:
         )
         control["evaluator_calls"] = evaluator_calls
         control["goal_plus"] = collect_goal_plus_state(workspace)
+        control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
+            workspace
+        )
         if control["hard_killed"]:
             control["result_incomplete_reason"] = (
                 f"{method} process group exceeded the shutdown grace"
@@ -2191,6 +2490,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
         workspace
     )
     control["goal_plus"] = collect_goal_plus_state(workspace)
+    control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
+        workspace
+    )
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=manifest["budget"]["concurrency"],

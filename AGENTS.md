@@ -2,6 +2,52 @@
 
 This repository is the control plane for Goal Plus benchmark integrations.
 
+## Repository model
+
+The repository owns reproducible environment setup, benchmark adapters,
+cross-method experiment manifests, campaign lifecycle, evidence collection, and
+reporting. Benchmark-native task definitions, datasets, work containers, and
+hidden judges remain in branch-tracked upstream forks.
+
+```text
+registry + tracked upstreams
+  -> bootstrap / doctor
+  -> benchmark-native or common adapter prepare
+  -> run / status / recoverable stop
+  -> native verifier / finalize
+  -> raw evidence + Markdown/XLSX report
+```
+
+- `benchmarks/`: benchmark, dataset, and executable runner catalogs; readiness and Docker policy.
+- `environment/` and `scripts/repro_env.py`: managed runtime and checkouts.
+- `adapters/`: task materialization and controller-owned evaluation contracts.
+- `bench_goal_plus/`: Agent application service, runner contracts, Docker hooks, and durable Agent state.
+- `experiments/`: native and common campaign controllers.
+- `runs/`: ignored disposable workspaces and durable campaign state.
+- `evidence/`: sanitized claims backed by reproducible commands.
+- `.agents/skills/`: setup, execution, reporting, and adaptation workflows.
+
+## Skill routing
+
+- Use `$bench-goal-plus` for an end-to-end setup/run/status/resume/finish workflow.
+- Use `$benchmark-setup` for bootstrap, dependencies, Docker/images, and doctor.
+- Use `$benchmark-run` for prepare/run/status/stop/finalize and concurrency.
+- Use `$benchmark-report` for `report.md` and `.xlsx` campaign exports.
+- Use `$benchmark-adapt` for a new upstream, adapter, evaluator, or runner.
+
+Register reusable runner families and executable targets in `benchmarks/runners.json`. Every target
+must declare a Docker contract (`requirement`, `owner`, `provision_mode`, `scope`). Keep lifecycle
+implementation in `bench_goal_plus/`; Skills and `scripts/bench.py` are thin entrypoints. Store frozen
+experiment configurations as named presets/examples, not benchmark-specific launcher scripts.
+
+## Concurrency vocabulary
+
+- `T`: wall-clock budget for one task trajectory/search run.
+- `K`: live within-task search concurrency. Plain Codex maps it to independent
+  trajectories; Goal Plus maps it to workers sharing one search state.
+- `C`: cross-task controller concurrency; it changes throughput, not per-task compute.
+- `R`: independent attempts/seeds. Do not relabel `C` as `K` or `R`.
+
 - Keep benchmark upstreams in separate forks. Do not vendor their source or datasets here.
 - Track one explicit branch for every upstream/fork in `benchmarks/registry.json`
   and `environment/upstreams.json`. Do not maintain manual commit pins for

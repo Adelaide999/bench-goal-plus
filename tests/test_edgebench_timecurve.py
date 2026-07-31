@@ -411,6 +411,93 @@ class EdgeBenchTimecurveTest(unittest.TestCase):
         self.assertEqual(json.loads(json_path.read_text())["schema_version"], 1)
         self.assertIn("campaign_id", csv_path.read_text())
 
+    def test_fast_reference_uses_inclusive_boundaries_and_prefers_protocol_evidence(
+        self,
+    ) -> None:
+        legacy = self.temp / "legacy"
+        modern = self.temp / "modern"
+        for campaign, classification in ((legacy, None), (modern, "aligned")):
+            self.write_json(
+                campaign / "campaign.json",
+                {"campaign_id": campaign.name},
+            )
+            self.write_json(
+                campaign / "comparison.json",
+                {
+                    "cells": [
+                        {
+                            "task_id": "task-a",
+                            "method": "plain-codex",
+                            "protocol_classification": classification,
+                            "known_protocol_issue": None,
+                        }
+                    ]
+                },
+            )
+
+        def row(task: str, hours: float, score: float | None) -> dict:
+            return {
+                "task_id": task,
+                "method": "plain-codex",
+                "checkpoint_hours": hours,
+                "checkpoint_seconds": int(hours * 3600),
+                "status": "available" if score is not None else "no_scored_submission",
+                "strict_checkpoint": True,
+                "valid": score is not None,
+                "raw_score": score,
+                "score_0_100": score,
+                "normalization_source": "judge_report",
+                "source": f"evidence/{task}.json",
+            }
+
+        legacy_curve = legacy / "timecurve" / "timecurve.json"
+        modern_curve = modern / "timecurve" / "timecurve.json"
+        self.write_json(
+            legacy_curve,
+            {
+                "schema_version": 1,
+                "campaign_id": "legacy",
+                "model": "gpt-test",
+                "reasoning_effort": "medium",
+                "rows": [
+                    row("task-a", 0.5, 90),
+                    row("task-b", 0.5, 30),
+                    row("task-b", 1.0, 99),
+                    row("task-c", 0.5, None),
+                ],
+            },
+        )
+        self.write_json(
+            modern_curve,
+            {
+                "schema_version": 1,
+                "campaign_id": "modern",
+                "model": "gpt-test",
+                "reasoning_effort": "medium",
+                "rows": [row("task-a", 0.5, 20)],
+            },
+        )
+
+        payload = TIMECURVE.collect_local_fast_reference(
+            [legacy_curve, modern_curve],
+            checkpoint_hours=[0.5, 1.0],
+            model="gpt-test",
+            reasoning_effort="medium",
+        )
+
+        self.assertEqual(payload["task_count"], 3)
+        half = payload["checkpoints"]["0.5h"]
+        one = payload["checkpoints"]["1h"]
+        self.assertEqual(half["available_count"], 2)
+        self.assertAlmostEqual(half["coverage"], 2 / 3)
+        self.assertEqual(half["tasks"]["task-a"]["edgebench_score"], 20)
+        self.assertEqual(half["tasks"]["task-a"]["campaign_id"], "modern")
+        self.assertEqual(half["tasks"]["task-b"]["edgebench_score"], 30)
+        self.assertEqual(one["tasks"]["task-a"]["edgebench_score"], 20)
+        self.assertEqual(one["tasks"]["task-b"]["edgebench_score"], 99)
+        self.assertIn("task-c", half["missing_tasks"])
+        self.assertIn("task-c", one["missing_tasks"])
+
 
 if __name__ == "__main__":
     unittest.main()

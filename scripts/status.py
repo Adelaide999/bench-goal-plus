@@ -12,6 +12,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "benchmarks/registry.json"
+sys.path.insert(0, str(ROOT))
+
+from adapters.registry import (  # noqa: E402
+    AdapterContractError,
+    load_adapter,
+    load_definitions,
+)
+from benchmarks.datasets import (  # noqa: E402
+    load_catalog as load_dataset_catalog,
+    validate_catalog as validate_dataset_catalog,
+)
 
 
 def load_registry() -> dict:
@@ -77,6 +88,23 @@ def validate(data: dict) -> list[str]:
     return errors
 
 
+def validate_task_adapters() -> list[str]:
+    try:
+        definitions = load_definitions()
+        for adapter_id in definitions:
+            load_adapter(adapter_id)
+    except (AdapterContractError, ImportError, KeyError) as error:
+        return [f"task adapter registry: {error}"]
+    return []
+
+
+def validate_datasets() -> list[str]:
+    return [
+        f"dataset catalog: {error}"
+        for error in validate_dataset_catalog(load_dataset_catalog())
+    ]
+
+
 def compact(status: str) -> str:
     return {
         "pass": "PASS",
@@ -132,14 +160,18 @@ def main() -> int:
     args = parser.parse_args()
 
     data = load_registry()
-    errors = validate(data)
+    errors = [*validate(data), *validate_task_adapters(), *validate_datasets()]
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
     if args.check:
-        print(f"OK: {len(data['items'])} registry items validated")
+        dataset_count = len(load_dataset_catalog()["datasets"])
+        print(
+            f"OK: {len(data['items'])} registry items and "
+            f"{dataset_count} datasets validated"
+        )
     else:
         print_table(data)
     return 0
