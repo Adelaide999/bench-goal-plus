@@ -19,6 +19,7 @@ from .profiles import (
     profile_task_protocol,
     protocol_diff,
     validate_claude_thinking_contract,
+    validate_pi_provider_model,
 )
 
 
@@ -37,6 +38,8 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         or profile.get("cell_concurrency", 1)
     )
     model = args.model or profile["model"]
+    if api_protocol == "pi-provider":
+        validate_pi_provider_model(model)
     requested_reasoning = getattr(args, "reasoning_effort", None)
     if requested_reasoning is not None:
         reasoning = requested_reasoning

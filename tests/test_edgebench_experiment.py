@@ -217,14 +217,39 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         _, goal_plus = EDGE.load_profile(
             "vliw-goal-plus-pi-sol-medium-local-smoke"
         )
+        _, api_provider = EDGE.load_profile(
+            "vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1"
+        )
 
         self.assertEqual(EDGE.METHODS["plain-pi"]["agent"], "pi")
         self.assertEqual(EDGE.METHODS["goal-plus-pi"]["agent"], "pi-goal-plus")
+        self.assertEqual(
+            EDGE.METHODS["goal-plus-pi-provider"]["agent"],
+            "pi-goal-plus-provider",
+        )
         self.assertEqual(plain["methods"], ["plain-pi"])
         self.assertEqual(goal_plus["methods"], ["goal-plus-pi"])
         self.assertEqual(goal_plus["concurrency"], 2)
         self.assertEqual(goal_plus["worker_runtime_seconds"], 240)
         self.assertEqual(goal_plus["goal_plus_finalization_grace_seconds"], 120)
+        self.assertEqual(
+            api_provider["methods"], ["goal-plus-pi-provider"]
+        )
+        self.assertEqual(api_provider["model"], "glm-proxy/GLM-5.2")
+        self.assertEqual(api_provider["wall_time_seconds"], 3600)
+        self.assertEqual(api_provider["concurrency"], 2)
+        self.assertEqual(api_provider["cell_concurrency"], 1)
+
+    def test_pi_provider_profile_requires_qualified_provider_model(self) -> None:
+        _, profile = EDGE.load_profile(
+            "vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1"
+        )
+        profile["model"] = "GLM-5.2"
+        path = self.temp / "invalid-pi-provider-model.json"
+        path.write_text(json.dumps(profile), encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "PROVIDER/MODEL"):
+            EDGE.load_profile(path)
 
     def test_profile_rejects_invalid_eval_interval_override(self) -> None:
         _, profile = EDGE.load_profile("vliw-codex-sol-medium-local-smoke")
@@ -1100,6 +1125,31 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "120"
         )
 
+    def test_goal_plus_pi_provider_environment_uses_goal_plus_contract(self) -> None:
+        env = EDGE.cell_environment(
+            {
+                "method": "goal-plus-pi-provider",
+                "sforge_agent": "pi-goal-plus-provider",
+                "model": "glm-proxy/GLM-5.2",
+                "reasoning_effort": "high",
+                "internet": True,
+                "inner_search_concurrency": 2,
+                "worker_runtime_seconds": 3300,
+                "goal_plus_finalization_grace_seconds": 300,
+            }
+        )
+        extra = dict(
+            item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_PARALLEL_NUM"], "2")
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "3300")
+        self.assertEqual(extra["SFORGE_PI_REASONING_EFFORT"], "high")
+        self.assertEqual(
+            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"],
+            "glm-proxy/GLM-5.2",
+        )
+
     def test_api_config_prefers_sforge_then_openai_then_codex(self) -> None:
         config = EDGE.resolve_agent_api_config(
             {
@@ -1146,6 +1196,16 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "https://anthropic.example/api/anthropic/v1/messages",
         )
 
+        provider = EDGE.resolve_agent_api_config(
+            {
+                "OPENAI_API_KEY": "must-not-be-used",
+                "ANTHROPIC_API_KEY": "must-not-be-used",
+            },
+            protocol="pi-provider",
+        )
+        self.assertIsNone(provider["api_key"])
+        self.assertIsNone(provider["api_base_url"])
+
     def test_pi_auth_requires_an_openai_codex_login(self) -> None:
         auth = self.temp / "pi-auth.json"
         auth.write_text(json.dumps({"other-provider": {}}))
@@ -1157,6 +1217,49 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         status = EDGE.resolve_pi_auth({"SFORGE_PI_AUTH_FILE": str(auth)})
         self.assertTrue(status["valid"])
         self.assertEqual(status["path"], auth)
+
+    def test_pi_provider_validates_registry_model_and_credential_env(self) -> None:
+        models = self.temp / "models.json"
+        models.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "glm-anthropic": {
+                            "api": "anthropic-messages",
+                            "apiKey": "${GLM_PROXY_API_KEY}",
+                            "models": [{"id": "GLM-5.2"}],
+                        },
+                        "glm-openai": {
+                            "api": "openai-completions",
+                            "apiKey": "$GLM_PROXY_API_KEY",
+                            "models": [{"id": "GLM-5.2"}],
+                        }
+                    }
+                }
+            )
+        )
+        env = {
+            "SFORGE_PI_MODELS_FILE": str(models),
+            "GLM_PROXY_API_KEY": "secret-value",
+        }
+
+        for provider in ("glm-anthropic", "glm-openai"):
+            with self.subTest(provider=provider):
+                status = EDGE.resolve_pi_provider(
+                    f"{provider}/GLM-5.2", env
+                )
+                self.assertTrue(status["valid"])
+                self.assertEqual(status["provider"], provider)
+                self.assertEqual(status["model"], "GLM-5.2")
+                self.assertEqual(status["credential_env"], "GLM_PROXY_API_KEY")
+                self.assertNotIn("secret-value", json.dumps(status))
+
+        missing = EDGE.resolve_pi_provider(
+            "glm-anthropic/GLM-5.2",
+            {"SFORGE_PI_MODELS_FILE": str(models)},
+        )
+        self.assertFalse(missing["valid"])
+        self.assertEqual(missing["error"], "missing GLM_PROXY_API_KEY")
 
     def test_claude_environment_pins_effort_and_preserves_extra_env(self) -> None:
         previous = EDGE.os.environ.get("SFORGE_AGENT_EXTRA_ENV")

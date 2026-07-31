@@ -43,6 +43,7 @@ from experiments.edgebench.controller.environment import (  # noqa: E402
     provision,
     resolve_agent_api_config,
     resolve_pi_auth,
+    resolve_pi_provider,
     rust_image_runtime_probe,
     rust_runtime_archive_status,
     rust_runtime_asset,

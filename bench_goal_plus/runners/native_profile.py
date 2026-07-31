@@ -39,7 +39,12 @@ class NativeProfileRunner(BenchmarkRunner):
         commands: list[list[str]] = []
         if self.definition.capabilities.provision and not skip_provision:
             commands.append([python, controller, "provision", "--profile", spec.profile])
-        commands.append([python, controller, "doctor", "--profile", spec.profile])
+        doctor_command = [python, controller, "doctor", "--profile", spec.profile]
+        if spec.model is not None:
+            doctor_command.extend(["--model", spec.model])
+        for method in spec.methods:
+            doctor_command.extend(["--method", method])
+        commands.append(doctor_command)
         return commands
 
     def prepare_commands(self, spec: CampaignSpec) -> tuple[list[list[str]], CampaignRef]:

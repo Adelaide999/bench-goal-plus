@@ -43,6 +43,7 @@ class RunnerDefinition:
     controller: Path
     supported_methods: tuple[str, ...]
     capabilities: RunnerCapabilities
+    method_contracts: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +52,7 @@ class RunnerDefinition:
             "controller": str(self.controller),
             "supported_methods": list(self.supported_methods),
             "capabilities": self.capabilities.as_dict(),
+            "method_contracts": self.method_contracts,
         }
 
 

@@ -10,8 +10,14 @@
         "goal-plus-codex",
         "plain-claude",
         "plain-pi",
-        "goal-plus-pi"
+        "goal-plus-pi",
+        "goal-plus-pi-provider"
       ],
+      "method_contracts": {
+        "goal-plus-pi-provider": {
+          "model_format": "provider/model"
+        }
+      },
       "capabilities": {
         "provision": true,
         "detach": true,
@@ -224,6 +230,22 @@
         "model": "gpt-5.6-sol",
         "reasoning_effort": "medium",
         "wall_time_seconds": 600,
+        "concurrency": 2,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "edgebench-vliw-goal-plus-pi-glm-provider-1h",
+      "description": "One-task Goal Plus + Pi campaign using the explicit glm-proxy/GLM-5.2 API provider with T=3600, K=2, C=1, R=1.",
+      "benchmarks": ["edgebench"],
+      "profile": "vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1",
+      "campaign_id_template": "edgebench-vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi-provider"],
+        "model": "glm-proxy/GLM-5.2",
+        "reasoning_effort": "high",
+        "wall_time_seconds": 3600,
         "concurrency": 2,
         "cell_concurrency": 1
       }

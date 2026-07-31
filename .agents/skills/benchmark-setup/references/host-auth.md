@@ -30,7 +30,8 @@ offline/network-isolated protocol 已满足；正式 Linux 运行也不能跳过
 | 路径 | 支持的鉴权 | 配置来源 | 重要限制 |
 | --- | --- | --- | --- |
 | EdgeBench Plain/Goal Plus Codex | Codex OAuth 或 OpenAI-compatible API | OAuth auth file，或 `SFORGE_AGENT_*` / `OPENAI_*` env | custom loopback API 只在具备 Linux bridge 时可用 |
-| EdgeBench Plain/Goal Plus Pi | Pi 的 `openai-codex` 登录 | `SFORGE_PI_AUTH_FILE` 或 `~/.pi/agent/auth.json` | 当前 EdgeBench Pi runner 不接受通用 direct-API provider |
+| EdgeBench Plain/Goal Plus Pi OAuth | Pi 的 `openai-codex` 登录 | `SFORGE_PI_AUTH_FILE` 或 `~/.pi/agent/auth.json` | 只适用于 `plain-pi` / `goal-plus-pi` |
+| EdgeBench Goal Plus + Pi provider API | Pi 显式 provider/model 与 API credential | `SFORGE_PI_MODELS_FILE` 或 `~/.pi/agent/models.json`；built-in `zai` 使用 `ZAI_API_KEY` | 使用 `goal-plus-pi-provider`；model 必须写成 `PROVIDER/MODEL` |
 | EdgeBench Claude | Anthropic-compatible API | `SFORGE_AGENT_*` 或 `ANTHROPIC_*` env | key 和 base URL 都必需 |
 | Common/OpenEvolve 的 Codex 路径 | Codex native login，或显式 OpenAI-compatible endpoint | 省略 `--api-base` 使用 native login；显式 endpoint 使用 `OPENAI_API_KEY` | custom provider 使用 Responses wire API |
 | Common/OpenEvolve 的 Pi、native OpenEvolve、SkyDiscover | OpenAI-compatible API | `--api-base` + `OPENAI_API_KEY` | 不是 Codex OAuth 路径 |
@@ -87,9 +88,32 @@ export SFORGE_PI_AUTH_FILE=/path/to/pi-auth.json
 未设置时使用 `~/.pi/agent/auth.json`。Plain Pi 与 Goal Plus + Pi 都使用这条路径；
 不能把 common/OpenEvolve 的 Pi direct-API 配置照搬到 EdgeBench。
 
+### EdgeBench Pi provider API
+
+`goal-plus-pi-provider` 不使用 `openai-codex` OAuth。profile 必须冻结精确的
+`PROVIDER/MODEL`，例如 `glm-proxy/GLM-5.2` 或 `zai/glm-5.2`。自定义 provider
+从 `SFORGE_PI_MODELS_FILE`（默认 `~/.pi/agent/models.json`）读取 endpoint、wire API
+和 model registration；built-in `zai` 直接读取 `ZAI_API_KEY`。
+
+这条路径与宿主操作系统无关：macOS 和 Linux 都使用 `pathlib` 解析 host registry，
+再由 SForge 把它复制到 Linux Work container 的固定 Pi 配置目录；实现中没有
+OrbStack socket、`/Users/...` 或其他 macOS 专用路径。服务器可通过
+`SFORGE_PI_MODELS_FILE` 指向自己的 registry。
+
+wire API 由 Pi registry 中 provider 的 `api` 字段决定。Pi 0.80.6 能识别的
+`anthropic-messages`、`openai-completions`、`openai-responses` 都走同一个
+`goal-plus-pi-provider` adapter；bench 控制面只验证 provider/model/credential，
+不会把远程 Claude API 或 OpenAI-compatible API 写成不同 method。
+
+如果 models registry 的 `apiKey` 是环境变量引用（支持 `NAME`、`$NAME`、`${NAME}`），
+adapter 只把该变量的运行时值传入 Work container；profile、command 和 doctor 输出只
+记录变量名，不记录值。控制面在 plan 阶段拒绝裸 model ID，在 doctor 阶段检查
+provider、model 和 credential source；它不会把 Pi provider 错配为 `openai-codex`。
+
 ### EdgeBench Goal Plus / Pi runtime cache
 
-`codex-goal-plus` 与 `pi-goal-plus` 已由 SForge 原生支持，不需要 Skill 在容器里手工
+`codex-goal-plus`、`pi-goal-plus` 与 `pi-goal-plus-provider` 已由 SForge 原生支持，
+不需要 Skill 在容器里手工
 拼安装命令。当前真实路径是：
 
 - controller 设置 `SFORGE_GOAL_PLUS_SOURCE_DIR`，`prepare_container` 把受管

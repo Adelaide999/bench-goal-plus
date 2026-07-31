@@ -9,11 +9,16 @@
 | `id` / `kind` | Stable runner ID and implementation selected by `runners/factory.py` |
 | `controller` | Existing repository controller; the Agent calls it instead of copying it |
 | `supported_methods` | Canonical methods accepted during plan resolution; unknown methods fail before setup |
+| `method_contracts` | Optional per-method input constraints; `model_format: provider/model` requires an exact `PROVIDER/MODEL` value |
 | `capabilities` | `provision`, `detach`, `stop`, `resume`, `cell_concurrency`, official evaluator, and exact resume semantics |
 
 Current kinds are `native-profile`, `common-matrix`, and `openevolve-batch`. If a new native
 lifecycle cannot implement this interface, add one runner implementation and tests; do not add
 target-name branches to the CLI.
+
+Every `method_contracts` key must also appear in `supported_methods`. Resolve these contracts during
+`plan` and reject malformed method inputs before setup, doctor, preparation, or launch. The same
+resolved method, provider, and model must then flow unchanged through the runner lifecycle.
 
 ## Target fields
 

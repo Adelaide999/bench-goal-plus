@@ -85,6 +85,34 @@ class Catalog:
             )
             if len(set(supported_methods)) != len(supported_methods):
                 raise ContractError(f"{runner_id}: supported_methods must be unique")
+            raw_method_contracts = entry.get("method_contracts") or {}
+            if not isinstance(raw_method_contracts, dict):
+                raise ContractError(f"{runner_id}: method_contracts must be an object")
+            unknown_contracts = set(raw_method_contracts) - set(supported_methods)
+            if unknown_contracts:
+                raise ContractError(
+                    f"{runner_id}: method_contracts name unsupported methods: "
+                    + ", ".join(sorted(unknown_contracts))
+                )
+            method_contracts: dict[str, dict[str, Any]] = {}
+            for method, contract in raw_method_contracts.items():
+                if not isinstance(contract, dict):
+                    raise ContractError(
+                        f"{runner_id}: contract for {method} must be an object"
+                    )
+                unknown_fields = set(contract) - {"model_format"}
+                if unknown_fields:
+                    raise ContractError(
+                        f"{runner_id}: contract for {method} has unknown fields: "
+                        + ", ".join(sorted(unknown_fields))
+                    )
+                model_format = contract.get("model_format")
+                if model_format != "provider/model":
+                    raise ContractError(
+                        f"{runner_id}: contract for {method} has unsupported "
+                        f"model_format {model_format!r}"
+                    )
+                method_contracts[method] = dict(contract)
             raw_capabilities = entry.get("capabilities")
             if not isinstance(raw_capabilities, dict):
                 raise ContractError(f"{runner_id}: capabilities must be an object")
@@ -111,6 +139,7 @@ class Catalog:
                 controller=controller,
                 supported_methods=supported_methods,
                 capabilities=capabilities,
+                method_contracts=method_contracts,
             )
 
         for index, entry in enumerate(payload.get("targets", [])):

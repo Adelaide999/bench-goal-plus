@@ -34,6 +34,7 @@ EdgeBench 特例加入通用 dispatcher。
 | Goal Plus + Codex | 1 replica | `parallel-num=K` | 一个共享搜索状态中的 K 个 candidate workers |
 | Plain Pi | `K` replicas | `replica-concurrency=K` | K 条互相独立的 Pi trajectory |
 | Goal Plus + Pi | 1 replica | `parallel-num=K` | Pi 主会话监管一个共享搜索状态中的 K 个 candidate workers |
+| Goal Plus + Pi provider API | 1 replica | `parallel-num=K` | 与上一行拓扑相同，但 outer/worker 使用显式 `PROVIDER/MODEL`，不使用 `openai-codex` OAuth |
 | Plain Claude | `K` replicas | `replica-concurrency=K` | Claude Code 原生 agent；可使用 Anthropic-compatible provider |
 
 两者固定同一 task definition、hidden judge、model、reasoning effort 和 wall budget
@@ -103,6 +104,19 @@ python3 scripts/bench.py plan --preset edgebench-vliw-goal-plus-pi-local-smoke
 
 确认 host `openai-codex` 登录和 resolved contract 后，把 `plan` 改成 `start`。
 当前只声明 wiring-ready；真实 Pi E2E evidence 生成前不得标为 pass。
+
+显式 Pi provider/API 路径使用单独的方法与 preset：
+
+```bash
+python3 scripts/bench.py plan \
+  --preset edgebench-vliw-goal-plus-pi-glm-provider-1h
+```
+
+该 preset 固定 `glm-proxy/GLM-5.2/high`、`T=3600,K=2,C=1,R=1`。这里的 provider
+可以是远端 Z.AI、Anthropic-compatible 或 OpenAI-compatible endpoint；“provider”
+描述的是 Pi 的 provider/model 与 API credential 路径，不表示模型运行在本机。
+macOS/OrbStack 与 Linux/Docker 使用同一 adapter；provider registry 中的 `api`
+可以是 Pi 支持的 Anthropic 或 OpenAI wire API，控制面不按 wire API 分叉 method。
 
 完整 51 题 Codex-only 固定协议是通用 dispatcher 中的一个 preset：
 

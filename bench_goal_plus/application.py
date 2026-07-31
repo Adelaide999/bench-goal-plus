@@ -217,6 +217,15 @@ class BenchmarkAgent:
                 f"runner {runner_definition.runner_id} does not support method(s): "
                 f"{rejected}; supported: {supported}"
             )
+        for method in selected_methods:
+            contract = runner_definition.method_contracts.get(method, {})
+            if contract.get("model_format") == "provider/model":
+                provider, separator, model_id = str(model or "").partition("/")
+                if not separator or not provider or not model_id:
+                    raise ContractError(
+                        f"method {method} requires --model PROVIDER/MODEL; "
+                        "a bare model ID cannot select a Pi provider"
+                    )
 
         selected_id = campaign_id
         if not selected_id and preset and preset.campaign_id_template:

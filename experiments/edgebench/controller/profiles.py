@@ -36,6 +36,12 @@ METHODS = {
         "inner_search": True,
         "api_protocol": "openai",
     },
+    "goal-plus-pi-provider": {
+        "agent": "pi-goal-plus-provider",
+        "outer_replicas": 1,
+        "inner_search": True,
+        "api_protocol": "pi-provider",
+    },
     "plain-claude": {
         "agent": "claude-code",
         "outer_replicas": "concurrency",
@@ -43,7 +49,9 @@ METHODS = {
         "api_protocol": "anthropic",
     },
 }
-GOAL_PLUS_METHODS = frozenset({"goal-plus-codex", "goal-plus-pi"})
+GOAL_PLUS_METHODS = frozenset(
+    {"goal-plus-codex", "goal-plus-pi", "goal-plus-pi-provider"}
+)
 CLAUDE_REASONING_EFFORTS = frozenset(
     {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
@@ -112,6 +120,12 @@ def api_protocol_for_methods(methods: Iterable[str]) -> str:
     return next(iter(protocols))
 
 
+def validate_pi_provider_model(model_ref: Any) -> None:
+    provider, separator, model_id = str(model_ref).partition("/")
+    if not separator or not provider or not model_id:
+        raise ValueError("Pi provider profiles must set model to PROVIDER/MODEL")
+
+
 def validate_claude_thinking_contract(
     thinking: Any, reasoning_effort: Any
 ) -> None:
@@ -163,6 +177,8 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
     if unknown:
         raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))
     api_protocol = api_protocol_for_methods(profile["methods"])
+    if api_protocol == "pi-provider":
+        validate_pi_provider_model(profile["model"])
     if api_protocol == "anthropic":
         validate_claude_thinking_contract(
             profile.get("thinking"), profile.get("reasoning_effort")

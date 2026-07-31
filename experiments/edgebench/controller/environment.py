@@ -58,6 +58,13 @@ def resolve_agent_api_config(
             "CODEX_API_KEY",
         )
         base_names = ("SFORGE_AGENT_API_BASE_URL", "OPENAI_BASE_URL")
+    elif protocol == "pi-provider":
+        return {
+            "api_key": None,
+            "api_key_source": None,
+            "api_base_url": None,
+            "api_base_url_source": None,
+        }
     else:
         raise ValueError(f"unsupported agent API protocol: {protocol!r}")
     api_key, key_source = first(key_names)
@@ -86,6 +93,101 @@ def resolve_pi_auth(env: dict[str, str] | None = None) -> dict[str, Any]:
         except (OSError, json.JSONDecodeError, AttributeError):
             valid = False
     return {"path": path, "valid": valid}
+
+
+def pi_api_key_env_name(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(
+        r"(?:\$\{([A-Z][A-Z0-9_]*)\}|\$([A-Z][A-Z0-9_]*)|([A-Z][A-Z0-9_]*))",
+        value,
+    )
+    if not match:
+        return None
+    return next(group for group in match.groups() if group is not None)
+
+
+def resolve_pi_provider(
+    model_ref: str,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    source = os.environ if env is None else env
+    provider, separator, model_id = model_ref.partition("/")
+    result: dict[str, Any] = {
+        "provider": provider or None,
+        "model": model_id or None,
+        "models_path": None,
+        "model_registered": False,
+        "credential_mode": None,
+        "credential_env": None,
+        "valid": False,
+        "error": None,
+    }
+    if not separator or not provider or not model_id:
+        result["error"] = "model must be PROVIDER/MODEL"
+        return result
+    builtin_keys = {"zai": "ZAI_API_KEY"}
+    if provider in builtin_keys:
+        key_name = builtin_keys[provider]
+        result.update(
+            {
+                "model_registered": True,
+                "credential_mode": "environment",
+                "credential_env": key_name,
+                "valid": bool(source.get(key_name)),
+                "error": None if source.get(key_name) else f"missing {key_name}",
+            }
+        )
+        return result
+
+    models_path = Path(
+        source.get(
+            "SFORGE_PI_MODELS_FILE",
+            Path.home() / ".pi" / "agent" / "models.json",
+        )
+    ).expanduser().resolve()
+    result["models_path"] = str(models_path)
+    if not models_path.is_file():
+        result["error"] = "Pi models file not found"
+        return result
+    try:
+        models = json.loads(models_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        result["error"] = f"invalid Pi models file: {exc}"
+        return result
+    provider_config = models.get("providers", {}).get(provider)
+    if not isinstance(provider_config, dict):
+        result["error"] = f"provider {provider!r} is not registered"
+        return result
+    registered_ids = {
+        entry.get("id")
+        for entry in provider_config.get("models", [])
+        if isinstance(entry, dict)
+    }
+    result["model_registered"] = model_id in registered_ids
+    if not result["model_registered"]:
+        result["error"] = f"model {model_id!r} is not registered"
+        return result
+    api_key = provider_config.get("apiKey")
+    key_name = pi_api_key_env_name(api_key)
+    if key_name:
+        result.update(
+            {
+                "credential_mode": "environment",
+                "credential_env": key_name,
+                "valid": bool(source.get(key_name)),
+                "error": None if source.get(key_name) else f"missing {key_name}",
+            }
+        )
+    else:
+        result.update(
+            {
+                "credential_mode": "models-file" if api_key else "none",
+                "valid": True,
+                "error": None,
+            }
+        )
+    return result
 
 
 def loopback_api_target(base_url: str) -> tuple[str, int] | None:
@@ -688,26 +790,39 @@ def _check_auth(
     codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
     auth = Path(auth_override).expanduser() if auth_override else codex_home / "auth.json"
     pi_auth_status = resolve_pi_auth()
+    pi_provider_status = (
+        resolve_pi_provider(str(profile["model"]))
+        if api_protocol == "pi-provider"
+        else None
+    )
     api_key = api_config["api_key"]
     api_base_url = api_config["api_base_url"]
     needs_codex = any(agent.startswith("codex") for agent in agents)
     needs_pi = any(agent.startswith("pi") for agent in agents)
+    needs_pi_oauth = needs_pi and api_protocol != "pi-provider"
     needs_claude = "claude-code" in agents
     auth_ready = (
         (not needs_codex or bool(api_key) or auth.is_file())
-        and (not needs_pi or bool(pi_auth_status["valid"]))
+        and (not needs_pi_oauth or bool(pi_auth_status["valid"]))
+        and (pi_provider_status is None or bool(pi_provider_status["valid"]))
         and (not needs_claude or bool(api_key))
     )
     report.add(
         "auth:agent",
         auth_ready,
-        mode="api_key" if api_key else "host_login",
+        mode=(
+            "pi-provider"
+            if pi_provider_status is not None
+            else "api_key"
+            if api_key
+            else "host_login"
+        ),
         protocol=api_protocol,
         api_key_source=api_config["api_key_source"],
         api_base_url_source=api_config["api_base_url_source"],
         policy=(
-            "Codex accepts API credentials or Codex auth; Pi requires "
-            "SFORGE_PI_AUTH_FILE or ~/.pi/agent/auth.json with openai-codex login"
+            "Codex accepts API credentials or Codex auth; openai-codex Pi requires "
+            "a Pi auth file; pi-provider uses the explicit provider/model registry"
         ),
     )
     if needs_codex:
@@ -718,12 +833,26 @@ def _check_auth(
             path=str(auth),
         )
     if needs_pi:
-        report.add(
-            "auth:pi",
-            bool(pi_auth_status["valid"]),
-            mode="openai-codex",
-            path=str(pi_auth_status["path"]),
-        )
+        if pi_provider_status is not None:
+            report.add(
+                "auth:pi",
+                bool(pi_provider_status["valid"]),
+                mode="provider-api",
+                provider=pi_provider_status["provider"],
+                model=pi_provider_status["model"],
+                models_path=pi_provider_status["models_path"],
+                model_registered=pi_provider_status["model_registered"],
+                credential_mode=pi_provider_status["credential_mode"],
+                credential_env=pi_provider_status["credential_env"],
+                error=pi_provider_status["error"],
+            )
+        else:
+            report.add(
+                "auth:pi",
+                bool(pi_auth_status["valid"]),
+                mode="openai-codex",
+                path=str(pi_auth_status["path"]),
+            )
     if api_key and api_base_url:
         api_probe = authenticated_api_probe(
             str(api_base_url),

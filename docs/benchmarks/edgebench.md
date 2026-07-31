@@ -62,13 +62,23 @@ python3 scripts/bench.py status \
   --campaign runs/edgebench/vliw-matched-01
 ```
 
-Runner 当前声明五个 canonical methods：`plain-codex`、
-`goal-plus-codex`、`plain-claude`、`plain-pi`、`goal-plus-pi`。Pi 的最小
+Runner 当前声明六个 canonical methods：`plain-codex`、
+`goal-plus-codex`、`plain-claude`、`plain-pi`、`goal-plus-pi` 和
+`goal-plus-pi-provider`。Pi 的最小
 profiles 是 `vliw-pi-sol-medium-local-smoke` 和
 `vliw-goal-plus-pi-sol-medium-local-smoke`；后者固定 `K=2`、240 秒 worker
 lease 和 120 秒 finalization grace。Pi 需要 host
 `~/.pi/agent/auth.json`（或 `SFORGE_PI_AUTH_FILE`）中的 `openai-codex` 登录。
 这些 Pi profiles 当前是 wiring-ready，不代表已取得真实 E2E pass evidence。
+
+`goal-plus-pi-provider` 用于 Z.AI 或 Pi models registry 中的显式 API provider，
+不是“本地模型”含义。它不读取 `openai-codex` OAuth，要求 profile 的 model 使用
+`PROVIDER/MODEL`。已登记的一小时 VLIW preset 是
+`edgebench-vliw-goal-plus-pi-glm-provider-1h`，固定
+`glm-proxy/GLM-5.2/high`、`T=3600,K=2,C=1,R=1`。
+这套 adapter 不依赖 macOS：Linux 服务器使用相同 registry 注入和 Work container
+路径。provider registry 可选择 `anthropic-messages` 或
+`openai-completions`/`openai-responses`，无需增加另一种 benchmark method。
 
 该 bootstrap 同时准备固定 SHA256 的 Rust 1.88.0 Linux x64 宿主缓存。Rust
 任务会优先使用 Work/Judge image 内同版本工具链，仅在缺失或版本漂移时离线

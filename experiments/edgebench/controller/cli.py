@@ -11,7 +11,12 @@ from bench_runtime_paths import configure_temp_environment
 from .environment import doctor, provision
 from .io import campaign_dir
 from .preparation import prepare
-from .profiles import METHODS, load_profile
+from .profiles import (
+    METHODS,
+    api_protocol_for_methods,
+    load_profile,
+    validate_pi_provider_model,
+)
 from .reporting import finalize_campaign
 from .runtime import execute_campaign, launch, print_status, stop_campaign
 
@@ -24,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
         child.add_argument("--profile", default="vliw-smoke")
         if name == "doctor":
             child.add_argument("--output", type=Path)
+            child.add_argument("--method", action="append", choices=sorted(METHODS))
+            child.add_argument("--model")
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--profile", default="vliw-smoke")
     prepare_parser.add_argument("--campaign-id")
@@ -55,6 +62,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "provision":
             return provision(profile)
         if args.command == "doctor":
+            profile = dict(profile)
+            if args.method:
+                profile["methods"] = args.method
+            if args.model:
+                profile["model"] = args.model
+            protocol = api_protocol_for_methods(profile["methods"])
+            if protocol == "pi-provider":
+                validate_pi_provider_model(profile["model"])
             return doctor(profile, output=args.output)
         prepare(args, profile)
         return 0

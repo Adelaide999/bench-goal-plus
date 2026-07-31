@@ -1,4 +1,4 @@
 interface:
   display_name: "Benchmark Setup"
-  short_description: "Prepare and validate benchmark environments"
-  default_prompt: "Use $benchmark-setup to prepare and validate the environment and Docker contract for a registered benchmark."
+  short_description: "Validate benchmark hosts, providers, auth, and Docker"
+  default_prompt: "Use $benchmark-setup to prepare and validate the host, provider/auth configuration, and Docker contract for a registered benchmark."

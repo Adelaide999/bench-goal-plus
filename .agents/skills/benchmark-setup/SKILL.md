@@ -1,6 +1,6 @@
 ---
 name: benchmark-setup
-description: 自动部署或诊断 bench-goal-plus benchmark 环境。用户要求安装依赖、拉取上游、下载 Docker 镜像、配置国内可用下载源、检查新机器是否满足 EdgeBench 或其他已登记 benchmark 的运行条件时使用。
+description: 自动部署或诊断 bench-goal-plus benchmark 环境、provider 和认证配置。用户要求安装依赖、拉取上游、下载 Docker 镜像、配置国内可用下载源、检查 macOS/Linux 新机器，或验证 OAuth、API key、provider/model、endpoint、Anthropic/OpenAI-compatible wire API 是否满足 EdgeBench 或其他已登记 benchmark 的运行条件时使用。
 ---
 
 # Benchmark 环境部署

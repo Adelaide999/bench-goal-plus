@@ -52,7 +52,12 @@ class BenchmarkAgentContractTest(unittest.TestCase):
                 "plain-claude",
                 "plain-pi",
                 "goal-plus-pi",
+                "goal-plus-pi-provider",
             ),
+        )
+        self.assertEqual(
+            self.catalog.runners["edgebench-native"].method_contracts,
+            {"goal-plus-pi-provider": {"model_format": "provider/model"}},
         )
 
     def test_runner_rejects_unknown_method_before_prepare(self) -> None:
@@ -72,12 +77,46 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         goal_plus = self.agent.resolve_spec(
             preset_id="edgebench-vliw-goal-plus-pi-local-smoke"
         )
+        api_provider = self.agent.resolve_spec(
+            preset_id="edgebench-vliw-goal-plus-pi-glm-provider-1h"
+        )
 
         self.assertEqual(plain.methods, ("plain-pi",))
         self.assertEqual(plain.concurrency(), {"T": 300, "K": 1, "C": 1, "R": 1})
         self.assertEqual(goal_plus.methods, ("goal-plus-pi",))
         self.assertEqual(
             goal_plus.concurrency(), {"T": 600, "K": 2, "C": 1, "R": 1}
+        )
+        self.assertEqual(
+            api_provider.methods, ("goal-plus-pi-provider",)
+        )
+        self.assertEqual(api_provider.model, "glm-proxy/GLM-5.2")
+        self.assertEqual(
+            api_provider.concurrency(),
+            {"T": 3600, "K": 2, "C": 1, "R": 1},
+        )
+
+    def test_pi_provider_method_requires_qualified_provider_and_model(self) -> None:
+        arguments = {
+            "target_ids": ("edgebench",),
+            "profile": "vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1",
+            "methods": ("goal-plus-pi-provider",),
+            "reasoning_effort": "high",
+            "wall_time_seconds": 3600,
+            "live_search_concurrency": 2,
+            "cell_concurrency": 1,
+        }
+        with self.assertRaisesRegex(ContractError, "PROVIDER/MODEL"):
+            self.agent.resolve_spec(model="GLM-5.2", **arguments)
+
+        spec = self.agent.resolve_spec(model="zai/glm-5.2", **arguments)
+        self.assertEqual(spec.model, "zai/glm-5.2")
+        doctor = create_runner(spec.runner).provision_commands(
+            spec, skip_provision=True
+        )[0]
+        self.assertEqual(
+            doctor[-4:],
+            ["--model", "zai/glm-5.2", "--method", "goal-plus-pi-provider"],
         )
 
     def test_every_target_has_an_explicit_docker_owner_and_mode(self) -> None:
