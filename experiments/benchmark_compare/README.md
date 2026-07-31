@@ -1,10 +1,10 @@
-# Standalone benchmark Plain Codex / Goal Plus + Codex runner
+# Standalone benchmark Plain Codex / Goal Plus + Codex/Pi runner
 
 This runner applies one experiment contract to the standalone benchmark cases
 that already have a portable, controller-owned evaluator. It is intentionally
 not another benchmark framework: every adapter materializes one upstream task,
 one editable artifact, and its native raw metric; the common runner only owns
-Codex launch, Goal Plus launch, wall deadline, concurrency, and evidence.
+Codex/Pi launch, Goal Plus launch, wall deadline, concurrency, and evidence.
 
 ## Supported task IDs
 
@@ -56,7 +56,16 @@ The same command shape works for every table row:
   --benchmark autolab-toy-isa --method goal-plus-codex \
   --wall-time-seconds 360 --soft-closeout-seconds 60 \
   --worker-runtime-seconds 120 --concurrency 2 --model gpt-5.6-sol
+
+.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
+  --benchmark autolab-toy-isa --method goal-plus-pi \
+  --wall-time-seconds 360 --soft-closeout-seconds 60 \
+  --worker-runtime-seconds 120 --concurrency 2 --model gpt-5.6-sol
 ```
+
+`goal-plus-pi` 使用同一个 materializer、task prompt 和 evaluator，但把 worker
+host 固定为 `pi-rpc`。运行时必须显式传 `--api-base`；run-local
+`pi-home/models.json` 只引用宿主环境中的 `$OPENAI_API_KEY`，不持久化密钥。
 
 These historical commands keep their previous behavior. For a claimable B3 or
 B4 ablation cell, pass `--condition B3 --coordination-variant way2` or

@@ -170,7 +170,7 @@ environment/                             Python lock 与受管 fork branch manif
 third_party/                             所有 branch-tracked benchmark/search runtime 的统一 ignored checkout 根目录
 local_examples/                          无 Docker 的固定 task replica；只作方法实验，不冒充正式 benchmark
 experiments/openevolve_compare/          native OE / Plain Codex / Goal Plus+Codex / Goal Plus+Pi 同任务时限入口
-experiments/benchmark_compare/             standalone benchmark 与 local task 的 Plain Codex / Goal Plus+Codex 统一入口
+experiments/benchmark_compare/             standalone benchmark 与 local task 的 Plain Codex / Goal Plus+Codex/Pi 统一入口
 experiments/benchmark_campaign/            benchmark × condition × seed 通用 campaign、状态与报告
 experiments/heurigym_compare/              上述通用实现的兼容入口
 experiments/edgebench/                      SForge 原生 runtime/judge 的 campaign 控制、监控、停止与汇总

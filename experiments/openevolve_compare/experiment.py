@@ -269,6 +269,12 @@ def render_goal(
             "AtomicPlan before each material edit or evaluator call and close an accepted plan "
             f"with its verifier result. {mode_behavior}"
         )
+    minimum_lease_enforcement = (
+        "the Pi pool supervisor automatically resumes the same native session "
+        "until the cumulative minimum is satisfied"
+        if worker_host == "pi-rpc"
+        else "SubagentStop blocks an early worker return"
+    )
     common_prompt = render_common_task_prompt(
         task_text,
         wall_seconds,
@@ -290,7 +296,8 @@ def render_goal(
         + (
             f"- `strategy.worker_budget.min_runtime_seconds={worker_min_runtime_seconds}` "
             "and `strategy.worker_budget.min_verifier_runs=1`; preserve this minimum "
-            "AutoResearch lease so SubagentStop blocks an early worker return.\n"
+            f"AutoResearch lease so {minimum_lease_enforcement}. Do not place either "
+            "field in `strategy.config`.\n"
             if worker_min_runtime_seconds is not None
             else ""
         )
@@ -320,6 +327,8 @@ def render_goal(
         "allow at most one changed file.\n"
         "- Workspace: use `source_path=\".\"` and `workspace.backend=\"git_worktree\"`.\n"
         "- Constraints: no network; preserve the artifact's controller-checked fixed regions.\n"
+        f"- `strategy.config.closeout_reserve_seconds={closeout_seconds}` so host "
+        "supervisors stop worker continuation before final completion work.\n"
         f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
         f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
         "Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as the authoritative upper deadline.\n"
@@ -452,7 +461,7 @@ def write_pi_models_config(
         "providers": {
             PI_PROVIDER_ID: {
                 "baseUrl": api_base,
-                "api": "openai-completions",
+                "api": "openai-responses",
                 "apiKey": "$OPENAI_API_KEY",
                 "authHeader": True,
                 "models": [
@@ -1242,6 +1251,24 @@ def collect_search_space_state(run_dir: Path) -> dict[str, Any]:
 
 def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
     root = workspace / ".gp"
+    pi_pool_jobs_by_run: dict[str, list[dict[str, Any]]] = {}
+    for job_path in sorted(
+        (root / "host-pools" / "pi").glob("pool_*/jobs/job_*/job.json")
+    ):
+        job = load_json(job_path)
+        run_id = job.get("run_id")
+        if not isinstance(run_id, str):
+            continue
+        result_path = job_path.parent / "result.json"
+        result = load_json(result_path) if result_path.is_file() else {}
+        pi_pool_jobs_by_run.setdefault(run_id, []).append(
+            {
+                "job_id": job.get("job_id"),
+                "candidate_id": job.get("candidate_id"),
+                "status": job.get("status"),
+                "lease": result.get("lease") if isinstance(result, dict) else None,
+            }
+        )
     goals = []
     for path in sorted((root / "goal-plus").glob("gp_*/goal.json")):
         payload = load_json(path)
@@ -1259,13 +1286,17 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
         payload = load_json(path)
         run_dir = path.parent
         metric_direction = None
+        worker_host = None
+        worker_budget = None
         frozen_spec_id = payload.get("frozen_spec_id")
         if isinstance(frozen_spec_id, str):
             frozen_spec_path = root / "specs" / frozen_spec_id / "frozen_spec.json"
             if frozen_spec_path.is_file():
-                metric_direction = (load_json(frozen_spec_path).get("spec") or {}).get(
-                    "metric_direction"
-                )
+                spec = load_json(frozen_spec_path).get("spec") or {}
+                metric_direction = spec.get("metric_direction")
+                strategy = spec.get("strategy") or {}
+                worker_host = strategy.get("worker_host")
+                worker_budget = strategy.get("worker_budget")
         candidate_paths = sorted(run_dir.glob("candidates/*/candidate.json"))
         session_paths = sorted(run_dir.glob("agent_sessions/agent_*.json"))
         process_verifier_logs = sorted(
@@ -1293,6 +1324,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                     for item in iterations
                     if isinstance(item, dict)
                     and isinstance(item.get("score"), (int, float))
+                    and item.get("process_passed") is not False
                 )
         for session_path in session_paths:
             session = load_json(session_path)
@@ -1362,6 +1394,9 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "process_verifier_command_count": len(process_verifier_logs),
                 "promotion_verifier_command_count": len(promotion_verifier_logs),
                 "metric_direction": metric_direction,
+                "worker_host": worker_host,
+                "worker_budget": worker_budget,
+                "pi_pool_jobs": pi_pool_jobs_by_run.get(str(payload.get("run_id")), []),
                 "best_recorded_score": (
                     min(best_scores)
                     if best_scores and metric_direction == "minimize"
@@ -1388,6 +1423,8 @@ def goal_plus_incomplete_reason(
     *,
     expected_concurrency: int | None = None,
     minimum_worker_verified_candidates: int | None = None,
+    expected_worker_min_runtime_seconds: int | None = None,
+    expected_worker_min_verifier_runs: int | None = None,
     expected_goal_plus_id: str | None = None,
     expected_run_id: str | None = None,
     codex_events: dict[str, Any] | None = None,
@@ -1440,6 +1477,44 @@ def goal_plus_incomplete_reason(
         runs = [item for item in runs if item.get("run_id") in linked_run_ids]
         if len(runs) != len(linked_run_ids):
             return "one or more Goal Plus linked Search runs are missing"
+    expected_lease = {
+        key: value
+        for key, value in {
+            "min_runtime_seconds": expected_worker_min_runtime_seconds,
+            "min_verifier_runs": expected_worker_min_verifier_runs,
+        }.items()
+        if value is not None
+    }
+    for run in runs:
+        actual_budget = run.get("worker_budget") or {}
+        mismatches = [
+            f"{key}={actual_budget.get(key)!r} (expected {expected!r})"
+            for key, expected in expected_lease.items()
+            if actual_budget.get(key) != expected
+        ]
+        if mismatches:
+            return (
+                f"Search run {run.get('run_id')} frozen worker budget mismatch: "
+                + ", ".join(mismatches)
+            )
+        if expected_lease and run.get("worker_host") == "pi-rpc":
+            jobs = run.get("pi_pool_jobs") or []
+            unsatisfied = [
+                str(job.get("job_id") or job.get("candidate_id") or "unknown")
+                for job in jobs
+                if job.get("status") != "completed"
+                or not isinstance(job.get("lease"), dict)
+                or job["lease"].get("satisfied") is not True
+            ]
+            if not jobs:
+                return (
+                    f"Search run {run.get('run_id')} has no Pi minimum lease evidence"
+                )
+            if unsatisfied:
+                return (
+                    f"Search run {run.get('run_id')} did not satisfy the Pi minimum lease "
+                    "for jobs: " + ", ".join(unsatisfied)
+                )
     if expected_concurrency is not None:
         if codex_events is not None:
             completed_spawns = codex_events.get("spawn_agent_completed_count", 0)
@@ -1518,6 +1593,7 @@ def close_pi_pools(workspace: Path, timeout_seconds: int) -> list[dict[str, Any]
                         "job_id": job.get("job_id"),
                         "candidate_id": job.get("candidate_id"),
                         "status": job.get("status"),
+                        "lease": (job.get("result") or {}).get("lease"),
                     }
                     for job in snapshot.get("jobs", [])
                 ],
@@ -2452,6 +2528,12 @@ def execute(args: argparse.Namespace) -> int:
             codex_events=(
                 control.get("codex") if method == "goal-plus-codex" else None
             ),
+            expected_worker_min_runtime_seconds=budget.get(
+                "worker_min_runtime_seconds"
+            ),
+            expected_worker_min_verifier_runs=(
+                1 if budget.get("worker_min_runtime_seconds") is not None else None
+            ),
         )
         if goal_reason and not control.get("result_incomplete_reason"):
             control["result_incomplete_reason"] = goal_reason
@@ -2547,6 +2629,14 @@ def repair_closeout(args: argparse.Namespace) -> int:
         expected_concurrency=manifest["budget"]["concurrency"],
         codex_events=(
             control.get("codex") if method == "goal-plus-codex" else None
+        ),
+        expected_worker_min_runtime_seconds=manifest["budget"].get(
+            "worker_min_runtime_seconds"
+        ),
+        expected_worker_min_verifier_runs=(
+            1
+            if manifest["budget"].get("worker_min_runtime_seconds") is not None
+            else None
         ),
     )
     if reason is None and not control.get("hard_killed"):
