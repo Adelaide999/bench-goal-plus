@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "priority-glm-5-2-adaptive-2h-k1-c2",
+  "description": "Ten prioritized public EdgeBench tasks, one Claude Code trajectory per task, two concurrent task cells, two hours per trajectory, using GLM-5.2 with adaptive thinking.",
+  "protocol_source": "edgebench-official-codex",
+  "backend": "docker",
+  "dataset_repository": "ByteDance-Seed/EdgeBench",
+  "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+  "registry": "seededge",
+  "task_ids": [
+    "vliw_kernel_optimization",
+    "integer_compression_codec",
+    "juliet_vulnerability_analyzer",
+    "molecular_self_assembly",
+    "ad_placement_optimization",
+    "graph_node_classification",
+    "treant_forest",
+    "dabic_gravity_inversion",
+    "portfolio_risk_calibration",
+    "tree_block_partitioning"
+  ],
+  "methods": [
+    "plain-claude"
+  ],
+  "model": "glm-5.2",
+  "thinking": {
+    "type": "adaptive"
+  },
+  "claude_context_window_tokens": 200000,
+  "claude_autocompact_percent": 80,
+  "wall_time_seconds": 7200,
+  "concurrency": 1,
+  "cell_concurrency": 2,
+  "judge_concurrency": 1,
+  "judge_port": 8080,
+  "protocol_override_reasons": {
+    "agent": "the campaign uses the native Claude Code harness used by the official GLM setting",
+    "backend": "the local campaign uses Docker instead of the official Kubernetes backend",
+    "model": "the campaign evaluates GLM-5.2 through the Z.AI Anthropic-compatible API",
+    "timeout": "the campaign uses a two-hour task budget instead of the official twelve hours",
+    "attempts_per_task": "the campaign runs one independent trajectory per task instead of three",
+    "cell_concurrency": "the local controller runs at most two task cells concurrently",
+    "judge_concurrency": "the local shared Judge serializes ephemeral Judge containers"
+  }
+}

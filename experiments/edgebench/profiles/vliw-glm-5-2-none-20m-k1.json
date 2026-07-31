@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "vliw-glm-5-2-none-20m-k1",
+  "description": "One-replica, 20-minute EdgeBench VLIW smoke using Claude Code with GLM-5.2 and deep thinking disabled.",
+  "protocol_source": "edgebench-official-codex",
+  "backend": "docker",
+  "dataset_repository": "ByteDance-Seed/EdgeBench",
+  "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+  "registry": "seededge",
+  "task_ids": [
+    "vliw_kernel_optimization"
+  ],
+  "methods": [
+    "plain-claude"
+  ],
+  "model": "glm-5.2",
+  "thinking": {
+    "type": "disabled"
+  },
+  "reasoning_effort": "none",
+  "wall_time_seconds": 1200,
+  "concurrency": 1,
+  "cell_concurrency": 1,
+  "judge_concurrency": 1,
+  "judge_port": 8080,
+  "protocol_override_reasons": {
+    "agent": "the smoke selects the native Claude Code agent through the Z.AI Anthropic-compatible API",
+    "backend": "the local smoke uses Docker instead of the official Kubernetes backend",
+    "model": "the smoke evaluates the selected GLM-5.2 development model",
+    "reasoning_effort": "deep thinking is disabled and reasoning effort none is pinned explicitly for reproducibility",
+    "timeout": "the lifecycle smoke uses a twenty-minute task budget",
+    "attempts_per_task": "the smoke uses one trajectory rather than three paper trajectories",
+    "cell_concurrency": "the local controller runs one task-method cell at a time",
+    "judge_concurrency": "the local shared Judge serializes ephemeral Judge containers"
+  }
+}

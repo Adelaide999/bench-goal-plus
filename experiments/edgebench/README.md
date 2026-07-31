@@ -11,6 +11,7 @@ artifact 汇总成同口径表；campaign manifest 记录实际 source commit。
 |---|---:|---:|---|
 | Plain Codex | `K` replicas | `replica-concurrency=K` | K 条互相独立的 trajectory，等价于 independent parallel baseline |
 | Goal Plus + Codex | 1 replica | `budget.max_parallel=K` | 一个共享搜索状态中的 K 个 candidate workers |
+| Plain Claude | `K` replicas | `replica-concurrency=K` | Claude Code 原生 agent；可使用 Anthropic-compatible provider |
 
 两者固定同一 task definition、hidden judge、model、reasoning effort 和 wall budget
 `T`。它们不强行匹配 evaluator calls 或 round；这些是运行后报告的行为量。
@@ -117,9 +118,43 @@ timeout、attempt 数和控制面并发字段。
 Linux rootless Docker 无法从容器直接访问只监听宿主 loopback 的 API/Judge 时，
 controller 会为 campaign 生命周期启动随机高端口的 `systemd-socket-proxyd` 桥，
 并在结束或可恢复停止时关闭。API 配置按
-`SFORGE_AGENT_* > OPENAI_* > CODEX_API_KEY` 解析；密钥只进入子进程环境，不写入
+`SFORGE_AGENT_* > protocol-native environment` 解析；Codex 使用 `OPENAI_*`，
+Claude 使用 `ANTHROPIC_*`。密钥只进入子进程环境，不写入
 manifest 或命令记录。`college_english_exam_bank` 的 Judge 使用同一 API bridge，
 并按 EdgeBench 官方配置固定 `SFORGE_JUDGE_MODEL=gpt-5.5`。
+
+GLM-5.2 Claude smoke 使用已固定的 profile；`thinking.type=enabled` 写入 profile，
+`reasoning_effort=high` 通过 Claude Code `CLAUDE_CODE_EFFORT_LEVEL` 传入 Work
+container：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
+  --profile vliw-glm-5-2-high-20m-k1
+.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
+  --profile vliw-glm-5-2-high-20m-k1 --campaign-id <campaign-id>
+.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
+  --campaign <campaign-id> --detach
+```
+
+不启用深度思考的同预算版本使用 `vliw-glm-5-2-none-20m-k1`。该 profile 固定
+`thinking.type=disabled` 和 `reasoning_effort=none`；控制器不向 Claude CLI 传递其
+不支持的 `--effort none`，而是在 Work container 中设置
+`MAX_THINKING_TOKENS=0` 并移除所有 force-effort 变量。
+
+复现官方 GLM-5.1 Claude Code adaptive-thinking 配置的两小时版本使用
+`vliw-glm-5-1-adaptive-2h-k1`。该 profile 固定 `thinking.type=adaptive`，不设置
+`reasoning_effort` 或数值 thinking budget，并按官方配置把所有 Claude 模型层级
+路由到请求标识 `glm-5.1`，使用 200K context window 和 80% 自动压缩阈值。
+实际服务的模型身份必须以 transcript 响应元数据中的 `message.model` 为准：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
+  --profile vliw-glm-5-1-adaptive-2h-k1
+.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
+  --profile vliw-glm-5-1-adaptive-2h-k1 --campaign-id <campaign-id>
+.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
+  --campaign <campaign-id> --detach
+```
 
 完整 51 题 Plain Codex 两小时 campaign 使用：
 

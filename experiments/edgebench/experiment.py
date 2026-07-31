@@ -64,13 +64,60 @@ METHODS = {
         "agent": "codex",
         "outer_replicas": "concurrency",
         "inner_search": False,
+        "api_protocol": "openai",
     },
     "goal-plus-codex": {
         "agent": "codex-goal-plus",
         "outer_replicas": 1,
         "inner_search": True,
+        "api_protocol": "openai",
+    },
+    "plain-claude": {
+        "agent": "claude-code",
+        "outer_replicas": "concurrency",
+        "inner_search": False,
+        "api_protocol": "anthropic",
     },
 }
+
+
+def api_protocol_for_methods(methods: Iterable[str]) -> str:
+    protocols = {str(METHODS[method]["api_protocol"]) for method in methods}
+    if len(protocols) != 1:
+        raise ValueError(
+            "one EdgeBench campaign cannot mix agent API protocols: "
+            + ", ".join(sorted(protocols))
+        )
+    return next(iter(protocols))
+
+
+CLAUDE_REASONING_EFFORTS = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+)
+
+
+def validate_claude_thinking_contract(
+    thinking: Any, reasoning_effort: Any
+) -> None:
+    if thinking == {"type": "adaptive"}:
+        if reasoning_effort is not None:
+            raise ValueError(
+                "adaptive Claude EdgeBench profiles must not set reasoning effort"
+            )
+        return
+    effort = str(reasoning_effort or "")
+    if effort not in CLAUDE_REASONING_EFFORTS:
+        raise ValueError(
+            "Claude EdgeBench profiles must use adaptive thinking without effort "
+            "or pin a supported reasoning effort"
+        )
+    expected_type = "disabled" if effort in {"none", "minimal"} else "enabled"
+    if thinking != {"type": expected_type}:
+        raise ValueError(
+            "Claude EdgeBench profiles must pair "
+            f"reasoning_effort={effort!r} with thinking.type={expected_type!r}"
+        )
+
 PAPER_LARGE_GAP_THRESHOLD_PP = 20.0
 LEGACY_PAPER_PROTOCOL_ISSUES = {
     "borden_source_inversion": "no cooldown; unusually high evaluator-call frequency",
@@ -266,6 +313,29 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
     unknown = set(profile["methods"]) - set(METHODS)
     if unknown:
         raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))
+    api_protocol = api_protocol_for_methods(profile["methods"])
+    if api_protocol == "anthropic":
+        validate_claude_thinking_contract(
+            profile.get("thinking"), profile.get("reasoning_effort")
+        )
+        context_window = profile.get("claude_context_window_tokens")
+        compact_percent = profile.get("claude_autocompact_percent")
+        if (context_window is None) != (compact_percent is None):
+            raise ValueError(
+                "Claude context window and autocompact percent must be set together"
+            )
+        if context_window is not None and (
+            not isinstance(context_window, int)
+            or isinstance(context_window, bool)
+            or context_window < 1
+        ):
+            raise ValueError("claude_context_window_tokens must be positive")
+        if compact_percent is not None and (
+            not isinstance(compact_percent, int)
+            or isinstance(compact_percent, bool)
+            or not 1 <= compact_percent <= 100
+        ):
+            raise ValueError("claude_autocompact_percent must be between 1 and 100")
     if int(profile["wall_time_seconds"]) < 1 or int(profile["concurrency"]) < 1:
         raise ValueError("wall_time_seconds and concurrency must be positive")
     if int(profile.get("cell_concurrency", 1)) < 1:
@@ -487,6 +557,8 @@ def run_capture(command: list[str], *, env: dict[str, str] | None = None) -> dic
 
 def resolve_agent_api_config(
     env: dict[str, str] | None = None,
+    *,
+    protocol: str = "openai",
 ) -> dict[str, str | None]:
     source = os.environ if env is None else env
 
@@ -497,12 +569,24 @@ def resolve_agent_api_config(
                 return value, name
         return None, None
 
-    api_key, key_source = first(
-        ("SFORGE_AGENT_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY")
-    )
-    base_url, base_source = first(
-        ("SFORGE_AGENT_API_BASE_URL", "OPENAI_BASE_URL")
-    )
+    if protocol == "anthropic":
+        key_names = (
+            "SFORGE_AGENT_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+        )
+        base_names = ("SFORGE_AGENT_API_BASE_URL", "ANTHROPIC_BASE_URL")
+    elif protocol == "openai":
+        key_names = (
+            "SFORGE_AGENT_API_KEY",
+            "OPENAI_API_KEY",
+            "CODEX_API_KEY",
+        )
+        base_names = ("SFORGE_AGENT_API_BASE_URL", "OPENAI_BASE_URL")
+    else:
+        raise ValueError(f"unsupported agent API protocol: {protocol!r}")
+    api_key, key_source = first(key_names)
+    base_url, base_source = first(base_names)
     return {
         "api_key": api_key,
         "api_key_source": key_source,
@@ -630,11 +714,50 @@ def start_socket_bridge(
     )
 
 
-def authenticated_api_probe(base_url: str, api_key: str) -> dict[str, Any]:
-    url = base_url.rstrip("/") + "/models"
+def agent_api_probe_url(base_url: str, protocol: str) -> str:
+    base = base_url.rstrip("/")
+    if protocol == "anthropic":
+        return base + ("/messages" if base.endswith("/v1") else "/v1/messages")
+    if protocol == "openai":
+        return base + "/models"
+    raise ValueError(f"unsupported agent API protocol: {protocol!r}")
+
+
+def authenticated_api_probe(
+    base_url: str,
+    api_key: str,
+    *,
+    protocol: str = "openai",
+    model: str | None = None,
+    thinking: dict[str, str] | None = None,
+    reasoning_effort: str | None = None,
+) -> dict[str, Any]:
+    url = agent_api_probe_url(base_url, protocol)
+    headers = {"Authorization": f"Bearer {api_key}"}
+    data: bytes | None = None
+    if protocol == "anthropic":
+        if not model:
+            raise ValueError("Anthropic API probes require a model")
+        headers.update(
+            {
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+        )
+        payload: dict[str, Any] = {
+            "model": model,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "Reply OK."}],
+        }
+        if thinking is not None:
+            payload["thinking"] = thinking
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
+        data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url,
-        headers={"Authorization": f"Bearer {api_key}"},
+        headers=headers,
+        data=data,
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
@@ -690,10 +813,16 @@ def docker_http_probe(
     url: str,
     *,
     api_key: str | None = None,
+    protocol: str | None = None,
+    model: str | None = None,
+    thinking_type: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     env = dict(os.environ)
     configure_temp_environment(env)
-    env["SFORGE_PROBE_URL"] = url
+    env["SFORGE_PROBE_URL"] = (
+        agent_api_probe_url(url, protocol) if protocol else url
+    )
     command = [
         "docker",
         "run",
@@ -706,12 +835,41 @@ def docker_http_probe(
     if api_key:
         env["SFORGE_PROBE_API_KEY"] = api_key
         command.extend(["-e", "SFORGE_PROBE_API_KEY"])
+    if protocol:
+        env["SFORGE_PROBE_PROTOCOL"] = protocol
+        command.extend(["-e", "SFORGE_PROBE_PROTOCOL"])
+    if model:
+        env["SFORGE_PROBE_MODEL"] = model
+        command.extend(["-e", "SFORGE_PROBE_MODEL"])
+    if thinking_type:
+        env["SFORGE_PROBE_THINKING_TYPE"] = thinking_type
+        command.extend(["-e", "SFORGE_PROBE_THINKING_TYPE"])
+    if reasoning_effort:
+        env["SFORGE_PROBE_REASONING_EFFORT"] = reasoning_effort
+        command.extend(["-e", "SFORGE_PROBE_REASONING_EFFORT"])
     command.extend(
         [
             image,
             "-c",
             (
-                "if [ -n \"${SFORGE_PROBE_API_KEY:-}\" ]; then "
+                "if [ \"${SFORGE_PROBE_PROTOCOL:-}\" = anthropic ]; then "
+                "if [ -n \"${SFORGE_PROBE_REASONING_EFFORT:-}\" ]; then "
+                "payload='{\"model\":\"'\"$SFORGE_PROBE_MODEL\"'\","
+                "\"max_tokens\":1,\"messages\":[{\"role\":\"user\","
+                "\"content\":\"Reply OK.\"}],\"thinking\":{\"type\":\"'"
+                "\"$SFORGE_PROBE_THINKING_TYPE\"'\"},\"reasoning_effort\":\"'"
+                "\"$SFORGE_PROBE_REASONING_EFFORT\"'\"}'; "
+                "else payload='{\"model\":\"'\"$SFORGE_PROBE_MODEL\"'\","
+                "\"max_tokens\":1,\"messages\":[{\"role\":\"user\","
+                "\"content\":\"Reply OK.\"}],\"thinking\":{\"type\":\"'"
+                "\"$SFORGE_PROBE_THINKING_TYPE\"'\"}}'; fi; "
+                "auth=\"Authorization: Bearer $SFORGE_PROBE_API_KEY\"; "
+                "code=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' "
+                "--max-time 30 -X POST -H \"$auth\" "
+                "-H 'anthropic-version: 2023-06-01' "
+                "-H 'content-type: application/json' "
+                "--data \"$payload\" \"$SFORGE_PROBE_URL\"); "
+                "elif [ -n \"${SFORGE_PROBE_API_KEY:-}\" ]; then "
                 "auth=\"Authorization: Bearer $SFORGE_PROBE_API_KEY\"; "
                 "code=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' "
                 "--max-time 15 -H \"$auth\" \"$SFORGE_PROBE_URL\"); "
@@ -954,6 +1112,8 @@ def provision(profile: dict[str, Any]) -> int:
 def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     expected_edge = upstream_entry("edgebench")["tracking_branch"]
     expected_goal = upstream_entry("goal_plus")["tracking_branch"]
+    api_protocol = api_protocol_for_methods(profile["methods"])
+    agents = {str(METHODS[method]["agent"]) for method in profile["methods"]}
     checks: list[dict[str, Any]] = []
 
     def add(name: str, passed: bool, **details: Any) -> None:
@@ -1015,25 +1175,33 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     )
     add("runtime:repository-local-temp", ensure_temp_root().is_dir(), path=".tmp")
 
-    api_config = resolve_agent_api_config()
+    api_config = resolve_agent_api_config(protocol=api_protocol)
     auth_override = os.environ.get("SFORGE_CODEX_AUTH_FILE")
     codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
     auth = Path(auth_override).expanduser() if auth_override else codex_home / "auth.json"
     api_key = api_config["api_key"]
     api_base_url = api_config["api_base_url"]
     add(
-        "auth:codex",
-        bool(api_key) or auth.is_file(),
+        "auth:agent",
+        bool(api_key) or (api_protocol == "openai" and auth.is_file()),
         mode="api_key" if api_key else "oauth",
+        protocol=api_protocol,
         api_key_source=api_config["api_key_source"],
         api_base_url_source=api_config["api_base_url_source"],
         policy=(
-            "SFORGE_AGENT_* > OPENAI_* > CODEX_API_KEY; otherwise "
-            "SFORGE_CODEX_AUTH_FILE or CODEX_HOME/auth.json"
+            "SFORGE_AGENT_* > protocol-native environment; Codex may "
+            "otherwise use SFORGE_CODEX_AUTH_FILE or CODEX_HOME/auth.json"
         ),
     )
     if api_key and api_base_url:
-        api_probe = authenticated_api_probe(str(api_base_url), str(api_key))
+        api_probe = authenticated_api_probe(
+            str(api_base_url),
+            str(api_key),
+            protocol=api_protocol,
+            model=str(profile["model"]),
+            thinking=profile.get("thinking"),
+            reasoning_effort=profile.get("reasoning_effort"),
+        )
         add(
             "auth:agent-api-host",
             bool(api_probe["passed"]),
@@ -1054,19 +1222,20 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                 mechanism="systemd-socket-proxyd",
             )
 
-    codex_runtime = (
-        Path.home()
-        / ".cache"
-        / "sforge"
-        / "codex"
-        / "codex-0.144.1-linux-x64.tgz"
-    )
-    add(
-        "runtime:codex-host-cache",
-        codex_runtime.is_file() and codex_runtime.stat().st_size > 0,
-        path=str(codex_runtime),
-        size=codex_runtime.stat().st_size if codex_runtime.is_file() else None,
-    )
+    if any(agent.startswith("codex") for agent in agents):
+        codex_runtime = (
+            Path.home()
+            / ".cache"
+            / "sforge"
+            / "codex"
+            / "codex-0.144.1-linux-x64.tgz"
+        )
+        add(
+            "runtime:codex-host-cache",
+            codex_runtime.is_file() and codex_runtime.stat().st_size > 0,
+            path=str(codex_runtime),
+            size=(codex_runtime.stat().st_size if codex_runtime.is_file() else None),
+        )
 
     docker_info = run_capture(["docker", "info", "--format", "{{json .}}"])
     docker_details: dict[str, Any] = {}
@@ -1250,6 +1419,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     unknown = set(methods) - set(METHODS)
     if unknown:
         raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))
+    api_protocol = api_protocol_for_methods(methods)
     wall_time = int(args.wall_time_seconds or profile["wall_time_seconds"])
     concurrency = int(args.concurrency or profile["concurrency"])
     cell_concurrency = int(
@@ -1257,7 +1427,18 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         or profile.get("cell_concurrency", 1)
     )
     model = args.model or profile["model"]
-    reasoning = args.reasoning_effort or profile.get("reasoning_effort", "high")
+    requested_reasoning = getattr(args, "reasoning_effort", None)
+    if requested_reasoning is not None:
+        reasoning = requested_reasoning
+    elif "reasoning_effort" in profile:
+        reasoning = profile["reasoning_effort"]
+    elif api_protocol == "anthropic":
+        reasoning = None
+    else:
+        reasoning = "high"
+    thinking = profile.get("thinking") if api_protocol == "anthropic" else None
+    if api_protocol == "anthropic":
+        validate_claude_thinking_contract(thinking, reasoning)
     backend = str(profile.get("backend") or "docker")
     judge_concurrency = int(profile.get("judge_concurrency", 1))
     override_reasons = dict(profile["protocol_override_reasons"])
@@ -1321,9 +1502,17 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "task_id": task_id,
                 "method": method,
                 "sforge_agent": method_config["agent"],
+                "api_protocol": method_config["api_protocol"],
                 "backend": backend,
                 "model": model,
                 "reasoning_effort": reasoning,
+                "thinking": thinking,
+                "claude_context_window_tokens": profile.get(
+                    "claude_context_window_tokens"
+                ),
+                "claude_autocompact_percent": profile.get(
+                    "claude_autocompact_percent"
+                ),
                 "wall_time_seconds": wall_time,
                 "live_search_concurrency": concurrency,
                 "outer_replicas": outer_replicas,
@@ -1405,6 +1594,8 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "methods": methods,
         "model": model,
         "reasoning_effort": reasoning,
+        "api_protocol": api_protocol,
+        "thinking": thinking,
         "wall_time_seconds": wall_time,
         "concurrency": concurrency,
         "cell_concurrency": cell_concurrency,
@@ -1437,6 +1628,8 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "methods": methods,
             "model": model,
             "reasoning_effort": reasoning,
+            "api_protocol": api_protocol,
+            "thinking": thinking,
             "wall_time_seconds": wall_time,
             "concurrency": concurrency,
             "cell_concurrency": cell_concurrency,
@@ -1528,6 +1721,29 @@ def build_sforge_command(destination: Path, cell: dict[str, Any]) -> list[str]:
     return command
 
 
+def merge_agent_extra_env(
+    env: dict[str, str],
+    additions: dict[str, str],
+    *,
+    removals: Iterable[str] = (),
+) -> None:
+    entries: dict[str, str] = {}
+    for item in env.get("SFORGE_AGENT_EXTRA_ENV", "").split(","):
+        if "=" in item:
+            key, value = item.split("=", 1)
+            if key.strip():
+                entries[key.strip()] = value.strip()
+    for key in removals:
+        entries.pop(key, None)
+    entries.update(additions)
+    if entries:
+        env["SFORGE_AGENT_EXTRA_ENV"] = ",".join(
+            f"{key}={value}" for key, value in entries.items()
+        )
+    else:
+        env.pop("SFORGE_AGENT_EXTRA_ENV", None)
+
+
 def cell_environment(
     cell: dict[str, Any],
     *,
@@ -1574,18 +1790,80 @@ def cell_environment(
         env["SFORGE_AGENT_API_BASE_URL"] = api_base_url
     if bridge_host:
         append_no_proxy(env, bridge_host)
-    env["SFORGE_CODEX_REASONING_EFFORT"] = str(cell["reasoning_effort"])
+    agent = str(cell.get("sforge_agent") or METHODS[cell["method"]]["agent"])
+    if agent.startswith("codex"):
+        env["SFORGE_CODEX_REASONING_EFFORT"] = str(cell["reasoning_effort"])
+    elif agent == "claude-code":
+        env["SFORGE_CLAUDE_CACHE_OPT"] = "1"
+        model = str(cell.get("model") or "")
+        claude_env = {}
+        if model:
+            claude_env.update(
+                {
+                    "ANTHROPIC_MODEL": model,
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+                    "CLAUDE_CODE_SUBAGENT_MODEL": model,
+                }
+            )
+        context_window = cell.get("claude_context_window_tokens")
+        compact_percent = cell.get("claude_autocompact_percent")
+        if context_window is not None:
+            claude_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(context_window)
+            claude_env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = str(compact_percent)
+        thinking_type = str((cell.get("thinking") or {}).get("type") or "")
+        reasoning_value = cell.get("reasoning_effort")
+        reasoning_effort = str(reasoning_value or "")
+        thinking_controls = (
+            "MAX_THINKING_TOKENS",
+            "CLAUDE_CODE_DISABLE_THINKING",
+            "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING",
+            "CLAUDE_CODE_EFFORT_LEVEL",
+            "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
+        )
+        for key in thinking_controls:
+            env.pop(key, None)
+        env.update(claude_env)
+        if thinking_type == "adaptive" and reasoning_value is None:
+            merge_agent_extra_env(
+                env,
+                claude_env,
+                removals=thinking_controls,
+            )
+        elif reasoning_effort in {"none", "minimal"}:
+            merge_agent_extra_env(
+                env,
+                {
+                    **claude_env,
+                    "MAX_THINKING_TOKENS": "0",
+                    "CLAUDE_CODE_DISABLE_THINKING": "1",
+                },
+                removals=thinking_controls,
+            )
+        else:
+            merge_agent_extra_env(
+                env,
+                {
+                    **claude_env,
+                    "CLAUDE_CODE_EFFORT_LEVEL": reasoning_effort,
+                    "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT": "1",
+                },
+                removals=thinking_controls,
+            )
     if cell["method"] == "goal-plus-codex":
         env["SFORGE_GOAL_PLUS_SOURCE_DIR"] = str(GOAL_PLUS_ROOT)
         extra_env = {
-            "SFORGE_GOAL_PLUS_MAX_PARALLEL": cell["inner_search_concurrency"],
-            "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS": cell[
-                "worker_runtime_seconds"
-            ],
-            "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": cell["model"],
-            "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": cell[
-                "reasoning_effort"
-            ],
+            "SFORGE_GOAL_PLUS_MAX_PARALLEL": str(
+                cell["inner_search_concurrency"]
+            ),
+            "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS": str(
+                cell["worker_runtime_seconds"]
+            ),
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": str(cell["model"]),
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": str(
+                cell["reasoning_effort"]
+            ),
         }
         if api_base_url:
             extra_env.update(
@@ -1603,9 +1881,7 @@ def cell_environment(
                     "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API": "responses",
                 }
             )
-        env["SFORGE_AGENT_EXTRA_ENV"] = ",".join(
-            f"{key}={value}" for key, value in extra_env.items()
-        )
+        merge_agent_extra_env(env, extra_env)
     return env
 
 
@@ -1978,18 +2254,26 @@ def execute_campaign(destination: Path) -> int:
 
     profile = read_json(destination / "profile.json")
     judge_port = int(profile.get("judge_port", 8080))
+    api_protocol = str(
+        profile.get("api_protocol")
+        or api_protocol_for_methods(profile["methods"])
+    )
     judge_process: subprocess.Popen[str] | None = None
     close_judge = lambda: None
     bridge_processes: list[subprocess.Popen[str]] = []
     bridge_closers: list[Any] = []
     controller["bridges"] = []
-    api_config = resolve_agent_api_config()
+    api_config = resolve_agent_api_config(protocol=api_protocol)
     api_key = api_config["api_key"]
     api_base_url = api_config["api_base_url"]
     runtime_api_base_url = str(api_base_url) if api_base_url else None
     bridge_host: str | None = None
     judge_container_url = f"http://host.docker.internal:{judge_port}"
     try:
+        if api_protocol == "anthropic" and (not api_key or not runtime_api_base_url):
+            raise RuntimeError(
+                "Claude Code campaigns require an API key and Anthropic base URL"
+            )
         if runtime_api_base_url and loopback_api_target(runtime_api_base_url):
             bridge_host = default_route_ipv4()
             target_host, target_port = loopback_api_target(runtime_api_base_url) or ("", 0)
@@ -2008,7 +2292,14 @@ def execute_campaign(destination: Path) -> int:
                 bridge_host,
                 int(metadata["listen_port"]),
             )
-            api_probe = authenticated_api_probe(runtime_api_base_url, str(api_key or ""))
+            api_probe = authenticated_api_probe(
+                runtime_api_base_url,
+                str(api_key or ""),
+                protocol=api_protocol,
+                model=str(profile["model"]),
+                thinking=profile.get("thinking"),
+                reasoning_effort=profile.get("reasoning_effort"),
+            )
             if not api_key or not api_probe["passed"]:
                 raise RuntimeError(
                     "authenticated agent API bridge probe failed "
@@ -2019,8 +2310,12 @@ def execute_campaign(destination: Path) -> int:
             probe_image = task_images(str(profile["task_ids"][0]))[0]
             container_probe = docker_http_probe(
                 probe_image,
-                runtime_api_base_url.rstrip("/") + "/models",
+                runtime_api_base_url,
                 api_key=str(api_key),
+                protocol=api_protocol,
+                model=str(profile["model"]),
+                thinking_type=str((profile.get("thinking") or {}).get("type") or ""),
+                reasoning_effort=str(profile.get("reasoning_effort") or ""),
             )
             if not container_probe["passed"]:
                 raise RuntimeError(
@@ -2068,6 +2363,7 @@ def execute_campaign(destination: Path) -> int:
         controller.update(
             {
                 "agent_auth_mode": "api_key" if api_key else "oauth",
+                "agent_api_protocol": api_protocol,
                 "agent_api_key_source": api_config["api_key_source"],
                 "agent_api_base_url_source": api_config["api_base_url_source"],
                 "agent_container_api_base_url": runtime_api_base_url,

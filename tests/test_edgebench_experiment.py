@@ -83,6 +83,40 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertNotIn("work_cpu_limit", profile)
         self.assertNotIn("judge_cpu_limit", profile)
 
+    def test_vliw_glm_profile_pins_claude_thinking_effort_and_budget(self) -> None:
+        _, profile = EDGE.load_profile("vliw-glm-5-2-high-20m-k1")
+
+        self.assertEqual(profile["task_ids"], ["vliw_kernel_optimization"])
+        self.assertEqual(profile["methods"], ["plain-claude"])
+        self.assertEqual(profile["model"], "glm-5.2")
+        self.assertEqual(profile["thinking"], {"type": "enabled"})
+        self.assertEqual(profile["reasoning_effort"], "high")
+        self.assertEqual(profile["wall_time_seconds"], 1200)
+        self.assertEqual(profile["concurrency"], 1)
+        self.assertEqual(profile["cell_concurrency"], 1)
+
+        _, none_profile = EDGE.load_profile("vliw-glm-5-2-none-20m-k1")
+        self.assertEqual(none_profile["task_ids"], ["vliw_kernel_optimization"])
+        self.assertEqual(none_profile["methods"], ["plain-claude"])
+        self.assertEqual(none_profile["model"], "glm-5.2")
+        self.assertEqual(none_profile["thinking"], {"type": "disabled"})
+        self.assertEqual(none_profile["reasoning_effort"], "none")
+        self.assertEqual(none_profile["wall_time_seconds"], 1200)
+        self.assertEqual(none_profile["concurrency"], 1)
+
+    def test_vliw_glm_51_profile_uses_official_adaptive_defaults(self) -> None:
+        _, profile = EDGE.load_profile("vliw-glm-5-1-adaptive-2h-k1")
+
+        self.assertEqual(profile["task_ids"], ["vliw_kernel_optimization"])
+        self.assertEqual(profile["methods"], ["plain-claude"])
+        self.assertEqual(profile["model"], "glm-5.1")
+        self.assertEqual(profile["thinking"], {"type": "adaptive"})
+        self.assertNotIn("reasoning_effort", profile)
+        self.assertEqual(profile["claude_context_window_tokens"], 200000)
+        self.assertEqual(profile["claude_autocompact_percent"], 80)
+        self.assertEqual(profile["wall_time_seconds"], 7200)
+        self.assertEqual(profile["concurrency"], 1)
+
     def test_protocol_regression_profile_targets_prior_failures(self) -> None:
         _, profile = EDGE.load_profile("protocol-regression-codex-2h")
 
@@ -545,6 +579,66 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertFalse(any(path.name in {".gp", ".goal-plus"} for path in destination.rglob("*")))
 
+    def test_prepare_encodes_plain_claude_api_and_thinking_contract(self) -> None:
+        _, profile = EDGE.load_profile("vliw-glm-5-2-high-20m-k1")
+        args = SimpleNamespace(
+            method=None,
+            wall_time_seconds=None,
+            concurrency=None,
+            cell_concurrency=None,
+            model=None,
+            reasoning_effort=None,
+            campaign_id="unit-claude-campaign",
+        )
+
+        destination = EDGE.prepare(args, profile)
+        cell = json.loads(
+            (
+                destination
+                / "cells"
+                / "vliw_kernel_optimization--plain-claude"
+                / "cell.json"
+            ).read_text()
+        )
+
+        self.assertEqual(cell["sforge_agent"], "claude-code")
+        self.assertEqual(cell["api_protocol"], "anthropic")
+        self.assertEqual(cell["thinking"], {"type": "enabled"})
+        self.assertEqual(cell["reasoning_effort"], "high")
+        self.assertEqual(cell["outer_replicas"], 1)
+        self.assertEqual(cell["inner_search_concurrency"], 0)
+
+    def test_prepare_preserves_adaptive_claude_without_effort(self) -> None:
+        _, profile = EDGE.load_profile("vliw-glm-5-1-adaptive-2h-k1")
+        args = SimpleNamespace(
+            method=None,
+            wall_time_seconds=None,
+            concurrency=None,
+            cell_concurrency=None,
+            model=None,
+            reasoning_effort=None,
+            campaign_id="unit-claude-adaptive-campaign",
+        )
+
+        destination = EDGE.prepare(args, profile)
+        cell = json.loads(
+            (
+                destination
+                / "cells"
+                / "vliw_kernel_optimization--plain-claude"
+                / "cell.json"
+            ).read_text()
+        )
+
+        self.assertEqual(cell["thinking"], {"type": "adaptive"})
+        self.assertIsNone(cell["reasoning_effort"])
+        self.assertEqual(cell["claude_context_window_tokens"], 200000)
+        self.assertEqual(cell["claude_autocompact_percent"], 80)
+        self.assertNotIn(
+            "reasoning_effort",
+            {item["field"] for item in cell["protocol_diff"]},
+        )
+
     def test_cell_queue_limits_parallel_cells_and_continues_after_failure(self) -> None:
         destination = self.temp / "campaign"
         destination.mkdir()
@@ -777,6 +871,151 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(fallback["api_key"], "openai-key")
         self.assertEqual(fallback["api_key_source"], "OPENAI_API_KEY")
         self.assertEqual(fallback["api_base_url_source"], "OPENAI_BASE_URL")
+
+        anthropic = EDGE.resolve_agent_api_config(
+            {
+                "ANTHROPIC_AUTH_TOKEN": "anthropic-token",
+                "ANTHROPIC_BASE_URL": "https://anthropic.example",
+                "OPENAI_API_KEY": "wrong-protocol-key",
+            },
+            protocol="anthropic",
+        )
+        self.assertEqual(anthropic["api_key"], "anthropic-token")
+        self.assertEqual(anthropic["api_key_source"], "ANTHROPIC_AUTH_TOKEN")
+        self.assertEqual(
+            anthropic["api_base_url"], "https://anthropic.example"
+        )
+        self.assertEqual(
+            EDGE.agent_api_probe_url(
+                "https://anthropic.example/api/anthropic", "anthropic"
+            ),
+            "https://anthropic.example/api/anthropic/v1/messages",
+        )
+
+    def test_claude_environment_pins_effort_and_preserves_extra_env(self) -> None:
+        previous = EDGE.os.environ.get("SFORGE_AGENT_EXTRA_ENV")
+        EDGE.os.environ["SFORGE_AGENT_EXTRA_ENV"] = "EXISTING=value"
+        try:
+            env = EDGE.cell_environment(
+                {
+                    "method": "plain-claude",
+                    "sforge_agent": "claude-code",
+                    "reasoning_effort": "high",
+                    "internet": False,
+                }
+            )
+        finally:
+            if previous is None:
+                EDGE.os.environ.pop("SFORGE_AGENT_EXTRA_ENV", None)
+            else:
+                EDGE.os.environ["SFORGE_AGENT_EXTRA_ENV"] = previous
+
+        extra = dict(
+            item.split("=", 1)
+            for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+        self.assertEqual(extra["EXISTING"], "value")
+        self.assertEqual(extra["CLAUDE_CODE_EFFORT_LEVEL"], "high")
+        self.assertEqual(extra["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"], "1")
+        self.assertEqual(env["SFORGE_CLAUDE_CACHE_OPT"], "1")
+        self.assertNotIn("SFORGE_CODEX_REASONING_EFFORT", env)
+
+    def test_claude_none_environment_disables_thinking_and_removes_effort(self) -> None:
+        keys = (
+            "SFORGE_AGENT_EXTRA_ENV",
+            "CLAUDE_CODE_EFFORT_LEVEL",
+            "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
+        )
+        previous = {key: EDGE.os.environ.get(key) for key in keys}
+        EDGE.os.environ["SFORGE_AGENT_EXTRA_ENV"] = (
+            "EXISTING=value,CLAUDE_CODE_EFFORT_LEVEL=high,"
+            "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1"
+        )
+        EDGE.os.environ["CLAUDE_CODE_EFFORT_LEVEL"] = "high"
+        EDGE.os.environ["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"] = "1"
+        try:
+            env = EDGE.cell_environment(
+                {
+                    "method": "plain-claude",
+                    "sforge_agent": "claude-code",
+                    "reasoning_effort": "none",
+                    "internet": False,
+                }
+            )
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    EDGE.os.environ.pop(key, None)
+                else:
+                    EDGE.os.environ[key] = value
+
+        extra = dict(
+            item.split("=", 1)
+            for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+        self.assertEqual(extra["EXISTING"], "value")
+        self.assertEqual(extra["MAX_THINKING_TOKENS"], "0")
+        self.assertEqual(extra["CLAUDE_CODE_DISABLE_THINKING"], "1")
+        self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", extra)
+        self.assertNotIn("CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", extra)
+        self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)
+        self.assertNotIn("CLAUDE_CODE_ALWAYS_ENABLE_EFFORT", env)
+
+    def test_claude_adaptive_environment_removes_fixed_thinking_controls(self) -> None:
+        keys = (
+            "SFORGE_AGENT_EXTRA_ENV",
+            "MAX_THINKING_TOKENS",
+            "CLAUDE_CODE_DISABLE_THINKING",
+            "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING",
+            "CLAUDE_CODE_EFFORT_LEVEL",
+            "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
+        )
+        previous = {key: EDGE.os.environ.get(key) for key in keys}
+        EDGE.os.environ["SFORGE_AGENT_EXTRA_ENV"] = (
+            "EXISTING=value,MAX_THINKING_TOKENS=0,"
+            "CLAUDE_CODE_DISABLE_THINKING=1,CLAUDE_CODE_EFFORT_LEVEL=high,"
+            "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1"
+        )
+        for key in keys[1:]:
+            EDGE.os.environ[key] = "1"
+        try:
+            env = EDGE.cell_environment(
+                {
+                    "method": "plain-claude",
+                    "sforge_agent": "claude-code",
+                    "model": "glm-5.1",
+                    "thinking": {"type": "adaptive"},
+                    "reasoning_effort": None,
+                    "claude_context_window_tokens": 200000,
+                    "claude_autocompact_percent": 80,
+                    "internet": False,
+                }
+            )
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    EDGE.os.environ.pop(key, None)
+                else:
+                    EDGE.os.environ[key] = value
+
+        extra = dict(
+            item.split("=", 1)
+            for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+        self.assertEqual(extra["EXISTING"], "value")
+        for key in (
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ):
+            self.assertEqual(extra[key], "glm-5.1")
+        self.assertEqual(extra["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], "200000")
+        self.assertEqual(extra["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"], "80")
+        for key in keys[1:]:
+            self.assertNotIn(key, extra)
+            self.assertNotIn(key, env)
 
     def test_loopback_api_bridge_preserves_base_path(self) -> None:
         self.assertEqual(

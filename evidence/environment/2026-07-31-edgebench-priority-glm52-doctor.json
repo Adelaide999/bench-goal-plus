@@ -1,0 +1,373 @@
+{
+  "checked_at": "2026-07-30T17:07:35+00:00",
+  "checks": [
+    {
+      "name": "protocol:official-source",
+      "passed": true,
+      "path": "third_party/edgebench/examples/all-tasks-k8s/experiment-codex.yaml",
+      "sha256": "6cf7d41bc67f765adbd458409209e6af02bbb9a53020cf366511707b3fc45b33",
+      "task_count": 51
+    },
+    {
+      "missing_tasks": [],
+      "name": "protocol:task-coverage",
+      "official_task_count": 51,
+      "passed": true,
+      "profile_task_count": 10
+    },
+    {
+      "actual_branch": "mac",
+      "actual_commit": "a1fc29e6d3f37f98d6f74aa07b7c405119682d48",
+      "dirty": false,
+      "expected_branch": "mac",
+      "name": "checkout:edgebench",
+      "passed": true
+    },
+    {
+      "actual_branch": "main",
+      "actual_commit": "0e67f8991971406832fb832b7507ee8c966e6295",
+      "dirty": false,
+      "expected_branch": "main",
+      "name": "checkout:goal-plus",
+      "passed": true
+    },
+    {
+      "name": "entrypoint:sforge",
+      "passed": true,
+      "path": ".bench-env/venv/bin/sforge"
+    },
+    {
+      "name": "runtime:sforge-server-dependencies",
+      "passed": true,
+      "stderr": null
+    },
+    {
+      "name": "runtime:repository-local-temp",
+      "passed": true,
+      "path": ".tmp"
+    },
+    {
+      "api_base_url_source": "SFORGE_AGENT_API_BASE_URL",
+      "api_key_source": "SFORGE_AGENT_API_KEY",
+      "mode": "api_key",
+      "name": "auth:agent",
+      "passed": true,
+      "policy": "SFORGE_AGENT_* > protocol-native environment; Codex may otherwise use SFORGE_CODEX_AUTH_FILE or CODEX_HOME/auth.json",
+      "protocol": "anthropic"
+    },
+    {
+      "base_url": "https://api.z.ai/api/anthropic",
+      "error": null,
+      "name": "auth:agent-api-host",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "architecture": "x86_64",
+      "name": "docker:engine",
+      "passed": true,
+      "stderr": null
+    },
+    {
+      "actual": "x86_64",
+      "name": "docker:linux-amd64",
+      "passed": true,
+      "required": "linux/amd64"
+    },
+    {
+      "name": "task:vliw_kernel_optimization",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/vliw_kernel_optimization.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:vliw_kernel_optimization",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:vliw_kernel_optimization",
+      "passed": true,
+      "submission_cooldown": 120
+    },
+    {
+      "image": "edgebench.work.vliw_kernel_optimization:9fa380a0ebef",
+      "name": "image:edgebench.work.vliw_kernel_optimization:9fa380a0ebef",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.vliw_kernel_optimization:5cdef0021634",
+      "name": "image:edgebench.judge.vliw_kernel_optimization:5cdef0021634",
+      "passed": true
+    },
+    {
+      "name": "task:integer_compression_codec",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/integer_compression_codec.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:integer_compression_codec",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:integer_compression_codec",
+      "passed": true,
+      "submission_cooldown": 120
+    },
+    {
+      "image": "edgebench.work.integer_compression_codec:fa3895856662",
+      "name": "image:edgebench.work.integer_compression_codec:fa3895856662",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.integer_compression_codec:27063396e02a",
+      "name": "image:edgebench.judge.integer_compression_codec:27063396e02a",
+      "passed": true
+    },
+    {
+      "name": "task:juliet_vulnerability_analyzer",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/juliet_vulnerability_analyzer.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:juliet_vulnerability_analyzer",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:juliet_vulnerability_analyzer",
+      "passed": true,
+      "submission_cooldown": 120
+    },
+    {
+      "image": "edgebench.work.juliet_vulnerability_analyzer:bae3ab85c5f5",
+      "name": "image:edgebench.work.juliet_vulnerability_analyzer:bae3ab85c5f5",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.juliet_vulnerability_analyzer:0c4f2c0057c2",
+      "name": "image:edgebench.judge.juliet_vulnerability_analyzer:0c4f2c0057c2",
+      "passed": true
+    },
+    {
+      "name": "task:molecular_self_assembly",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/molecular_self_assembly.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:molecular_self_assembly",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:molecular_self_assembly",
+      "passed": true,
+      "submission_cooldown": 120
+    },
+    {
+      "image": "edgebench.work.molecular_self_assembly:6459dea01a82",
+      "name": "image:edgebench.work.molecular_self_assembly:6459dea01a82",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.molecular_self_assembly:96df6463f5e6",
+      "name": "image:edgebench.judge.molecular_self_assembly:96df6463f5e6",
+      "passed": true
+    },
+    {
+      "name": "task:ad_placement_optimization",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/ad_placement_optimization.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:ad_placement_optimization",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:ad_placement_optimization",
+      "passed": true,
+      "submission_cooldown": 120
+    },
+    {
+      "image": "edgebench.work.ad_placement_optimization:49747cad3ebd",
+      "name": "image:edgebench.work.ad_placement_optimization:49747cad3ebd",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.ad_placement_optimization:56cbfc81cfa1",
+      "name": "image:edgebench.judge.ad_placement_optimization:56cbfc81cfa1",
+      "passed": true
+    },
+    {
+      "name": "task:graph_node_classification",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/graph_node_classification.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:graph_node_classification",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:graph_node_classification",
+      "passed": true,
+      "submission_cooldown": 120
+    },
+    {
+      "image": "edgebench.work.graph_node_classification:4d2c1f502d14",
+      "name": "image:edgebench.work.graph_node_classification:4d2c1f502d14",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.graph_node_classification:f2ddd52992ae",
+      "name": "image:edgebench.judge.graph_node_classification:f2ddd52992ae",
+      "passed": true
+    },
+    {
+      "name": "task:treant_forest",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/treant_forest.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:treant_forest",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:treant_forest",
+      "passed": true,
+      "submission_cooldown": 120
+    },
+    {
+      "image": "edgebench.work.treant_forest:e05dfd5d2463",
+      "name": "image:edgebench.work.treant_forest:e05dfd5d2463",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.treant_forest:d47dc1a7da74",
+      "name": "image:edgebench.judge.treant_forest:d47dc1a7da74",
+      "passed": true
+    },
+    {
+      "name": "task:dabic_gravity_inversion",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/dabic_gravity_inversion.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:dabic_gravity_inversion",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:dabic_gravity_inversion",
+      "passed": true,
+      "submission_cooldown": 2160
+    },
+    {
+      "image": "edgebench.work.dabic_gravity_inversion:85db0aba8a5f",
+      "name": "image:edgebench.work.dabic_gravity_inversion:85db0aba8a5f",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.dabic_gravity_inversion:517eb738b87b",
+      "name": "image:edgebench.judge.dabic_gravity_inversion:517eb738b87b",
+      "passed": true
+    },
+    {
+      "name": "task:portfolio_risk_calibration",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/portfolio_risk_calibration.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:portfolio_risk_calibration",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:portfolio_risk_calibration",
+      "passed": true,
+      "submission_cooldown": 120
+    },
+    {
+      "image": "edgebench.work.portfolio_risk_calibration:e9e47d60871d",
+      "name": "image:edgebench.work.portfolio_risk_calibration:e9e47d60871d",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.portfolio_risk_calibration:08fe0a4bad80",
+      "name": "image:edgebench.judge.portfolio_risk_calibration:08fe0a4bad80",
+      "passed": true
+    },
+    {
+      "name": "task:tree_block_partitioning",
+      "passed": true,
+      "path": "third_party/edgebench/tasks/tree_block_partitioning.json"
+    },
+    {
+      "actual": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "expected": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+      "name": "dataset-revision:tree_block_partitioning",
+      "passed": true
+    },
+    {
+      "internet": false,
+      "name": "protocol-effective:tree_block_partitioning",
+      "passed": true,
+      "submission_cooldown": 120
+    },
+    {
+      "image": "edgebench.work.tree_block_partitioning:f282a9f7e05a",
+      "name": "image:edgebench.work.tree_block_partitioning:f282a9f7e05a",
+      "passed": true
+    },
+    {
+      "image": "edgebench.judge.tree_block_partitioning:f74f0ef897ce",
+      "name": "image:edgebench.judge.tree_block_partitioning:f74f0ef897ce",
+      "passed": true
+    },
+    {
+      "actual_memory_bytes": 17179869184,
+      "actual_nano_cpus": 4000000000,
+      "cpu_limit": 4,
+      "daemon_cpu_cfs_quota": true,
+      "daemon_memory_limit": true,
+      "expected_memory_bytes": 17179869184,
+      "expected_nano_cpus": 4000000000,
+      "image": "edgebench.work.vliw_kernel_optimization:9fa380a0ebef",
+      "mem_limit": "16g",
+      "name": "docker:official-resource-limits",
+      "passed": true,
+      "stderr": null
+    },
+    {
+      "mechanism": "SForge passwordless sudo iptables allowlist",
+      "name": "network:offline-task-isolation",
+      "offline_task_count": 10,
+      "passed": true,
+      "sample_task": "vliw_kernel_optimization",
+      "stderr": null
+    }
+  ],
+  "ok": true,
+  "profile": "priority-glm-5-2-adaptive-2h-k1-c2",
+  "schema_version": 1
+}
