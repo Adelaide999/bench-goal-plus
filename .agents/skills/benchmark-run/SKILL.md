@@ -43,5 +43,8 @@ bootstrap/provision，但不得跳过 doctor。长运行是否 detach 由登记�
 
 - 只有 runner capability 中 `cell_concurrency=true` 且已有测试证据时才能接受 `C>1`。
 - Plain Codex 的 `K` 是独立 outer trajectories；Goal Plus 的 `K` 是共享状态 internal workers。
+- Goal Plus + Codex 的 session/候选记录只证明控制面已分配工作；还必须在顶层
+  Codex JSONL 中看到至少 `K` 次成功的 `spawn_agent`，并在 `.gp` 中看到 worker
+  verifier 证据，才能认为实际 worker 链路跑通。空 target 的 `wait` 不是启动证据。
 - 不要启动多个 controller 来伪造 `C`；总并发必须由一个 campaign manifest 记录。
 - 重新运行 interrupted cell 会产生新 attempt；不得覆盖或伪装成原 trajectory 的 resume。

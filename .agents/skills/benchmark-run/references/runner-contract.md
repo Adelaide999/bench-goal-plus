@@ -40,3 +40,14 @@ evaluator path. `external` means the Agent checks the prerequisite but does not 
 
 Presets are frozen examples over targets. They expand model, reasoning, T/K/C/R, methods, and
 profile into `agent-run.json`; they are never generic defaults.
+
+## Goal Plus Codex launch evidence
+
+`search_start_agent_session` allocates durable Goal Plus state and returns a launch payload. It
+does not itself create a Codex subagent. A completed Goal Plus + Codex cell therefore requires both:
+
+- at least `K` successful `spawn_agent` calls in the top-level Codex JSONL;
+- candidate-bound worker verifier evidence in `.gp`.
+
+Treat a session with a bound task name but no matching Codex spawn event as incomplete. This keeps
+controller state, actual host execution, and reported concurrency separate.

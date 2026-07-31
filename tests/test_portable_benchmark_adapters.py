@@ -89,10 +89,13 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             self.assertNotIn("--ignore-user-config", goal_plus)
             self.assertIn("--ignore-user-config", plain)
             self.assertIn('model_reasoning_effort="medium"', goal_plus)
+            self.assertIn("features.multi_agent=true", goal_plus)
+            self.assertIn("agents.enabled=true", goal_plus)
             self.assertIn(
-                "features.multi_agent_v2.max_concurrent_threads_per_session=5",
+                "agents.max_concurrent_threads_per_session=5",
                 goal_plus,
             )
+            self.assertFalse(any("multi_agent_v2" in arg for arg in goal_plus))
             self.assertFalse(
                 any("max_concurrent_threads_per_session" in arg for arg in plain)
             )

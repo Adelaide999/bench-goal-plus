@@ -96,7 +96,8 @@ class BenchmarkReportTest(unittest.TestCase):
                         "task_id": "vliw",
                         "cell_id": "cell-1",
                         "method": "plain-codex",
-                        "status": "finished",
+                        "status": "incomplete",
+                        "incomplete_reason": "Codex completed 0 spawn_agent calls",
                         "protocol": {
                             "metric_name": "cycles",
                             "direction": "minimize",
@@ -136,6 +137,8 @@ class BenchmarkReportTest(unittest.TestCase):
             self.assertIn("raw_metrics", rendered)
             self.assertIn("directional_gain", rendered)
             self.assertIn("minimize", rendered)
+            self.assertIn("incomplete_reason", rendered)
+            self.assertIn("Codex completed 0 spawn_agent calls", rendered)
 
     def test_campaign_id_cannot_escape_output_directory(self) -> None:
         with self.temporary_campaign() as temporary:

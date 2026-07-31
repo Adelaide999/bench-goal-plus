@@ -226,6 +226,7 @@ def collect_run(
         or ledger.get("task_id"),
         "method": manifest.get("method") or entry.get("method") or ledger.get("method"),
         "status": status,
+        "incomplete_reason": execution.get("result_incomplete_reason"),
         "returncode": ledger.get("returncode", execution.get("returncode")),
         "error": ledger.get("error"),
         "model": manifest.get("model") or campaign.get("model"),

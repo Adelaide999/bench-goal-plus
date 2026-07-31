@@ -629,7 +629,11 @@ def codex_command(
         command.extend(
             [
                 "--config",
-                "features.multi_agent_v2.max_concurrent_threads_per_session="
+                "features.multi_agent=true",
+                "--config",
+                "agents.enabled=true",
+                "--config",
+                "agents.max_concurrent_threads_per_session="
                 f"{max_concurrent_threads_per_session}",
                 "--dangerously-bypass-hook-trust",
                 *codex_goal_plus_mcp_args(),
@@ -876,6 +880,7 @@ def execute_goal_plus(
         control["goal_plus"],
         expected_concurrency=budget["concurrency"],
         minimum_worker_verified_candidates=1,
+        codex_events=control["codex"],
     )
     if reason:
         control["result_incomplete_reason"] = reason
@@ -1170,6 +1175,7 @@ def repair_closeout(args: argparse.Namespace) -> int:
         control["goal_plus"],
         expected_concurrency=budget["concurrency"],
         minimum_worker_verified_candidates=1,
+        codex_events=control.get("codex"),
     )
     if not control["goal_plus_controller_closeout_repair"].get("completed"):
         reason = (

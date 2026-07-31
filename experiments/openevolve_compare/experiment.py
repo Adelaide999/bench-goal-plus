@@ -296,6 +296,13 @@ def render_goal(
         )
         + f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
         f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
+        "- A successful `search_start_agent_session` only allocates a durable Goal Plus "
+        "session and returns a launch payload; it does not start a Codex worker. For every "
+        "initial candidate, immediately map that payload to an actual `spawn_agent` call. "
+        "Only bind the handle returned by the successful spawn. Do not claim workers are "
+        "running or call `wait_agent` until all initial spawn calls have returned real agent "
+        "handles. If a spawn is unavailable or fails, leave the run incomplete and report "
+        "the launch failure instead of simulating worker progress.\n"
         f"{coordination_text}"
         f"- Metric: `{metric_name}` with direction `{metric_direction}`.\n"
         "- Process verifier: `python3 .goal-plus-verifiers/primary_metric.py`, role "
@@ -975,7 +982,10 @@ def parse_codex_events(path: Path) -> dict[str, Any]:
     usage = None
     terminal_event = None
     event_count = 0
-    for line in path.read_text().splitlines():
+    collaboration_tool_counts: dict[str, dict[str, int]] = {}
+    spawned_agent_thread_ids: set[str] = set()
+    targetless_wait_count = 0
+    for line in path.read_text().splitlines() if path.is_file() else []:
         if not line.strip():
             continue
         event_count += 1
@@ -990,13 +1000,40 @@ def parse_codex_events(path: Path) -> dict[str, Any]:
             terminal_event = event_type
             if isinstance(event.get("usage"), dict):
                 usage = event["usage"]
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "collab_tool_call":
+            continue
+        tool = item.get("tool")
+        if not isinstance(tool, str):
+            continue
+        status = item.get("status")
+        if not isinstance(status, str):
+            status = event_type.removeprefix("item.")
+        counts = collaboration_tool_counts.setdefault(tool, {})
+        counts[status] = counts.get(status, 0) + 1
+        if tool == "spawn_agent" and status == "completed":
+            receiver_ids = item.get("receiver_thread_ids")
+            if isinstance(receiver_ids, list):
+                spawned_agent_thread_ids.update(
+                    value for value in receiver_ids if isinstance(value, str) and value
+                )
+        if tool in {"wait", "wait_agent"} and status == "completed":
+            receiver_ids = item.get("receiver_thread_ids")
+            if isinstance(receiver_ids, list) and not receiver_ids:
+                targetless_wait_count += 1
+    spawn_counts = collaboration_tool_counts.get("spawn_agent") or {}
     return {
         "thread_id": thread_id,
         "terminal_event": terminal_event,
         "top_level_usage": usage,
         "event_count": event_count,
+        "collaboration_tool_counts": collaboration_tool_counts,
+        "spawn_agent_completed_count": spawn_counts.get("completed", 0),
+        "spawned_agent_thread_ids": sorted(spawned_agent_thread_ids),
+        "targetless_wait_count": targetless_wait_count,
         "coverage": (
-            "top-level Codex usage only; Goal Plus worker observability remains in workspace/.gp"
+            "top-level Codex usage and collaboration tool calls; Goal Plus worker details "
+            "remain in workspace/.gp"
         ),
     }
 
@@ -1353,6 +1390,7 @@ def goal_plus_incomplete_reason(
     minimum_worker_verified_candidates: int | None = None,
     expected_goal_plus_id: str | None = None,
     expected_run_id: str | None = None,
+    codex_events: dict[str, Any] | None = None,
 ) -> str | None:
     goals = state.get("goals") or []
     if not goals:
@@ -1403,6 +1441,14 @@ def goal_plus_incomplete_reason(
         if len(runs) != len(linked_run_ids):
             return "one or more Goal Plus linked Search runs are missing"
     if expected_concurrency is not None:
+        if codex_events is not None:
+            completed_spawns = codex_events.get("spawn_agent_completed_count", 0)
+            if completed_spawns < expected_concurrency:
+                return (
+                    "Codex completed "
+                    f"{completed_spawns} spawn_agent calls; expected at least "
+                    f"{expected_concurrency} actual workers"
+                )
         required_worker_evidence = (
             expected_concurrency
             if minimum_worker_verified_candidates is None
@@ -2403,6 +2449,9 @@ def execute(args: argparse.Namespace) -> int:
         goal_reason = goal_plus_incomplete_reason(
             control["goal_plus"],
             expected_concurrency=budget["concurrency"],
+            codex_events=(
+                control.get("codex") if method == "goal-plus-codex" else None
+            ),
         )
         if goal_reason and not control.get("result_incomplete_reason"):
             control["result_incomplete_reason"] = goal_reason
@@ -2496,6 +2545,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=manifest["budget"]["concurrency"],
+        codex_events=(
+            control.get("codex") if method == "goal-plus-codex" else None
+        ),
     )
     if reason is None and not control.get("hard_killed"):
         control.pop("result_incomplete_reason", None)

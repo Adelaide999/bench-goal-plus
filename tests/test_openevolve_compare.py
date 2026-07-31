@@ -220,7 +220,9 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("do not run a duplicate parent-side process verification", prompt)
         self.assertIn("allow only `candidate.py`", prompt)
         self.assertNotIn("goal_plus_id=", prompt)
-        self.assertNotIn("search_start_agent_session", prompt)
+        self.assertIn("search_start_agent_session", prompt)
+        self.assertIn("actual `spawn_agent` call", prompt)
+        self.assertIn("Do not claim workers are running", prompt)
 
     def test_plain_and_goal_plus_prompts_share_exact_common_body(self) -> None:
         task = "# Objective\nImprove it."
@@ -246,6 +248,44 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertEqual(common, experiment.render_plain_prompt(task, 300, 60))
         self.assertNotIn("independent lane", common)
         self.assertNotIn("controller-prepared", prompt)
+
+    def test_codex_event_parser_records_actual_worker_launches(self) -> None:
+        events = [
+            {"type": "thread.started", "thread_id": "thread_parent"},
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "collab_tool_call",
+                    "tool": "spawn_agent",
+                    "status": "completed",
+                    "receiver_thread_ids": ["thread_worker_1"],
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "collab_tool_call",
+                    "tool": "wait",
+                    "status": "completed",
+                    "receiver_thread_ids": [],
+                },
+            },
+            {
+                "type": "turn.completed",
+                "usage": {"input_tokens": 10, "output_tokens": 2},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "events.jsonl"
+            path.write_text("\n".join(json.dumps(item) for item in events))
+            result = experiment.parse_codex_events(path)
+
+        self.assertEqual(result["spawn_agent_completed_count"], 1)
+        self.assertEqual(result["spawned_agent_thread_ids"], ["thread_worker_1"])
+        self.assertEqual(result["targetless_wait_count"], 1)
+        self.assertEqual(
+            result["collaboration_tool_counts"]["spawn_agent"]["completed"], 1
+        )
 
     def test_goal_plus_completion_requires_worker_verifier_evidence_for_every_candidate(
         self,
@@ -276,6 +316,22 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             "expected_run_id": "run_test",
         }
         self.assertIsNone(experiment.goal_plus_incomplete_reason(base_state, **kwargs))
+
+        self.assertIn(
+            "0 spawn_agent calls",
+            experiment.goal_plus_incomplete_reason(
+                base_state,
+                codex_events={"spawn_agent_completed_count": 0},
+                **kwargs,
+            ),
+        )
+        self.assertIsNone(
+            experiment.goal_plus_incomplete_reason(
+                base_state,
+                codex_events={"spawn_agent_completed_count": 2},
+                **kwargs,
+            )
+        )
 
         missing_worker_evidence = json.loads(json.dumps(base_state))
         missing_worker_evidence["runs"][0]["worker_verified_candidate_count"] = 1

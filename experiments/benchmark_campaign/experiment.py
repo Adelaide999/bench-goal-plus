@@ -646,6 +646,28 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"{input_tokens if input_tokens is not None else 'n/a'} / "
             f"{output_tokens if output_tokens is not None else 'n/a'} |"
         )
+    incomplete = [
+        record for record in summary["records"] if record.get("status") != "finished"
+    ]
+    if incomplete:
+        lines.extend(["", "## Incomplete cells", ""])
+        for record in incomplete:
+            reason = (
+                record.get("incomplete_reason")
+                or record.get("error")
+                or "no failure reason was recorded"
+            )
+            reason = " ".join(str(reason).splitlines())
+            label = "/".join(
+                str(value)
+                for value in (
+                    record.get("benchmark_id"),
+                    record.get("method"),
+                    f"seed-{record.get('seed')}",
+                )
+                if value is not None
+            )
+            lines.append(f"- `{label}`: {reason}")
     paired = summary["b1_vs_b4"]
     paired_gain = paired["mean_b4_minus_b1_directional_gain"]
     lines.extend(

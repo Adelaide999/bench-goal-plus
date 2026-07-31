@@ -121,6 +121,7 @@ def generic_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "reasoning_effort": record.get("reasoning_effort"),
                 "seed": record.get("seed"),
                 "status": record.get("status", record.get("state")),
+                "incomplete_reason": record.get("incomplete_reason"),
                 "metric_name": protocol.get("metric_name"),
                 "metric_direction": protocol.get("direction"),
                 "raw_final_metric": score.get("final"),

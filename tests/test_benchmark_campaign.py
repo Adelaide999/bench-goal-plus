@@ -110,6 +110,44 @@ class BenchmarkConditionTest(unittest.TestCase):
 
 
 class BenchmarkCampaignTest(unittest.TestCase):
+    def test_markdown_explains_incomplete_cells(self) -> None:
+        markdown = campaign.render_markdown(
+            {
+                "campaign_id": "worker-launch-check",
+                "state": "partial",
+                "record_count": 1,
+                "condition_summaries": [
+                    {
+                        "condition": "goal-plus-codex",
+                        "finished_count": 0,
+                        "cell_count": 1,
+                        "valid_final_count": 0,
+                        "mean_directional_gain": None,
+                        "total_evaluator_calls": 1,
+                        "total_input_tokens": None,
+                        "total_output_tokens": None,
+                    }
+                ],
+                "records": [
+                    {
+                        "benchmark_id": "local-vliw",
+                        "method": "goal-plus-codex",
+                        "seed": 1,
+                        "status": "incomplete",
+                        "incomplete_reason": "Codex completed 0 spawn_agent calls",
+                    }
+                ],
+                "b1_vs_b4": {
+                    "paired_count": 0,
+                    "mean_b4_minus_b1_directional_gain": None,
+                },
+            }
+        )
+
+        self.assertIn("## Incomplete cells", markdown)
+        self.assertIn("local-vliw/goal-plus-codex/seed-1", markdown)
+        self.assertIn("Codex completed 0 spawn_agent calls", markdown)
+
     def test_prepare_accepts_method_mode_without_a_condition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
