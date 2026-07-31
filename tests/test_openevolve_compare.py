@@ -204,8 +204,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             worker_model="bench-openai/gpt-5.6-luna",
         )
         self.assertTrue(prompt.startswith("/goal-plus mode=autonomous"))
-        self.assertIn("budget.max_candidates=2", prompt)
         self.assertIn("budget.max_parallel=2", prompt)
+        self.assertIn("omit deprecated `budget.max_candidates`", prompt)
         self.assertIn("240 seconds", prompt)
         self.assertIn("not hard-capped", prompt)
         self.assertIn("GOAL_PLUS_OUTER_DEADLINE_AT", prompt)

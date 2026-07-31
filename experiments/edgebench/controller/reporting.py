@@ -141,9 +141,12 @@ def comparison_record(
     )
     completion = cell.get("completion_evidence") or {}
     completion_checks = completion.get("checks") or {}
-    worker_check = completion_checks.get("actual_worker_launches") or (
-        completion_checks.get("agent_sessions") or {}
-    )
+    if cell.get("method") == "goal-plus-codex":
+        worker_check = completion_checks.get("actual_worker_launches") or {}
+    elif cell.get("method") == "goal-plus-pi":
+        worker_check = completion_checks.get("agent_sessions") or {}
+    else:
+        worker_check = {}
     if normalized is None:
         issue_marker = "MISSING_CURRENT"
     else:

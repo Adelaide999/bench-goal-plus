@@ -31,9 +31,9 @@ EdgeBench 特例加入通用 dispatcher。
 | 方法 | SForge outer run | live concurrency `K` | 含义 |
 |---|---:|---:|---|
 | Plain Codex | `K` replicas | `replica-concurrency=K` | K 条互相独立的 trajectory，等价于 independent parallel baseline |
-| Goal Plus + Codex | 1 replica | `budget.max_parallel=K` | 一个共享搜索状态中的 K 个 candidate workers |
+| Goal Plus + Codex | 1 replica | `parallel-num=K` | 一个共享搜索状态中的 K 个 candidate workers |
 | Plain Pi | `K` replicas | `replica-concurrency=K` | K 条互相独立的 Pi trajectory |
-| Goal Plus + Pi | 1 replica | `budget.max_parallel=K` | Pi 主会话监管一个共享搜索状态中的 K 个 candidate workers |
+| Goal Plus + Pi | 1 replica | `parallel-num=K` | Pi 主会话监管一个共享搜索状态中的 K 个 candidate workers |
 | Plain Claude | `K` replicas | `replica-concurrency=K` | Claude Code 原生 agent；可使用 Anthropic-compatible provider |
 
 两者固定同一 task definition、hidden judge、model、reasoning effort 和 wall budget

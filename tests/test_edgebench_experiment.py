@@ -1050,7 +1050,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         extra = dict(
             item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
         )
-        self.assertEqual(extra["SFORGE_GOAL_PLUS_MAX_PARALLEL"], "4")
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_PARALLEL_NUM"], "4")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "600")
         self.assertEqual(
             extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "90"
@@ -1093,7 +1093,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             env["SFORGE_GOAL_PLUS_SOURCE_DIR"],
             str(EDGE.current_paths().goal_plus_root),
         )
-        self.assertEqual(extra["SFORGE_GOAL_PLUS_MAX_PARALLEL"], "2")
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_PARALLEL_NUM"], "2")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "240")
         self.assertEqual(extra["SFORGE_PI_REASONING_EFFORT"], "medium")
         self.assertEqual(
@@ -1671,41 +1671,73 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             ],
             valid_trajectories=1,
         )
+        too_many_spawns = EDGE.goal_plus_completion_evidence(
+            cell,
+            [
+                {
+                    **complete,
+                    "agent_events": {
+                        **complete["agent_events"],
+                        "spawn_agent_completed_count": 3,
+                        "spawned_agent_thread_count": 3,
+                    },
+                }
+            ],
+            valid_trajectories=1,
+        )
 
         self.assertTrue(passed["passed"])
         self.assertFalse(missing_spawn["passed"])
+        self.assertFalse(too_many_spawns["passed"])
         self.assertEqual(
             missing_spawn["checks"]["actual_worker_launches"],
             {"expected": 2, "actual": 0},
         )
+        self.assertEqual(
+            too_many_spawns["checks"]["actual_worker_launches"],
+            {"expected": 2, "actual": 3},
+        )
 
     def test_goal_plus_pi_completion_uses_persisted_session_evidence(self) -> None:
-        evidence = EDGE.goal_plus_completion_evidence(
-            {
-                "method": "goal-plus-pi",
-                "outer_replicas": 1,
-                "inner_search_concurrency": 2,
+        cell = {
+            "method": "goal-plus-pi",
+            "outer_replicas": 1,
+            "inner_search_concurrency": 2,
+        }
+        complete = {
+            "edgebench_score": 40.0,
+            "goal_plus": {
+                "candidates": 2,
+                "agent_sessions": 2,
+                "worker_verifier_runs": 3,
+                "verifier_candidate_ids": ["c001", "c002"],
+                "selected_candidate_ids": ["c001"],
+                "promoted_candidate_ids": ["c001"],
             },
+            "agent_events": {
+                "spawn_agent_completed_count": 0,
+                "goal_plus": {
+                    "candidate_ids": [],
+                    "agent_session_ids": [],
+                    "verifier_ledger": [],
+                    "selected_candidate_ids": [],
+                    "promoted_candidate_ids": [],
+                },
+            },
+        }
+        evidence = EDGE.goal_plus_completion_evidence(
+            cell,
+            [complete],
+            valid_trajectories=1,
+        )
+        too_many_sessions = EDGE.goal_plus_completion_evidence(
+            cell,
             [
                 {
-                    "edgebench_score": 40.0,
+                    **complete,
                     "goal_plus": {
-                        "candidates": 2,
-                        "agent_sessions": 2,
-                        "worker_verifier_runs": 3,
-                        "verifier_candidate_ids": ["c001", "c002"],
-                        "selected_candidate_ids": ["c001"],
-                        "promoted_candidate_ids": ["c001"],
-                    },
-                    "agent_events": {
-                        "spawn_agent_completed_count": 0,
-                        "goal_plus": {
-                            "candidate_ids": [],
-                            "agent_session_ids": [],
-                            "verifier_ledger": [],
-                            "selected_candidate_ids": [],
-                            "promoted_candidate_ids": [],
-                        },
+                        **complete["goal_plus"],
+                        "agent_sessions": 3,
                     },
                 }
             ],
@@ -1713,7 +1745,12 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
 
         self.assertTrue(evidence["passed"])
+        self.assertFalse(too_many_sessions["passed"])
         self.assertNotIn("actual_worker_launches", evidence["checks"])
+        self.assertEqual(
+            too_many_sessions["checks"]["agent_sessions"],
+            {"expected": 2, "actual": 3},
+        )
 
     def test_finalize_downgrades_missing_goal_plus_evidence_to_partial(self) -> None:
         destination = self.temp / "campaign-finalize"

@@ -224,7 +224,7 @@ def cell_environment(
     if cell["method"] in GOAL_PLUS_METHODS:
         env["SFORGE_GOAL_PLUS_SOURCE_DIR"] = str(current_paths().goal_plus_root)
         extra_env = {
-            "SFORGE_GOAL_PLUS_MAX_PARALLEL": str(cell["inner_search_concurrency"]),
+            "SFORGE_GOAL_PLUS_PARALLEL_NUM": str(cell["inner_search_concurrency"]),
             "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS": str(
                 cell["worker_runtime_seconds"]
             ),

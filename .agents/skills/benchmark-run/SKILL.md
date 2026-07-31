@@ -34,10 +34,37 @@ benchmark 使用相同 lifecycle 或支持相同并发。
 1. 冻结 task/evaluator、model、reasoning、`T/K/C/R`、seed、method 和 resolved commit。
 2. 在 `benchmarks/runners.json` 解析 target/runner；使用 native controller、common matrix 或 OpenEvolve batch 的 `prepare`，确认 prepare 不调用模型且不预建 Goal Plus state。
    Common matrix 的普通方法运行使用 `--method plain-codex` 或 `--method goal-plus-codex`；只有做 B0-B4 消融实验时才使用 `--condition`。两者不能混用。
-3. 用 `launch` 启动 runner。长运行使用已有 detach/controller，不自行拼后台 shell。
-4. 用统一 `status --campaign <path>` 读取 `agent-run.json` 和 native manifest。不要因为终端断开就重建 campaign。
-5. 只在 capability 允许时调用 `stop` 或 `resume`。EdgeBench stop 后归档 partial，不伪称原 trajectory 可恢复；common/OpenEvolve batch 只补跑未完成 cell。
-6. native final artifact 存在后再 `finalize`/`summarize`，再用 `$benchmark-report` 导出。
+3. 完成下面的 K/C 启动确认门禁；未确认前只能执行只读的 `catalog`、`doctor` 和 `plan`，
+   不得执行 `launch` 或 `e2e`。
+4. 用 `launch` 启动 runner。长运行使用已有 detach/controller，不自行拼后台 shell。
+5. 用统一 `status --campaign <path>` 读取 `agent-run.json` 和 native manifest。不要因为终端断开就重建 campaign。
+6. 只在 capability 允许时调用 `stop` 或 `resume`。EdgeBench stop 后归档 partial，不伪称原 trajectory 可恢复；common/OpenEvolve batch 只补跑未完成 cell。
+7. native final artifact 存在后再 `finalize`/`summarize`，再用 `$benchmark-report` 导出。
+
+## K/C 启动确认门禁
+
+自然语言里的“并发 2”“并行 2”“同时跑 2 个”不能自动映射到配置，因为它们既可能表示
+单个 task cell 内的 `K`，也可能表示跨 task cell 的 `C`。遇到这类说法必须分别询问：
+
+- `K` 是否表示同一个 task cell 内实际并行工作的 Agent/subagent 数；
+- `C` 是否表示同一个 campaign 同时运行的 task cell 数。
+
+执行真实 `launch` 或 `e2e` 前，必须向用户展示 `plan` 解析后的确认块，并得到明确确认：
+
+```text
+T=<每个 task 的墙钟预算>
+K=<每个 task cell 内的 Agent/subagent 数>
+C=<同时运行的 task cell 数>
+R=<独立重复次数>
+method=<方法及其 K 拓扑>
+同时运行规模=<按该方法解释的 K × C>
+```
+
+即使 preset 已冻结 K/C，也必须展示其解析值。混合方法 campaign 要分别说明 Plain 方法的
+`K` 个 outer trajectories 与 Goal Plus 的 1 个 outer session + `K` 个 internal subagents。
+用户只确认了其中一个维度、使用了未标注的“并发/并行”数字，或确认内容与 `plan` 不一致时，
+不得启动；先重新 `plan` 并再次确认。`resume` 已有 campaign 不重复询问，但不能借 resume
+修改原有 K/C。
 
 ## 交付
 

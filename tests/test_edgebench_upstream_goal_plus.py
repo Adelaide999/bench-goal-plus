@@ -29,7 +29,7 @@ class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
         agent = PiGoalPlusAgent(
             SForgeConfig(
                 agent_extra_env={
-                    "SFORGE_GOAL_PLUS_MAX_PARALLEL": "2",
+                    "SFORGE_GOAL_PLUS_PARALLEL_NUM": "2",
                     "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS": "240",
                     "SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS": "120",
                 }
@@ -37,7 +37,10 @@ class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
         )
         command = agent.format_run_cmd("/tmp/prompt.md", model="gpt-test")
 
-        self.assertIn("budget.max_parallel to 2", command)
+        self.assertIn(
+            "set budget.max_parallel to 2", command
+        )
+        self.assertIn("omit the deprecated budget.max_candidates field", command)
         self.assertIn('"max_runtime_seconds": 240', command)
         self.assertNotIn('"max_turns"', command)
         self.assertIn("SFORGE_AGENT_HARD_DEADLINE", command)

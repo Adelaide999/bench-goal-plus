@@ -52,15 +52,20 @@ class BenchmarkDocsTest(unittest.TestCase):
     def test_root_agents_declares_directory_ownership_and_public_cli(self):
         text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         for required in (
-            "benchmark operations control plane",
-            "## Standard Agent workflow",
-            "## Skill routing",
+            "基准测试运行控制面",
+            "## 智能体标准流程",
+            "## 技能路由",
             "`bench-goal-plus`",
             "`benchmark-setup`",
             "`benchmark-run`",
             "`benchmark-report`",
             "`benchmark-adapt`",
-            "## Repository map and ownership",
+            "## T/K/C/R 契约",
+            "`K` 是同一个 task cell 内实际并行工作的 Agent 数量",
+            "`C` 是一个 campaign 同时运行的不同 task cell 数量",
+            "`budget.max_candidates` 已弃用",
+            "实际 subagent 数量不等于 `K`",
+            "## 目录职责",
             "`bench_goal_plus/`",
             "`benchmarks/`",
             "`adapters/<benchmark>/`",
@@ -72,8 +77,7 @@ class BenchmarkDocsTest(unittest.TestCase):
             "`.agents/skills/`",
             "`.github/workflows/`",
             "python3 scripts/bench.py",
-            "Every new repository-owned top-level directory needs an "
-            "ownership row",
+            "每个新的仓库自有顶层目录在使用之前，都必须先在此表中增加职责行",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, text)
@@ -92,6 +96,21 @@ class BenchmarkDocsTest(unittest.TestCase):
             combined,
             r"python3 \.agents/skills/.*/scripts/.*\.py",
         )
+
+    def test_benchmark_run_requires_explicit_k_c_confirmation(self):
+        text = (
+            ROOT / ".agents/skills/benchmark-run/SKILL.md"
+        ).read_text(encoding="utf-8")
+        for required in (
+            "## K/C 启动确认门禁",
+            "不得执行 `launch` 或 `e2e`",
+            "K=<每个 task cell 内的 Agent/subagent 数>",
+            "C=<同时运行的 task cell 数>",
+            "同时运行规模=<按该方法解释的 K × C>",
+            "不能自动映射到配置",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
 
     def test_router_skill_routes_platform_and_benchmark_differences(self):
         text = (ROOT / ".agents/skills/bench-goal-plus/SKILL.md").read_text(

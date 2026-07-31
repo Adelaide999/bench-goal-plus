@@ -678,9 +678,18 @@ def goal_plus_completion_evidence(
         "expected": expected_workers,
         "actual": len(verifier_candidates),
     }
-    passed = all(
+    required_evidence_present = all(
         int(check["actual"]) >= int(check["expected"]) for check in checks.values()
     )
+    actual_subagent_check = (
+        checks["actual_worker_launches"]
+        if cell["method"] == "goal-plus-codex"
+        else checks["agent_sessions"]
+    )
+    actual_subagent_count_matches_k = (
+        int(actual_subagent_check["actual"]) == expected_workers
+    )
+    passed = required_evidence_present and actual_subagent_count_matches_k
     return {
         "required": True,
         "passed": passed,
@@ -688,8 +697,8 @@ def goal_plus_completion_evidence(
         "reason": (
             None
             if passed
-            else "Goal Plus method did not persist the required worker, verifier, "
-            "promotion, and official trajectory evidence"
+            else "Goal Plus method did not persist exactly K actual subagents plus "
+            "the required verifier, promotion, and official trajectory evidence"
         ),
     }
 

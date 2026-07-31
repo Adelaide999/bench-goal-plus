@@ -1,28 +1,38 @@
 # Benchmark 并发契约
 
-## Four independent dimensions
+## 四个相互独立的维度
 
-| Symbol | Meaning | Manifest field | Comparison rule |
+| 符号 | 含义 | Manifest 字段 | 比较规则 |
 |---|---|---|---|
-| `T` | one trajectory/search wall budget | `wall_time_seconds` | fix across compared methods |
-| `K` | live within-task search concurrency | `live_search_concurrency` / `concurrency` | fix across compared methods |
-| `C` | different cells/tasks run simultaneously | `cell_concurrency` | capacity setting; report explicitly |
-| `R` | independent attempts/seeds | attempts/seed matrix | never replace with `C` |
+| `T` | 一个 trajectory/search 的墙钟预算 | `wall_time_seconds` | 对比方法之间保持一致 |
+| `K` | 同一个 task cell 内实际并行工作的 Agent 数量 | `live_search_concurrency` / `concurrency` | 对比方法之间保持一致，并核对实际 Agent 数量 |
+| `C` | 同时运行的不同 cell/task 数量 | `cell_concurrency` | 单独配置并明确报告 |
+| `R` | 独立 attempt/seed 数量 | attempt/seed matrix | 不得用 `C` 代替 |
 
-Plain Codex maps `K` to independent isolated trajectories and selects only after the deadline. Goal Plus maps the same `K` to workers sharing one search state. Preserve each native control flow and report evaluator calls, iterations, tokens, cost coverage, and actual wall time after the run.
+Plain Codex 把 `K` 映射为相互隔离的 trajectory，并在截止时间后统一选择结果。
+Goal Plus 把同一个 `K` 映射为共享一份 Search 状态的内部 subagent。必须保留每种方法的
+原生控制流，并在运行后报告实际 Agent/subagent 数、evaluator call、iteration、token、
+cost coverage 和实际墙钟时间。
+Goal Plus 的新 SearchSpec 只用 `budget.max_parallel` 承载 `K`；
+`budget.max_candidates` 已弃用，不能与 `K` 分开配置。
 
-## Migration standard for a new benchmark
+自然语言中的“并发”“并行”“同时跑几个”没有默认归属。真实 launch 前必须把 `K` 和 `C`
+拆开显示，说明对应拓扑和 `K × C` 同时运行规模，并取得用户明确确认；不能根据单个数字猜测。
 
-1. Identify the native scheduler and the unit that owns a mutable environment.
-2. Ensure every live worker/lane has an isolated resettable workspace unless sharing is the tested mechanism.
-3. Put the live `K` bound in the controller/runtime, not only in the prompt.
-4. Add `C` only above task cells. Compute host capacity for the worst case and retain native CPU/memory quotas.
-5. Use one campaign controller; do not multiply concurrency by launching duplicate controllers.
-6. Test `K=1`, then a cheap `K=2` wiring task. Verify peak live processes/containers never exceed the manifest.
-7. If these guarantees are unavailable, declare `K=1` support and the missing mechanism as `partial`.
+## 新 benchmark 的迁移标准
 
-## Example preset
+1. 识别 native scheduler，以及拥有可变环境的工作单元。
+2. 除非共享正是被测试的机制，否则每个 worker/lane 都必须拥有相互隔离、可重置的 workspace。
+3. `K` 必须由 controller/runtime 实际执行，不能只写在 prompt 中。
+4. `C` 只能加在 task cell 之上。按 `K × C` 的任务拓扑计算主机容量，并保留 native
+   CPU/memory quota。
+5. 一个 campaign 只使用一个 controller；不得通过重复启动 controller 伪造 `C`。
+6. 先测试 `K=1`，再测试一个低成本的 `K=2` wiring task，并核对实际 Agent/subagent
+   数量等于 manifest 中的 `K`。
+7. 无法证明实际数量等于 `K` 时，只能声明 `K=1` 已支持，并把缺失机制标记为 `partial`。
 
-`edgebench-codex-2h` happens to mean `T=7200`, `K=1`, `C=2`, `R=1`. It is an example preset,
-not the concurrency default for other benchmarks. The common matrix controller currently declares
-`C=1`; do not enable cross-cell concurrency there until isolation and peak resource bounds are tested.
+## 预设示例
+
+`edgebench-codex-2h` 恰好表示 `T=7200`、`K=1`、`C=2`、`R=1`。它只是一个预设
+示例，不是其他 benchmark 的并发默认值。common matrix controller 当前只声明
+`C=1`；在 task 隔离和实际并发数量完成测试之前，不得开放跨 cell 并发。

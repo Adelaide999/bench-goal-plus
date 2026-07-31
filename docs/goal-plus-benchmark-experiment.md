@@ -48,7 +48,7 @@ Q = 1 task
 ## Goal Plus 当前已有能力与必须整改项
 
 当前跟踪 `ck0123/goal-plus@main`；具体实验会把当次 resolved commit 写入
-manifest。该 branch 已有 Codex/Pi `parallel_loops`、`max_candidates/max_parallel`、
+manifest。该 branch 已有 Codex/Pi `parallel_loops`、单一 `max_parallel`、
 同 native worker continuation、verifier-backed best、Search Evidence/Schema、
 worker min/max runtime 和 usage report；benchmark-specific fixture 已从 runtime 仓迁出。
 
@@ -198,7 +198,7 @@ SwarmResearch 15 上再加入论文原生 Swarm；Frontier-Engineering 上再加
 
 **整改**：先修复复现仓 bootstrap/import 和 ADRS/ALE 共享 worker build context；建立 15 题统一 `task-eval → native metric` adapter。Goal Plus 必须记录 orchestrator + workers 全部 usage，并允许固定 lane 长期 continuation；Swarm 轨迹则统一还原 agent session、commit、evaluator calls 和 50 美元 cutoff。
 
-**建议并发/预算**：5-task pilot 用 `K=4/8`；最终实验先从公开轨迹重建 peak live agents，再匹配实际 `K`，同时向 README 提到的 50-agent **累计规模**扩展。不能把“50 agent run”未经证据解释为 50 个同时在线。work-matched 优先按 evaluator calls + known cost，另给 3 小时 wall slice。Goal Plus 的 `max_candidates` 是固定 lane 数，不应与 Swarm 累计 spawn 的 agent budget 直接画等号。
+**建议并发/预算**：5-task pilot 用 `K=4/8`；最终实验先从公开轨迹重建 peak live agents，再匹配实际 `K`，同时向 README 提到的 50-agent **累计规模**扩展。不能把“50 agent run”未经证据解释为 50 个同时在线。work-matched 优先按 evaluator calls + known cost，另给 3 小时 wall slice。Goal Plus 的 `max_parallel` 是固定 lane 数，不应与 Swarm 累计 spawn 的 agent budget 直接画等号。
 
 **与论文工作对应**：公开任务轨迹约 100 美元/题，论文报告 50 美元 cutoff；README 另给出 50 agents、约 3 小时 Codex 运行的成本参考。外部论文分数只能做 reference；要归因于方法，必须用同一 Codex 版本重跑原生 Swarm 与 Goal Plus。
 

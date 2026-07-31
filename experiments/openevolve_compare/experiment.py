@@ -287,7 +287,7 @@ def render_goal(
         "Use the current workspace and construct the verifier-backed Goal Plus search from "
         "the configuration below. Goal Plus owns intake, triage, SearchSpec freezing, candidate "
         "workspaces, selection, promotion, and final reporting.\n\n"
-        f"- `budget.max_candidates={concurrency}` and `budget.max_parallel={concurrency}`.\n"
+        f"- `budget.max_parallel={concurrency}`; omit deprecated `budget.max_candidates`.\n"
         f"- `strategy.name=\"agent_guided\"`, `strategy.worker_host=\"{worker_host}\"`, "
         "and `strategy.orchestration_mode=\"parallel_loops\"`.\n"
         f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "

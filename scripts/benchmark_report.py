@@ -38,6 +38,14 @@ def edgebench_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for cell in payload.get("cells", []):
         observations = cell.get("observations") or []
         best = cell.get("best") or {}
+        completion = cell.get("completion_evidence") or {}
+        completion_checks = completion.get("checks") or {}
+        if cell.get("method") == "goal-plus-codex":
+            actual_subagents = completion_checks.get("actual_worker_launches") or {}
+        elif cell.get("method") == "goal-plus-pi":
+            actual_subagents = completion_checks.get("agent_sessions") or {}
+        else:
+            actual_subagents = {}
         usage_records = [item.get("codex_usage") or {} for item in observations]
         token_records = [item.get("tokens") or {} for item in usage_records]
         paper = ((payload.get("paper_reference") or {}).get("tasks") or {}).get(
@@ -97,6 +105,18 @@ def edgebench_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 ),
                 "protocol_classification": cell.get("protocol_classification"),
                 "known_protocol_issue": cell.get("known_protocol_issue"),
+                "actual_goal_plus_subagents": actual_subagents.get("actual"),
+                "goal_plus_candidates": (
+                    completion_checks.get("candidates") or {}
+                ).get("actual"),
+                "goal_plus_worker_sessions": (
+                    completion_checks.get("agent_sessions") or {}
+                ).get("actual"),
+                "goal_plus_verifier_runs": (
+                    completion_checks.get("worker_verifier_runs") or {}
+                ).get("actual"),
+                "completion_evidence_passed": completion.get("passed"),
+                "incomplete_reason": cell.get("incomplete_reason"),
             }
         )
     return rows

@@ -24,21 +24,36 @@ class BenchmarkReportTest(unittest.TestCase):
             )
             payload = {
                 "campaign_id": campaign_id,
-                "live_search_concurrency": 1,
+                "live_search_concurrency": 2,
                 "cell_concurrency": 2,
                 "paper_reference": {"tasks": {"task-a": {"mean": 40.0}}},
                 "cells": [
                     {
                         "task_id": "task-a",
-                        "method": "plain-codex",
+                        "method": "goal-plus-codex",
                         "model": "gpt-5.6-sol",
                         "reasoning_effort": "medium",
                         "metric_direction": "maximize",
                         "wall_time_seconds": 7200,
-                        "live_search_concurrency": 1,
+                        "live_search_concurrency": 2,
                         "outer_replicas": 1,
                         "completed_trajectories": 1,
                         "valid_trajectories": 1,
+                        "completion_evidence": {
+                            "passed": True,
+                            "checks": {
+                                "actual_worker_launches": {
+                                    "expected": 2,
+                                    "actual": 2,
+                                },
+                                "candidates": {"expected": 2, "actual": 2},
+                                "agent_sessions": {"expected": 2, "actual": 2},
+                                "worker_verifier_runs": {
+                                    "expected": 2,
+                                    "actual": 3,
+                                },
+                            },
+                        },
                         "best": {"raw_score": 0, "edgebench_score": 50.0},
                         "observations": [
                             {
@@ -55,6 +70,13 @@ class BenchmarkReportTest(unittest.TestCase):
             }
             (campaign / "comparison.json").write_text(json.dumps(payload))
             (campaign / "comparison.md").write_text("# Native comparison\n")
+
+            rows = benchmark_report.edgebench_rows(payload)
+            self.assertEqual(rows[0]["actual_goal_plus_subagents"], 2)
+            self.assertEqual(rows[0]["goal_plus_candidates"], 2)
+            self.assertEqual(rows[0]["goal_plus_worker_sessions"], 2)
+            self.assertEqual(rows[0]["goal_plus_verifier_runs"], 3)
+            self.assertTrue(rows[0]["completion_evidence_passed"])
 
             outputs = benchmark_report.export(campaign, None, None)
 
@@ -76,6 +98,9 @@ class BenchmarkReportTest(unittest.TestCase):
                 self.assertIn("input_tokens", rendered)
                 self.assertIn("agent_output_only", rendered)
                 self.assertIn("raw_metric_direction", rendered)
+                self.assertIn("actual_goal_plus_subagents", rendered)
+                self.assertIn("goal_plus_worker_sessions", rendered)
+                self.assertIn("completion_evidence_passed", rendered)
                 self.assertIn('r="R2" s="2"/', rendered)
 
     def test_generic_export_keeps_raw_directional_fields(self) -> None:

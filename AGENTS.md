@@ -1,164 +1,182 @@
-# bench-goal-plus contributor rules
+# bench-goal-plus 贡献者规则
 
-This repository is the benchmark operations control plane. It owns benchmark
-catalogs, reproducible environments, lifecycle orchestration, method contracts,
-evidence normalization, and reports. Goal Plus is one supported method and one
-source of observability evidence; it is not the repository architecture.
+本仓库是基准测试运行控制面，负责基准目录、可复现环境、生命周期编排、方法契约、
+证据归一化与报告。Goal Plus 是其中一种受支持的方法和一种可观测性证据来源，
+不是本仓库的整体架构。
 
-## Standard Agent workflow
+## 智能体标准流程
 
-For every benchmark request:
+处理每一个基准测试请求时：
 
-1. Read `python3 scripts/bench.py catalog` and resolve the registered target,
-   preset, runner, supported method, Docker contract, and capability flags.
-2. Route environment, host, Docker, upstream, and authentication work through
-   `benchmark-setup`; run setup/doctor before a real campaign.
-3. Route campaign configuration through `benchmark-run`; use `plan` before
-   `launch`, record `T/K/C/R`, and return the generated campaign path.
-4. For a long run, use `status` and the registered `stop`/`resume` capability.
-   Do not replace, delete, or silently restart a partial campaign.
-5. After the native campaign reaches a terminal state, route finalization and
-   export through `benchmark-report`.
-6. Route a new benchmark or task family through `benchmark-adapt`; do not call
-   a scaffold or registry entry ready until its acceptance path has evidence.
+1. 运行 `python3 scripts/bench.py catalog`，解析已登记的目标、预设、运行器、
+   受支持方法、Docker 契约和能力标志。
+2. 环境、主机、Docker、上游代码和鉴权工作统一交给 `benchmark-setup`；
+   正式 campaign 之前必须执行 `setup`/`doctor`。
+3. campaign 配置统一交给 `benchmark-run`；先执行 `plan`，再执行 `launch`，
+   记录 `T/K/C/R`，并返回生成的 campaign 路径。
+4. 长任务使用 `status` 以及已登记的 `stop`/`resume` 能力。不得替换、删除或
+   静默重启一个状态为 `partial` 的 campaign。
+5. native campaign 到达终态后，通过 `benchmark-report` 完成最终归档和导出。
+6. 新基准或新任务族统一交给 `benchmark-adapt`；在验收路径产生证据之前，
+   不得把脚手架或注册表条目称为就绪。
 
-Before executing a platform- or benchmark-specific command, read the reference
-selected by the relevant Skill. Do not infer Linux behavior from macOS,
-API-key behavior from OAuth, or one benchmark's lifecycle from another.
+执行平台或基准专属命令之前，必须读取相关技能选定的参考文档。
+不得用 macOS 行为推断 Linux，不得用 API 密钥行为推断 OAuth，也不得把一个
+基准的生命周期套用到另一个基准。
 
-## Skill routing
+## 技能路由
 
-| User intent | Skill | Required reference selection |
+| 用户意图 | 技能 | 必须读取的参考文档 |
 | --- | --- | --- |
-| End-to-end request or unclear benchmark operation | `bench-goal-plus` | Read its agent contract, then route to one or more Skills below |
-| Install, bootstrap, Docker, host compatibility, auth | `benchmark-setup` | Read `host-auth.md` and `benchmark-matrix.md` |
-| Plan, launch, monitor, stop, or resume | `benchmark-run` | Read `runner-map.md`, then the selected benchmark/runner reference |
-| Finalize, inspect metrics, export Markdown/XLSX | `benchmark-report` | Read `report-contract.md` |
-| Add a benchmark or task family | `benchmark-adapt` | Read `adaptation-checklist.md` |
+| 端到端请求或尚不明确的基准操作 | `bench-goal-plus` | 先读智能体契约，再路由到下列一个或多个技能 |
+| 安装、初始化、Docker、主机兼容性、鉴权 | `benchmark-setup` | `host-auth.md` 和 `benchmark-matrix.md` |
+| 规划、启动、监控、停止或恢复 | `benchmark-run` | `runner-map.md`，再读选定基准和运行器的参考文档 |
+| 最终归档、指标检查、导出 Markdown/XLSX | `benchmark-report` | `report-contract.md` |
+| 增加基准或任务族 | `benchmark-adapt` | `adaptation-checklist.md` |
 
-Skills describe operator workflow and route to references. Registries and code
-remain executable truth; do not hide host, authentication, or benchmark
-differences only inside Python implementation.
+技能只描述操作流程，并把用户意图路由到 `scripts/bench.py`。注册表和代码仍是
+可执行事实来源；主机、鉴权或基准差异不能只隐藏在 Python 实现中。
 
-## Public contract
+## 公开契约
 
-- The canonical user entrypoint is `python3 scripts/bench.py`.
-- `catalog`, `setup`, `plan`, `launch`, `status`, `stop`, `resume`, `finish`,
-  and `check` form the public lifecycle vocabulary. `start` is the compatible
-  spelling of `launch`; `e2e` is the foreground convenience path.
-- `scaffold` is a contributor tool. Its output is not a readiness claim.
-- Skills and benchmark-local scripts may be thin adapters around that
-  vocabulary. Do not document a second equivalent public CLI.
-- A method must be declared in its runner's `supported_methods` before a plan
-  can select it. Reject unsupported methods before setup or preparation.
-- A capability shown by `catalog` is a contract. Do not advertise provision,
-  detach, stop, resume, cell concurrency, or an official evaluator until tests
-  and a reproducible evidence path exist.
+- 统一用户入口是 `python3 scripts/bench.py`。
+- `catalog`、`setup`、`plan`、`launch`、`status`、`stop`、`resume`、`finish`
+  和 `check` 构成公开生命周期词汇。`start` 只是 `launch` 的兼容写法；`e2e`
+  是前台运行的便捷路径。
+- `scaffold` 是贡献者工具，它生成的内容不代表已经就绪。
+- 技能和基准本地脚本可以是上述统一入口的薄适配层，但不得再公开一套
+  等价的第二 CLI。
+- 方法必须先出现在其 runner 的 `supported_methods` 中，`plan` 才能选择它。
+  不受支持的方法必须在 setup 或 prepare 之前被拒绝。
+- `catalog` 展示的能力就是契约。环境供给、后台运行、停止、恢复、任务单元并发或
+  官方评测器在具备测试和可复现证据路径之前不得被声明为已支持。
 
-## Repository map and ownership
+## T/K/C/R 契约
 
-| Path | Owns | Required content | Must not own |
+- `T` 是一条 task trajectory 或一次 Goal Plus search 的墙钟探索时间预算。
+- `K` 是同一个 task cell 内实际并行工作的 Agent 数量。配置中只有这一个并行数量，
+  不再引入另一套最大值、上限或策略参数。
+- Goal Plus adapter 把 `K` 映射为唯一的 `parallel-num`/`budget.max_parallel`。
+  `budget.max_candidates` 已弃用，不得作为第二个可独立配置的数量。
+- `C` 是一个 campaign 同时运行的不同 task cell 数量。`C` 只控制 task 之间的并发，
+  不能代替或改写每个 task 内部的 `K`。
+- `R` 是独立重复次数或 seed 数量，不能用 `C` 代替。
+
+不同方法必须按各自原生拓扑实现同一个 `K`：
+
+- Plain Codex、Plain Claude 和 Plain Pi：一个 task cell 启动 `K` 条相互隔离的
+  outer Agent trajectory。
+- Goal Plus + Codex 和 Goal Plus + Pi：一个 task cell 只启动一个 outer Goal Plus
+  主会话，由这个主会话启动 `K` 个共享同一 Search 状态的内部 subagent。
+- `K=4,C=1` 表示一次只跑一个 task；Plain 方法运行 4 个 outer Agent，Goal Plus
+  方法运行 1 个 outer 主会话和 4 个内部 subagent。
+- `K=1,C=4` 表示同时跑 4 个 task cell；每个 cell 内仍只有 1 个 Agent 或 1 个
+  Goal Plus subagent。
+- `K=4,C=4` 表示同时跑 4 个 task cell，并且每个 cell 都按其方法拓扑实现 `K=4`。
+
+Goal Plus 结束后必须统计实际 subagent 数量并与 `K` 核对：
+
+- Goal Plus + Codex 使用不同的 `spawn_agent` worker thread 或已绑定的 Codex host
+  handle 证明实际 subagent；仅分配 session 不代表已经启动 subagent。
+- Goal Plus + Pi 使用不同的、已绑定 candidate 的 Pi worker session 作为实际
+  subagent 证据。
+- candidate 数、session 分配数、verifier 调用次数和 outer replica 数必须分别记录，
+  不得互相替代。
+- 实际 subagent 数量不等于 `K`，或者缺少可核对证据时，保留已有分数和原始证据，
+  但 cell/campaign 必须标记为 `partial`，不得进入 matched comparison。
+
+## 目录职责
+
+| 路径 | 负责内容 | 必须包含 | 不得包含 |
 | --- | --- | --- | --- |
-| `bench_goal_plus/` | Typed application, catalog, runner, state, event, and reporting contracts | Benchmark-neutral Python modules with fail-closed validation | Benchmark-specific prompts, task IDs, or stopping logic |
-| `benchmarks/` | Declarative runner, target, preset, dataset, and evidence registries | Explicit schemas, branch-tracked references, method/capability contracts | Executable orchestration or secrets |
-| `environment/` | Reproducible host and upstream definitions | Locked dependencies and one tracking branch per managed checkout | Manual managed-source commit pins or copied virtualenvs |
-| `adapters/<benchmark>/` | Common-runner materialization and official evaluation boundary | Task discovery/materialization, evaluator invocation, raw metric and direction | Generic campaign control or vendored upstream source |
-| `experiments/<benchmark>/` | Benchmark-owned native lifecycle integration | Profiles, controller, references, and a benchmark-specific README | Cross-benchmark policy or reusable application logic |
-| `docker/` | Repository-owned benchmark support images | Minimal Dockerfiles with explicit benchmark purpose and locked inputs | Generic runner policy, credentials, or copied upstream images |
-| `local_examples/` | Small repository-owned task fixtures | License/provenance, task README, and deterministic evaluator boundary | Unattributed upstream datasets or claims of full benchmark coverage |
-| `evidence/` | Reviewable, committed validation records | Small immutable manifests/summaries with commands, revisions, metrics, and status | Mutable campaign state, credentials, or large raw outputs |
-| `legacy/` | Preserved pre-control-plane diagnostics | Clearly labeled compatibility/direct-API tools and migration documentation | New public lifecycle features or readiness claims |
-| `scripts/` | Stable entrypoints and small repository maintenance tools | Thin calls into `bench_goal_plus/`; `bench.py` is canonical | Duplicate runner implementations |
-| `.agents/skills/` | Operator guidance for the canonical lifecycle | Thin workflow instructions that call `scripts/bench.py` | Broad repository policy or alternative CLIs |
-| `docs/` | Explanations, runbooks, protocol rationale, and migration notes | Long-form material linked from code or Skills | Executable truth that is absent from registries/tests |
-| `tests/` | Control-plane contracts and regression evidence | Self-contained unit/contract tests runnable in the locked environment | Hidden credentials, network-only assumptions, or disposable run output |
-| `.github/workflows/` | Automated repository gates | Locked setup, status validation, and canonical unit suite | Benchmark campaigns or secret-bearing smoke runs |
-| `runs/`, `.tmp/`, `.bench-env/`, `.venv/`, `.worktrees/`, `third_party/`, `.codebase-memory/`, `__pycache__/` | Ignored/generated local state | Preserved campaigns, repository-local scratch, recreated environments, managed checkouts, and derived indexes | Hand-authored source intended for this repository |
+| `bench_goal_plus/` | 类型化应用、catalog、runner、state、event 和 report 契约 | 与具体 benchmark 无关、默认拒绝不完整输入的 Python 模块 | benchmark 专属 prompt、task ID 或停止逻辑 |
+| `benchmarks/` | 声明式 runner、target、preset、dataset 和 evidence registry | 明确 schema、分支跟踪引用、方法与能力契约 | 可执行编排逻辑或凭据 |
+| `environment/` | 可复现主机和上游定义 | 锁定依赖、每个受管 checkout 的唯一跟踪分支 | 手工固定的受管源码 commit 或复制的 virtualenv |
+| `adapters/<benchmark>/` | common runner 的任务物化与官方评测边界 | task 发现和物化、evaluator 调用、raw metric 和方向 | 通用 campaign 控制或 vendored 上游源码 |
+| `experiments/<benchmark>/` | benchmark 自己拥有的 native 生命周期集成 | profile、controller、reference 和 benchmark 专属 README | 跨 benchmark 策略或可复用应用逻辑 |
+| `docker/` | 仓库自有的 benchmark 支持镜像 | 用途明确且输入锁定的最小 Dockerfile | 通用 runner 策略、凭据或复制的上游镜像 |
+| `local_examples/` | 小型仓库自有任务 fixture | license/provenance、任务 README 和确定性 evaluator 边界 | 来源不明的上游 dataset 或完整 benchmark 覆盖声明 |
+| `evidence/` | 可评审、已提交的验证记录 | 小型不可变 manifest/summary，包含命令、revision、metric 和状态 | 可变 campaign state、凭据或大型原始输出 |
+| `legacy/` | 保留的旧控制面诊断工具 | 明确标注为兼容或直接 API 工具，并包含迁移说明 | 新的公开生命周期功能或 ready 声明 |
+| `scripts/` | 稳定入口和小型仓库维护工具 | `bench_goal_plus/` 的薄调用；`bench.py` 是统一入口 | 重复的 runner 实现 |
+| `.agents/skills/` | 统一生命周期的操作指南 | 调用 `scripts/bench.py` 的薄流程说明 | 宽泛仓库策略或替代 CLI |
+| `docs/` | 说明、运行手册、协议原理和迁移说明 | 由代码或 Skill 链接的长篇材料 | registry/test 中不存在的可执行事实 |
+| `tests/` | 控制面契约和回归证据 | 能在锁定环境中独立运行的 unit/contract test | 隐藏凭据、仅网络可运行假设或一次性 run 输出 |
+| `.github/workflows/` | 自动化仓库门禁 | 锁定 setup、status 校验和统一 unit test suite | benchmark campaign 或带凭据的 smoke run |
+| `runs/`、`.tmp/`、`.bench-env/`、`.venv/`、`.worktrees/`、`third_party/`、`.codebase-memory/`、`__pycache__/` | 忽略或自动生成的本地状态 | 保留的 campaign、仓库本地临时文件、可重建环境、受管 checkout 和派生索引 | 应提交到本仓库的手写源码 |
 
-Every new repository-owned top-level directory needs an ownership row here
-before it is used. Nested directories inherit their nearest listed owner's
-rules unless their own `AGENTS.md` narrows them.
+每个新的仓库自有顶层目录在使用之前，都必须先在此表中增加职责行。嵌套目录继承
+最近上级目录的规则，除非它自己的 `AGENTS.md` 进一步收窄范围。
 
-## Where a change belongs
+## 修改应放在哪里
 
-1. Put reusable lifecycle or evidence behavior in `bench_goal_plus/`.
-2. Put declarative identity, support, and capability facts in `benchmarks/`.
-3. Put a common-runner benchmark boundary in `adapters/<benchmark>/`.
-4. Put an intrinsically benchmark-specific native controller/profile in
-   `experiments/<benchmark>/`.
-5. Patch a managed upstream only when the behavior belongs to that upstream.
-   Keep that change in its `third_party/<checkout>` Git worktree and report the
-   root and upstream diffs separately.
-6. Put broad policy here. Put operator steps in docs or a Skill.
+1. 可复用生命周期或证据行为放在 `bench_goal_plus/`。
+2. 声明式身份、支持状态和能力事实放在 `benchmarks/`。
+3. common runner 的 benchmark 边界放在 `adapters/<benchmark>/`。
+4. benchmark 专属 native controller/profile 放在 `experiments/<benchmark>/`。
+5. 只有行为确实属于上游时才修改受管 upstream。改动保留在对应的
+   `third_party/<checkout>` Git worktree，并分别汇报根仓库与 upstream diff。
+6. 宽泛策略写在本文件中；操作步骤写在 docs 或 Skill 中。
 
-Never vendor benchmark source or datasets into this repository. Managed source
-checkouts track the explicit branches in both `benchmarks/registry.json` and
-`environment/upstreams.json`. Preparation records the resolved commit SHA in
-the campaign manifest.
+不得把 benchmark 源码或 dataset vendor 到本仓库。受管源码 checkout 必须跟踪
+`benchmarks/registry.json` 与 `environment/upstreams.json` 中共同声明的显式分支。
+`prepare` 必须把解析后的 commit SHA 写入 campaign manifest。
 
-## Benchmark integration contract
+## 基准接入契约
 
-A benchmark is ready only when all of these exist:
+只有同时具备以下各项时，一个 benchmark 才是 ready：
 
-- A target and runner mapping with Docker requirement, owner, provision mode,
-  and scope.
-- An explicit runner method list and capability declaration.
-- A branch-tracked upstream entry or a documented repository-owned fixture.
-- A native profile or common adapter that preserves the benchmark's task,
-  evaluator, raw metric, and metric direction.
-- Contract tests for schema loading, method rejection, plan generation, and
-  capability behavior.
-- A reproducible `doctor → prepare → run → status → finalize` acceptance path.
-- Evidence files that justify every `pass` claim.
+- target/runner 映射，包含 Docker requirement、owner、provision mode 和 scope。
+- 明确的 runner method 列表和 capability 声明。
+- 分支跟踪的 upstream 条目，或者有文档说明的仓库自有 fixture。
+- 保留 benchmark task、evaluator、raw metric 和 metric direction 的 native profile
+  或 common adapter。
+- 覆盖 schema 加载、method 拒绝、plan 生成和 capability 行为的 contract test。
+- 可复现的 `doctor → prepare → run → status → finalize` 验收路径。
+- 能证明每一项 `pass` 声明的 evidence 文件。
 
-Use the benchmark adaptation scaffold documented by the `benchmark-adapt`
-Skill for the initial file layout. Generated placeholders are not support:
-until the acceptance path is executed, readiness is at most `partial`.
+初始文件布局使用 `benchmark-adapt` 技能说明的适配 scaffold。生成的 placeholder
+不代表已支持；验收路径没有实际执行之前，readiness 最多只能是 `partial`。
 
-## Evidence and comparison invariants
+## 证据与比较不变量
 
-- Keep official verifier, native baseline, Plain Codex, Goal Plus + Codex,
-  Plain Pi, and Goal Plus + Pi readiness claims separate.
-- Fix task/evaluator, model, reasoning, wall-clock exploration budget `T`, live
-  search concurrency `K`, task-cell concurrency `C`, and repeats `R`. Record
-  evaluator calls, tokens/cost coverage, actual wall time, and finalization
-  grace rather than silently treating missing values as zero.
-- Preserve each method's native control flow and the benchmark's raw metric and
-  direction. Put method- or benchmark-specific completion evidence in the
-  selected runner reference and enforce it in code/tests.
-- Do not pre-create Goal Plus goals, specs, runs, candidates, sessions, or
-  `.gp/` before a timed natural invocation. Do not add benchmark-specific
-  stopping logic to Goal Plus core.
-- Missing required evidence is `partial`, never `pass`.
+- official verifier、native baseline、Plain Codex、Goal Plus + Codex、Plain Pi 和
+  Goal Plus + Pi 的 readiness 声明必须分开。
+- 固定 task/evaluator、model、reasoning、墙钟探索预算 `T`、task 内并行数 `K`、
+  task cell 并发数 `C` 和重复数 `R`。记录 evaluator call、token/cost coverage、
+  实际墙钟时间和 finalization grace；不得把缺失值静默写成零。
+- 保留每种方法的原生控制流，以及 benchmark 的 raw metric 和 direction。
+  method 或 benchmark 专属 completion evidence 写入选定的 runner reference，
+  并由代码和测试强制执行。
+- 定时自然调用开始之前，不得预建 Goal Plus goal、spec、run、candidate、session
+  或 `.gp/`。不得向 Goal Plus core 增加 benchmark 专属停止逻辑。
+- 缺少必需证据时必须是 `partial`，不得标记为 `pass`。
 
-## Runtime and safety invariants
+## 运行与安全不变量
 
-- Never persist API keys, auth files, cookies, provider headers, or
-  secret-bearing command lines.
-- Never run Goal Plus from a benchmark source checkout. Materialize a
-  disposable Git workspace under ignored `runs/`; keep its `.gp/` there.
-- Route `TMPDIR`, `TMP`, and `TEMP` through `bench_runtime_paths.py` to the
-  ignored repository-local `.tmp/`. Do not use host-wide `/tmp`,
-  `/private/tmp`, or `/var/tmp` for controller state, builds, tests, evaluator
-  output, or subprocess scratch.
-- Do not delete workspaces, campaigns, or caches automatically. Preserve a
-  conflicting path with a `_bak` suffix and report it.
-- Before setup, enforce the registry's `docker_requirement` and `docker_scope`.
-  If Docker is unavailable, run only `not_required` paths; a `mixed` target may
-  use only its named portable task. Never replace a containerized official
-  score with a host-only evaluator.
-- Preserve raw metrics and their direction. A normalized aggregate is an
-  additional field, never a replacement.
+- 不得持久化 API key、auth 文件、cookie、provider header 或包含凭据的命令行。
+- 不得从 benchmark 源码 checkout 内运行 Goal Plus。必须在忽略的 `runs/` 下物化
+  一次性 Git workspace，并把它的 `.gp/` 保留在该 workspace 内。
+- `TMPDIR`、`TMP` 和 `TEMP` 必须通过 `bench_runtime_paths.py` 路由到仓库本地、
+  已忽略的 `.tmp/`。controller state、build、test、evaluator output 或 subprocess
+  scratch 不得使用主机全局 `/tmp`、`/private/tmp` 或 `/var/tmp`。
+- 不得自动删除 workspace、campaign 或 cache。冲突路径必须用 `_bak` 后缀保留，
+  并在结果中报告。
+- setup 前必须执行 registry 的 `docker_requirement` 和 `docker_scope`。Docker
+  不可用时，只能运行 `not_required` 路径；`mixed` target 只能运行其明确登记的
+  portable task。不得用 host-only evaluator 代替容器化 official score。
+- 必须保留 raw metric 及其 direction。normalized aggregate 只能是附加字段，
+  不能取代原始指标。
 
-## Required verification
+## 必需验证
 
-Use the locked repository environment for the canonical gate:
+统一门禁必须使用仓库锁定环境：
 
 ```bash
 .bench-env/venv/bin/python scripts/status.py --check
 .bench-env/venv/bin/python -m unittest discover -s tests -v
 ```
 
-When changing a managed upstream, also run its focused tests in that checkout.
-Before calling a benchmark path ready, exercise its public lifecycle through
-`python3 scripts/bench.py` and retain the resulting manifests and evidence.
+修改受管 upstream 后，还必须在对应 checkout 中运行聚焦测试。声明某条 benchmark
+路径 ready 之前，必须通过 `python3 scripts/bench.py` 执行其公开生命周期，并保留
+生成的 manifest 和 evidence。
