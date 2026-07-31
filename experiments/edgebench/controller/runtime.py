@@ -949,6 +949,24 @@ def print_status(destination: Path, *, as_json: bool) -> int:
             f"- {cell['cell_id']}: {cell['state']}; "
             f"{cell['completed_trajectories']}/{cell['expected_trajectories']} trajectories"
         )
+        goal_plus = cell.get("goal_plus")
+        if isinstance(goal_plus, dict):
+            statuses = ", ".join(
+                f"{item.get('goal_plus_id', 'goal')}={item.get('status', 'unknown')}"
+                for item in goal_plus.get("goal_statuses") or []
+                if isinstance(item, dict)
+            )
+            print(
+                "  Goal Plus: "
+                f"{goal_plus['candidate_count']} candidates; "
+                f"{goal_plus['agent_session_count']} sessions; "
+                f"{goal_plus['actual_worker_launch_count']} workers; "
+                f"{goal_plus['worker_verifier_runs']} verifier runs; "
+                f"selected={goal_plus['selected_candidate_ids'] or '-'}; "
+                f"promoted={goal_plus['promoted_candidate_ids'] or '-'}; "
+                f"status={statuses or '-'}; "
+                f"snapshot={goal_plus.get('snapshot_at') or '-'}"
+            )
     return 0
 
 

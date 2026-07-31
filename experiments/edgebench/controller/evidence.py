@@ -118,12 +118,15 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         return None
     candidates: set[tuple[str, str]] = set()
     sessions = 0
+    worker_sessions: list[dict[str, Any]] = []
+    bound_worker_handles: list[dict[str, Any]] = []
     verifier_runs = 0
     verifier_candidates: set[str] = set()
     search_runs: set[str] = set()
     search_run_states: dict[str, int] = defaultdict(int)
     selected_candidate_ids: set[str] = set()
     promoted_candidate_ids: set[str] = set()
+    goal_statuses: list[dict[str, Any]] = []
     annotation_usage: dict[str, int | float] = {}
     annotation_tasks = 0
     annotation_attempts = 0
@@ -164,6 +167,29 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                 if match:
                     search_runs.add(match.group(1))
                     candidates.add((match.group(1), match.group(2)))
+                if "/goal-plus/" in member.name and member.name.endswith(
+                    "/goal.json"
+                ):
+                    extracted = archive.extractfile(member)
+                    if extracted:
+                        try:
+                            payload = json.loads(
+                                extracted.read().decode("utf-8", errors="replace")
+                            )
+                            goal_statuses.append(
+                                {
+                                    key: payload.get(key)
+                                    for key in (
+                                        "goal_plus_id",
+                                        "status",
+                                        "phase",
+                                        "updated_at",
+                                    )
+                                    if payload.get(key) is not None
+                                }
+                            )
+                        except (json.JSONDecodeError, TypeError):
+                            pass
                 if "/agent_sessions/" in member.name and member.name.endswith(".json"):
                     sessions += 1
                     extracted = archive.extractfile(member)
@@ -176,7 +202,40 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                                 payload.get("counters", {}).get("verifier_runs", 0)
                             )
                             verifier_runs += session_verifier_runs
+                            session_id = payload.get("agent_session_id")
                             candidate_id = payload.get("candidate_id")
+                            worker_sessions.append(
+                                {
+                                    key: value
+                                    for key, value in {
+                                        "agent_session_id": session_id,
+                                        "run_id": payload.get("run_id"),
+                                        "candidate_id": candidate_id,
+                                        "host": payload.get("host"),
+                                        "verifier_runs": session_verifier_runs,
+                                        "updated_at": payload.get("updated_at"),
+                                    }.items()
+                                    if value is not None
+                                }
+                            )
+                            handle = payload.get("host_handle")
+                            if isinstance(handle, dict) and session_id:
+                                compact_handle = {
+                                    key: handle.get(key)
+                                    for key in (
+                                        "host",
+                                        "task_name",
+                                        "external_id",
+                                    )
+                                    if handle.get(key) is not None
+                                }
+                                if compact_handle:
+                                    bound_worker_handles.append(
+                                        {
+                                            "agent_session_id": session_id,
+                                            **compact_handle,
+                                        }
+                                    )
                             if (
                                 session_verifier_runs > 0
                                 and isinstance(candidate_id, str)
@@ -216,13 +275,17 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
     return {
         "search_runs": len(search_runs),
         "candidates": len(candidates),
+        "candidate_ids": sorted({candidate_id for _, candidate_id in candidates}),
         "agent_sessions": sessions,
+        "worker_sessions": worker_sessions,
+        "bound_worker_handles": bound_worker_handles,
         "worker_verifier_runs": verifier_runs,
         "verifier_candidate_ids": sorted(verifier_candidates),
         "verifier_candidate_count": len(verifier_candidates),
         "search_run_states": dict(sorted(search_run_states.items())),
         "selected_candidate_ids": sorted(selected_candidate_ids),
         "promoted_candidate_ids": sorted(promoted_candidate_ids),
+        "goal_statuses": goal_statuses,
         "evidence_annotator_usage": {
             **annotation_usage,
             "tasks": annotation_tasks,
@@ -231,6 +294,37 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
             "coverage": "persisted Goal Plus Evidence annotator turns",
         },
     }
+
+
+def goal_plus_live_snapshot(task_run: Path) -> dict[str, Any] | None:
+    """Read the compact snapshot emitted by a live SForge Goal Plus agent."""
+
+    path = task_run / "goal-plus-live-status.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _merge_keyed_records(
+    older: list[dict[str, Any]],
+    newer: list[dict[str, Any]],
+    key: str,
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    unkeyed: list[dict[str, Any]] = []
+    for item in [*older, *newer]:
+        if not isinstance(item, dict):
+            continue
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            merged[value] = {**merged.get(value, {}), **item}
+        else:
+            unkeyed.append(item)
+    return [merged[value] for value in sorted(merged)] + unkeyed
 
 
 def latest_judge_report(
@@ -311,28 +405,93 @@ def live_goal_plus_status(
         else parse_codex_event_file(Path(""))
     )
     event_goal_plus = events["goal_plus"]
+    live = goal_plus_live_snapshot(task_run) if task_run is not None else None
     archived = goal_plus_stats(task_run) if task_run is not None else None
+    live_candidate_ids = (live or {}).get("candidate_ids") or []
+    archived_candidate_ids = (archived or {}).get("candidate_ids") or []
+    candidate_ids = sorted(
+        {
+            *event_goal_plus["candidate_ids"],
+            *map(str, live_candidate_ids),
+            *map(str, archived_candidate_ids),
+        }
+    )
+    live_sessions = (live or {}).get("worker_sessions") or []
+    worker_sessions = _merge_keyed_records(
+        event_goal_plus["worker_sessions"], live_sessions, "agent_session_id"
+    )
+    worker_sessions = _merge_keyed_records(
+        worker_sessions,
+        (archived or {}).get("worker_sessions") or [],
+        "agent_session_id",
+    )
+    live_handles = (live or {}).get("bound_worker_handles") or []
+    bound_worker_handles = _merge_keyed_records(
+        event_goal_plus["bound_worker_handles"],
+        live_handles,
+        "agent_session_id",
+    )
+    bound_worker_handles = _merge_keyed_records(
+        bound_worker_handles,
+        (archived or {}).get("bound_worker_handles") or [],
+        "agent_session_id",
+    )
+    live_ledger = (live or {}).get("verifier_ledger") or []
+    verifier_ledger = max(
+        (event_goal_plus["verifier_ledger"], live_ledger),
+        key=len,
+    )
+    goal_statuses = _merge_keyed_records(
+        event_goal_plus["goal_statuses"],
+        (live or {}).get("goal_statuses") or [],
+        "goal_plus_id",
+    )
+    goal_statuses = _merge_keyed_records(
+        goal_statuses,
+        (archived or {}).get("goal_statuses") or [],
+        "goal_plus_id",
+    )
+    state_sources = []
+    if live is not None:
+        state_sources.append("goal-plus-live-status.json")
+    if archived is not None:
+        state_sources.append("goal-plus-state.tar")
+    if any(
+        (
+            event_goal_plus["candidate_ids"],
+            event_goal_plus["agent_session_ids"],
+            event_goal_plus["verifier_ledger"],
+            event_goal_plus["goal_statuses"],
+        )
+    ):
+        state_sources.append("codex-event-stream")
     return {
-        "candidate_ids": event_goal_plus["candidate_ids"],
+        "candidate_ids": candidate_ids,
         "candidate_count": max(
-            len(event_goal_plus["candidate_ids"]),
+            len(candidate_ids),
+            int((live or {}).get("candidate_count") or 0),
             int((archived or {}).get("candidates") or 0),
         ),
-        "worker_sessions": event_goal_plus["worker_sessions"],
+        "worker_sessions": worker_sessions,
         "agent_session_count": max(
             len(event_goal_plus["agent_session_ids"]),
+            len(worker_sessions),
+            int((live or {}).get("agent_session_count") or 0),
             int((archived or {}).get("agent_sessions") or 0),
         ),
         "spawned_worker_thread_ids": events["spawned_agent_thread_ids"],
         "spawn_agent_completed_count": events["spawn_agent_completed_count"],
-        "bound_worker_handles": event_goal_plus["bound_worker_handles"],
+        "bound_worker_handles": bound_worker_handles,
         "actual_worker_launch_count": max(
             int(events["spawned_agent_thread_count"]),
             int(event_goal_plus["bound_worker_handle_count"]),
+            int((live or {}).get("actual_worker_launch_count") or 0),
+            int((archived or {}).get("agent_sessions") or 0),
         ),
-        "verifier_ledger": event_goal_plus["verifier_ledger"],
+        "verifier_ledger": verifier_ledger,
         "worker_verifier_runs": max(
-            len(event_goal_plus["verifier_ledger"]),
+            len(verifier_ledger),
+            int((live or {}).get("worker_verifier_runs") or 0),
             int((archived or {}).get("worker_verifier_runs") or 0),
         ),
         "verifier_candidate_ids": sorted(
@@ -342,22 +501,28 @@ def live_goal_plus_status(
                     for item in event_goal_plus["verifier_ledger"]
                     if isinstance(item, dict) and item.get("candidate_id")
                 ),
+                *((live or {}).get("verifier_candidate_ids") or []),
                 *((archived or {}).get("verifier_candidate_ids") or []),
             }
         ),
         "selected_candidate_ids": sorted(
             {
                 *event_goal_plus["selected_candidate_ids"],
+                *((live or {}).get("selected_candidate_ids") or []),
                 *((archived or {}).get("selected_candidate_ids") or []),
             }
         ),
         "promoted_candidate_ids": sorted(
             {
                 *event_goal_plus["promoted_candidate_ids"],
+                *((live or {}).get("promoted_candidate_ids") or []),
                 *((archived or {}).get("promoted_candidate_ids") or []),
             }
         ),
-        "goal_statuses": event_goal_plus["goal_statuses"],
+        "goal_statuses": goal_statuses,
+        "terminal_ready": (live or {}).get("terminal_ready"),
+        "snapshot_at": (live or {}).get("captured_at"),
+        "state_sources": state_sources,
         "remaining": remaining_time(cell),
         "latest_judge_submission": latest_judge_report(destination, cell, task_run),
     }

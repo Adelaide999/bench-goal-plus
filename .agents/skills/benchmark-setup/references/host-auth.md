@@ -19,6 +19,7 @@
 | 宿主 loopback API | 当前 EdgeBench controller 不支持把 `127.0.0.1` API 从 Mac 桥入容器；使用容器可达的非 loopback URL | 需要 `ip`、`systemd-socket-activate` 和 `systemd-socket-proxyd` |
 | `internet=false` | Docker VM 通常不能满足 SForge 的 host `iptables` gate；只能使用 profile 明确声明的 open-network smoke | 需要 SForge 可使用 passwordless `sudo iptables` 完成 allowlist |
 | Codex container runtime | 需要 Linux x64 Codex runtime cache | 同样需要 Linux x64 Codex runtime cache |
+| Goal Plus container runtime | controller 会把受管 Goal Plus checkout 复制进容器；不能复制 macOS Python/venv | 可选复制兼容目标镜像的 Linux x64 便携 Python；普通 host venv 不能直接复用 |
 
 两种 host 都必须通过 benchmark-native doctor。macOS 能跑 local smoke 不等于官方
 offline/network-isolated protocol 已满足；正式 Linux 运行也不能跳过 bridge、resource limit
@@ -85,6 +86,26 @@ export SFORGE_PI_AUTH_FILE=/path/to/pi-auth.json
 
 未设置时使用 `~/.pi/agent/auth.json`。Plain Pi 与 Goal Plus + Pi 都使用这条路径；
 不能把 common/OpenEvolve 的 Pi direct-API 配置照搬到 EdgeBench。
+
+### EdgeBench Goal Plus / Pi runtime cache
+
+`codex-goal-plus` 与 `pi-goal-plus` 已由 SForge 原生支持，不需要 Skill 在容器里手工
+拼安装命令。当前真实路径是：
+
+- controller 设置 `SFORGE_GOAL_PLUS_SOURCE_DIR`，`prepare_container` 把受管
+  Goal Plus checkout 复制到 `/opt/goal-plus`，因此不会在每个任务里重新 clone；
+- SForge 接受 `SFORGE_GOAL_PLUS_PYTHON_DIR`，把 Linux Python 3.10+ runtime
+  复制到 `/opt/sforge-python`；该目录必须与 Work container 的平台兼容，macOS
+  Python 或 macOS venv 不能使用；
+- 未设置便携 Python 时，每个 Work container 仍会执行 Goal Plus `pip install`；
+- Pi 的 Node.js 与固定版本 Pi package 当前仍按任务安装。下载镜像只能加速下载，
+  不等于已经有可复用 runtime。
+
+因此，进一步降低启动耗时应在 EdgeBench/SForge provision 中生成并校验按
+`architecture + Python/Node/Pi version + Goal Plus commit` 定址的 Linux runtime
+bundle，再由 `prepare_container` 复制或挂载。bench-goal-plus 只负责选择、传入并在
+doctor 中验证该 bundle；不要把构建逻辑写进 Skill，也不要修改或冒充任务固定的
+Work/Judge image tag。
 
 ### Anthropic-compatible API
 

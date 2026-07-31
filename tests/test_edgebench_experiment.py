@@ -25,6 +25,7 @@ sys.modules[SPEC.name] = EDGE
 SPEC.loader.exec_module(EDGE)
 
 from experiments.edgebench.controller import io as EDGE_IO
+from experiments.edgebench.controller import evidence as EDGE_EVIDENCE
 from experiments.edgebench.controller import reporting as EDGE_REPORTING
 from experiments.edgebench.controller import runtime as EDGE_RUNTIME
 
@@ -56,6 +57,87 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             self.assertTrue(
                 (ROOT / "experiments" / "edgebench" / "controller" / module).is_file()
             )
+
+    def test_live_goal_plus_status_uses_pi_runtime_snapshot(self) -> None:
+        task_run = self.temp / "task-run"
+        task_run.mkdir(parents=True)
+        (task_run / "goal-plus-live-status.json").write_text(
+            json.dumps(
+                {
+                    "captured_at": "2026-07-31T10:40:00Z",
+                    "candidate_ids": ["c001", "c002"],
+                    "candidate_count": 2,
+                    "worker_sessions": [
+                        {
+                            "agent_session_id": "agent_001",
+                            "candidate_id": "c001",
+                            "host": "pi",
+                            "verifier_runs": 4,
+                        },
+                        {
+                            "agent_session_id": "agent_002",
+                            "candidate_id": "c002",
+                            "host": "pi",
+                            "verifier_runs": 7,
+                        },
+                    ],
+                    "agent_session_count": 2,
+                    "bound_worker_handles": [
+                        {
+                            "agent_session_id": "agent_001",
+                            "host": "pi-rpc",
+                            "external_id": "agent_001",
+                        },
+                        {
+                            "agent_session_id": "agent_002",
+                            "host": "pi-rpc",
+                            "external_id": "agent_002",
+                        },
+                    ],
+                    "actual_worker_launch_count": 2,
+                    "verifier_ledger": [
+                        {"candidate_id": "c001", "iteration": index}
+                        for index in range(1, 5)
+                    ]
+                    + [
+                        {"candidate_id": "c002", "iteration": index}
+                        for index in range(1, 8)
+                    ],
+                    "worker_verifier_runs": 11,
+                    "verifier_candidate_ids": ["c001", "c002"],
+                    "selected_candidate_ids": ["c001"],
+                    "promoted_candidate_ids": ["c001"],
+                    "goal_statuses": [
+                        {"goal_plus_id": "gp_0001", "status": "complete"}
+                    ],
+                    "terminal_ready": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        status = EDGE_EVIDENCE.live_goal_plus_status(
+            self.temp,
+            {
+                "state": "running",
+                "started_at": "2026-07-31T10:35:00Z",
+                "wall_time_seconds": 600,
+                "goal_plus_finalization_grace_seconds": 120,
+                "task_id": "vliw_kernel_optimization",
+                "sforge_run_id": "pi-live-status-test",
+            },
+            task_run,
+        )
+
+        self.assertEqual(status["candidate_count"], 2)
+        self.assertEqual(status["agent_session_count"], 2)
+        self.assertEqual(status["actual_worker_launch_count"], 2)
+        self.assertEqual(status["worker_verifier_runs"], 11)
+        self.assertEqual(status["promoted_candidate_ids"], ["c001"])
+        self.assertTrue(status["terminal_ready"])
+        self.assertEqual(
+            status["state_sources"], ["goal-plus-live-status.json"]
+        )
 
     def setUp(self) -> None:
         self.temp = (
