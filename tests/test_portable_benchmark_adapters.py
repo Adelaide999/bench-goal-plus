@@ -343,6 +343,103 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             self.assertEqual(run["best_recorded_score"], 4.0)
             self.assertEqual(run["selected_score"], 4.0)
 
+    def test_goal_plus_collector_exposes_frozen_budget_and_pi_lease(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            root = workspace / ".gp"
+            run_dir = root / "runs/run_test"
+            spec_dir = root / "specs/spec_test"
+            job_dir = root / "host-pools/pi/pool_test/jobs/job_test"
+            run_dir.mkdir(parents=True)
+            spec_dir.mkdir(parents=True)
+            job_dir.mkdir(parents=True)
+            (run_dir / "run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run_test",
+                        "state": "promoted",
+                        "frozen_spec_id": "spec_test",
+                    }
+                )
+            )
+            (spec_dir / "frozen_spec.json").write_text(
+                json.dumps(
+                    {
+                        "spec": {
+                            "metric_direction": "minimize",
+                            "strategy": {
+                                "worker_host": "pi-rpc",
+                                "worker_budget": {
+                                    "min_runtime_seconds": 150,
+                                    "min_verifier_runs": 1,
+                                    "max_runtime_seconds": 200,
+                                },
+                            },
+                        }
+                    }
+                )
+            )
+            (job_dir / "job.json").write_text(
+                json.dumps(
+                    {
+                        "job_id": "job_test",
+                        "run_id": "run_test",
+                        "candidate_id": "c001",
+                        "status": "timed_out",
+                    }
+                )
+            )
+            (job_dir / "result.json").write_text(
+                json.dumps({"lease": {"satisfied": False}})
+            )
+
+            run = openevolve_experiment.collect_goal_plus_state(workspace)["runs"][0]
+
+            self.assertEqual(run["worker_host"], "pi-rpc")
+            self.assertEqual(run["worker_budget"]["min_runtime_seconds"], 150)
+            self.assertEqual(run["pi_pool_jobs"][0]["status"], "timed_out")
+            self.assertFalse(run["pi_pool_jobs"][0]["lease"]["satisfied"])
+
+    def test_goal_plus_collector_excludes_failed_iteration_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            root = workspace / ".gp"
+            run_dir = root / "runs/run_test"
+            candidate_dir = run_dir / "candidates/c001"
+            spec_dir = root / "specs/spec_test"
+            candidate_dir.mkdir(parents=True)
+            spec_dir.mkdir(parents=True)
+            (run_dir / "run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run_test",
+                        "state": "promoted",
+                        "frozen_spec_id": "spec_test",
+                        "selected_score": 1461,
+                    }
+                )
+            )
+            (spec_dir / "frozen_spec.json").write_text(
+                json.dumps({"spec": {"metric_direction": "minimize"}})
+            )
+            (candidate_dir / "candidate.json").write_text(
+                json.dumps(
+                    {
+                        "candidate_id": "c001",
+                        "iterations": [
+                            {"score": 1461, "process_passed": True},
+                            {"score": 0, "process_passed": False},
+                        ],
+                    }
+                )
+            )
+
+            run = openevolve_experiment.collect_goal_plus_state(workspace)["runs"][0]
+
+            self.assertEqual(run["best_recorded_score"], 1461)
+            self.assertEqual(run["recorded_score_min"], 1461)
+            self.assertEqual(run["recorded_score_max"], 1461)
+
     def test_controller_runtime_files_are_not_candidate_edits(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)
@@ -374,6 +471,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             (workspace / ".bench-runtime/budget.json").write_text("{}\n")
             (workspace / ".tmp").mkdir()
             (workspace / ".tmp/handoff.json").write_text("{}\n")
+            (workspace / ".tmp/peer.diff").write_text("scratch\n")
             (workspace / "results.tsv").write_text("commit\tscore\n")
             (workspace / "TASK.md").write_text("unauthorized\n")
             self.assertEqual(candidate_changed_paths(workspace), {"TASK.md"})

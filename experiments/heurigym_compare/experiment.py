@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run HeuriGym operator scheduling with Plain Codex or Goal Plus + Codex."""
+"""Run portable benchmarks with Codex, Goal Plus, or SkyDiscover."""
 
 from __future__ import annotations
 
@@ -24,7 +24,9 @@ from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from experiments.backends import skydiscover as sky_backend  # noqa: E402
 from experiments.openevolve_compare.experiment import (  # noqa: E402
     DEFAULT_REASONING_EFFORT,
+    PI_PROVIDER_ID,
     append_unique_lines,
+    close_pi_pools,
     codex_goal_plus_mcp_args,
     codex_provider_args,
     collect_evidence_annotator_usage,
@@ -33,9 +35,11 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     configure_evidence_annotator_environment,
     configure_isolated_codex_home,
     copy_goal_plus_assets,
+    copy_goal_plus_pi_assets,
     finalize_goal_plus_search,
     goal_plus_incomplete_reason,
     parse_codex_events,
+    parse_pi_events,
     primary_score,
     render_goal,
     render_plain_prompt,
@@ -44,6 +48,7 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     sha256_file,
     sha256_text,
     utc_now,
+    write_pi_models_config,
     write_json,
 )
 
@@ -53,7 +58,12 @@ DEFAULT_CHECKOUT_ROOT = ROOT / "third_party"
 DEFAULT_VENV = ROOT / ".bench-env/venv"
 DEFAULT_RUNS = ROOT / "runs/benchmark-compare"
 DEFAULT_MODEL = "gpt-5.6-sol"
-METHODS = ("plain-codex", "goal-plus-codex", *sky_backend.METHODS)
+METHODS = (
+    "plain-codex",
+    "goal-plus-codex",
+    "goal-plus-pi",
+    *sky_backend.METHODS,
+)
 SKYDISCOVER_EDIT_PROTOCOL = """
 
 ## SkyDiscover candidate response contract
@@ -221,14 +231,22 @@ def prepare(args: argparse.Namespace) -> int:
         }
         workspace_value = None
         goal_plus_config = None
-    elif args.method == "goal-plus-codex":
+    elif args.method in {"goal-plus-codex", "goal-plus-pi"}:
         workspace = run_dir / "workspace"
         materialized = materialize_workspace(
             benchmark_root,
             workspace,
         )
-        copy_goal_plus_assets(goal_plus_root, workspace)
-        append_unique_lines(workspace / ".gitignore", [".gp/", ".codex-log/"])
+        if args.method == "goal-plus-codex":
+            copy_goal_plus_assets(goal_plus_root, workspace)
+            append_unique_lines(workspace / ".gitignore", [".gp/", ".codex-log/"])
+            worker_host = "codex"
+            worker_model = args.model
+        else:
+            copy_goal_plus_pi_assets(goal_plus_root, workspace)
+            append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
+            worker_host = "pi-rpc"
+            worker_model = f"{PI_PROVIDER_ID}/{args.model}"
         task_text = (workspace / "TASK.md").read_text()
         goal_prompt = render_goal(
             task_text=task_text,
@@ -238,8 +256,8 @@ def prepare(args: argparse.Namespace) -> int:
             wall_seconds=args.wall_time_seconds,
             closeout_seconds=args.soft_closeout_seconds,
             concurrency=args.concurrency,
-            worker_host="codex",
-            worker_model=args.model,
+            worker_host=worker_host,
+            worker_model=worker_model,
             reasoning_effort=args.reasoning_effort,
             worker_runtime_seconds=args.worker_runtime_seconds,
             worker_min_runtime_seconds=args.worker_min_runtime_seconds,
@@ -261,8 +279,8 @@ def prepare(args: argparse.Namespace) -> int:
         workspace_value = str(workspace)
         goal_plus_config = {
             "entrypoint": "/goal-plus mode=autonomous",
-            "worker_host": "codex",
-            "worker_model": args.model,
+            "worker_host": worker_host,
+            "worker_model": worker_model,
             "metric_name": PRIMARY_METRIC,
             "metric_direction": DIRECTION,
             "artifact_name": ARTIFACT_NAME,
@@ -634,6 +652,7 @@ def execute_goal_plus(
 ) -> dict[str, Any]:
     budget = manifest["budget"]
     workspace = Path(manifest["workspace"])
+    is_pi = manifest.get("method", "goal-plus-codex") == "goal-plus-pi"
     if (workspace / ".gp").exists():
         raise RuntimeError("standard Goal Plus run must start without .gp")
     seed = evaluate_with_controller_runtime(
@@ -667,8 +686,8 @@ def execute_goal_plus(
         wall_seconds=budget["wall_time_seconds"],
         closeout_seconds=budget["soft_closeout_seconds"],
         concurrency=budget["concurrency"],
-        worker_host="codex",
-        worker_model=args.model,
+        worker_host="pi-rpc" if is_pi else "codex",
+        worker_model=f"{PI_PROVIDER_ID}/{args.model}" if is_pi else args.model,
         reasoning_effort=manifest.get(
             "reasoning_effort", DEFAULT_REASONING_EFFORT
         ),
@@ -677,30 +696,75 @@ def execute_goal_plus(
         verifier_timeout_seconds=VERIFIER_TIMEOUT_SECONDS,
     )
     (run_dir / "prompt.md").write_text(prompt)
-    command = codex_command(
-        codex_bin=args.codex_bin,
-        workspace=workspace,
-        output_last_message=run_dir / "final-message.txt",
-        model=args.model,
-        reasoning_effort=manifest.get(
-            "reasoning_effort", DEFAULT_REASONING_EFFORT
-        ),
-        api_base=args.api_base,
-        sandbox=CODEX_SANDBOX,
-        goal_plus=True,
-        ephemeral=False,
-        max_concurrent_threads_per_session=budget["concurrency"] + 1,
-    )
+    reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)
+    if is_pi:
+        qualified_model = f"{PI_PROVIDER_ID}/{args.model}"
+        pi_home = run_dir / "pi-home"
+        write_pi_models_config(
+            pi_home,
+            api_base=args.api_base,
+            model=args.model,
+            reasoning_effort=reasoning_effort,
+        )
+        environment["PI_CODING_AGENT_DIR"] = str(pi_home)
+        environment["GOAL_PLUS_PI_MODEL"] = qualified_model
+        command = [
+            args.pi_bin,
+            "--mode",
+            "json",
+            "--provider",
+            PI_PROVIDER_ID,
+            "--model",
+            qualified_model,
+            "--thinking",
+            reasoning_effort,
+            "--approve",
+            "--session-dir",
+            str(run_dir / "pi-main-session"),
+            "--session-id",
+            f"bench-{run_dir.name}",
+            "--no-extensions",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-context-files",
+            "--extension",
+            str(workspace / ".pi/extensions/goal-plus.ts"),
+            "--skill",
+            str(workspace / ".pi/skills/goal-plus/SKILL.md"),
+            prompt,
+        ]
+        stdin_text = None
+        recorded_command = [*command[:-1], "<goal-prompt>"]
+    else:
+        command = codex_command(
+            codex_bin=args.codex_bin,
+            workspace=workspace,
+            output_last_message=run_dir / "final-message.txt",
+            model=args.model,
+            reasoning_effort=reasoning_effort,
+            api_base=args.api_base,
+            sandbox=CODEX_SANDBOX,
+            goal_plus=True,
+            ephemeral=False,
+            max_concurrent_threads_per_session=budget["concurrency"] + 1,
+        )
+        stdin_text = prompt
+        recorded_command = None
     control = run_controlled(
         command,
         cwd=workspace,
         environment=environment,
-        stdin_text=prompt,
+        stdin_text=stdin_text,
         stdout_path=run_dir / "events.jsonl",
         stderr_path=run_dir / "stderr.log",
         wall_time_seconds=budget["wall_time_seconds"],
         hard_kill_grace_seconds=budget["hard_kill_grace_seconds"],
+        recorded_command=recorded_command,
     )
+    if is_pi:
+        control["pi_pool_cleanup"] = close_pi_pools(
+            workspace, budget["hard_kill_grace_seconds"]
+        )
     with controller_subprocess_environment(
         runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
         verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
@@ -713,7 +777,10 @@ def execute_goal_plus(
     )
     write_json(run_dir / "final-eval.json", final)
     shutil.copy2(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
-    control["codex"] = parse_codex_events(run_dir / "events.jsonl")
+    if is_pi:
+        control["pi"] = parse_pi_events(run_dir / "events.jsonl")
+    else:
+        control["codex"] = parse_codex_events(run_dir / "events.jsonl")
     control["goal_plus"] = collect_goal_plus_state(workspace)
     control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
         workspace
@@ -742,6 +809,12 @@ def execute_goal_plus(
         control["goal_plus"],
         expected_concurrency=budget["concurrency"],
         minimum_worker_verified_candidates=1,
+        expected_worker_min_runtime_seconds=budget.get(
+            "worker_min_runtime_seconds"
+        ),
+        expected_worker_min_verifier_runs=(
+            1 if budget.get("worker_min_runtime_seconds") is not None else None
+        ),
     )
     if reason:
         control["result_incomplete_reason"] = reason
@@ -895,7 +968,10 @@ def execute(args: argparse.Namespace) -> int:
         raise RuntimeError(f"run is not prepared: {manifest['status']}")
     if args.model != manifest["model"]:
         raise ValueError(f"model mismatch: prepared {manifest['model']}, got {args.model}")
-    if sky_backend.is_method(manifest["method"]) and not args.api_base:
+    if (
+        sky_backend.is_method(manifest["method"])
+        or manifest["method"] == "goal-plus-pi"
+    ) and not args.api_base:
         raise ValueError(f"--api-base is required for {manifest['method']}")
     if args.api_base and not os.environ.get("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is required with --api-base")
@@ -935,6 +1011,8 @@ def execute(args: argparse.Namespace) -> int:
     version_command = (
         [str(bin_dir / "skydiscover-run"), "--version"]
         if sky_backend.is_method(manifest["method"])
+        else [args.pi_bin, "--version"]
+        if manifest["method"] == "goal-plus-pi"
         else [args.codex_bin, "--version"]
     )
     version = subprocess.run(
@@ -960,7 +1038,7 @@ def seed_smoke(args: argparse.Namespace) -> int:
                 "public",
                 run_dir / "controller-runtime/seed-smoke" / workspace.name,
             )
-            if manifest["method"] == "goal-plus-codex"
+            if manifest["method"] in {"goal-plus-codex", "goal-plus-pi"}
             else evaluate(workspace, "public")
         )
         results.append(
@@ -978,10 +1056,14 @@ def repair_closeout(args: argparse.Namespace) -> int:
     manifest_path = run_dir / "experiment.json"
     manifest = load_json(manifest_path)
     configure_adapter(manifest.get("benchmark_adapter", "heurigym"))
-    if manifest["method"] != "goal-plus-codex":
-        raise ValueError("closeout is only valid for Goal Plus + Codex runs")
+    if manifest["method"] not in {"goal-plus-codex", "goal-plus-pi"}:
+        raise ValueError("closeout is only valid for Goal Plus runs")
     workspace = Path(manifest["workspace"])
     control = dict(manifest.get("execution") or {})
+    if manifest["method"] == "goal-plus-pi":
+        control["pi_pool_cleanup_repair"] = close_pi_pools(
+            workspace, manifest["budget"]["hard_kill_grace_seconds"]
+        )
     with controller_subprocess_environment(
         runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
         verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
@@ -1028,6 +1110,12 @@ def repair_closeout(args: argparse.Namespace) -> int:
         control["goal_plus"],
         expected_concurrency=budget["concurrency"],
         minimum_worker_verified_candidates=1,
+        expected_worker_min_runtime_seconds=budget.get(
+            "worker_min_runtime_seconds"
+        ),
+        expected_worker_min_verifier_runs=(
+            1 if budget.get("worker_min_runtime_seconds") is not None else None
+        ),
     )
     if not control["goal_plus_controller_closeout_repair"].get("completed"):
         reason = (
@@ -1087,6 +1175,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--run-dir", type=Path, required=True)
     run_parser.add_argument("--codex-bin", default="codex")
+    run_parser.add_argument("--pi-bin", default="pi")
     run_parser.add_argument("--model", default=DEFAULT_MODEL)
     run_parser.add_argument("--api-base")
 

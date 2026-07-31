@@ -222,6 +222,26 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertNotIn("goal_plus_id=", prompt)
         self.assertNotIn("search_start_agent_session", prompt)
 
+    def test_pi_goal_prompt_names_pool_supervisor_minimum_lease(self) -> None:
+        prompt = experiment.render_goal(
+            task_text="# Objective\nImprove it.",
+            artifact_name="candidate.py",
+            metric_name="combined_score",
+            metric_direction="maximize",
+            wall_seconds=300,
+            closeout_seconds=60,
+            concurrency=2,
+            worker_host="pi-rpc",
+            worker_model="bench-openai/gpt-5.6-luna",
+            worker_runtime_seconds=200,
+            worker_min_runtime_seconds=150,
+        )
+
+        self.assertIn("pool supervisor", prompt)
+        self.assertIn("same native session", prompt)
+        self.assertIn("strategy.config.closeout_reserve_seconds=60", prompt)
+        self.assertNotIn("SubagentStop", prompt)
+
     def test_plain_and_goal_plus_prompts_share_exact_common_body(self) -> None:
         task = "# Objective\nImprove it."
         common = experiment.render_plain_prompt(task, 300, 60)
@@ -262,6 +282,27 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 {
                     "run_id": "run_test",
                     "candidate_count": 2,
+                    "worker_host": "pi-rpc",
+                    "worker_budget": {
+                        "min_runtime_seconds": 150,
+                        "min_verifier_runs": 1,
+                        "max_runtime_seconds": 200,
+                        "on_exceed": "interrupt",
+                    },
+                    "pi_pool_jobs": [
+                        {
+                            "job_id": "job_1",
+                            "candidate_id": "c001",
+                            "status": "completed",
+                            "lease": {"satisfied": True},
+                        },
+                        {
+                            "job_id": "job_2",
+                            "candidate_id": "c002",
+                            "status": "completed",
+                            "lease": {"satisfied": True},
+                        },
+                    ],
                     "bound_candidate_count": 2,
                     "worker_verified_candidate_count": 2,
                     "unbound_agent_session_count": 0,
@@ -274,6 +315,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             "expected_concurrency": 2,
             "expected_goal_plus_id": "gp_0001",
             "expected_run_id": "run_test",
+            "expected_worker_min_runtime_seconds": 150,
+            "expected_worker_min_verifier_runs": 1,
         }
         self.assertIsNone(experiment.goal_plus_incomplete_reason(base_state, **kwargs))
 
@@ -316,6 +359,22 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn(
             "duplicate Goal Plus records",
             experiment.goal_plus_incomplete_reason(duplicate_goal, **kwargs),
+        )
+
+        misplaced_budget = json.loads(json.dumps(base_state))
+        misplaced_budget["runs"][0]["worker_budget"].pop("min_runtime_seconds")
+        self.assertIn(
+            "frozen worker budget",
+            experiment.goal_plus_incomplete_reason(misplaced_budget, **kwargs),
+        )
+
+        unsatisfied_lease = json.loads(json.dumps(base_state))
+        unsatisfied_lease["runs"][0]["pi_pool_jobs"][0].update(
+            {"status": "timed_out", "lease": {"satisfied": False}}
+        )
+        self.assertIn(
+            "minimum lease",
+            experiment.goal_plus_incomplete_reason(unsatisfied_lease, **kwargs),
         )
 
     def test_natural_goal_plus_completion_ignores_aborted_search_history(
@@ -599,6 +658,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             payload = json.loads(raw)
             provider = payload["providers"][experiment.PI_PROVIDER_ID]
             self.assertEqual(provider["apiKey"], "$OPENAI_API_KEY")
+            self.assertEqual(provider["api"], "openai-responses")
             self.assertEqual(
                 provider["models"][0]["thinkingLevelMap"], {"high": "high"}
             )

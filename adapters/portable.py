@@ -97,7 +97,8 @@ def candidate_changed_paths(workspace: Path) -> set[str]:
         path
         for path in changed_workspace_paths(workspace)
         if not path.startswith(".bench-runtime/")
-        and path not in {".tmp/handoff.json", "results.tsv"}
+        and not path.startswith(".tmp/")
+        and path != "results.tsv"
     }
 
 
