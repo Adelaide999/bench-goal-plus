@@ -267,6 +267,15 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             self.assertEqual(report["classification"], "local_example")
             self.assertFalse(report["official_edgebench_comparable"])
 
+    def test_local_vliw_final_suite_has_its_own_timeout(self) -> None:
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.object(local_vliw.subprocess, "run", return_value=completed) as run:
+            local_vliw.run_source_evaluator(Path("source"), Path("solution.py"), "public")
+            self.assertEqual(run.call_args.kwargs["timeout"], 60)
+
+            local_vliw.run_source_evaluator(Path("source"), Path("solution.py"), "final")
+            self.assertEqual(run.call_args.kwargs["timeout"], 180)
+
     def test_codex_task_name_counts_as_a_bound_goal_plus_session(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)

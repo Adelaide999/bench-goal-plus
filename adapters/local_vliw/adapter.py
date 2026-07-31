@@ -46,6 +46,7 @@ OFFICIAL_BENCHMARK_COMPARABLE = False
 BASELINE_CYCLES = 147_734
 INVALID_CYCLES = 1_000_000_000
 VERIFIER_TIMEOUT_SECONDS = 60
+FINAL_EVALUATOR_TIMEOUT_SECONDS = 180
 
 SOURCE_FILES = {
     "task/problem.py": "task/problem.py",
@@ -205,7 +206,11 @@ def run_source_evaluator(
             cwd=runtime_root,
             capture_output=True,
             text=True,
-            timeout=VERIFIER_TIMEOUT_SECONDS,
+            timeout=(
+                FINAL_EVALUATOR_TIMEOUT_SECONDS
+                if mode == "final"
+                else VERIFIER_TIMEOUT_SECONDS
+            ),
         )
         raw = json.loads(report_path.read_text()) if report_path.is_file() else {}
     diagnostics = {
