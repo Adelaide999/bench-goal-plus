@@ -291,6 +291,49 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 },
             },
             {
+                "type": "item.completed",
+                "item": {
+                    "type": "mcp_tool_call",
+                    "server": "goal-plus",
+                    "tool": "search_start_agent_session",
+                    "status": "completed",
+                    "arguments": {
+                        "run_id": "run_test",
+                        "candidate_id": "c001",
+                    },
+                    "result": {
+                        "structured_content": {
+                            "run_id": "run_test",
+                            "candidate_id": "c001",
+                            "agent_session_id": "agent_001",
+                            "host": "codex",
+                        }
+                    },
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "mcp_tool_call",
+                    "server": "goal-plus",
+                    "tool": "search_run_verifier",
+                    "status": "completed",
+                    "arguments": {
+                        "run_id": "run_test",
+                        "candidate_id": "c001",
+                    },
+                    "result": {
+                        "structured_content": {
+                            "run_id": "run_test",
+                            "candidate_id": "c001",
+                            "validity_passed": True,
+                            "aggregate_score": 2.0,
+                            "disposition": "keep",
+                        }
+                    },
+                },
+            },
+            {
                 "type": "turn.completed",
                 "usage": {"input_tokens": 10, "output_tokens": 2},
             },
@@ -301,11 +344,45 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             result = experiment.parse_codex_events(path)
 
         self.assertEqual(result["spawn_agent_completed_count"], 1)
+        self.assertEqual(result["spawned_agent_thread_count"], 1)
         self.assertEqual(result["spawned_agent_thread_ids"], ["thread_worker_1"])
         self.assertEqual(result["targetless_wait_count"], 1)
         self.assertEqual(
             result["collaboration_tool_counts"]["spawn_agent"]["completed"], 1
         )
+        self.assertEqual(result["goal_plus"]["candidate_ids"], ["c001"])
+        self.assertEqual(result["goal_plus"]["agent_session_ids"], ["agent_001"])
+        self.assertEqual(
+            result["goal_plus"]["verifier_ledger"][0]["aggregate_score"], 2.0
+        )
+
+    def test_codex_event_parser_deduplicates_bound_worker_handles(self) -> None:
+        events = [
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "mcp_tool_call",
+                    "server": "goal-plus",
+                    "tool": "search_bind_agent_handle",
+                    "status": "completed",
+                    "arguments": {
+                        "agent_session_id": session_id,
+                        "handle": {
+                            "host": "codex",
+                            "task_name": "/root/shared-worker",
+                        },
+                    },
+                },
+            }
+            for session_id in ("agent_001", "agent_002")
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "events.jsonl"
+            path.write_text("\n".join(json.dumps(item) for item in events))
+            result = experiment.parse_codex_events(path)
+
+        self.assertEqual(result["goal_plus"]["bound_worker_session_count"], 2)
+        self.assertEqual(result["goal_plus"]["bound_worker_handle_count"], 1)
 
     def test_goal_plus_completion_requires_worker_verifier_evidence_for_every_candidate(
         self,
@@ -361,17 +438,17 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIsNone(experiment.goal_plus_incomplete_reason(base_state, **kwargs))
 
         self.assertIn(
-            "0 spawn_agent calls",
+            "0 distinct spawned worker threads",
             experiment.goal_plus_incomplete_reason(
                 base_state,
-                codex_events={"spawn_agent_completed_count": 0},
+                codex_events={"spawned_agent_thread_count": 0},
                 **kwargs,
             ),
         )
         self.assertIsNone(
             experiment.goal_plus_incomplete_reason(
                 base_state,
-                codex_events={"spawn_agent_completed_count": 2},
+                codex_events={"spawned_agent_thread_count": 2},
                 **kwargs,
             )
         )
@@ -594,12 +671,15 @@ class OpenEvolveComparisonTest(unittest.TestCase):
 
             tools.search_select.side_effect = finish_promotion_then_fail
             with (
-                mock.patch(
-                    "goal_plus.goal_plus.FileGoalPlusRuntime",
-                    return_value=goal_runtime,
+                mock.patch.object(
+                    experiment,
+                    "_goal_plus_runtime_types",
+                    return_value=(
+                        mock.Mock(return_value=goal_runtime),
+                        mock.Mock(),
+                        mock.Mock(return_value=tools),
+                    ),
                 ),
-                mock.patch("goal_plus.runtime.FileSearchRuntime"),
-                mock.patch("goal_plus.tools.SearchTools", return_value=tools),
                 mock.patch.object(
                     experiment, "apply_promotion_patch", return_value="applied"
                 ) as apply_patch,
@@ -661,12 +741,15 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             tools.search_report.return_value = {"report_path": "report.md"}
 
             with (
-                mock.patch(
-                    "goal_plus.goal_plus.FileGoalPlusRuntime",
-                    return_value=goal_runtime,
+                mock.patch.object(
+                    experiment,
+                    "_goal_plus_runtime_types",
+                    return_value=(
+                        mock.Mock(return_value=goal_runtime),
+                        mock.Mock(),
+                        mock.Mock(return_value=tools),
+                    ),
                 ),
-                mock.patch("goal_plus.runtime.FileSearchRuntime"),
-                mock.patch("goal_plus.tools.SearchTools", return_value=tools),
                 mock.patch.object(
                     experiment, "apply_promotion_patch", return_value="applied"
                 ),

@@ -5,14 +5,13 @@ This preset is one concrete campaign, not the scope of `$benchmark-run`.
 Inspect the resolved lifecycle without changing the environment:
 
 ```bash
-python3 .agents/skills/benchmark-run/scripts/run_benchmark.py launch \
-  --preset edgebench-codex-2h --dry-run
+python3 scripts/bench.py plan --preset edgebench-codex-2h
 ```
 
 Launch it with bootstrap, Docker validation, provision, doctor, prepare, and detached run:
 
 ```bash
-python3 .agents/skills/benchmark-run/scripts/run_benchmark.py launch \
+python3 scripts/bench.py start \
   --preset edgebench-codex-2h
 ```
 

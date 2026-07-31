@@ -100,6 +100,20 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertTrue(profile["protocol_override_reasons"]["eval_interval"])
         self.assertTrue(profile["protocol_override_reasons"]["internet"])
 
+    def test_pi_profiles_use_canonical_method_names_and_explicit_budgets(self) -> None:
+        _, plain = EDGE.load_profile("vliw-pi-sol-medium-local-smoke")
+        _, goal_plus = EDGE.load_profile(
+            "vliw-goal-plus-pi-sol-medium-local-smoke"
+        )
+
+        self.assertEqual(EDGE.METHODS["plain-pi"]["agent"], "pi")
+        self.assertEqual(EDGE.METHODS["goal-plus-pi"]["agent"], "pi-goal-plus")
+        self.assertEqual(plain["methods"], ["plain-pi"])
+        self.assertEqual(goal_plus["methods"], ["goal-plus-pi"])
+        self.assertEqual(goal_plus["concurrency"], 2)
+        self.assertEqual(goal_plus["worker_runtime_seconds"], 240)
+        self.assertEqual(goal_plus["goal_plus_finalization_grace_seconds"], 120)
+
     def test_profile_rejects_invalid_eval_interval_override(self) -> None:
         _, profile = EDGE.load_profile("vliw-codex-sol-medium-local-smoke")
         for value in (0, "60"):
@@ -908,6 +922,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "reasoning_effort": "xhigh",
             "inner_search_concurrency": 4,
             "worker_runtime_seconds": 600,
+            "goal_plus_finalization_grace_seconds": 90,
         }
 
         env = EDGE.cell_environment(
@@ -922,6 +937,9 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertEqual(extra["SFORGE_GOAL_PLUS_MAX_PARALLEL"], "4")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "600")
+        self.assertEqual(
+            extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "90"
+        )
         self.assertEqual(
             extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"], "gpt-5.6-sol"
         )
@@ -938,6 +956,31 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         for key in ("TMPDIR", "TMP", "TEMP"):
             self.assertTrue(Path(env[key]).is_relative_to(ROOT))
+
+    def test_goal_plus_pi_environment_uses_the_same_runtime_contract(self) -> None:
+        env = EDGE.cell_environment(
+            {
+                "method": "goal-plus-pi",
+                "sforge_agent": "pi-goal-plus",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "medium",
+                "internet": True,
+                "inner_search_concurrency": 2,
+                "worker_runtime_seconds": 240,
+                "goal_plus_finalization_grace_seconds": 120,
+            }
+        )
+        extra = dict(
+            item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+
+        self.assertEqual(env["SFORGE_GOAL_PLUS_SOURCE_DIR"], str(EDGE.GOAL_PLUS_ROOT))
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_MAX_PARALLEL"], "2")
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "240")
+        self.assertEqual(extra["SFORGE_PI_REASONING_EFFORT"], "medium")
+        self.assertEqual(
+            extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "120"
+        )
 
     def test_api_config_prefers_sforge_then_openai_then_codex(self) -> None:
         config = EDGE.resolve_agent_api_config(
@@ -984,6 +1027,18 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             ),
             "https://anthropic.example/api/anthropic/v1/messages",
         )
+
+    def test_pi_auth_requires_an_openai_codex_login(self) -> None:
+        auth = self.temp / "pi-auth.json"
+        auth.write_text(json.dumps({"other-provider": {}}))
+        self.assertFalse(
+            EDGE.resolve_pi_auth({"SFORGE_PI_AUTH_FILE": str(auth)})["valid"]
+        )
+
+        auth.write_text(json.dumps({"openai-codex": {"type": "oauth"}}))
+        status = EDGE.resolve_pi_auth({"SFORGE_PI_AUTH_FILE": str(auth)})
+        self.assertTrue(status["valid"])
+        self.assertEqual(status["path"], auth)
 
     def test_claude_environment_pins_effort_and_preserves_extra_env(self) -> None:
         previous = EDGE.os.environ.get("SFORGE_AGENT_EXTRA_ENV")
@@ -1424,6 +1479,155 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertIn("--disable-auto-resume", command)
         self.assertIn("--disable-stop-hook", command)
         self.assertIn("--disable-internet", command)
+
+    def test_goal_plus_codex_completion_requires_real_spawn_and_verifier_evidence(
+        self,
+    ) -> None:
+        cell = {
+            "method": "goal-plus-codex",
+            "outer_replicas": 1,
+            "inner_search_concurrency": 2,
+        }
+        complete = {
+            "edgebench_score": 50.0,
+            "goal_plus": {
+                "candidates": 2,
+                "agent_sessions": 2,
+                "worker_verifier_runs": 2,
+            },
+            "agent_events": {
+                "spawn_agent_completed_count": 2,
+                "spawned_agent_thread_count": 2,
+                "goal_plus": {
+                    "candidate_ids": ["c001", "c002"],
+                    "agent_session_ids": ["a001", "a002"],
+                    "verifier_ledger": [
+                        {"candidate_id": "c001"},
+                        {"candidate_id": "c002"},
+                    ],
+                    "selected_candidate_ids": ["c001"],
+                    "promoted_candidate_ids": ["c001"],
+                },
+            },
+        }
+
+        passed = EDGE.goal_plus_completion_evidence(
+            cell, [complete], valid_trajectories=1
+        )
+        missing_spawn = EDGE.goal_plus_completion_evidence(
+            cell,
+            [
+                {
+                    **complete,
+                    "agent_events": {
+                        **complete["agent_events"],
+                        "spawn_agent_completed_count": 0,
+                        "spawned_agent_thread_count": 0,
+                    },
+                }
+            ],
+            valid_trajectories=1,
+        )
+
+        self.assertTrue(passed["passed"])
+        self.assertFalse(missing_spawn["passed"])
+        self.assertEqual(
+            missing_spawn["checks"]["actual_worker_launches"],
+            {"expected": 2, "actual": 0},
+        )
+
+    def test_goal_plus_pi_completion_uses_persisted_session_evidence(self) -> None:
+        evidence = EDGE.goal_plus_completion_evidence(
+            {
+                "method": "goal-plus-pi",
+                "outer_replicas": 1,
+                "inner_search_concurrency": 2,
+            },
+            [
+                {
+                    "edgebench_score": 40.0,
+                    "goal_plus": {
+                        "candidates": 2,
+                        "agent_sessions": 2,
+                        "worker_verifier_runs": 3,
+                        "verifier_candidate_ids": ["c001", "c002"],
+                    },
+                    "agent_events": {
+                        "spawn_agent_completed_count": 0,
+                        "goal_plus": {
+                            "candidate_ids": [],
+                            "agent_session_ids": [],
+                            "verifier_ledger": [],
+                            "selected_candidate_ids": ["c001"],
+                            "promoted_candidate_ids": [],
+                        },
+                    },
+                }
+            ],
+            valid_trajectories=1,
+        )
+
+        self.assertTrue(evidence["passed"])
+        self.assertNotIn("actual_worker_launches", evidence["checks"])
+
+    def test_finalize_downgrades_missing_goal_plus_evidence_to_partial(self) -> None:
+        destination = self.temp / "campaign-finalize"
+        cell_dir = destination / "cells" / "vliw--goal-plus-codex"
+        cell_dir.mkdir(parents=True)
+        campaign = {
+            "campaign_id": "campaign-finalize",
+            "state": "completed",
+            "task_ids": ["vliw_kernel_optimization"],
+            "cells": [
+                {
+                    "cell_id": "vliw--goal-plus-codex",
+                    "task_id": "vliw_kernel_optimization",
+                    "method": "goal-plus-codex",
+                    "state": "completed",
+                }
+            ],
+        }
+        cell = {
+            "cell_id": "vliw--goal-plus-codex",
+            "task_id": "vliw_kernel_optimization",
+            "method": "goal-plus-codex",
+            "state": "completed",
+        }
+        (destination / "campaign.json").write_text(json.dumps(campaign))
+        (cell_dir / "cell.json").write_text(json.dumps(cell))
+        original_summary = EDGE.summarize_cell
+        original_reference = EDGE.load_paper_reference
+        original_workbook = EDGE.write_comparison_workbook
+        EDGE.summarize_cell = lambda *_args, **_kwargs: {
+            "cell_id": "vliw--goal-plus-codex",
+            "task_id": "vliw_kernel_optimization",
+            "model": "gpt-test",
+            "reasoning_effort": "medium",
+            "wall_time_seconds": 60,
+            "live_search_concurrency": 2,
+            "completion_evidence": {"passed": False},
+            "incomplete_reason": "missing worker evidence",
+        }
+        EDGE.load_paper_reference = lambda: {
+            "tasks": {"vliw_kernel_optimization": {}}
+        }
+        EDGE.write_comparison_workbook = lambda *_args, **_kwargs: None
+        try:
+            payload = EDGE.finalize_campaign(destination)
+        finally:
+            EDGE.summarize_cell = original_summary
+            EDGE.load_paper_reference = original_reference
+            EDGE.write_comparison_workbook = original_workbook
+
+        self.assertFalse(payload["completion_evidence_passed"])
+        self.assertEqual(
+            json.loads((destination / "campaign.json").read_text())["state"],
+            "partial",
+        )
+        self.assertEqual(
+            json.loads((cell_dir / "cell.json").read_text())["state"],
+            "partial",
+        )
 
 
 if __name__ == "__main__":

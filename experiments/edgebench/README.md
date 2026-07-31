@@ -11,6 +11,8 @@ artifact 汇总成同口径表；campaign manifest 记录实际 source commit。
 |---|---:|---:|---|
 | Plain Codex | `K` replicas | `replica-concurrency=K` | K 条互相独立的 trajectory，等价于 independent parallel baseline |
 | Goal Plus + Codex | 1 replica | `budget.max_parallel=K` | 一个共享搜索状态中的 K 个 candidate workers |
+| Plain Pi | `K` replicas | `replica-concurrency=K` | K 条互相独立的 Pi trajectory |
+| Goal Plus + Pi | 1 replica | `budget.max_parallel=K` | Pi 主会话监管一个共享搜索状态中的 K 个 candidate workers |
 | Plain Claude | `K` replicas | `replica-concurrency=K` | Claude Code 原生 agent；可使用 Anthropic-compatible provider |
 
 两者固定同一 task definition、hidden judge、model、reasoning effort 和 wall budget
@@ -19,13 +21,8 @@ artifact 汇总成同口径表；campaign manifest 记录实际 source commit。
 ## 从新机器开始
 
 ```bash
-python3 scripts/repro_env.py bootstrap --only edgebench
-
-.bench-env/venv/bin/python experiments/edgebench/experiment.py provision \
-  --profile vliw-smoke
-
-.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
-  --profile vliw-smoke
+python3 scripts/bench.py setup \
+  --benchmark edgebench --profile vliw-smoke
 ```
 
 `provision` 只下载 profile 需要的 task definitions，并只 pull 这些题的 work/judge
@@ -60,7 +57,7 @@ Rust distribution 到 `~/.cache/sforge/rust/`，最终统一核对官方 SHA256�
 先在本地验证 Codex、Docker、Judge 和报告链路时，使用固定的 VLIW smoke preset：
 
 ```bash
-python3 scripts/bench.py launch \
+python3 scripts/bench.py start \
   --preset edgebench-vliw-codex-local-smoke
 ```
 
@@ -75,10 +72,20 @@ profile 中显式改为每 60 秒评测一次；macOS 本地 OAuth 路径也显�
 完成端到端验证：4 次 hidden Judge 均通过 9/9，controller 最终状态为
 `completed`，并成功生成 `report.md` 与同名 xlsx。
 
+Pi 的两个最小 profile 通过同一个入口：
+
+```bash
+python3 scripts/bench.py plan --preset edgebench-vliw-pi-local-smoke
+python3 scripts/bench.py plan --preset edgebench-vliw-goal-plus-pi-local-smoke
+```
+
+确认 host `openai-codex` 登录和 resolved contract 后，把 `plan` 改成 `start`。
+当前只声明 wiring-ready；真实 Pi E2E evidence 生成前不得标为 pass。
+
 完整 51 题 Codex-only 固定协议是通用 dispatcher 中的一个 preset：
 
 ```bash
-python3 .agents/skills/benchmark-run/scripts/run_benchmark.py launch \
+python3 scripts/bench.py start \
   --preset edgebench-codex-2h
 ```
 
@@ -87,17 +94,13 @@ python3 .agents/skills/benchmark-run/scripts/run_benchmark.py launch \
 run。它不会覆盖同名 campaign；加 `--dry-run` 可审查 resolved contract 和完整命令链。
 
 ```bash
-.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
-  --profile vliw-smoke \
+python3 scripts/bench.py start \
+  --benchmark edgebench --profile vliw-smoke \
   --campaign-id vliw-matched-01 \
   --model gpt-5.6-terra \
   --wall-time-seconds 300 \
-  --concurrency 2 \
+  --live-search-concurrency 2 \
   --cell-concurrency 1
-
-.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
-  --campaign vliw-matched-01 \
-  --detach
 ```
 
 `prepare` 不启动容器、不调用模型，也不预建 Goal Plus state。每个
@@ -148,12 +151,9 @@ GLM-5.2 Claude smoke 使用已固定的 profile；`thinking.type=enabled` 写入
 container：
 
 ```bash
-.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
-  --profile vliw-glm-5-2-high-20m-k1
-.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
-  --profile vliw-glm-5-2-high-20m-k1 --campaign-id <campaign-id>
-.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
-  --campaign <campaign-id> --detach
+python3 scripts/bench.py start \
+  --benchmark edgebench --profile vliw-glm-5-2-high-20m-k1 \
+  --campaign-id <campaign-id>
 ```
 
 不启用深度思考的同预算版本使用 `vliw-glm-5-2-none-20m-k1`。该 profile 固定
@@ -168,23 +168,15 @@ container：
 实际服务的模型身份必须以 transcript 响应元数据中的 `message.model` 为准：
 
 ```bash
-.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
-  --profile vliw-glm-5-1-adaptive-2h-k1
-.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
-  --profile vliw-glm-5-1-adaptive-2h-k1 --campaign-id <campaign-id>
-.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
-  --campaign <campaign-id> --detach
+python3 scripts/bench.py start \
+  --benchmark edgebench --profile vliw-glm-5-1-adaptive-2h-k1 \
+  --campaign-id <campaign-id>
 ```
 
 完整 51 题 Plain Codex 两小时 campaign 使用：
 
 ```bash
-.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
-  --profile full-codex-2h
-.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
-  --profile full-codex-2h --campaign-id <campaign-id>
-.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
-  --campaign <campaign-id> --detach
+python3 scripts/bench.py start --preset edgebench-codex-2h
 ```
 
 该 profile 固定 `concurrency=1`、`cell_concurrency=2`，即每题一个 Codex
@@ -196,12 +188,11 @@ passwordless iptables、改用能执行这些限制的 Docker，或使用官方 
 ## 监控、停止与恢复
 
 ```bash
-.bench-env/venv/bin/python experiments/edgebench/experiment.py status \
-  --campaign vliw-matched-01
+python3 scripts/bench.py status \
+  --campaign runs/edgebench/vliw-matched-01
 
-.bench-env/venv/bin/python experiments/edgebench/experiment.py stop \
-  --campaign vliw-matched-01 \
-  --wait-seconds 20
+python3 scripts/bench.py stop \
+  --campaign runs/edgebench/vliw-matched-01
 ```
 
 `run --detach` 建立独立 process group，并记录 controller PID/PGID。`stop` 请求
@@ -220,8 +211,8 @@ hard-kill 或清理容器/目录。
 ## 汇总
 
 ```bash
-.bench-env/venv/bin/python experiments/edgebench/experiment.py finalize \
-  --campaign vliw-matched-01
+python3 scripts/bench.py finish \
+  --campaign runs/edgebench/vliw-matched-01
 ```
 
 `finalize` 遍历每条 replica 的 `final_result.json` 和 `run_history.json`，调用
@@ -318,7 +309,8 @@ curve 比较；正式对比仍需先对齐 task revision、环境、`T` 和 `K`�
   --output runs/edgebench/local-fast-reference/reference.json
 ```
 
-将 reference 显式加入最终 XLSX；`comparison.json` 会保存完整 reference 和来源，
+下面是 controller maintainer 的参考曲线再生成接口，不是第二套公开 lifecycle。
+它将 reference 显式加入最终 XLSX；`comparison.json` 会保存完整 reference 和来源，
 主表只显示 checkpoint、local best 与当前结果差值，详细证据位于 `Local Fast`
 sheet：
 

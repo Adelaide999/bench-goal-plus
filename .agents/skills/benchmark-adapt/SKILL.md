@@ -10,6 +10,15 @@ description: 把新 benchmark 或新 task family 接入 bench-goal-plus。用户
 ## 流程
 
 1. 记录 official task、artifact、evaluator、raw metric、direction、环境、数据 revision、license 和 secret 边界。
+   先生成不覆盖现有文件的结构计划；确认后再写入：
+
+   ```bash
+   python3 scripts/bench.py scaffold --benchmark-id <id> --shape common
+   python3 scripts/bench.py scaffold --benchmark-id <id> --shape common --write
+   ```
+
+   native harness 使用 `--shape native`。scaffold 只生成目录、模板、契约测试和
+   registration fragment，不自动把未完成实现登记为 supported。
 2. 在独立 fork 建 benchmark-specific 改动；同时在 `benchmarks/registry.json` 与 `environment/upstreams.json` 登记同一显式 tracking branch。
 3. 声明 readiness 的 `docker_requirement`/`docker_scope`，并在 `benchmarks/runners.json` 声明 Docker `owner`/`provision_mode`。自带 Docker/native harness 用 runner owner；common adapter 选择 eager hooks 或 lazy evaluator。
 4. 选择接入面：单 artifact + controller evaluator 使用 `adapters/` contract；复杂 native harness 增加 `experiments/<benchmark>/` lifecycle 和一个可复用 runner；不要强塞进不匹配的 adapter。
@@ -21,11 +30,13 @@ description: 把新 benchmark 或新 task family 接入 bench-goal-plus。用户
 ## 验收
 
 ```bash
-python3 scripts/status.py --check
-python3 -m unittest discover -s tests -v
+.bench-env/venv/bin/python scripts/status.py --check
+.bench-env/venv/bin/python -m unittest discover -s tests -v
 ```
 
-输出 readiness matrix：official verifier、native OpenEvolve、plain Codex、Goal Plus + Codex、Goal Plus + Pi 五项分别为 pass/partial/fail，并逐项链接命令和 evidence。
+输出 readiness matrix：official verifier、native OpenEvolve、plain Codex、
+Goal Plus + Codex、plain Pi、Goal Plus + Pi 六项分别为 pass/partial/fail，并逐项
+链接命令和 evidence。
 
 ## Gotchas
 

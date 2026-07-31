@@ -987,64 +987,9 @@ def send_hard_stop(process: subprocess.Popen[str]) -> None:
 
 
 def parse_codex_events(path: Path) -> dict[str, Any]:
-    thread_id = None
-    usage = None
-    terminal_event = None
-    event_count = 0
-    collaboration_tool_counts: dict[str, dict[str, int]] = {}
-    spawned_agent_thread_ids: set[str] = set()
-    targetless_wait_count = 0
-    for line in path.read_text().splitlines() if path.is_file() else []:
-        if not line.strip():
-            continue
-        event_count += 1
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        event_type = event.get("type")
-        if event_type == "thread.started":
-            thread_id = event.get("thread_id")
-        if event_type in {"turn.completed", "turn.failed"}:
-            terminal_event = event_type
-            if isinstance(event.get("usage"), dict):
-                usage = event["usage"]
-        item = event.get("item")
-        if not isinstance(item, dict) or item.get("type") != "collab_tool_call":
-            continue
-        tool = item.get("tool")
-        if not isinstance(tool, str):
-            continue
-        status = item.get("status")
-        if not isinstance(status, str):
-            status = event_type.removeprefix("item.")
-        counts = collaboration_tool_counts.setdefault(tool, {})
-        counts[status] = counts.get(status, 0) + 1
-        if tool == "spawn_agent" and status == "completed":
-            receiver_ids = item.get("receiver_thread_ids")
-            if isinstance(receiver_ids, list):
-                spawned_agent_thread_ids.update(
-                    value for value in receiver_ids if isinstance(value, str) and value
-                )
-        if tool in {"wait", "wait_agent"} and status == "completed":
-            receiver_ids = item.get("receiver_thread_ids")
-            if isinstance(receiver_ids, list) and not receiver_ids:
-                targetless_wait_count += 1
-    spawn_counts = collaboration_tool_counts.get("spawn_agent") or {}
-    return {
-        "thread_id": thread_id,
-        "terminal_event": terminal_event,
-        "top_level_usage": usage,
-        "event_count": event_count,
-        "collaboration_tool_counts": collaboration_tool_counts,
-        "spawn_agent_completed_count": spawn_counts.get("completed", 0),
-        "spawned_agent_thread_ids": sorted(spawned_agent_thread_ids),
-        "targetless_wait_count": targetless_wait_count,
-        "coverage": (
-            "top-level Codex usage and collaboration tool calls; Goal Plus worker details "
-            "remain in workspace/.gp"
-        ),
-    }
+    from bench_goal_plus.agent_events import parse_codex_event_file
+
+    return parse_codex_event_file(path)
 
 
 def parse_pi_events(path: Path) -> dict[str, Any]:
@@ -1517,11 +1462,14 @@ def goal_plus_incomplete_reason(
                 )
     if expected_concurrency is not None:
         if codex_events is not None:
-            completed_spawns = codex_events.get("spawn_agent_completed_count", 0)
-            if completed_spawns < expected_concurrency:
+            spawned_workers = int(
+                codex_events.get("spawned_agent_thread_count") or 0
+            )
+            if spawned_workers < expected_concurrency:
                 return (
-                    "Codex completed "
-                    f"{completed_spawns} spawn_agent calls; expected at least "
+                    "Codex recorded "
+                    f"{spawned_workers} distinct spawned worker threads; "
+                    "expected at least "
                     f"{expected_concurrency} actual workers"
                 )
         required_worker_evidence = (
@@ -1683,11 +1631,17 @@ def _existing_selection(
     return run_data, candidate_id, selection
 
 
-def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
-    """Controller-owned post-deadline drain/select/promote, outside search T."""
+def _goal_plus_runtime_types() -> tuple[type[Any], type[Any], type[Any]]:
     from goal_plus.goal_plus import FileGoalPlusRuntime
     from goal_plus.runtime import FileSearchRuntime
     from goal_plus.tools import SearchTools
+
+    return FileGoalPlusRuntime, FileSearchRuntime, SearchTools
+
+
+def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
+    """Controller-owned post-deadline drain/select/promote, outside search T."""
+    FileGoalPlusRuntime, FileSearchRuntime, SearchTools = _goal_plus_runtime_types()
 
     started = time.monotonic()
     root = workspace / ".gp"

@@ -52,16 +52,23 @@ cycles 转成 EdgeBench 0–100；无效候选没有合法 cycle score。
 先使用 `vliw-smoke` profile 验证一题：
 
 ```bash
-python3 scripts/repro_env.py bootstrap --only edgebench
-.bench-env/venv/bin/python experiments/edgebench/experiment.py provision \
-  --profile vliw-smoke
-.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
-  --profile vliw-smoke
-.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
-  --profile vliw-smoke --campaign-id vliw-matched-01
-.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
-  --campaign vliw-matched-01 --detach
+python3 scripts/bench.py plan \
+  --benchmark edgebench --profile vliw-smoke \
+  --campaign-id vliw-matched-01
+python3 scripts/bench.py start \
+  --benchmark edgebench --profile vliw-smoke \
+  --campaign-id vliw-matched-01
+python3 scripts/bench.py status \
+  --campaign runs/edgebench/vliw-matched-01
 ```
+
+Runner 当前声明五个 canonical methods：`plain-codex`、
+`goal-plus-codex`、`plain-claude`、`plain-pi`、`goal-plus-pi`。Pi 的最小
+profiles 是 `vliw-pi-sol-medium-local-smoke` 和
+`vliw-goal-plus-pi-sol-medium-local-smoke`；后者固定 `K=2`、240 秒 worker
+lease 和 120 秒 finalization grace。Pi 需要 host
+`~/.pi/agent/auth.json`（或 `SFORGE_PI_AUTH_FILE`）中的 `openai-codex` 登录。
+这些 Pi profiles 当前是 wiring-ready，不代表已取得真实 E2E pass evidence。
 
 该 bootstrap 同时准备固定 SHA256 的 Rust 1.88.0 Linux x64 宿主缓存。Rust
 任务会优先使用 Work/Judge image 内同版本工具链，仅在缺失或版本漂移时离线
@@ -99,11 +106,11 @@ controller-owned held-out cases：
 
 ```bash
 python3 local_examples/vliw_kernel_optimization/evaluate.py --cases both
-
-.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
+python3 scripts/bench.py start \
   --benchmark local-vliw --method plain-codex \
-  --wall-time-seconds 360 --soft-closeout-seconds 60 \
-  --worker-runtime-seconds 120 --concurrency 2 --model gpt-5.6-sol
+  --wall-time-seconds 360 --worker-runtime-seconds 120 \
+  --live-search-concurrency 2 --model gpt-5.6-sol \
+  --reasoning-effort medium
 ```
 
 这条路径适合本机快速比较方法，但不是官方 host-only EdgeBench backend。

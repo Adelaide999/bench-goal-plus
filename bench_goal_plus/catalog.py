@@ -76,6 +76,15 @@ class Catalog:
                 raise ContractError(
                     f"{runner_id}: controller does not exist: {controller_value!r}"
                 )
+            raw_methods = entry.get("supported_methods")
+            if not isinstance(raw_methods, list) or not raw_methods:
+                raise ContractError(f"{runner_id}: supported_methods must be non-empty")
+            supported_methods = tuple(
+                self._safe_id(value, f"{runner_id} method {method_index}")
+                for method_index, value in enumerate(raw_methods)
+            )
+            if len(set(supported_methods)) != len(supported_methods):
+                raise ContractError(f"{runner_id}: supported_methods must be unique")
             raw_capabilities = entry.get("capabilities")
             if not isinstance(raw_capabilities, dict):
                 raise ContractError(f"{runner_id}: capabilities must be an object")
@@ -100,6 +109,7 @@ class Catalog:
                 runner_id=runner_id,
                 kind=kind,
                 controller=controller,
+                supported_methods=supported_methods,
                 capabilities=capabilities,
             )
 

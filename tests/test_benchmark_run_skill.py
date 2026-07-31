@@ -44,6 +44,41 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertEqual(self.catalog.targets["edgebench"].runner_id, "edgebench-native")
         self.assertIn("openevolve-cpu-portable", self.catalog.targets)
         self.assertEqual(len(self.catalog.runners), 3)
+        self.assertEqual(
+            self.catalog.runners["edgebench-native"].supported_methods,
+            (
+                "plain-codex",
+                "goal-plus-codex",
+                "plain-claude",
+                "plain-pi",
+                "goal-plus-pi",
+            ),
+        )
+
+    def test_runner_rejects_unknown_method_before_prepare(self) -> None:
+        with self.assertRaisesRegex(
+            ContractError, "edgebench-native does not support.*plain-pi-typo"
+        ):
+            self.agent.resolve_spec(
+                target_ids=("edgebench",),
+                profile="vliw-pi-sol-medium-local-smoke",
+                methods=("plain-pi-typo",),
+            )
+
+    def test_edgebench_pi_presets_resolve_to_canonical_methods(self) -> None:
+        plain = self.agent.resolve_spec(
+            preset_id="edgebench-vliw-pi-local-smoke"
+        )
+        goal_plus = self.agent.resolve_spec(
+            preset_id="edgebench-vliw-goal-plus-pi-local-smoke"
+        )
+
+        self.assertEqual(plain.methods, ("plain-pi",))
+        self.assertEqual(plain.concurrency(), {"T": 300, "K": 1, "C": 1, "R": 1})
+        self.assertEqual(goal_plus.methods, ("goal-plus-pi",))
+        self.assertEqual(
+            goal_plus.concurrency(), {"T": 600, "K": 2, "C": 1, "R": 1}
+        )
 
     def test_every_target_has_an_explicit_docker_owner_and_mode(self) -> None:
         for target in self.catalog.targets.values():
@@ -165,6 +200,19 @@ class BenchmarkAgentContractTest(unittest.TestCase):
                 wall_time_seconds=60,
                 live_search_concurrency=1,
                 cell_concurrency=2,
+            )
+
+    def test_common_runner_rejects_method_outside_its_contract(self) -> None:
+        with self.assertRaisesRegex(
+            ContractError, "common-matrix does not support method.*plain-pi"
+        ):
+            self.agent.resolve_spec(
+                target_ids=("local-vliw",),
+                methods=("plain-pi",),
+                model="test-model",
+                reasoning_effort="medium",
+                wall_time_seconds=60,
+                live_search_concurrency=1,
             )
 
     def test_preset_rejects_overrides_that_would_mislabel_campaign(self) -> None:

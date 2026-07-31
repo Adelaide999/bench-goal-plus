@@ -13,3 +13,4 @@ __pycache__/
 /.tmp/
 /artifacts/raw/
 /secrets/
+.codebase-memory/

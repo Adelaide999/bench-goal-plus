@@ -10,6 +10,7 @@ from typing import Any
 
 from .application import BenchmarkAgent
 from .errors import BenchGoalPlusError, ContractError
+from .scaffold import scaffold_benchmark
 
 
 def add_selection(parser: argparse.ArgumentParser) -> None:
@@ -76,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     check = children.add_parser("check")
     check.add_argument("--benchmark", required=True)
     check.add_argument("--dry-run", action="store_true")
+    scaffold = children.add_parser("scaffold")
+    scaffold.add_argument("--benchmark-id", required=True)
+    scaffold.add_argument("--shape", choices=("common", "native"), required=True)
+    scaffold.add_argument("--module")
+    scaffold.add_argument("--write", action="store_true")
     return parser
 
 
@@ -109,7 +115,8 @@ def render_catalog(agent: BenchmarkAgent, *, as_json: bool) -> int:
         print(
             f"runner {runner['id']}: {runner['kind']} "
             f"detach={capabilities['detach']} stop={capabilities['stop']} "
-            f"resume={capabilities['resume']} C={capabilities['cell_concurrency']}"
+            f"resume={capabilities['resume']} C={capabilities['cell_concurrency']} "
+            f"methods={','.join(runner['supported_methods'])}"
         )
     for target in payload["targets"]:
         docker = target["docker"]
@@ -127,6 +134,15 @@ def main(argv: list[str] | None = None) -> int:
     agent = BenchmarkAgent()
     if args.command == "catalog":
         return render_catalog(agent, as_json=args.json)
+    if args.command == "scaffold":
+        result = scaffold_benchmark(
+            benchmark_id=args.benchmark_id,
+            shape=args.shape,
+            module=args.module,
+            write=args.write,
+        )
+        print(json.dumps(result, indent=2))
+        return 0
     if args.command == "setup":
         targets, preset = agent.resolve_targets(
             target_ids=args.benchmark, preset_id=args.preset

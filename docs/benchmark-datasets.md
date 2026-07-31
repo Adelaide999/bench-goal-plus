@@ -55,7 +55,7 @@ python3 scripts/datasets.py validate
 python3 scripts/datasets.py list
 python3 scripts/datasets.py list --domain software --stage 1
 python3 scripts/datasets.py show swe-evo
-python3 scripts/status.py --check
+.bench-env/venv/bin/python scripts/status.py --check
 ```
 
 `--stage` follows the scenario plan:

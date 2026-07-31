@@ -5,6 +5,13 @@
       "id": "edgebench-native",
       "kind": "native-profile",
       "controller": "experiments/edgebench/experiment.py",
+      "supported_methods": [
+        "plain-codex",
+        "goal-plus-codex",
+        "plain-claude",
+        "plain-pi",
+        "goal-plus-pi"
+      ],
       "capabilities": {
         "provision": true,
         "detach": true,
@@ -19,6 +26,14 @@
       "id": "common-matrix",
       "kind": "common-matrix",
       "controller": "experiments/benchmark_campaign/experiment.py",
+      "supported_methods": [
+        "plain-codex",
+        "goal-plus-codex",
+        "goal-plus-pi",
+        "skydiscover-best-of-n",
+        "skydiscover-evox",
+        "skydiscover-adaevolve"
+      ],
       "capabilities": {
         "provision": false,
         "detach": false,
@@ -33,6 +48,12 @@
       "id": "openevolve-batch",
       "kind": "openevolve-batch",
       "controller": "experiments/openevolve_compare/experiment.py",
+      "supported_methods": [
+        "openevolve",
+        "plain-codex",
+        "goal-plus-codex",
+        "goal-plus-pi"
+      ],
       "capabilities": {
         "provision": false,
         "detach": false,
@@ -173,6 +194,38 @@
         "wall_time_seconds": 7200,
         "concurrency": 1,
         "cell_concurrency": 2
+      }
+    },
+    {
+      "id": "edgebench-vliw-pi-local-smoke",
+      "description": "One-task local Plain Pi smoke using the host openai-codex login.",
+      "benchmarks": ["edgebench"],
+      "profile": "vliw-pi-sol-medium-local-smoke",
+      "campaign_id_template": "edgebench-vliw-pi-gpt-5-6-sol-medium-local-smoke-5m-k1-c1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["plain-pi"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 300,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "edgebench-vliw-goal-plus-pi-local-smoke",
+      "description": "One-task local Goal Plus + Pi smoke with two live search workers.",
+      "benchmarks": ["edgebench"],
+      "profile": "vliw-goal-plus-pi-sol-medium-local-smoke",
+      "campaign_id_template": "edgebench-vliw-goal-plus-pi-gpt-5-6-sol-medium-local-smoke-10m-k2-c1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 600,
+        "concurrency": 2,
+        "cell_concurrency": 1
       }
     }
   ]

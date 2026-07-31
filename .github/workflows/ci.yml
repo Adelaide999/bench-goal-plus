@@ -1,0 +1,42 @@
+name: control-plane-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Materialize branch-tracked upstreams used by unit tests
+        run: |
+          git clone --depth 1 --branch bench-goal-plus https://github.com/ck0123/openevolve.git third_party/openevolve
+          git clone --depth 1 --branch main https://github.com/ck0123/goal-plus.git third_party/goal-plus
+          git clone --depth 1 --branch mac https://github.com/ck0123/EdgeBench.git third_party/edgebench
+
+      - name: Create the locked test environment
+        run: |
+          uv venv .bench-env/venv --python 3.12
+          uv pip install --python .bench-env/venv/bin/python -r environment/requirements.lock
+          uv pip install --python .bench-env/venv/bin/python --no-build-isolation --no-deps \
+            -e third_party/openevolve \
+            -e third_party/goal-plus \
+            -e third_party/edgebench
+
+      - name: Validate registries and documentation contracts
+        run: .bench-env/venv/bin/python scripts/status.py --check
+
+      - name: Run the canonical unit suite
+        run: .bench-env/venv/bin/python -m unittest discover -s tests -v

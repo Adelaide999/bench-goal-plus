@@ -1,182 +1,164 @@
 # bench-goal-plus contributor rules
 
-This repository is the control plane for Goal Plus benchmark integrations.
+This repository is the benchmark operations control plane. It owns benchmark
+catalogs, reproducible environments, lifecycle orchestration, method contracts,
+evidence normalization, and reports. Goal Plus is one supported method and one
+source of observability evidence; it is not the repository architecture.
 
-## Repository model
+## Standard Agent workflow
 
-The repository owns reproducible environment setup, benchmark adapters,
-cross-method experiment manifests, campaign lifecycle, evidence collection, and
-reporting. Benchmark-native task definitions, datasets, work containers, and
-hidden judges remain in branch-tracked upstream forks.
+For every benchmark request:
 
-```text
-registry + tracked upstreams
-  -> bootstrap / doctor
-  -> benchmark-native or common adapter prepare
-  -> run / status / recoverable stop
-  -> native verifier / finalize
-  -> raw evidence + Markdown/XLSX report
-```
+1. Read `python3 scripts/bench.py catalog` and resolve the registered target,
+   preset, runner, supported method, Docker contract, and capability flags.
+2. Route environment, host, Docker, upstream, and authentication work through
+   `benchmark-setup`; run setup/doctor before a real campaign.
+3. Route campaign configuration through `benchmark-run`; use `plan` before
+   `launch`, record `T/K/C/R`, and return the generated campaign path.
+4. For a long run, use `status` and the registered `stop`/`resume` capability.
+   Do not replace, delete, or silently restart a partial campaign.
+5. After the native campaign reaches a terminal state, route finalization and
+   export through `benchmark-report`.
+6. Route a new benchmark or task family through `benchmark-adapt`; do not call
+   a scaffold or registry entry ready until its acceptance path has evidence.
 
-- `benchmarks/`: benchmark, dataset, and executable runner catalogs; readiness and Docker policy.
-- `environment/` and `scripts/repro_env.py`: managed runtime and checkouts.
-- `adapters/`: task materialization and controller-owned evaluation contracts.
-- `bench_goal_plus/`: Agent application service, runner contracts, Docker hooks, and durable Agent state.
-- `experiments/`: native and common campaign controllers.
-- `runs/`: ignored disposable workspaces and durable campaign state.
-- `evidence/`: sanitized claims backed by reproducible commands.
-- `.agents/skills/`: setup, execution, reporting, and adaptation workflows.
+Before executing a platform- or benchmark-specific command, read the reference
+selected by the relevant Skill. Do not infer Linux behavior from macOS,
+API-key behavior from OAuth, or one benchmark's lifecycle from another.
 
 ## Skill routing
 
-- Use `$bench-goal-plus` for an end-to-end setup/run/status/resume/finish workflow.
-- Use `$benchmark-setup` for bootstrap, dependencies, Docker/images, and doctor.
-- Use `$benchmark-run` for prepare/run/status/stop/finalize and concurrency.
-- Use `$benchmark-report` for `report.md` and `.xlsx` campaign exports.
-- Use `$benchmark-adapt` for a new upstream, adapter, evaluator, or runner.
+| User intent | Skill | Required reference selection |
+| --- | --- | --- |
+| End-to-end request or unclear benchmark operation | `bench-goal-plus` | Read its agent contract, then route to one or more Skills below |
+| Install, bootstrap, Docker, host compatibility, auth | `benchmark-setup` | Read `host-auth.md` and `benchmark-matrix.md` |
+| Plan, launch, monitor, stop, or resume | `benchmark-run` | Read `runner-map.md`, then the selected benchmark/runner reference |
+| Finalize, inspect metrics, export Markdown/XLSX | `benchmark-report` | Read `report-contract.md` |
+| Add a benchmark or task family | `benchmark-adapt` | Read `adaptation-checklist.md` |
 
-Register reusable runner families and executable targets in `benchmarks/runners.json`. Every target
-must declare a Docker contract (`requirement`, `owner`, `provision_mode`, `scope`). Keep lifecycle
-implementation in `bench_goal_plus/`; Skills and `scripts/bench.py` are thin entrypoints. Store frozen
-experiment configurations as named presets/examples, not benchmark-specific launcher scripts.
+Skills describe operator workflow and route to references. Registries and code
+remain executable truth; do not hide host, authentication, or benchmark
+differences only inside Python implementation.
 
-## Concurrency vocabulary
+## Public contract
 
-- `T`: wall-clock budget for one task trajectory/search run.
-- `K`: live within-task search concurrency. Plain Codex maps it to independent
-  trajectories; Goal Plus maps it to workers sharing one search state.
-- `C`: cross-task controller concurrency; it changes throughput, not per-task compute.
-- `R`: independent attempts/seeds. Do not relabel `C` as `K` or `R`.
+- The canonical user entrypoint is `python3 scripts/bench.py`.
+- `catalog`, `setup`, `plan`, `launch`, `status`, `stop`, `resume`, `finish`,
+  and `check` form the public lifecycle vocabulary. `start` is the compatible
+  spelling of `launch`; `e2e` is the foreground convenience path.
+- `scaffold` is a contributor tool. Its output is not a readiness claim.
+- Skills and benchmark-local scripts may be thin adapters around that
+  vocabulary. Do not document a second equivalent public CLI.
+- A method must be declared in its runner's `supported_methods` before a plan
+  can select it. Reject unsupported methods before setup or preparation.
+- A capability shown by `catalog` is a contract. Do not advertise provision,
+  detach, stop, resume, cell concurrency, or an official evaluator until tests
+  and a reproducible evidence path exist.
 
-- Keep benchmark upstreams in separate forks. Do not vendor their source or datasets here.
-- Track one explicit branch for every upstream/fork in `benchmarks/registry.json`
-  and `environment/upstreams.json`. Do not maintain manual commit pins for
-  managed source checkouts; every prepared run must still record the resolved
-  commit SHA in its manifest.
-- Put cross-benchmark orchestration and adapters here; patch a benchmark fork only when the change is intrinsically benchmark-specific.
-- Never persist API keys, auth files, cookies, provider headers, or secret-bearing command lines.
-- A status can become `pass` only when a reproducible command and evidence file exist. Repository support or an unexecuted code path is at most `partial`.
-- Keep five claims separate: official verifier works, native OpenEvolve works, plain Codex works, Goal Plus + Codex works, and Goal Plus + Pi works.
-- Preserve raw benchmark metrics and direction. Any normalized aggregate must be an additional field, not a replacement.
-- For full-system comparisons, fix the task/evaluator, total wall-clock budget `T`, and live search concurrency `K`. Preserve each method's native control flow; report evaluator calls, iterations, tokens, cost coverage, and actual wall time after the run. Hard-match evaluator calls only in an explicitly labeled mechanism ablation.
-- Standard Plain Codex and Codex + Goal Plus comparisons must share one byte-identical common task prompt. Plain Codex uses it directly; Codex + Goal Plus adds only the natural `/goal-plus` prefix and a complete Goal Plus configuration suffix. Do not pre-create Goal Plus goals, frozen specs, Search runs, candidates, or sessions before the timed invocation.
-- Never add benchmark-specific stopping logic to Goal Plus core just to mimic another method's rounds. OpenEvolve may use a very large iteration ceiling and an outer `SIGTERM` deadline.
-- Never run Goal Plus from an upstream or benchmark source checkout. Materialize a disposable Git workspace under ignored `runs/`; keep its `.gp/` state inside that workspace.
-- Never use host-wide `/tmp`, `/private/tmp`, or `/var/tmp` for benchmark controller state, builds, verifier output, tests, or subprocess scratch space. Route `TMPDIR`, `TMP`, and `TEMP` to the ignored repository-local `.tmp/` through `bench_runtime_paths.py`. A user-selected override must remain under the repository or a user-writable location such as `~/.tmp/`.
-- Do not delete local workspaces or caches automatically. If a conflicting path must be preserved, rename it with a `_bak` suffix and report it.
-- Before preparing a benchmark on a fresh host, read its `docker_requirement` and
-  `docker_scope` in `benchmarks/registry.json`. If `docker info` fails, run only
-  `not_required` paths; a `mixed` item is allowed only through the specific
-  host-portable task named in `docker_scope`. Never silently substitute a
-  host-only evaluator for a containerized official score.
-- Run `python3 scripts/status.py --check` and `python3 -m unittest discover -s tests -v` before committing.
+## Repository map and ownership
 
-## Fresh-host bootstrap
+| Path | Owns | Required content | Must not own |
+| --- | --- | --- | --- |
+| `bench_goal_plus/` | Typed application, catalog, runner, state, event, and reporting contracts | Benchmark-neutral Python modules with fail-closed validation | Benchmark-specific prompts, task IDs, or stopping logic |
+| `benchmarks/` | Declarative runner, target, preset, dataset, and evidence registries | Explicit schemas, branch-tracked references, method/capability contracts | Executable orchestration or secrets |
+| `environment/` | Reproducible host and upstream definitions | Locked dependencies and one tracking branch per managed checkout | Manual managed-source commit pins or copied virtualenvs |
+| `adapters/<benchmark>/` | Common-runner materialization and official evaluation boundary | Task discovery/materialization, evaluator invocation, raw metric and direction | Generic campaign control or vendored upstream source |
+| `experiments/<benchmark>/` | Benchmark-owned native lifecycle integration | Profiles, controller, references, and a benchmark-specific README | Cross-benchmark policy or reusable application logic |
+| `docker/` | Repository-owned benchmark support images | Minimal Dockerfiles with explicit benchmark purpose and locked inputs | Generic runner policy, credentials, or copied upstream images |
+| `local_examples/` | Small repository-owned task fixtures | License/provenance, task README, and deterministic evaluator boundary | Unattributed upstream datasets or claims of full benchmark coverage |
+| `evidence/` | Reviewable, committed validation records | Small immutable manifests/summaries with commands, revisions, metrics, and status | Mutable campaign state, credentials, or large raw outputs |
+| `legacy/` | Preserved pre-control-plane diagnostics | Clearly labeled compatibility/direct-API tools and migration documentation | New public lifecycle features or readiness claims |
+| `scripts/` | Stable entrypoints and small repository maintenance tools | Thin calls into `bench_goal_plus/`; `bench.py` is canonical | Duplicate runner implementations |
+| `.agents/skills/` | Operator guidance for the canonical lifecycle | Thin workflow instructions that call `scripts/bench.py` | Broad repository policy or alternative CLIs |
+| `docs/` | Explanations, runbooks, protocol rationale, and migration notes | Long-form material linked from code or Skills | Executable truth that is absent from registries/tests |
+| `tests/` | Control-plane contracts and regression evidence | Self-contained unit/contract tests runnable in the locked environment | Hidden credentials, network-only assumptions, or disposable run output |
+| `.github/workflows/` | Automated repository gates | Locked setup, status validation, and canonical unit suite | Benchmark campaigns or secret-bearing smoke runs |
+| `runs/`, `.tmp/`, `.bench-env/`, `.venv/`, `.worktrees/`, `third_party/`, `.codebase-memory/`, `__pycache__/` | Ignored/generated local state | Preserved campaigns, repository-local scratch, recreated environments, managed checkouts, and derived indexes | Hand-authored source intended for this repository |
 
-Global host prerequisites are `git`, a Python `3.10+` launcher, `uv`, and Codex
-CLI `0.144.1+`. Docker is optional for the control plane but mandatory for
-registry items marked `required`. Credentials stay in the host environment or
-Codex auth store; never write them into this repository.
+Every new repository-owned top-level directory needs an ownership row here
+before it is used. Nested directories inherit their nearest listed owner's
+rules unless their own `AGENTS.md` narrows them.
 
-```bash
-cd bench-goal-plus
-python3 scripts/repro_env.py bootstrap
-python3 scripts/repro_env.py doctor
-```
+## Where a change belongs
 
-`bootstrap` creates the disposable `.bench-env/venv` and clones every
-branch-tracked benchmark/search runtime into ignored `third_party/`. It installs
-editable OpenEvolve and Goal Plus from that same root, fetches and fast-forwards
-clean managed branches, and refuses dirty, divergent, wrong-origin, or
-wrong-branch checkouts. On another machine, recreate `.bench-env` and
-`third_party`; do not copy a virtualenv between hosts. To prepare one benchmark
-plus the always-required runtimes, use:
+1. Put reusable lifecycle or evidence behavior in `bench_goal_plus/`.
+2. Put declarative identity, support, and capability facts in `benchmarks/`.
+3. Put a common-runner benchmark boundary in `adapters/<benchmark>/`.
+4. Put an intrinsically benchmark-specific native controller/profile in
+   `experiments/<benchmark>/`.
+5. Patch a managed upstream only when the behavior belongs to that upstream.
+   Keep that change in its `third_party/<checkout>` Git worktree and report the
+   root and upstream diffs separately.
+6. Put broad policy here. Put operator steps in docs or a Skill.
 
-All Python temporary directories and inherited child-process scratch files use
-ignored `bench-goal-plus/.tmp/`; no writable system temp directory is required.
+Never vendor benchmark source or datasets into this repository. Managed source
+checkouts track the explicit branches in both `benchmarks/registry.json` and
+`environment/upstreams.json`. Preparation records the resolved commit SHA in
+the campaign manifest.
 
-```bash
-python3 scripts/repro_env.py bootstrap --only heurigym
-python3 scripts/repro_env.py doctor --only heurigym
-```
+## Benchmark integration contract
 
-EdgeBench 仍由 native SForge 拥有 work container、hidden judge 和最终归档；
-本仓只管理 branch-tracked source、pinned data revision、campaign 生命周期与汇总：
+A benchmark is ready only when all of these exist:
 
-```bash
-python3 scripts/repro_env.py bootstrap --only edgebench
-.bench-env/venv/bin/python experiments/edgebench/experiment.py provision \
-  --profile vliw-smoke
-.bench-env/venv/bin/python experiments/edgebench/experiment.py doctor \
-  --profile vliw-smoke
-.bench-env/venv/bin/python experiments/edgebench/experiment.py prepare \
-  --profile vliw-smoke --campaign-id vliw-matched-01
-.bench-env/venv/bin/python experiments/edgebench/experiment.py run \
-  --campaign vliw-matched-01 --detach
-.bench-env/venv/bin/python experiments/edgebench/experiment.py status \
-  --campaign vliw-matched-01
-```
+- A target and runner mapping with Docker requirement, owner, provision mode,
+  and scope.
+- An explicit runner method list and capability declaration.
+- A branch-tracked upstream entry or a documented repository-owned fixture.
+- A native profile or common adapter that preserves the benchmark's task,
+  evaluator, raw metric, and metric direction.
+- Contract tests for schema loading, method rejection, plan generation, and
+  capability behavior.
+- A reproducible `doctor → prepare → run → status → finalize` acceptance path.
+- Evidence files that justify every `pass` claim.
 
-Use `stop --campaign ...` for a recoverable `SIGINT` closeout; never delete a
-partial campaign. Plain Codex maps `K` to independent SForge replicas, while
-Goal Plus maps the same `K` to internal workers in one outer SForge run.
+Use the benchmark adaptation scaffold documented by the `benchmark-adapt`
+Skill for the initial file layout. Generated placeholders are not support:
+until the acceptance path is executed, readiness is at most `partial`.
 
-Prepare and verify a model-free Goal Plus task workspace. Preparation materializes only the task, evaluator wrapper, and portable Goal Plus host assets; `.gp/` must not exist yet:
+## Evidence and comparison invariants
 
-```bash
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
-  --method goal-plus-codex --task-id function_minimization \
-  --wall-time-seconds 300 --concurrency 2 --model gpt-5.6-luna --seed 1
+- Keep official verifier, native baseline, Plain Codex, Goal Plus + Codex,
+  Plain Pi, and Goal Plus + Pi readiness claims separate.
+- Fix task/evaluator, model, reasoning, wall-clock exploration budget `T`, live
+  search concurrency `K`, task-cell concurrency `C`, and repeats `R`. Record
+  evaluator calls, tokens/cost coverage, actual wall time, and finalization
+  grace rather than silently treating missing values as zero.
+- Preserve each method's native control flow and the benchmark's raw metric and
+  direction. Put method- or benchmark-specific completion evidence in the
+  selected runner reference and enforce it in code/tests.
+- Do not pre-create Goal Plus goals, specs, runs, candidates, sessions, or
+  `.gp/` before a timed natural invocation. Do not add benchmark-specific
+  stopping logic to Goal Plus core.
+- Missing required evidence is `partial`, never `pass`.
 
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py seed-smoke \
-  --run-dir runs/openevolve-compare/<run-id>
-```
+## Runtime and safety invariants
 
-Execute that prepared run with one explicit OpenAI-compatible provider. Keep the key only in the shell:
+- Never persist API keys, auth files, cookies, provider headers, or
+  secret-bearing command lines.
+- Never run Goal Plus from a benchmark source checkout. Materialize a
+  disposable Git workspace under ignored `runs/`; keep its `.gp/` there.
+- Route `TMPDIR`, `TMP`, and `TEMP` through `bench_runtime_paths.py` to the
+  ignored repository-local `.tmp/`. Do not use host-wide `/tmp`,
+  `/private/tmp`, or `/var/tmp` for controller state, builds, tests, evaluator
+  output, or subprocess scratch.
+- Do not delete workspaces, campaigns, or caches automatically. Preserve a
+  conflicting path with a `_bak` suffix and report it.
+- Before setup, enforce the registry's `docker_requirement` and `docker_scope`.
+  If Docker is unavailable, run only `not_required` paths; a `mixed` target may
+  use only its named portable task. Never replace a containerized official
+  score with a host-only evaluator.
+- Preserve raw metrics and their direction. A normalized aggregate is an
+  additional field, never a replacement.
 
-```bash
-export OPENAI_API_KEY='<secret>'
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py run \
-  --run-dir runs/openevolve-compare/<run-id> \
-  --model gpt-5.6-luna --api-base https://api.example.com/v1
-```
+## Required verification
 
-Prepare `openevolve`, `plain-codex`, `goal-plus-codex`, and `goal-plus-pi` separately. Goal Plus intake, triage, SearchSpec freezing, Search-run creation, candidates, and workers all begin from the natural `/goal-plus` prompt inside `T`. See `docs/reproducible-environment.md` for Mac/Linux details and failure semantics.
-
-For the screened no-special-environment OpenEvolve batch, use the catalog instead of preparing tasks by hand:
-
-```bash
-.bench-env/venv/bin/python scripts/openevolve_task.py batch-seed-smoke \
-  --task-set cpu_portable \
-  --run-root runs/openevolve-batch/<run-id>
-
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare-batch \
-  --task-set cpu_portable \
-  --methods openevolve plain-codex goal-plus-codex goal-plus-pi \
-  --run-root runs/openevolve-campaigns/<campaign-id> \
-  --wall-time-seconds 300 --concurrency 2 --model gpt-5.6-luna --seed 1
-```
-
-`cpu_portable` currently means 12 tasks using only the standard library and locked NumPy/SciPy environment, with no GPU/NPU, downloaded dataset, network service, compiler, or external executable. Batch commands preserve every workspace and record per-cell failures; never delete a partial campaign to retry it.
-
-Standalone benchmarks share one runner while preserving their own task,
-artifact, evaluator, raw metric, and metric direction:
+Use the locked repository environment for the canonical gate:
 
 ```bash
-.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
-  --benchmark autolab-toy-isa --method plain-codex \
-  --wall-time-seconds 360 --soft-closeout-seconds 60 --concurrency 2 \
-  --model gpt-5.6-sol
-
-.bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \
-  --benchmark autolab-toy-isa --method goal-plus-codex \
-  --wall-time-seconds 360 --soft-closeout-seconds 60 --concurrency 2 \
-  --worker-runtime-seconds 120 --model gpt-5.6-sol
+.bench-env/venv/bin/python scripts/status.py --check
+.bench-env/venv/bin/python -m unittest discover -s tests -v
 ```
 
-Run the printed directory with `experiment.py run --run-dir ... --model ...`.
-Supported IDs, task-specific environment requirements, measured verifier time,
-and recommended wiring budgets are in
-`experiments/benchmark_compare/README.md`. The older
-`experiments/heurigym_compare/experiment.py` remains a compatibility entrypoint
-to the same implementation.
+When changing a managed upstream, also run its focused tests in that checkout.
+Before calling a benchmark path ready, exercise its public lifecycle through
+`python3 scripts/bench.py` and retain the resulting manifests and evidence.

@@ -1,6 +1,8 @@
 # Benchmark 环境矩阵
 
-始终重新读取 `benchmarks/registry.json` 和 `environment/upstreams.json`；本表只负责命令路由。
+始终重新读取 `benchmarks/registry.json` 和 `environment/upstreams.json`；本表只负责
+benchmark 依赖和命令路由。macOS/Linux、OAuth/direct API、agent/provider 的差异必须另读
+[Host 与鉴权矩阵](host-auth.md)。
 
 | Benchmark | `bootstrap --only` key | Docker | 额外入口 |
 |---|---|---|---|

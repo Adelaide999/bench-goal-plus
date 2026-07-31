@@ -167,6 +167,15 @@ class BenchmarkAgent:
 
         if runner_definition.kind == "native-profile" and not selected_profile:
             raise ContractError("native-profile campaigns require --profile or a preset")
+        if (
+            cell_concurrency is not None
+            and cell_concurrency > 1
+            and not runner_definition.capabilities.cell_concurrency
+        ):
+            raise ContractError(
+                f"{runner_definition.runner_id} has not proven cross-cell "
+                "concurrency; use C=1"
+            )
         if runner_definition.kind in {"common-matrix", "openevolve-batch"}:
             required = {
                 "--model": model,
@@ -177,10 +186,6 @@ class BenchmarkAgent:
             missing = [flag for flag, value in required.items() if value is None]
             if missing:
                 raise ContractError("common-matrix requires " + ", ".join(missing))
-            if cell_concurrency not in (None, 1):
-                raise ContractError(
-                    f"{runner_definition.kind} has not proven cross-cell concurrency; use C=1"
-                )
             cell_concurrency = 1
             if (
                 worker_min_runtime_seconds is not None
@@ -200,6 +205,18 @@ class BenchmarkAgent:
             raise ContractError("openevolve-batch currently supports one seed per campaign")
         if runner_definition.kind == "openevolve-batch" and not selected_methods:
             selected_methods = OPENEVOLVE_METHODS
+        if len(set(selected_methods)) != len(selected_methods):
+            raise ContractError("methods must be unique")
+        unsupported_methods = set(selected_methods) - set(
+            runner_definition.supported_methods
+        )
+        if unsupported_methods:
+            supported = ", ".join(runner_definition.supported_methods)
+            rejected = ", ".join(sorted(unsupported_methods))
+            raise ContractError(
+                f"runner {runner_definition.runner_id} does not support method(s): "
+                f"{rejected}; supported: {supported}"
+            )
 
         selected_id = campaign_id
         if not selected_id and preset and preset.campaign_id_template:

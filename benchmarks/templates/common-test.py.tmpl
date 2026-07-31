@@ -1,0 +1,16 @@
+from __future__ import annotations
+
+import unittest
+
+from adapters.__MODULE__ import adapter
+
+
+class AdapterContractTest(unittest.TestCase):
+    def test_declares_raw_metric_contract(self) -> None:
+        self.assertIn(adapter.DIRECTION, {"minimize", "maximize"})
+        self.assertTrue(adapter.PRIMARY_METRIC)
+        self.assertTrue(adapter.ARTIFACT_NAME)
+
+
+if __name__ == "__main__":
+    unittest.main()

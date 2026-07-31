@@ -236,8 +236,8 @@ python3 scripts/repro_env.py doctor
 .bench-env/venv/bin/openevolve-run --help
 .bench-env/venv/bin/goal-plus --help
 pi --version
-python3 scripts/status.py --check
-python3 -m unittest discover -s tests -v
+.bench-env/venv/bin/python scripts/status.py --check
+.bench-env/venv/bin/python -m unittest discover -s tests -v
 ```
 
 最后确认：upstream checkout clean 且 commit 精确匹配；实验 workspace 位于 ignored `runs/`；`.gp` 不在 `goal-plus/`、`openevolve/` 或 benchmark 源 checkout；任何准备提交的文件都不含本机绝对 home path 或 API key。

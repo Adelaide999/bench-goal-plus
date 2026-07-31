@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 from ..errors import ContractError, UnsupportedOperation
@@ -116,6 +117,33 @@ class NativeProfileRunner(BenchmarkRunner):
             "interrupted": "interrupted",
         }.get(raw, "unknown")
         pid = controller.get("pid") if isinstance(controller.get("pid"), int) else None
+        native_details: dict[str, object] = {}
+        command = [
+            str(managed_python()),
+            str(self.definition.controller.relative_to(ROOT)),
+            "status",
+            "--campaign",
+            campaign.campaign_id,
+            "--json",
+        ]
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode == 0:
+            try:
+                parsed = json.loads(completed.stdout)
+                if isinstance(parsed, dict):
+                    native_details = parsed
+            except json.JSONDecodeError:
+                native_details = {"status_error": "native status returned invalid JSON"}
+        else:
+            native_details = {
+                "status_error": completed.stderr.strip() or completed.stdout.strip()
+            }
         return StatusSnapshot(
             state=normalized,
             raw_state=raw,
@@ -126,6 +154,7 @@ class NativeProfileRunner(BenchmarkRunner):
             can_resume=raw == "interrupted" and self.definition.capabilities.resume,
             can_stop=raw == "running" and self.definition.capabilities.stop,
             can_finalize=terminal,
+            details=native_details,
         )
 
     def stop_command(self, campaign: CampaignRef) -> list[str]:

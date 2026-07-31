@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Native lifecycle controller skeleton for __BENCHMARK_ID__."""
+
+from __future__ import annotations
+
+import argparse
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    children = parser.add_subparsers(
+        dest="command",
+        required=True,
+    )
+    for command in ("provision", "doctor", "prepare", "run", "status", "stop", "finalize"):
+        children.add_parser(command)
+    return parser
+
+
+def main() -> int:
+    command = build_parser().parse_args().command
+    raise NotImplementedError(
+        f"implement benchmark-owned {command} while preserving its native harness"
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

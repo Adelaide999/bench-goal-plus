@@ -28,6 +28,114 @@ REQUIRED_CASE_SECTIONS = (
 
 
 class BenchmarkDocsTest(unittest.TestCase):
+    def test_root_readme_is_a_short_operator_overview(self):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        for required in (
+            "benchmark 的控制面仓库",
+            "自动检查并部署环境",
+            "python3 scripts/bench.py catalog",
+            "edgebench-codex-2h",
+            "python3 scripts/bench.py plan",
+            "python3 scripts/bench.py launch",
+            "python3 scripts/bench.py status",
+            "python3 scripts/bench.py finish",
+            "report.md",
+            "<campaign-id>.xlsx",
+            "Host 与鉴权矩阵",
+            "benchmark-adapt",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+        self.assertLessEqual(len(text.splitlines()), 200)
+        self.assertNotIn("## 当前结果", text)
+
+    def test_root_agents_declares_directory_ownership_and_public_cli(self):
+        text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        for required in (
+            "benchmark operations control plane",
+            "## Standard Agent workflow",
+            "## Skill routing",
+            "`bench-goal-plus`",
+            "`benchmark-setup`",
+            "`benchmark-run`",
+            "`benchmark-report`",
+            "`benchmark-adapt`",
+            "## Repository map and ownership",
+            "`bench_goal_plus/`",
+            "`benchmarks/`",
+            "`adapters/<benchmark>/`",
+            "`experiments/<benchmark>/`",
+            "`docker/`",
+            "`local_examples/`",
+            "`evidence/`",
+            "`legacy/`",
+            "`.agents/skills/`",
+            "`.github/workflows/`",
+            "python3 scripts/bench.py",
+            "Every new repository-owned top-level directory needs an "
+            "ownership row",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+
+    def test_operator_skills_use_the_canonical_public_cli(self):
+        skill_paths = (
+            ROOT / ".agents/skills/bench-goal-plus/SKILL.md",
+            ROOT / ".agents/skills/benchmark-run/SKILL.md",
+            ROOT / ".agents/skills/benchmark-adapt/SKILL.md",
+        )
+        combined = "\n".join(
+            path.read_text(encoding="utf-8") for path in skill_paths
+        )
+        self.assertIn("python3 scripts/bench.py", combined)
+        self.assertNotRegex(
+            combined,
+            r"python3 \.agents/skills/.*/scripts/.*\.py",
+        )
+
+    def test_router_skill_routes_platform_and_benchmark_differences(self):
+        text = (ROOT / ".agents/skills/bench-goal-plus/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "只负责识别任务阶段并路由",
+            "host-auth.md",
+            "benchmark-matrix.md",
+            "runner-map.md",
+            "report-contract.md",
+            "adaptation-checklist.md",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+
+    def test_runner_map_routes_each_runner_family(self):
+        text = (
+            ROOT
+            / ".agents/skills/benchmark-run/references/runner-map.md"
+        ).read_text(encoding="utf-8")
+        for required in (
+            "benchmarks/edgebench.md",
+            "benchmarks/common-matrix.md",
+            "benchmarks/openevolve.md",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+
+    def test_all_root_and_skill_markdown_links_resolve(self):
+        markdown_files = [ROOT / "README.md", ROOT / "AGENTS.md"] + list(
+            (ROOT / ".agents/skills").rglob("*.md")
+        )
+        link_pattern = re.compile(r"\[[^]]+\]\(([^)]+)\)")
+        for markdown_file in markdown_files:
+            text = markdown_file.read_text(encoding="utf-8")
+            for target in link_pattern.findall(text):
+                if target.startswith(("https://", "http://", "#", "mailto:")):
+                    continue
+                path_target = target.split("#", 1)[0]
+                resolved = (markdown_file.parent / path_target).resolve()
+                with self.subTest(file=markdown_file.name, target=target):
+                    self.assertTrue(resolved.exists(), str(resolved))
+
     def test_overview_links_every_active_benchmark(self):
         overview = (DOCS_DIR / "README.md").read_text(encoding="utf-8")
         for filename in BENCHMARK_DOCS + TASK_PACK_DOCS:

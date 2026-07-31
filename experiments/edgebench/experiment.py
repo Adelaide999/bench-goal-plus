@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from bench_runtime_paths import configure_temp_environment, ensure_temp_root  # noqa: E402
+from bench_goal_plus.agent_events import parse_codex_event_file  # noqa: E402
 
 
 EDGE_ROOT = ROOT / "third_party" / "edgebench"
@@ -72,6 +73,18 @@ METHODS = {
         "inner_search": True,
         "api_protocol": "openai",
     },
+    "plain-pi": {
+        "agent": "pi",
+        "outer_replicas": "concurrency",
+        "inner_search": False,
+        "api_protocol": "openai",
+    },
+    "goal-plus-pi": {
+        "agent": "pi-goal-plus",
+        "outer_replicas": 1,
+        "inner_search": True,
+        "api_protocol": "openai",
+    },
     "plain-claude": {
         "agent": "claude-code",
         "outer_replicas": "concurrency",
@@ -79,6 +92,7 @@ METHODS = {
         "api_protocol": "anthropic",
     },
 }
+GOAL_PLUS_METHODS = frozenset({"goal-plus-codex", "goal-plus-pi"})
 
 
 def api_protocol_for_methods(methods: Iterable[str]) -> str:
@@ -341,6 +355,12 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
         raise ValueError("wall_time_seconds and concurrency must be positive")
     if int(profile.get("cell_concurrency", 1)) < 1:
         raise ValueError("cell_concurrency must be positive")
+    if int(profile.get("worker_runtime_seconds", 1)) < 1:
+        raise ValueError("worker_runtime_seconds must be positive")
+    if int(profile.get("goal_plus_finalization_grace_seconds", 300)) < 0:
+        raise ValueError(
+            "goal_plus_finalization_grace_seconds must be non-negative"
+        )
     if profile.get("protocol_source") != "edgebench-official-codex":
         raise ValueError("EdgeBench profile must use edgebench-official-codex")
     reasons = profile.get("protocol_override_reasons")
@@ -642,6 +662,24 @@ def resolve_agent_api_config(
         "api_base_url": base_url,
         "api_base_url_source": base_source,
     }
+
+
+def resolve_pi_auth(env: dict[str, str] | None = None) -> dict[str, Any]:
+    source = os.environ if env is None else env
+    override = source.get("SFORGE_PI_AUTH_FILE")
+    path = (
+        Path(override).expanduser()
+        if override
+        else Path.home() / ".pi" / "agent" / "auth.json"
+    )
+    valid = False
+    if path.is_file():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            valid = isinstance(payload.get("openai-codex"), dict)
+        except (OSError, json.JSONDecodeError, AttributeError):
+            valid = False
+    return {"path": path, "valid": valid}
 
 
 def loopback_api_target(base_url: str) -> tuple[str, int] | None:
@@ -1228,20 +1266,45 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     auth_override = os.environ.get("SFORGE_CODEX_AUTH_FILE")
     codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
     auth = Path(auth_override).expanduser() if auth_override else codex_home / "auth.json"
+    pi_auth_status = resolve_pi_auth()
+    pi_auth = pi_auth_status["path"]
+    pi_auth_valid = bool(pi_auth_status["valid"])
     api_key = api_config["api_key"]
     api_base_url = api_config["api_base_url"]
+    needs_codex = any(agent.startswith("codex") for agent in agents)
+    needs_pi = any(agent.startswith("pi") for agent in agents)
+    needs_claude = "claude-code" in agents
+    auth_ready = (
+        (not needs_codex or bool(api_key) or auth.is_file())
+        and (not needs_pi or pi_auth_valid)
+        and (not needs_claude or bool(api_key))
+    )
     add(
         "auth:agent",
-        bool(api_key) or (api_protocol == "openai" and auth.is_file()),
-        mode="api_key" if api_key else "oauth",
+        auth_ready,
+        mode="api_key" if api_key else "host_login",
         protocol=api_protocol,
         api_key_source=api_config["api_key_source"],
         api_base_url_source=api_config["api_base_url_source"],
         policy=(
-            "SFORGE_AGENT_* > protocol-native environment; Codex may "
-            "otherwise use SFORGE_CODEX_AUTH_FILE or CODEX_HOME/auth.json"
+            "Codex accepts API credentials or Codex auth; Pi requires "
+            "SFORGE_PI_AUTH_FILE or ~/.pi/agent/auth.json with openai-codex login"
         ),
     )
+    if needs_codex:
+        add(
+            "auth:codex",
+            bool(api_key) or auth.is_file(),
+            mode="api_key" if api_key else "oauth",
+            path=str(auth),
+        )
+    if needs_pi:
+        add(
+            "auth:pi",
+            pi_auth_valid,
+            mode="openai-codex",
+            path=str(pi_auth),
+        )
     if api_key and api_base_url:
         api_probe = authenticated_api_probe(
             str(api_base_url),
@@ -1271,7 +1334,7 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                 mechanism="systemd-socket-proxyd",
             )
 
-    if any(agent.startswith("codex") for agent in agents):
+    if needs_codex:
         codex_runtime = (
             Path.home()
             / ".cache"
@@ -1586,6 +1649,9 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                     wall_time,
                     int(profile.get("worker_runtime_seconds", wall_time)),
                 ),
+                "goal_plus_finalization_grace_seconds": int(
+                    profile.get("goal_plus_finalization_grace_seconds", 300)
+                ),
                 "eval_interval_seconds": int(effective_contract["eval_interval"]),
                 "judge_concurrency": judge_concurrency,
                 "judge_port": int(profile.get("judge_port", 8080)),
@@ -1702,6 +1768,10 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "wall_time_seconds": wall_time,
             "concurrency": concurrency,
             "cell_concurrency": cell_concurrency,
+            "worker_runtime_seconds": profile.get("worker_runtime_seconds"),
+            "goal_plus_finalization_grace_seconds": int(
+                profile.get("goal_plus_finalization_grace_seconds", 300)
+            ),
             "protocol_source": {
                 "path": official_protocol["source"],
                 "sha256": official_protocol["source_sha256"],
@@ -1864,6 +1934,15 @@ def cell_environment(
     agent = str(cell.get("sforge_agent") or METHODS[cell["method"]]["agent"])
     if agent.startswith("codex"):
         env["SFORGE_CODEX_REASONING_EFFORT"] = str(cell["reasoning_effort"])
+    elif agent.startswith("pi"):
+        merge_agent_extra_env(
+            env,
+            {
+                "SFORGE_PI_REASONING_EFFORT": str(
+                    cell["reasoning_effort"]
+                )
+            },
+        )
     elif agent == "claude-code":
         env["SFORGE_CLAUDE_CACHE_OPT"] = "1"
         model = str(cell.get("model") or "")
@@ -1922,7 +2001,7 @@ def cell_environment(
                 },
                 removals=thinking_controls,
             )
-    if cell["method"] == "goal-plus-codex":
+    if cell["method"] in GOAL_PLUS_METHODS:
         env["SFORGE_GOAL_PLUS_SOURCE_DIR"] = str(GOAL_PLUS_ROOT)
         extra_env = {
             "SFORGE_GOAL_PLUS_MAX_PARALLEL": str(
@@ -1930,6 +2009,9 @@ def cell_environment(
             ),
             "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS": str(
                 cell["worker_runtime_seconds"]
+            ),
+            "SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS": str(
+                cell.get("goal_plus_finalization_grace_seconds", 300)
             ),
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": str(cell["model"]),
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": str(
@@ -2118,9 +2200,11 @@ def start_campaign_cell(
                 "api_key_source": api_config["api_key_source"],
                 "api_base_url_source": api_config["api_base_url_source"],
                 "temp": ".tmp",
-                "goal_plus_source": "third_party/goal-plus"
-                if cell["method"] == "goal-plus-codex"
-                else None,
+                "goal_plus_source": (
+                    "third_party/goal-plus"
+                    if cell["method"] in GOAL_PLUS_METHODS
+                    else None
+                ),
             },
         },
     )
@@ -2512,7 +2596,20 @@ def execute_campaign(destination: Path) -> int:
         }
     )
     write_json(controller_path, controller)
-    finalize_campaign(destination)
+    finalized = finalize_campaign(destination)
+    controller["completion_evidence_passed"] = bool(
+        finalized["completion_evidence_passed"]
+    )
+    if not finalized["completion_evidence_passed"]:
+        overall_returncode = overall_returncode or 2
+        final_state = "partial"
+        controller.update(
+            {
+                "state": final_state,
+                "returncode": overall_returncode,
+            }
+        )
+    write_json(controller_path, controller)
     return overall_returncode
 
 
@@ -2571,21 +2668,27 @@ def status_payload(destination: Path) -> dict[str, Any]:
         final_results = [
             run / "final_result.json" for run in task_runs if (run / "final_result.json").is_file()
         ]
-        cells.append(
-            {
-                "cell_id": item["cell_id"],
-                "task_id": item["task_id"],
-                "method": item["method"],
-                "state": cell["state"],
-                "pid": cell.get("pid"),
-                "pid_alive": process_alive(cell.get("pid")),
-                "completed_trajectories": len(final_results),
-                "expected_trajectories": cell["outer_replicas"],
-                "summary": portable_path(cell_path / "summary.json")
-                if (cell_path / "summary.json").is_file()
-                else None,
-            }
-        )
+        cell_status = {
+            "cell_id": item["cell_id"],
+            "task_id": item["task_id"],
+            "method": item["method"],
+            "state": cell["state"],
+            "pid": cell.get("pid"),
+            "pid_alive": process_alive(cell.get("pid")),
+            "completed_trajectories": len(final_results),
+            "expected_trajectories": cell["outer_replicas"],
+            "summary": portable_path(cell_path / "summary.json")
+            if (cell_path / "summary.json").is_file()
+            else None,
+        }
+        if item["method"] in GOAL_PLUS_METHODS:
+            latest_task_run = task_runs[-1] if task_runs else None
+            cell_status["goal_plus"] = live_goal_plus_status(
+                destination,
+                cell,
+                latest_task_run,
+            )
+        cells.append(cell_status)
     return {
         "campaign": campaign["campaign_id"],
         "state": campaign["state"],
@@ -2739,6 +2842,7 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
     candidates: set[tuple[str, str]] = set()
     sessions = 0
     verifier_runs = 0
+    verifier_candidates: set[str] = set()
     search_runs: set[str] = set()
     search_run_states: dict[str, int] = defaultdict(int)
     annotation_usage: dict[str, int | float] = {}
@@ -2774,9 +2878,17 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                             payload = json.loads(
                                 extracted.read().decode("utf-8", errors="replace")
                             )
-                            verifier_runs += int(
+                            session_verifier_runs = int(
                                 payload.get("counters", {}).get("verifier_runs", 0)
                             )
+                            verifier_runs += session_verifier_runs
+                            candidate_id = payload.get("candidate_id")
+                            if (
+                                session_verifier_runs > 0
+                                and isinstance(candidate_id, str)
+                                and candidate_id
+                            ):
+                                verifier_candidates.add(candidate_id)
                         except (json.JSONDecodeError, TypeError, ValueError):
                             pass
                 if (
@@ -2812,6 +2924,8 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         "candidates": len(candidates),
         "agent_sessions": sessions,
         "worker_verifier_runs": verifier_runs,
+        "verifier_candidate_ids": sorted(verifier_candidates),
+        "verifier_candidate_count": len(verifier_candidates),
         "search_run_states": dict(sorted(search_run_states.items())),
         "evidence_annotator_usage": {
             **annotation_usage,
@@ -2820,6 +2934,134 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
             "states": dict(sorted(annotation_states.items())),
             "coverage": "persisted Goal Plus Evidence annotator turns",
         },
+    }
+
+
+def latest_judge_report(
+    destination: Path,
+    cell: dict[str, Any],
+    task_run: Path | None,
+) -> dict[str, Any] | None:
+    paths: set[Path] = set()
+    if task_run is not None:
+        paths.update((task_run / "submissions").glob("*/report.json"))
+    paths.update(
+        (
+            destination
+            / "judge"
+            / "runs"
+            / str(cell["sforge_run_id"])
+            / str(cell["task_id"])
+            / "submissions"
+        ).glob("*/report.json")
+    )
+    reports: list[tuple[float, Path, dict[str, Any]]] = []
+    for path in paths:
+        try:
+            payload = read_json(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        submitted_at = payload.get("submitted_at")
+        order = (
+            float(submitted_at)
+            if isinstance(submitted_at, (int, float))
+            else path.stat().st_mtime
+        )
+        reports.append((order, path, payload))
+    if not reports:
+        return None
+    _, path, payload = max(reports, key=lambda item: item[0])
+    return {
+        key: payload.get(key)
+        for key in (
+            "submission_id",
+            "score",
+            "score_0_100",
+            "valid",
+            "submitted_at",
+            "passed",
+        )
+        if payload.get(key) is not None
+    } | {"path": portable_path(path)}
+
+
+def remaining_time(cell: dict[str, Any]) -> dict[str, int | None]:
+    started_at = cell.get("started_at")
+    if not isinstance(started_at, str):
+        return {
+            "exploration_seconds": None,
+            "finalization_seconds": None,
+        }
+    try:
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except ValueError:
+        return {
+            "exploration_seconds": None,
+            "finalization_seconds": None,
+        }
+    elapsed = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+    exploration = int(cell["wall_time_seconds"])
+    grace = int(cell.get("goal_plus_finalization_grace_seconds", 300))
+    if cell.get("state") in {"completed", "failed", "interrupted", "partial"}:
+        return {"exploration_seconds": 0, "finalization_seconds": 0}
+    return {
+        "exploration_seconds": max(0, exploration - elapsed),
+        "finalization_seconds": max(0, exploration + grace - elapsed),
+    }
+
+
+def live_goal_plus_status(
+    destination: Path,
+    cell: dict[str, Any],
+    task_run: Path | None,
+) -> dict[str, Any]:
+    events = (
+        parse_codex_event_file(task_run / "agent_output.txt")
+        if task_run is not None
+        else parse_codex_event_file(Path(""))
+    )
+    event_goal_plus = events["goal_plus"]
+    archived = goal_plus_stats(task_run) if task_run is not None else None
+    return {
+        "candidate_ids": event_goal_plus["candidate_ids"],
+        "candidate_count": max(
+            len(event_goal_plus["candidate_ids"]),
+            int((archived or {}).get("candidates") or 0),
+        ),
+        "worker_sessions": event_goal_plus["worker_sessions"],
+        "agent_session_count": max(
+            len(event_goal_plus["agent_session_ids"]),
+            int((archived or {}).get("agent_sessions") or 0),
+        ),
+        "spawned_worker_thread_ids": events["spawned_agent_thread_ids"],
+        "spawn_agent_completed_count": events["spawn_agent_completed_count"],
+        "bound_worker_handles": event_goal_plus["bound_worker_handles"],
+        "actual_worker_launch_count": max(
+            int(events["spawned_agent_thread_count"]),
+            int(event_goal_plus["bound_worker_handle_count"]),
+        ),
+        "verifier_ledger": event_goal_plus["verifier_ledger"],
+        "worker_verifier_runs": max(
+            len(event_goal_plus["verifier_ledger"]),
+            int((archived or {}).get("worker_verifier_runs") or 0),
+        ),
+        "verifier_candidate_ids": sorted(
+            {
+                *(
+                    str(item["candidate_id"])
+                    for item in event_goal_plus["verifier_ledger"]
+                    if isinstance(item, dict) and item.get("candidate_id")
+                ),
+                *((archived or {}).get("verifier_candidate_ids") or []),
+            }
+        ),
+        "selected_candidate_ids": event_goal_plus["selected_candidate_ids"],
+        "promoted_candidate_ids": event_goal_plus["promoted_candidate_ids"],
+        "goal_statuses": event_goal_plus["goal_statuses"],
+        "remaining": remaining_time(cell),
+        "latest_judge_submission": latest_judge_report(
+            destination, cell, task_run
+        ),
     }
 
 
@@ -2872,7 +3114,123 @@ def score_task_run(task_run: Path, cell: dict[str, Any]) -> dict[str, Any]:
     observation["evaluator_calls"] = evaluator_calls
     observation["codex_usage"] = codex_usage(task_run)
     observation["goal_plus"] = goal_plus_stats(task_run)
+    observation["agent_events"] = parse_codex_event_file(
+        task_run / "agent_output.txt"
+    )
     return observation
+
+
+def goal_plus_completion_evidence(
+    cell: dict[str, Any],
+    observations: list[dict[str, Any]],
+    *,
+    valid_trajectories: int,
+) -> dict[str, Any]:
+    if cell["method"] not in GOAL_PLUS_METHODS:
+        return {
+            "required": False,
+            "passed": valid_trajectories == int(cell["outer_replicas"]),
+            "checks": {
+                "valid_trajectories": {
+                    "expected": int(cell["outer_replicas"]),
+                    "actual": valid_trajectories,
+                }
+            },
+        }
+    expected_workers = int(cell["inner_search_concurrency"])
+    candidates = 0
+    agent_sessions = 0
+    verifier_candidates: set[str] = set()
+    verifier_runs = 0
+    spawned_worker_threads = 0
+    bound_worker_handles = 0
+    selected: set[str] = set()
+    promoted: set[str] = set()
+    for observation in observations:
+        archived = observation.get("goal_plus") or {}
+        events = observation.get("agent_events") or {}
+        event_goal_plus = events.get("goal_plus") or {}
+        candidates = max(
+            candidates,
+            int(archived.get("candidates") or 0),
+            len(event_goal_plus.get("candidate_ids") or []),
+        )
+        agent_sessions = max(
+            agent_sessions,
+            int(archived.get("agent_sessions") or 0),
+            len(event_goal_plus.get("agent_session_ids") or []),
+        )
+        spawned_worker_threads = max(
+            spawned_worker_threads,
+            int(events.get("spawned_agent_thread_count") or 0),
+        )
+        bound_worker_handles = max(
+            bound_worker_handles,
+            int(event_goal_plus.get("bound_worker_handle_count") or 0),
+        )
+        ledger = event_goal_plus.get("verifier_ledger") or []
+        verifier_runs = max(
+            verifier_runs,
+            int(archived.get("worker_verifier_runs") or 0),
+            len(ledger),
+        )
+        verifier_candidates.update(
+            str(candidate_id)
+            for candidate_id in archived.get("verifier_candidate_ids") or []
+            if candidate_id
+        )
+        verifier_candidates.update(
+            str(item["candidate_id"])
+            for item in ledger
+            if isinstance(item, dict) and item.get("candidate_id")
+        )
+        selected.update(event_goal_plus.get("selected_candidate_ids") or [])
+        promoted.update(event_goal_plus.get("promoted_candidate_ids") or [])
+
+    checks: dict[str, dict[str, Any]] = {
+        "valid_trajectory": {"expected": 1, "actual": valid_trajectories},
+        "candidates": {"expected": expected_workers, "actual": candidates},
+        "agent_sessions": {
+            "expected": expected_workers,
+            "actual": agent_sessions,
+        },
+        "worker_verifier_runs": {
+            "expected": expected_workers,
+            "actual": verifier_runs,
+        },
+        "promotion": {
+            "expected": 1,
+            "actual": max(len(selected), len(promoted)),
+        },
+    }
+    if cell["method"] == "goal-plus-codex":
+        checks["actual_worker_launches"] = {
+            "expected": expected_workers,
+            "actual": max(spawned_worker_threads, bound_worker_handles),
+        }
+        checks["spawn_agent_event_coverage"] = {
+            "expected": 0,
+            "actual": spawned_worker_threads,
+        }
+    checks["verifier_candidate_coverage"] = {
+        "expected": expected_workers,
+        "actual": len(verifier_candidates),
+    }
+    passed = all(
+        int(check["actual"]) >= int(check["expected"])
+        for check in checks.values()
+    )
+    return {
+        "required": True,
+        "passed": passed,
+        "checks": checks,
+        "reason": (
+            None
+            if passed
+            else "Goal Plus method did not persist the required worker, verifier, "
+            "promotion, and official trajectory evidence"
+        ),
+    }
 
 
 def summarize_cell(destination: Path, cell: dict[str, Any]) -> dict[str, Any]:
@@ -2887,6 +3245,11 @@ def summarize_cell(destination: Path, cell: dict[str, Any]) -> dict[str, Any]:
     ]
     valid = [item for item in observations if "edgebench_score" in item]
     best = max(valid, key=lambda item: float(item["edgebench_score"])) if valid else None
+    completion_evidence = goal_plus_completion_evidence(
+        cell,
+        observations,
+        valid_trajectories=len(valid),
+    )
     summary = {
         "schema_version": 1,
         "cell_id": cell["cell_id"],
@@ -2904,6 +3267,8 @@ def summarize_cell(destination: Path, cell: dict[str, Any]) -> dict[str, Any]:
         "valid_trajectories": len(valid),
         "observations": observations,
         "best": best,
+        "completion_evidence": completion_evidence,
+        "incomplete_reason": completion_evidence.get("reason"),
         "protocol_classification": cell.get("protocol_classification"),
         "official_edgebench_comparable": cell.get(
             "official_edgebench_comparable", False
@@ -2997,6 +3362,11 @@ def comparison_record(
         if normalized is not None and local_one_score is not None
         else None
     )
+    completion = cell.get("completion_evidence") or {}
+    completion_checks = completion.get("checks") or {}
+    worker_check = completion_checks.get("actual_worker_launches") or (
+        completion_checks.get("agent_sessions") or {}
+    )
 
     if normalized is None:
         issue_marker = "MISSING_CURRENT"
@@ -3046,6 +3416,15 @@ def comparison_record(
         "Input tokens": input_tokens,
         "Output tokens": output_tokens,
         "Usage coverage": ", ".join(sorted(coverage)) or "unavailable",
+        "Completion evidence": bool(completion.get("passed")),
+        "Actual Goal Plus workers": worker_check.get("actual"),
+        "Goal Plus candidates": (
+            completion_checks.get("candidates") or {}
+        ).get("actual"),
+        "Goal Plus verifier runs": (
+            completion_checks.get("worker_verifier_runs") or {}
+        ).get("actual"),
+        "Incomplete reason": cell.get("incomplete_reason"),
         "Protocol classification": cell.get("protocol_classification"),
         "Official comparable": cell.get("official_edgebench_comparable", False),
         "Issue marker": issue_marker,
@@ -3304,8 +3683,36 @@ def finalize_campaign(
         "cell_concurrency": campaign.get("cell_concurrency"),
         "paper_reference": paper_reference,
         "cells": summaries,
+        "completion_evidence_passed": all(
+            bool(summary["completion_evidence"]["passed"])
+            for summary in summaries
+        ),
         "finalized_at": utc_now(),
     }
+    if not payload["completion_evidence_passed"]:
+        incomplete = {
+            summary["cell_id"]: summary["incomplete_reason"]
+            for summary in summaries
+            if not summary["completion_evidence"]["passed"]
+        }
+        for item in campaign["cells"]:
+            if item["cell_id"] not in incomplete:
+                continue
+            item["state"] = "partial"
+            item["incomplete_reason"] = incomplete[item["cell_id"]]
+            cell_path = destination / "cells" / item["cell_id"] / "cell.json"
+            cell = read_json(cell_path)
+            cell["state"] = "partial"
+            cell["incomplete_reason"] = incomplete[item["cell_id"]]
+            write_json(cell_path, cell)
+        campaign["state"] = "partial"
+        campaign["completion_evidence_passed"] = False
+        campaign["incomplete_cells"] = incomplete
+        campaign["updated_at"] = utc_now()
+    else:
+        campaign["completion_evidence_passed"] = True
+        campaign["updated_at"] = utc_now()
+    write_json(destination / "campaign.json", campaign)
     if local_fast_reference_path is not None:
         payload["local_fast_reference"] = load_local_fast_reference(
             local_fast_reference_path

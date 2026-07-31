@@ -5,17 +5,26 @@ description: 自动部署或诊断 bench-goal-plus benchmark 环境。用户要�
 
 # Benchmark 环境部署
 
-从仓库根目录执行。先读 [benchmark-matrix.md](references/benchmark-matrix.md)，再以
-`benchmarks/registry.json` 和 `environment/upstreams.json` 的当前内容为事实源。
+从仓库根目录执行。先按实际 host/provider 读
+[host-auth.md](references/host-auth.md)，再读
+[benchmark-matrix.md](references/benchmark-matrix.md)。以
+`benchmarks/registry.json`、`benchmarks/runners.json` 和
+`environment/upstreams.json` 的当前内容为事实源。
 
 ## 流程
 
-1. 确认 `git`、Python 3.10+、`uv`、Codex CLI 0.144.1+；只报告缺失项，不把凭据写入文件。
-2. 同时读取 `benchmarks/registry.json` 的 readiness Docker 边界和 `benchmarks/runners.json` 的可执行 Docker contract。需要 Docker 时先运行 `docker info`；失败则停止需要容器的路径。
-3. 运行 `python3 scripts/repro_env.py bootstrap --only <upstream>`。多个上游重复传 `--only`。让脚本管理 `.bench-env/venv`、`third_party/` 和 repository-local `.tmp/`。只有准备运行 `goal-plus-pi` 时才加 `--require-pi`；Plain Codex 和 Goal Plus + Codex 不应被缺失的 host Pi 阻断。
-4. 运行同参数的 `doctor`。不得绕过 dirty、wrong-origin、wrong-branch、divergent 或版本检查。默认 `host:pi` 是诊断项；`--require-pi` 才把它升级为硬依赖。
-5. 按 Docker owner/mode 执行 provision：native runner 调自己的 provision/doctor；eager adapter 调标准 hooks；lazy adapter 保留 evaluator 自带的创建逻辑。`--skip-provision` 也不能跳过 doctor。
-6. 汇报执行命令、resolved branch/commit、Docker 状态、已拉镜像/数据 revision、pass/fail/partial 和下一步。
+1. 明确 benchmark、runner、macOS/Linux、agent 和 auth mode。若用户没有指定，
+   从 preset/method 和当前 host 推导，并在执行前汇报选择。
+2. 确认 `git`、Python 3.10+、`uv`、Codex CLI 0.144.1+；只报告缺失项，不把凭据写入文件。
+3. 同时读取 registry 的 readiness Docker 边界和 runner 的可执行 Docker contract。
+   需要 Docker 时先运行 `docker info`；失败则停止需要容器的路径。
+4. 通过 `python3 scripts/bench.py setup --benchmark <id>` 或 `--preset <id>`
+   执行受管 bootstrap、doctor 和 provision。只在诊断底层 bootstrap 时直接使用
+   `scripts/repro_env.py`。
+5. 不得绕过 dirty、wrong-origin、wrong-branch、divergent、版本、auth、container
+   architecture、network bridge 或 resource-limit 检查。
+6. 汇报 host/auth 组合、resolved branch/commit、Docker 状态、已拉镜像/数据 revision、
+   pass/fail/partial 和下一步。
 
 ## 约束
 

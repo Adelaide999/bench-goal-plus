@@ -1,15 +1,33 @@
-# Runner map
+# Benchmark runner map
 
-可执行映射以 `benchmarks/runners.json` 为准；本页只解释选择逻辑，不重复维护 target 清单。
+可执行映射以 `benchmarks/runners.json` 为准。本页只负责把已解析的 runner/target
+路由到必须阅读的 reference。
 
-| Workload | Controller | Lifecycle |
-|---|---|---|
-| Native profile benchmark | benchmark-owned controller | `provision`, `doctor`, `prepare`, `run`, `status`, `stop`, `finalize` as declared |
-| Standalone artifact task | `experiments/benchmark_compare/experiment.py` | low-level `prepare`, `run`; normally reached through matrix controller |
-| Benchmark x condition x seed matrix | `experiments/benchmark_campaign/experiment.py` | `list`, `prepare`, `run`, `status`, `summarize` |
-| OpenEvolve examples | `experiments/openevolve_compare/experiment.py` | single/batch prepare, run, report |
-| HeuriGym compatibility | `experiments/heurigym_compare/experiment.py` | forwards to common standalone implementation |
+## Runner family
 
-用 dispatcher 构造已登记命令；修改 contract 或接入新 runner kind 时才直接检查 controller 的 README
-和 `--help`。hidden judge、service/container lifecycle、browser state 或 specialized scheduling
-继续由 native controller 持有。
+| Runner | 何时使用 | 必读 reference |
+| --- | --- | --- |
+| `edgebench-native` | EdgeBench 的 SForge、Work/Judge container、native campaign | [EdgeBench](benchmarks/edgebench.md) |
+| `common-matrix` | 单 artifact + evaluator 的普通 benchmark adapter | [Common matrix](benchmarks/common-matrix.md) |
+| `openevolve-batch` | OpenEvolve `cpu_portable` task set 和原生 OpenEvolve 对比 | [OpenEvolve](benchmarks/openevolve.md) |
+
+不要根据统一 CLI 猜测 runner capability。`detach`、`stop`、`resume`、`C>1`、
+official evaluator 和 report source 必须读取 catalog/registry。
+
+## Target-specific context
+
+Common runner 统一 campaign lifecycle，但 task、artifact、evaluator、Docker 和 readiness
+仍由 benchmark 决定：
+
+| Target | Benchmark reference |
+| --- | --- |
+| ALE-Bench Lite | [docs/benchmarks/ale-bench-lite.md](../../../../docs/benchmarks/ale-bench-lite.md) |
+| HeuriGym | [docs/benchmarks/heurigym.md](../../../../docs/benchmarks/heurigym.md) |
+| Frontier Engineering | [docs/benchmarks/frontier-engineering-v1-lite.md](../../../../docs/benchmarks/frontier-engineering-v1-lite.md) |
+| AutoLab | [docs/benchmarks/autolab-cpu.md](../../../../docs/benchmarks/autolab-cpu.md) |
+| SwarmResearch | [docs/benchmarks/swarmresearch-15.md](../../../../docs/benchmarks/swarmresearch-15.md) |
+| Frontier-CS | [docs/benchmarks/frontier-cs-algorithmic.md](../../../../docs/benchmarks/frontier-cs-algorithmic.md) |
+| SkyDiscover task packs | [docs/benchmarks/skydiscover-task-packs.md](../../../../docs/benchmarks/skydiscover-task-packs.md) |
+
+存在 benchmark reference 只说明契约和当前状态被记录；是否可运行仍以 catalog、doctor、
+plan 和实际 evidence 为准。

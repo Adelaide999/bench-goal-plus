@@ -1,31 +1,35 @@
 ---
 name: bench-goal-plus
-description: 端到端操作 bench-goal-plus benchmark control plane。用户要求从新机器部署环境、选择已登记 benchmark、启动或恢复 campaign、监控/停止长任务、执行 native finalize，并生成 report.md 与 campaign 命名 XLSX 时使用；也用于检查新 benchmark 是否完成 setup/run/report 注册。
+description: bench-goal-plus 的端到端路由 Skill。用户提出完整 benchmark 请求、请求同时包含环境部署/启动/监控/报告，或还不知道应该使用哪个 benchmark workflow Skill 时使用。
 ---
 
-# Bench Goal Plus Agent
+# Bench Goal Plus 路由
 
-从仓库根目录使用统一入口：
+这个 Skill 只负责识别任务阶段并路由，不复制平台配置、benchmark 命令或报告逻辑。
+仓库的统一入口是：
 
 ```bash
-python3 .agents/skills/bench-goal-plus/scripts/bench.py catalog
+python3 scripts/bench.py catalog
 ```
 
-先读 [agent-contract.md](references/agent-contract.md)。需要细节时再使用
-`$benchmark-setup`、`$benchmark-run`、`$benchmark-report` 或 `$benchmark-adapt`；不要绕过
-`scripts/bench.py` 另拼生命周期命令。
+先读 [Agent lifecycle contract](references/agent-contract.md)，再按请求选择：
 
-## 执行
+| 请求 | 使用的 Skill | 先读的 reference |
+| --- | --- | --- |
+| 新机器、依赖、Docker、Mac/Linux、OAuth/API | `benchmark-setup` | [host-auth.md](../benchmark-setup/references/host-auth.md)、[benchmark-matrix.md](../benchmark-setup/references/benchmark-matrix.md) |
+| 选择 benchmark、冻结配置、启动、监控、停止、恢复 | `benchmark-run` | [runner-map.md](../benchmark-run/references/runner-map.md)，再读对应 benchmark reference |
+| native finalize、`report.md`、XLSX、指标核对 | `benchmark-report` | [report-contract.md](../benchmark-report/references/report-contract.md) |
+| 接入新 benchmark 或 task family | `benchmark-adapt` | [adaptation-checklist.md](../benchmark-adapt/references/adaptation-checklist.md) |
 
-1. 用 `catalog` 确认 target/preset。
-2. 用 `setup ... --dry-run` 或 `plan ...` 审查依赖、Docker owner/mode、上游和完整命令链。
-3. 短任务使用 `e2e`，它在前台完成 setup、prepare、run、finalize 和报告导出。
-4. 长任务使用 `start`；只有声明 `detach=true` 的 runner 才会后台运行。保存 campaign path；
-   `agent-run.json` 已记录后续命令。
-5. 用 `status` 读取 native campaign 和 Agent 状态；按 capability 使用 `stop` 或 `resume`，不得删除 partial campaign。
-6. campaign 终态后用 `finish`，统一执行 native finalize/summarize 和 Markdown/XLSX 导出。
+## 端到端请求
 
-## 交付
+当一个请求覆盖完整生命周期时，按以下顺序组合 Skills：
 
-返回实际 target、profile/preset、campaign path、`T/K/C/R`、状态、恢复/停止命令、source
-JSON、`report.md` 和 `.xlsx` 的绝对路径。只有实际执行且 evidence 存在时声明 `pass`。
+1. `benchmark-setup`：确认 host、auth、Docker、upstream 和 doctor。
+2. `benchmark-run`：执行 `plan`，确认 resolved method/profile 与 `T/K/C/R`，再
+   `launch`。
+3. `benchmark-run`：长任务返回 campaign path，并通过 `status` 继续监控。
+4. `benchmark-report`：campaign 终态后执行 `finish` 并核对产物。
+
+不要仅因 catalog、profile 或代码路径存在就声明 ready。返回实际命令、campaign path、
+状态和 evidence；缺少真实执行证据时最多为 `partial`。

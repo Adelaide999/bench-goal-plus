@@ -41,6 +41,7 @@ class RunnerDefinition:
     runner_id: str
     kind: str
     controller: Path
+    supported_methods: tuple[str, ...]
     capabilities: RunnerCapabilities
 
     def as_dict(self) -> dict[str, Any]:
@@ -48,6 +49,7 @@ class RunnerDefinition:
             "id": self.runner_id,
             "kind": self.kind,
             "controller": str(self.controller),
+            "supported_methods": list(self.supported_methods),
             "capabilities": self.capabilities.as_dict(),
         }
 
@@ -171,6 +173,7 @@ class StatusSnapshot:
     can_resume: bool = False
     can_stop: bool = False
     can_finalize: bool = False
+    details: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

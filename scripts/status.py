@@ -19,6 +19,8 @@ from adapters.registry import (  # noqa: E402
     load_adapter,
     load_definitions,
 )
+from bench_goal_plus.catalog import Catalog  # noqa: E402
+from bench_goal_plus.errors import ContractError  # noqa: E402
 from benchmarks.datasets import (  # noqa: E402
     load_catalog as load_dataset_catalog,
     validate_catalog as validate_dataset_catalog,
@@ -105,6 +107,14 @@ def validate_datasets() -> list[str]:
     ]
 
 
+def validate_runner_catalog() -> list[str]:
+    try:
+        Catalog()
+    except ContractError as error:
+        return [f"runner catalog: {error}"]
+    return []
+
+
 def compact(status: str) -> str:
     return {
         "pass": "PASS",
@@ -160,7 +170,12 @@ def main() -> int:
     args = parser.parse_args()
 
     data = load_registry()
-    errors = [*validate(data), *validate_task_adapters(), *validate_datasets()]
+    errors = [
+        *validate(data),
+        *validate_task_adapters(),
+        *validate_datasets(),
+        *validate_runner_catalog(),
+    ]
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
