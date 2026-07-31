@@ -122,6 +122,8 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
     verifier_candidates: set[str] = set()
     search_runs: set[str] = set()
     search_run_states: dict[str, int] = defaultdict(int)
+    selected_candidate_ids: set[str] = set()
+    promoted_candidate_ids: set[str] = set()
     annotation_usage: dict[str, int | float] = {}
     annotation_tasks = 0
     annotation_attempts = 0
@@ -141,6 +143,18 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                             state = payload.get("state")
                             if state:
                                 search_run_states[str(state)] += 1
+                            selected_candidate_id = payload.get(
+                                "selected_candidate_id"
+                            )
+                            if (
+                                isinstance(selected_candidate_id, str)
+                                and selected_candidate_id
+                            ):
+                                selected_candidate_ids.add(selected_candidate_id)
+                                if state == "promoted":
+                                    promoted_candidate_ids.add(
+                                        selected_candidate_id
+                                    )
                         except (json.JSONDecodeError, TypeError):
                             pass
                 match = re.search(
@@ -207,6 +221,8 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         "verifier_candidate_ids": sorted(verifier_candidates),
         "verifier_candidate_count": len(verifier_candidates),
         "search_run_states": dict(sorted(search_run_states.items())),
+        "selected_candidate_ids": sorted(selected_candidate_ids),
+        "promoted_candidate_ids": sorted(promoted_candidate_ids),
         "evidence_annotator_usage": {
             **annotation_usage,
             "tasks": annotation_tasks,
@@ -329,8 +345,18 @@ def live_goal_plus_status(
                 *((archived or {}).get("verifier_candidate_ids") or []),
             }
         ),
-        "selected_candidate_ids": event_goal_plus["selected_candidate_ids"],
-        "promoted_candidate_ids": event_goal_plus["promoted_candidate_ids"],
+        "selected_candidate_ids": sorted(
+            {
+                *event_goal_plus["selected_candidate_ids"],
+                *((archived or {}).get("selected_candidate_ids") or []),
+            }
+        ),
+        "promoted_candidate_ids": sorted(
+            {
+                *event_goal_plus["promoted_candidate_ids"],
+                *((archived or {}).get("promoted_candidate_ids") or []),
+            }
+        ),
         "goal_statuses": event_goal_plus["goal_statuses"],
         "remaining": remaining_time(cell),
         "latest_judge_submission": latest_judge_report(destination, cell, task_run),
@@ -462,7 +488,9 @@ def goal_plus_completion_evidence(
             for item in ledger
             if isinstance(item, dict) and item.get("candidate_id")
         )
+        selected.update(archived.get("selected_candidate_ids") or [])
         selected.update(event_goal_plus.get("selected_candidate_ids") or [])
+        promoted.update(archived.get("promoted_candidate_ids") or [])
         promoted.update(event_goal_plus.get("promoted_candidate_ids") or [])
 
     checks: dict[str, dict[str, Any]] = {

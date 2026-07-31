@@ -1445,6 +1445,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(stats["search_runs"], 1)
         self.assertEqual(stats["candidates"], 0)
         self.assertEqual(stats["search_run_states"], {"running": 1})
+        self.assertEqual(stats["selected_candidate_ids"], [])
+        self.assertEqual(stats["promoted_candidate_ids"], [])
         self.assertEqual(
             stats["evidence_annotator_usage"],
             {
@@ -1457,6 +1459,29 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "coverage": "persisted Goal Plus Evidence annotator turns",
             },
         )
+
+    def test_goal_plus_stats_recovers_archived_promotion(self) -> None:
+        run = self.temp / "task-run"
+        run.mkdir()
+        payload = json.dumps(
+            {
+                "run_id": "run-1",
+                "state": "promoted",
+                "selected_candidate_id": "c001",
+            }
+        ).encode()
+        member = tarfile.TarInfo(".goal-plus/runs/run-1/run.json")
+        member.size = len(payload)
+        with tarfile.open(run / "goal-plus-state.tar", "w") as archive:
+            archive.addfile(member, io.BytesIO(payload))
+
+        stats = EDGE.goal_plus_stats(run)
+
+        self.assertIsNotNone(stats)
+        assert stats is not None
+        self.assertEqual(stats["search_run_states"], {"promoted": 1})
+        self.assertEqual(stats["selected_candidate_ids"], ["c001"])
+        self.assertEqual(stats["promoted_candidate_ids"], ["c001"])
 
     def test_provision_excludes_downloaded_tasks_from_git_status(self) -> None:
         exclude = EDGE.current_paths().edge_root / ".git" / "info" / "exclude"
@@ -1587,6 +1612,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                         "agent_sessions": 2,
                         "worker_verifier_runs": 3,
                         "verifier_candidate_ids": ["c001", "c002"],
+                        "selected_candidate_ids": ["c001"],
+                        "promoted_candidate_ids": ["c001"],
                     },
                     "agent_events": {
                         "spawn_agent_completed_count": 0,
@@ -1594,7 +1621,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                             "candidate_ids": [],
                             "agent_session_ids": [],
                             "verifier_ledger": [],
-                            "selected_candidate_ids": ["c001"],
+                            "selected_candidate_ids": [],
                             "promoted_candidate_ids": [],
                         },
                     },
