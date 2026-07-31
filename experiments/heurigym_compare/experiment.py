@@ -22,9 +22,5 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | set(dir(_implementation)))
 
 
-def main() -> int:
-    return _implementation.main()
-
-
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_implementation.main())
