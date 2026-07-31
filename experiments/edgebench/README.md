@@ -5,6 +5,27 @@
 branch、固定 data revision，生成实验单元，启动/监控进程，并把 SForge raw
 artifact 汇总成同口径表；campaign manifest 记录实际 source commit。
 
+## 代码边界
+
+用户和仓内调度器继续调用 `experiments/edgebench/experiment.py`；它只是兼容入口，
+负责转发历史公开符号和 CLI，不再承载实现。实际代码位于 `controller/`：
+
+| 模块 | 单一职责 |
+|---|---|
+| `context.py` | 仓库、上游、task、run 等路径上下文；测试通过显式 context 隔离 |
+| `profiles.py` | profile 加载、协议归一化及官方协议 diff |
+| `environment.py` | host/API/Docker 检查、资源探测、provision 与 doctor |
+| `preparation.py` | 把已解析 profile 物化为不可变 campaign/cell manifest |
+| `runtime.py` | SForge 命令、Judge 生命周期、cell 队列、启动/停止/状态 |
+| `evidence.py` | raw run、Judge、token、Goal Plus 完成证据的读取与归一化 |
+| `reporting.py` | native finalize、comparison JSON、Markdown 与 XLSX |
+| `cli.py` | EdgeBench 子命令解析和分发 |
+
+跨 benchmark 的选择、setup/start/status/stop/finish 仍只放在
+`scripts/bench.py`；EdgeBench 的 hidden Judge、容器和原生归档仍归 SForge。
+新增 benchmark-specific 行为时放入上述所属模块，不把业务逻辑放回兼容入口，也不把
+EdgeBench 特例加入通用 dispatcher。
+
 ## 方法与 K 的映射
 
 | 方法 | SForge outer run | live concurrency `K` | 含义 |
@@ -67,10 +88,11 @@ profile 中显式改为每 60 秒评测一次；macOS 本地 OAuth 路径也显�
 `internet=true`。这两个差异都有逐字段原因并把结果标成
 `official_protocol_with_intentional_overrides`，不能当作官方同口径结果。
 
-2026-07-31 已用 campaign
-`edgebench-vliw-codex-gpt-5-6-sol-medium-local-smoke-5m-k1-c1-20260731-1532`
-完成端到端验证：4 次 hidden Judge 均通过 9/9，controller 最终状态为
-`completed`，并成功生成 `report.md` 与同名 xlsx。
+2026-07-31 已在模块化 controller 上用 campaign
+`edgebench-vliw-codex-gpt-5-6-sol-medium-local-smoke-5m-k1-c1-20260731-1755`
+完成端到端验证：4 次 hidden Judge 均通过 9/9，最终 raw score 为 2136 cycles，
+controller 状态为 `completed` 且 `completion_evidence_passed=true`，并成功生成
+`report.md` 与同名 xlsx。
 
 Pi 的两个最小 profile 通过同一个入口：
 

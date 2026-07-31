@@ -7,6 +7,7 @@ import sys
 import tarfile
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,27 +24,57 @@ EDGE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = EDGE
 SPEC.loader.exec_module(EDGE)
 
+from experiments.edgebench.controller import io as EDGE_IO
+from experiments.edgebench.controller import reporting as EDGE_REPORTING
+from experiments.edgebench.controller import runtime as EDGE_RUNTIME
+
 
 class EdgeBenchExperimentTest(unittest.TestCase):
+    def test_compatibility_entrypoint_stays_thin(self) -> None:
+        entrypoint = ROOT / "experiments" / "edgebench" / "experiment.py"
+        source = entrypoint.read_text(encoding="utf-8")
+
+        self.assertLessEqual(len(source.splitlines()), 200)
+        for implementation in (
+            "def doctor_payload(",
+            "def execute_campaign(",
+            "def finalize_campaign(",
+            "def prepare(",
+        ):
+            self.assertNotIn(implementation, source)
+        for module in (
+            "cli.py",
+            "context.py",
+            "environment.py",
+            "evidence.py",
+            "io.py",
+            "preparation.py",
+            "profiles.py",
+            "reporting.py",
+            "runtime.py",
+        ):
+            self.assertTrue(
+                (ROOT / "experiments" / "edgebench" / "controller" / module).is_file()
+            )
+
     def setUp(self) -> None:
         self.temp = (
             EDGE.ensure_temp_root("test-edgebench-experiment")
             / f"{self._testMethodName}-{time.time_ns()}"
         )
         self.temp.mkdir(parents=True)
-        self.originals = {
-            "TASKS_DIR": EDGE.TASKS_DIR,
-            "RUNS_ROOT": EDGE.RUNS_ROOT,
-            "EDGE_ROOT": EDGE.EDGE_ROOT,
-            "GOAL_PLUS_ROOT": EDGE.GOAL_PLUS_ROOT,
-        }
-        EDGE.TASKS_DIR = self.temp / "edgebench" / "tasks"
-        EDGE.RUNS_ROOT = self.temp / "runs"
-        EDGE.EDGE_ROOT = self.temp / "edgebench"
-        EDGE.GOAL_PLUS_ROOT = self.temp / "goal-plus"
-        EDGE.TASKS_DIR.mkdir(parents=True)
-        EDGE.GOAL_PLUS_ROOT.mkdir(parents=True)
-        (EDGE.TASKS_DIR / "vliw_kernel_optimization.json").write_text(
+        self.original_paths = EDGE.current_paths()
+        self.test_paths = replace(
+            self.original_paths,
+            edge_root=self.temp / "edgebench",
+            goal_plus_root=self.temp / "goal-plus",
+            tasks_dir=self.temp / "edgebench" / "tasks",
+            runs_root=self.temp / "runs",
+        )
+        EDGE.set_paths(self.test_paths)
+        self.test_paths.tasks_dir.mkdir(parents=True)
+        self.test_paths.goal_plus_root.mkdir(parents=True)
+        (self.test_paths.tasks_dir / "vliw_kernel_optimization.json").write_text(
             json.dumps(
                 {
                     "task_id": "vliw_kernel_optimization",
@@ -62,8 +93,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
-        for name, value in self.originals.items():
-            setattr(EDGE, name, value)
+        EDGE.set_paths(self.original_paths)
 
     def profile(self) -> dict:
         _, profile = EDGE.load_profile("vliw-smoke")
@@ -545,8 +575,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 ]
             },
         )
-        original_run_capture = EDGE.run_capture
-        EDGE.run_capture = lambda *_args, **_kwargs: {
+        original_run_capture = EDGE_IO.run_capture
+        EDGE_IO.run_capture = lambda *_args, **_kwargs: {
             "returncode": 0,
             "stdout": json.dumps(
                 {
@@ -562,7 +592,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 {"model": "gpt-test", "wall_time_seconds": 120},
             )
         finally:
-            EDGE.run_capture = original_run_capture
+            EDGE_IO.run_capture = original_run_capture
 
         self.assertEqual(observation["evaluator_calls"], 2)
 
@@ -802,11 +832,11 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 for process in processes:
                     process.done = True
 
-        original_start = EDGE.start_campaign_cell
-        original_finish = EDGE.finish_campaign_cell
+        original_start = EDGE_RUNTIME.start_campaign_cell
+        original_finish = EDGE_RUNTIME.finish_campaign_cell
         original_sleep = EDGE.time.sleep
-        EDGE.start_campaign_cell = fake_start
-        EDGE.finish_campaign_cell = fake_finish
+        EDGE_RUNTIME.start_campaign_cell = fake_start
+        EDGE_RUNTIME.finish_campaign_cell = fake_finish
         EDGE.time.sleep = fake_sleep
         try:
             returncode = EDGE.execute_cell_queue(
@@ -822,8 +852,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 stop_requested=lambda: False,
             )
         finally:
-            EDGE.start_campaign_cell = original_start
-            EDGE.finish_campaign_cell = original_finish
+            EDGE_RUNTIME.start_campaign_cell = original_start
+            EDGE_RUNTIME.finish_campaign_cell = original_finish
             EDGE.time.sleep = original_sleep
 
         self.assertEqual(returncode, 1)
@@ -884,11 +914,11 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             nonlocal requested
             requested = True
 
-        original_start = EDGE.start_campaign_cell
-        original_finish = EDGE.finish_campaign_cell
+        original_start = EDGE_RUNTIME.start_campaign_cell
+        original_finish = EDGE_RUNTIME.finish_campaign_cell
         original_sleep = EDGE.time.sleep
-        EDGE.start_campaign_cell = fake_start
-        EDGE.finish_campaign_cell = fake_finish
+        EDGE_RUNTIME.start_campaign_cell = fake_start
+        EDGE_RUNTIME.finish_campaign_cell = fake_finish
         EDGE.time.sleep = fake_sleep
         try:
             returncode = EDGE.execute_cell_queue(
@@ -904,8 +934,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 stop_requested=lambda: requested,
             )
         finally:
-            EDGE.start_campaign_cell = original_start
-            EDGE.finish_campaign_cell = original_finish
+            EDGE_RUNTIME.start_campaign_cell = original_start
+            EDGE_RUNTIME.finish_campaign_cell = original_finish
             EDGE.time.sleep = original_sleep
 
         self.assertEqual(returncode, 130)
@@ -931,7 +961,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             api_base_url="http://192.0.2.10:45678/v1",
         )
 
-        self.assertEqual(env["SFORGE_GOAL_PLUS_SOURCE_DIR"], str(EDGE.GOAL_PLUS_ROOT))
+        self.assertEqual(
+            env["SFORGE_GOAL_PLUS_SOURCE_DIR"],
+            str(EDGE.current_paths().goal_plus_root),
+        )
         extra = dict(
             item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
         )
@@ -974,7 +1007,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
         )
 
-        self.assertEqual(env["SFORGE_GOAL_PLUS_SOURCE_DIR"], str(EDGE.GOAL_PLUS_ROOT))
+        self.assertEqual(
+            env["SFORGE_GOAL_PLUS_SOURCE_DIR"],
+            str(EDGE.current_paths().goal_plus_root),
+        )
         self.assertEqual(extra["SFORGE_GOAL_PLUS_MAX_PARALLEL"], "2")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "240")
         self.assertEqual(extra["SFORGE_PI_REASONING_EFFORT"], "medium")
@@ -1280,7 +1316,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             self.assertNotIn(key, env)
 
     def test_docker_resource_probe_verifies_applied_host_config(self) -> None:
-        original = EDGE.run_capture
+        original = EDGE_IO.run_capture
         commands = []
 
         def fake_run_capture(command, *, env=None):
@@ -1297,13 +1333,13 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 }
             return {"returncode": 0, "stdout": "", "stderr": ""}
 
-        EDGE.run_capture = fake_run_capture
+        EDGE_IO.run_capture = fake_run_capture
         try:
             result = EDGE.docker_resource_limit_probe(
                 "example:work", cpu_limit=4, mem_limit="16g"
             )
         finally:
-            EDGE.run_capture = original
+            EDGE_IO.run_capture = original
 
         self.assertTrue(result["passed"])
         self.assertIn("--cpus", commands[0])
@@ -1311,18 +1347,18 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(commands[-1][1:3], ["rm", "--force"])
 
     def test_rust_runtime_probe_preserves_image_environment(self) -> None:
-        original = EDGE.run_capture
+        original = EDGE_IO.run_capture
         captured = []
 
         def fake_run_capture(command, *, env=None):
             captured.append(command)
             return {"returncode": 0, "stdout": "rustc 1.88.0", "stderr": ""}
 
-        EDGE.run_capture = fake_run_capture
+        EDGE_IO.run_capture = fake_run_capture
         try:
             result = EDGE.rust_image_runtime_probe("example:rust", "1.88.0")
         finally:
-            EDGE.run_capture = original
+            EDGE_IO.run_capture = original
 
         self.assertEqual(result["returncode"], 0)
         self.assertIn("-c", captured[0])
@@ -1423,7 +1459,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
 
     def test_provision_excludes_downloaded_tasks_from_git_status(self) -> None:
-        exclude = EDGE.EDGE_ROOT / ".git" / "info" / "exclude"
+        exclude = EDGE.current_paths().edge_root / ".git" / "info" / "exclude"
         exclude.parent.mkdir(parents=True)
         exclude.write_text("# local excludes\n", encoding="utf-8")
 
@@ -1595,10 +1631,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         }
         (destination / "campaign.json").write_text(json.dumps(campaign))
         (cell_dir / "cell.json").write_text(json.dumps(cell))
-        original_summary = EDGE.summarize_cell
-        original_reference = EDGE.load_paper_reference
-        original_workbook = EDGE.write_comparison_workbook
-        EDGE.summarize_cell = lambda *_args, **_kwargs: {
+        original_summary = EDGE_REPORTING.summarize_cell
+        original_reference = EDGE_REPORTING.load_paper_reference
+        original_workbook = EDGE_REPORTING.write_comparison_workbook
+        EDGE_REPORTING.summarize_cell = lambda *_args, **_kwargs: {
             "cell_id": "vliw--goal-plus-codex",
             "task_id": "vliw_kernel_optimization",
             "model": "gpt-test",
@@ -1608,16 +1644,16 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "completion_evidence": {"passed": False},
             "incomplete_reason": "missing worker evidence",
         }
-        EDGE.load_paper_reference = lambda: {
+        EDGE_REPORTING.load_paper_reference = lambda: {
             "tasks": {"vliw_kernel_optimization": {}}
         }
-        EDGE.write_comparison_workbook = lambda *_args, **_kwargs: None
+        EDGE_REPORTING.write_comparison_workbook = lambda *_args, **_kwargs: None
         try:
             payload = EDGE.finalize_campaign(destination)
         finally:
-            EDGE.summarize_cell = original_summary
-            EDGE.load_paper_reference = original_reference
-            EDGE.write_comparison_workbook = original_workbook
+            EDGE_REPORTING.summarize_cell = original_summary
+            EDGE_REPORTING.load_paper_reference = original_reference
+            EDGE_REPORTING.write_comparison_workbook = original_workbook
 
         self.assertFalse(payload["completion_evidence_passed"])
         self.assertEqual(

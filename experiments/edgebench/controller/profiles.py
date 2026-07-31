@@ -1,0 +1,404 @@
+"""EdgeBench method, profile, and official-protocol contracts."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Iterable
+
+import yaml
+
+from . import io
+from .context import current_paths
+
+
+METHODS = {
+    "plain-codex": {
+        "agent": "codex",
+        "outer_replicas": "concurrency",
+        "inner_search": False,
+        "api_protocol": "openai",
+    },
+    "goal-plus-codex": {
+        "agent": "codex-goal-plus",
+        "outer_replicas": 1,
+        "inner_search": True,
+        "api_protocol": "openai",
+    },
+    "plain-pi": {
+        "agent": "pi",
+        "outer_replicas": "concurrency",
+        "inner_search": False,
+        "api_protocol": "openai",
+    },
+    "goal-plus-pi": {
+        "agent": "pi-goal-plus",
+        "outer_replicas": 1,
+        "inner_search": True,
+        "api_protocol": "openai",
+    },
+    "plain-claude": {
+        "agent": "claude-code",
+        "outer_replicas": "concurrency",
+        "inner_search": False,
+        "api_protocol": "anthropic",
+    },
+}
+GOAL_PLUS_METHODS = frozenset({"goal-plus-codex", "goal-plus-pi"})
+CLAUDE_REASONING_EFFORTS = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+)
+PAPER_LARGE_GAP_THRESHOLD_PP = 20.0
+LEGACY_PAPER_PROTOCOL_ISSUES = {
+    "borden_source_inversion": "no cooldown; unusually high evaluator-call frequency",
+    "exchange_core_throughput": "Internet access and unbounded CPU/hardware-sensitive score",
+    "schemathesis_config_modernization": "Internet access used by the agent; no official cooldown",
+    "schemathesis_datagen_pipeline": "Internet access used by the agent; no official cooldown",
+    "schemathesis_reporting_observability": "Internet access used by the agent; no official cooldown",
+}
+OFFICIAL_PROTOCOL_FIELDS = frozenset(
+    {
+        "agent",
+        "backend",
+        "disable_auto_eval",
+        "disable_auto_resume",
+        "disable_stop_hook",
+        "eval_interval",
+        "judge_cpu_limit",
+        "judge_mem_limit",
+        "max_submissions",
+        "submission_cooldown",
+        "timeout",
+        "work_cpu_limit",
+        "work_mem_limit",
+    }
+)
+OFFICIAL_REQUIRED_DEFAULTS = frozenset(
+    {
+        "agent",
+        "backend",
+        "eval_interval",
+        "judge_cpu_limit",
+        "judge_mem_limit",
+        "submission_cooldown",
+        "timeout",
+        "work_cpu_limit",
+        "work_mem_limit",
+    }
+)
+ALLOWED_PROTOCOL_OVERRIDE_FIELDS = frozenset(
+    {
+        "agent",
+        "attempts_per_task",
+        "backend",
+        "cell_concurrency",
+        "judge_concurrency",
+        "model",
+        "reasoning_effort",
+        "timeout",
+    }
+)
+PROFILE_PROTOCOL_OVERRIDE_FIELDS = frozenset({"eval_interval", "internet"})
+OFFICIAL_TASK_COUNT = 51
+OFFICIAL_SCHEDULED_RUNS = 3
+
+
+def api_protocol_for_methods(methods: Iterable[str]) -> str:
+    protocols = {str(METHODS[method]["api_protocol"]) for method in methods}
+    if len(protocols) != 1:
+        raise ValueError(
+            "one EdgeBench campaign cannot mix agent API protocols: "
+            + ", ".join(sorted(protocols))
+        )
+    return next(iter(protocols))
+
+
+def validate_claude_thinking_contract(
+    thinking: Any, reasoning_effort: Any
+) -> None:
+    if thinking == {"type": "adaptive"}:
+        if reasoning_effort is not None:
+            raise ValueError(
+                "adaptive Claude EdgeBench profiles must not set reasoning effort"
+            )
+        return
+    effort = str(reasoning_effort or "")
+    if effort not in CLAUDE_REASONING_EFFORTS:
+        raise ValueError(
+            "Claude EdgeBench profiles must use adaptive thinking without effort "
+            "or pin a supported reasoning effort"
+        )
+    expected_type = "disabled" if effort in {"none", "minimal"} else "enabled"
+    if thinking != {"type": expected_type}:
+        raise ValueError(
+            "Claude EdgeBench profiles must pair "
+            f"reasoning_effort={effort!r} with thinking.type={expected_type!r}"
+        )
+
+
+def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
+    paths = current_paths()
+    candidate = Path(value)
+    if not candidate.suffix:
+        candidate = paths.profile_dir / f"{candidate.name}.json"
+    elif not candidate.is_absolute():
+        candidate = (paths.root / candidate).resolve()
+    if not candidate.is_file():
+        raise FileNotFoundError(f"EdgeBench profile not found: {candidate}")
+    profile = io.read_json(candidate)
+    if profile.get("schema_version") != 1:
+        raise ValueError("unsupported EdgeBench profile schema")
+    for key in (
+        "id",
+        "dataset_repository",
+        "dataset_revision",
+        "task_ids",
+        "methods",
+        "model",
+        "wall_time_seconds",
+        "concurrency",
+    ):
+        if key not in profile:
+            raise ValueError(f"EdgeBench profile is missing {key!r}")
+    unknown = set(profile["methods"]) - set(METHODS)
+    if unknown:
+        raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))
+    api_protocol = api_protocol_for_methods(profile["methods"])
+    if api_protocol == "anthropic":
+        validate_claude_thinking_contract(
+            profile.get("thinking"), profile.get("reasoning_effort")
+        )
+        context_window = profile.get("claude_context_window_tokens")
+        compact_percent = profile.get("claude_autocompact_percent")
+        if (context_window is None) != (compact_percent is None):
+            raise ValueError(
+                "Claude context window and autocompact percent must be set together"
+            )
+        if context_window is not None and (
+            not isinstance(context_window, int)
+            or isinstance(context_window, bool)
+            or context_window < 1
+        ):
+            raise ValueError("claude_context_window_tokens must be positive")
+        if compact_percent is not None and (
+            not isinstance(compact_percent, int)
+            or isinstance(compact_percent, bool)
+            or not 1 <= compact_percent <= 100
+        ):
+            raise ValueError("claude_autocompact_percent must be between 1 and 100")
+    if int(profile["wall_time_seconds"]) < 1 or int(profile["concurrency"]) < 1:
+        raise ValueError("wall_time_seconds and concurrency must be positive")
+    if int(profile.get("cell_concurrency", 1)) < 1:
+        raise ValueError("cell_concurrency must be positive")
+    if int(profile.get("worker_runtime_seconds", 1)) < 1:
+        raise ValueError("worker_runtime_seconds must be positive")
+    if int(profile.get("goal_plus_finalization_grace_seconds", 300)) < 0:
+        raise ValueError(
+            "goal_plus_finalization_grace_seconds must be non-negative"
+        )
+    if profile.get("protocol_source") != "edgebench-official-codex":
+        raise ValueError("EdgeBench profile must use edgebench-official-codex")
+    reasons = profile.get("protocol_override_reasons")
+    if not isinstance(reasons, dict) or not reasons:
+        raise ValueError("EdgeBench profile must record protocol_override_reasons")
+    protocol_overrides = profile.get("protocol_overrides", {})
+    if not isinstance(protocol_overrides, dict):
+        raise ValueError("EdgeBench profile protocol_overrides must be an object")
+    unknown_overrides = set(protocol_overrides) - PROFILE_PROTOCOL_OVERRIDE_FIELDS
+    if unknown_overrides:
+        raise ValueError(
+            "EdgeBench profile has unsupported protocol overrides: "
+            f"{sorted(unknown_overrides)}"
+        )
+    if "internet" in protocol_overrides and not isinstance(
+        protocol_overrides["internet"], bool
+    ):
+        raise ValueError("EdgeBench profile internet override must be boolean")
+    if "eval_interval" in protocol_overrides and (
+        not isinstance(protocol_overrides["eval_interval"], int)
+        or isinstance(protocol_overrides["eval_interval"], bool)
+        or protocol_overrides["eval_interval"] < 1
+    ):
+        raise ValueError(
+            "EdgeBench profile eval_interval override must be a positive integer"
+        )
+    missing_override_reasons = set(protocol_overrides) - set(reasons)
+    if missing_override_reasons:
+        raise ValueError(
+            "EdgeBench profile protocol overrides are missing reasons: "
+            f"{sorted(missing_override_reasons)}"
+        )
+    unknown_reasons = set(reasons) - (
+        ALLOWED_PROTOCOL_OVERRIDE_FIELDS | PROFILE_PROTOCOL_OVERRIDE_FIELDS
+    )
+    if unknown_reasons:
+        raise ValueError(
+            "EdgeBench profile has unsupported protocol override reasons: "
+            f"{sorted(unknown_reasons)}"
+        )
+    invalid_reasons = sorted(
+        key
+        for key, reason in reasons.items()
+        if not isinstance(reason, str) or not reason.strip()
+    )
+    if invalid_reasons:
+        raise ValueError(
+            "EdgeBench profile has invalid protocol override reasons: "
+            f"{invalid_reasons}"
+        )
+    return candidate, profile
+
+
+def _normalize_protocol_fields(data: Any, *, context: str) -> dict[str, Any]:
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} must be a mapping")
+    unknown = set(data) - OFFICIAL_PROTOCOL_FIELDS
+    if unknown:
+        raise ValueError(f"{context} has unsupported fields: {sorted(unknown)}")
+    result: dict[str, Any] = {}
+    for key, value in data.items():
+        if key in {
+            "disable_auto_eval",
+            "disable_auto_resume",
+            "disable_stop_hook",
+        }:
+            if not isinstance(value, bool):
+                raise ValueError(f"{context}.{key} must be boolean")
+        elif key in {
+            "eval_interval",
+            "judge_cpu_limit",
+            "max_submissions",
+            "submission_cooldown",
+            "timeout",
+            "work_cpu_limit",
+        }:
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{context}.{key} must be a non-negative integer")
+        elif key in {"judge_mem_limit", "work_mem_limit", "agent", "backend"}:
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{context}.{key} must be a non-empty string")
+        result[key] = value
+    return result
+
+
+def load_official_codex_protocol(path: Path | None = None) -> dict[str, Any]:
+    selected_path = path or current_paths().official_codex_protocol_path
+    raw = yaml.safe_load(selected_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"official EdgeBench protocol must be a mapping: {selected_path}"
+        )
+    allowed_top = {"defaults", "env", "model", "stagger", "tasks"}
+    unknown_top = {
+        key for key in raw if key not in allowed_top and not str(key).startswith("x-")
+    }
+    if unknown_top:
+        raise ValueError(
+            "official EdgeBench protocol has unsupported top-level fields: "
+            f"{sorted(unknown_top)}"
+        )
+    defaults = _normalize_protocol_fields(
+        raw.get("defaults"), context="official defaults"
+    )
+    missing_defaults = OFFICIAL_REQUIRED_DEFAULTS - set(defaults)
+    if missing_defaults:
+        raise ValueError(
+            f"official EdgeBench defaults are missing: {sorted(missing_defaults)}"
+        )
+    tasks_raw = raw.get("tasks")
+    if not isinstance(tasks_raw, dict) or not tasks_raw:
+        raise ValueError("official EdgeBench protocol must define tasks")
+    tasks = {
+        str(task_id): _normalize_protocol_fields(
+            overrides, context=f"official task {task_id}"
+        )
+        for task_id, overrides in tasks_raw.items()
+    }
+    if len(tasks) != OFFICIAL_TASK_COUNT:
+        raise ValueError(
+            "official EdgeBench protocol must define exactly "
+            f"{OFFICIAL_TASK_COUNT} tasks, found {len(tasks)}"
+        )
+    model_raw = raw.get("model")
+    if not isinstance(model_raw, dict) or not isinstance(model_raw.get("model"), str):
+        raise ValueError("official EdgeBench protocol must define model.model")
+    stagger = raw.get("stagger", 0)
+    if not isinstance(stagger, int) or isinstance(stagger, bool) or stagger < 0:
+        raise ValueError(
+            "official EdgeBench protocol stagger must be a non-negative integer"
+        )
+    return {
+        "schema_version": 1,
+        "source": io.portable_path(selected_path),
+        "source_sha256": io.sha256_file(selected_path),
+        "official_model": str(model_raw["model"]),
+        "stagger_seconds": stagger,
+        "defaults": defaults,
+        "tasks": tasks,
+    }
+
+
+def official_task_protocol(
+    protocol: dict[str, Any], task_id: str, config: dict[str, Any]
+) -> dict[str, Any]:
+    if task_id not in protocol["tasks"]:
+        raise ValueError(f"official EdgeBench protocol is missing task {task_id}")
+    internet = config.get("internet")
+    if not isinstance(internet, bool):
+        raise ValueError(f"task {task_id} must define boolean internet")
+    resolved = {**protocol["defaults"], **protocol["tasks"][task_id]}
+    resolved.setdefault("disable_auto_eval", False)
+    resolved.setdefault("disable_auto_resume", False)
+    resolved.setdefault("disable_stop_hook", False)
+    resolved.setdefault("max_submissions", None)
+    resolved["internet"] = internet
+    return resolved
+
+
+def profile_task_protocol(
+    profile: dict[str, Any],
+    protocol: dict[str, Any],
+    task_id: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    resolved = official_task_protocol(protocol, task_id, config)
+    return {**resolved, **dict(profile.get("protocol_overrides") or {})}
+
+
+def protocol_diff(
+    *,
+    official: dict[str, Any],
+    effective: dict[str, Any],
+    reasons: dict[str, Any],
+    allowed_fields: frozenset[str] | set[str] | None = None,
+) -> list[dict[str, Any]]:
+    permitted = (
+        ALLOWED_PROTOCOL_OVERRIDE_FIELDS
+        if allowed_fields is None
+        else frozenset(allowed_fields)
+    )
+    fields = sorted(set(official) | set(effective))
+    result: list[dict[str, Any]] = []
+    for field in fields:
+        before = official.get(field)
+        after = effective.get(field)
+        if before == after:
+            continue
+        if field not in permitted:
+            raise ValueError(f"unsupported EdgeBench protocol override: {field}")
+        reason = reasons.get(field)
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"protocol override {field!r} is missing a reason")
+        result.append(
+            {
+                "field": field,
+                "official": before,
+                "effective": after,
+                "reason": reason,
+            }
+        )
+    return result
+
+
+_protocol_diff = protocol_diff
