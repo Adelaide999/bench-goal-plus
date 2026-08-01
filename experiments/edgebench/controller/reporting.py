@@ -93,6 +93,11 @@ def comparison_record(
         output_tokens += int(tokens.get("output_tokens") or 0)
         if usage.get("coverage"):
             coverage.add(str(usage["coverage"]))
+        worker = (item.get("goal_plus") or {}).get("worker_usage") or {}
+        input_tokens += int(worker.get("input_tokens") or 0)
+        output_tokens += int(worker.get("output_tokens") or 0)
+        if worker.get("sessions"):
+            coverage.add(str(worker.get("coverage")))
         annotator = (item.get("goal_plus") or {}).get(
             "evidence_annotator_usage"
         ) or {}

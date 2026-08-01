@@ -54,6 +54,13 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         validate_claude_thinking_contract(thinking, reasoning)
     backend = str(profile.get("backend") or "docker")
     judge_concurrency = int(profile.get("judge_concurrency", 1))
+    worker_runtime = min(
+        wall_time,
+        int(profile.get("worker_runtime_seconds", wall_time)),
+    )
+    worker_min_runtime = int(profile.get("worker_min_runtime_seconds", 0))
+    worker_min_verifiers = int(profile.get("worker_min_verifier_runs", 0))
+    closeout_reserve = int(profile.get("closeout_reserve_seconds", 0))
     override_reasons = dict(profile["protocol_override_reasons"])
     profile_protocol_overrides = dict(profile.get("protocol_overrides") or {})
     allowed_protocol_override_fields = (
@@ -62,6 +69,14 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     if wall_time < 1 or concurrency < 1 or cell_concurrency < 1:
         raise ValueError(
             "wall time, concurrency, and cell concurrency must be positive"
+        )
+    if worker_min_runtime and worker_min_runtime >= worker_runtime:
+        raise ValueError(
+            "worker minimum runtime must be less than the effective worker runtime"
+        )
+    if worker_runtime + closeout_reserve > wall_time:
+        raise ValueError(
+            "effective worker runtime and closeout reserve must fit within wall time"
         )
 
     campaign_id = io.sanitize_id(
@@ -142,10 +157,10 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "inner_search_concurrency": (
                     concurrency if method_config["inner_search"] else 0
                 ),
-                "worker_runtime_seconds": min(
-                    wall_time,
-                    int(profile.get("worker_runtime_seconds", wall_time)),
-                ),
+                "worker_runtime_seconds": worker_runtime,
+                "worker_min_runtime_seconds": worker_min_runtime,
+                "worker_min_verifier_runs": worker_min_verifiers,
+                "closeout_reserve_seconds": closeout_reserve,
                 "goal_plus_finalization_grace_seconds": int(
                     profile.get("goal_plus_finalization_grace_seconds", 300)
                 ),
@@ -224,6 +239,10 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "wall_time_seconds": wall_time,
         "concurrency": concurrency,
         "cell_concurrency": cell_concurrency,
+        "worker_runtime_seconds": worker_runtime,
+        "worker_min_runtime_seconds": worker_min_runtime,
+        "worker_min_verifier_runs": worker_min_verifiers,
+        "closeout_reserve_seconds": closeout_reserve,
         "protocol_source": {
             "path": official_protocol["source"],
             "sha256": official_protocol["source_sha256"],
@@ -262,7 +281,10 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "wall_time_seconds": wall_time,
             "concurrency": concurrency,
             "cell_concurrency": cell_concurrency,
-            "worker_runtime_seconds": profile.get("worker_runtime_seconds"),
+            "worker_runtime_seconds": worker_runtime,
+            "worker_min_runtime_seconds": worker_min_runtime,
+            "worker_min_verifier_runs": worker_min_verifiers,
+            "closeout_reserve_seconds": closeout_reserve,
             "goal_plus_finalization_grace_seconds": int(
                 profile.get("goal_plus_finalization_grace_seconds", 300)
             ),

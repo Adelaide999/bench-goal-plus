@@ -723,7 +723,14 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             campaign_id="unit-campaign",
         )
 
-        destination = EDGE.prepare(args, self.profile())
+        profile = self.profile()
+        profile.update(
+            worker_runtime_seconds=120,
+            worker_min_runtime_seconds=90,
+            worker_min_verifier_runs=1,
+            closeout_reserve_seconds=30,
+        )
+        destination = EDGE.prepare(args, profile)
 
         plain = json.loads(
             (
@@ -745,6 +752,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(plain["inner_search_concurrency"], 0)
         self.assertEqual(goal_plus["outer_replicas"], 1)
         self.assertEqual(goal_plus["inner_search_concurrency"], 2)
+        self.assertEqual(goal_plus["worker_runtime_seconds"], 120)
+        self.assertEqual(goal_plus["worker_min_runtime_seconds"], 90)
+        self.assertEqual(goal_plus["worker_min_verifier_runs"], 1)
+        self.assertEqual(goal_plus["closeout_reserve_seconds"], 30)
         self.assertFalse(plain["internet"])
         self.assertEqual(plain["eval_interval_seconds"], 1800)
         self.assertEqual(plain["submission_cooldown"], 120)
@@ -1118,6 +1129,9 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "internet": True,
                 "inner_search_concurrency": 2,
                 "worker_runtime_seconds": 240,
+                "worker_min_runtime_seconds": 180,
+                "worker_min_verifier_runs": 1,
+                "closeout_reserve_seconds": 60,
                 "goal_plus_finalization_grace_seconds": 120,
             }
         )
@@ -1131,6 +1145,11 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertEqual(extra["SFORGE_GOAL_PLUS_PARALLEL_NUM"], "2")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "240")
+        self.assertEqual(
+            extra["SFORGE_GOAL_PLUS_WORKER_MIN_RUNTIME_SECONDS"], "180"
+        )
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_MIN_VERIFIER_RUNS"], "1")
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_CLOSEOUT_RESERVE_SECONDS"], "60")
         self.assertEqual(extra["SFORGE_PI_REASONING_EFFORT"], "medium")
         self.assertEqual(extra["SFORGE_PI_PACKAGE_VERSION"], "0.83.0")
         self.assertEqual(
@@ -1159,7 +1178,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(extra["SFORGE_PI_REASONING_EFFORT"], "high")
         self.assertEqual(
             extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"],
-            "glm-proxy/GLM-5.2",
+            "GLM-5.2",
         )
 
     def test_api_config_prefers_sforge_then_openai_then_codex(self) -> None:
@@ -1675,6 +1694,30 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(usage["tokens"]["output_tokens"], 9)
         self.assertEqual(usage["tokens"]["total_tokens"], 27)
 
+    def test_agent_usage_reads_pi_message_usage_once(self) -> None:
+        run = self.temp / "task-run"
+        run.mkdir()
+        usage = {"input": 11, "output": 5, "cacheRead": 3, "cacheWrite": 2}
+        (run / "agent_output.txt").write_text(
+            "\n".join(
+                [
+                    '{"type":"session","id":"pi-session"}',
+                    json.dumps({"type": "message_end", "message": {"usage": usage}}),
+                    json.dumps({"type": "turn_end", "usage": usage}),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        observed = EDGE.codex_usage(run)
+
+        self.assertEqual(observed["coverage"], "pi_agent_output")
+        self.assertEqual(observed["session_count"], 1)
+        self.assertEqual(observed["tokens"]["input_tokens"], 11)
+        self.assertEqual(observed["tokens"]["cached_input_tokens"], 3)
+        self.assertEqual(observed["tokens"]["output_tokens"], 5)
+        self.assertEqual(observed["tokens"]["processed_tokens"], 21)
+
     def test_goal_plus_stats_counts_empty_search_run(self) -> None:
         run = self.temp / "task-run"
         run.mkdir()
@@ -1721,6 +1764,46 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "states": {"completed": 1},
                 "coverage": "persisted Goal Plus Evidence annotator turns",
             },
+        )
+
+    def test_goal_plus_stats_and_report_count_pi_worker_usage(self) -> None:
+        run = self.temp / "task-run"
+        run.mkdir()
+        events = (
+            '{"type":"message_end","usage":'
+            '{"input":7,"output":3,"cacheRead":5,"cacheWrite":0}}\n'
+            '{"type":"turn_end","usage":'
+            '{"input":7,"output":3,"cacheRead":5,"cacheWrite":0}}'
+        ).encode()
+        member = tarfile.TarInfo(
+            ".goal-plus/host-logs/pi-rpc-agent-session.jsonl"
+        )
+        member.size = len(events)
+        with tarfile.open(run / "goal-plus-state.tar", "w") as archive:
+            archive.addfile(member, io.BytesIO(events))
+
+        stats = EDGE.goal_plus_stats(run)
+
+        assert stats is not None
+        self.assertEqual(stats["worker_usage"]["input_tokens"], 7)
+        self.assertEqual(stats["worker_usage"]["output_tokens"], 3)
+        self.assertEqual(stats["worker_usage"]["sessions"], 1)
+        record = EDGE.comparison_record(
+            {
+                "task_id": "vliw_kernel_optimization",
+                "method": "goal-plus-pi",
+                "wall_time_seconds": 7200,
+                "live_search_concurrency": 4,
+                "completed_trajectories": 1,
+                "valid_trajectories": 1,
+                "observations": [{"goal_plus": stats}],
+            },
+            {"vliw_kernel_optimization": {"mean": 0}},
+        )
+        self.assertEqual(record["Input tokens"], 7)
+        self.assertEqual(record["Output tokens"], 3)
+        self.assertEqual(
+            record["Usage coverage"], "persisted Pi worker message usage"
         )
 
     def test_goal_plus_stats_recovers_archived_promotion(self) -> None:

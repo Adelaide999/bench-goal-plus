@@ -30,7 +30,7 @@ def iter_json_lines(text: str) -> Iterable[dict[str, Any]]:
             yield item
 
 
-def add_usage(total: dict[str, int], event: dict[str, Any]) -> None:
+def add_usage(total: dict[str, int | float], event: dict[str, Any]) -> None:
     if event.get("type") != "turn.completed":
         return
     usage = event.get("usage")
@@ -41,9 +41,50 @@ def add_usage(total: dict[str, int], event: dict[str, Any]) -> None:
             total[key] += value
 
 
+def add_pi_usage(total: dict[str, int | float], event: dict[str, Any]) -> bool:
+    if event.get("type") != "message_end":
+        return False
+    usage = event.get("usage")
+    if not isinstance(usage, dict):
+        message = event.get("message")
+        usage = message.get("usage") if isinstance(message, dict) else None
+    if not isinstance(usage, dict):
+        return False
+    values: dict[str, int] = {}
+    for source, target in (
+        ("input", "input_tokens"),
+        ("cacheRead", "cached_input_tokens"),
+        ("cacheWrite", "cache_write_tokens"),
+        ("output", "output_tokens"),
+        ("reasoning", "reasoning_output_tokens"),
+    ):
+        value = usage.get(source)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            values[target] = int(value)
+            total[target] += int(value)
+    total["total_tokens"] += values.get("input_tokens", 0) + values.get(
+        "output_tokens", 0
+    )
+    total["processed_tokens"] += sum(
+        values.get(key, 0)
+        for key in (
+            "input_tokens",
+            "cached_input_tokens",
+            "cache_write_tokens",
+            "output_tokens",
+        )
+    )
+    cost = usage.get("cost")
+    if isinstance(cost, dict) and isinstance(cost.get("total"), (int, float)):
+        total["cost_usd"] += float(cost["total"])
+    total["assistant_messages"] += 1
+    return True
+
+
 def codex_usage(task_run: Path) -> dict[str, Any]:
-    totals: dict[str, int] = defaultdict(int)
+    totals: dict[str, int | float] = defaultdict(int)
     session_ids: set[str] = set()
+    pi_messages = 0
     archive_path = task_run / "codex-sessions.tar"
     coverage = "agent_output_only"
     if archive_path.is_file():
@@ -104,7 +145,13 @@ def codex_usage(task_run: Path) -> dict[str, Any]:
             ):
                 if event.get("type") == "thread.started" and event.get("thread_id"):
                     session_ids.add(str(event["thread_id"]))
+                if event.get("type") == "session" and event.get("id"):
+                    session_ids.add(str(event["id"]))
                 add_usage(totals, event)
+                if add_pi_usage(totals, event):
+                    pi_messages += 1
+            if pi_messages:
+                coverage = "pi_agent_output"
     return {
         "coverage": coverage,
         "session_count": len(session_ids),
@@ -131,6 +178,8 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
     annotation_tasks = 0
     annotation_attempts = 0
     annotation_states: dict[str, int] = defaultdict(int)
+    worker_usage: dict[str, int | float] = defaultdict(int)
+    worker_logs = 0
     try:
         with tarfile.open(archive_path) as archive:
             for member in archive:
@@ -270,6 +319,16 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                                     )
                         except (json.JSONDecodeError, TypeError, ValueError):
                             pass
+                if (
+                    "/host-logs/pi-rpc-" in member.name
+                    and member.name.endswith(".jsonl")
+                ):
+                    extracted = archive.extractfile(member)
+                    if extracted:
+                        worker_logs += 1
+                        text = extracted.read().decode("utf-8", errors="replace")
+                        for event in iter_json_lines(text):
+                            add_pi_usage(worker_usage, event)
     except tarfile.TarError:
         return {"archive": "invalid"}
     return {
@@ -286,6 +345,11 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         "selected_candidate_ids": sorted(selected_candidate_ids),
         "promoted_candidate_ids": sorted(promoted_candidate_ids),
         "goal_statuses": goal_statuses,
+        "worker_usage": {
+            **dict(sorted(worker_usage.items())),
+            "sessions": worker_logs,
+            "coverage": "persisted Pi worker message usage",
+        },
         "evidence_annotator_usage": {
             **annotation_usage,
             "tasks": annotation_tasks,
