@@ -37,9 +37,27 @@ benchmark 使用相同 lifecycle 或支持相同并发。
 3. 完成下面的 K/C 启动确认门禁；未确认前只能执行只读的 `catalog`、`doctor` 和 `plan`，
    不得执行 `launch` 或 `e2e`。
 4. 用 `launch` 启动 runner。长运行使用已有 detach/controller，不自行拼后台 shell。
-5. 用统一 `status --campaign <path>` 读取 `agent-run.json` 和 native manifest。不要因为终端断开就重建 campaign。
+5. 用统一 `status --campaign <path>` 读取 `agent-run.json` 和 native manifest。不要因为终端断开就重建 campaign。后台 campaign 的进展查询还必须按下文的“进展查询与终态归档”处理。
 6. 只在 capability 允许时调用 `stop` 或 `resume`。EdgeBench stop 后归档 partial，不伪称原 trajectory 可恢复；common/OpenEvolve batch 只补跑未完成 cell。
-7. native final artifact 存在后再 `finalize`/`summarize`，再用 `$benchmark-report` 导出。
+7. native final artifact 存在后再 `finalize`/`summarize`，再用 `$benchmark-report` 导出。后台 campaign 在进展查询中到达终态时，不得停在“可以归档”的提示；满足条件就完成归档。
+
+## 进展查询与终态归档
+
+用户询问“当前进展”“跑完了吗”“状态如何”时，按一次完整的后台 campaign 检查点处理：
+
+1. 先执行 `status --campaign <path>`，区分 runner/controller 是否仍在运行、是否已到终态，以及是否 `can_finalize`。
+2. 尚未到终态时只报告当前执行进展，不生成最终报告。
+3. 已到终态、`can_finalize=true` 且尚未归档时，在同一轮主动调用 `$benchmark-report` 的统一 `finish` 流程；不要只告诉用户“还没执行 finish”。用户明确要求“只看状态”“不要归档”时除外。
+4. 已归档时不要重复执行 `finish`。终态但不满足归档条件时，报告具体缺失证据或失败原因，不把它描述成仍在运行。
+5. `finish` 后重新读取状态并验证 source JSON、`report.md` 和 workbook，再返回最终结果与绝对路径。
+
+所有进展答复必须分别写清：
+
+- **执行状态**：运行中，或已结束及其终态（completed/succeeded/partial/failed/stopped）；
+- **归档状态**：未到归档阶段、已归档、归档失败，或因何无法归档。
+
+禁止单独使用“还没执行 finish”“还没完成”来概括一个已经到终态的 campaign。应写成例如：
+“benchmark 执行已成功结束；检测到尚未归档，现已自动执行 finish 并生成报告。”
 
 ## K/C 启动确认门禁
 
