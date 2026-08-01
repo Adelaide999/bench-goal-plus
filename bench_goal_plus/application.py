@@ -13,7 +13,13 @@ from adapters.registry import load_adapter
 
 from .catalog import Catalog, read_json
 from .errors import ContractError, UnsupportedOperation
-from .models import CampaignRef, CampaignSpec, EvidenceBundle, TargetDefinition
+from .models import (
+    AssetPackDefinition,
+    CampaignRef,
+    CampaignSpec,
+    EvidenceBundle,
+    TargetDefinition,
+)
 from .paths import ROOT, RUNS_ROOT
 from .runners.factory import create_runner
 from .runners.openevolve_batch import DEFAULT_METHODS as OPENEVOLVE_METHODS
@@ -72,6 +78,21 @@ class BenchmarkAgent:
         if preset:
             self._validate_preset_profile(preset)
         return tuple(self.catalog.targets[item] for item in ids), preset
+
+    def resolve_asset_packs(
+        self, pack_ids: Iterable[str]
+    ) -> tuple[AssetPackDefinition, ...]:
+        ids = tuple(pack_ids)
+        if not ids:
+            raise ContractError("choose --asset-pack")
+        if len(set(ids)) != len(ids):
+            raise ContractError("asset pack ids must be unique")
+        unknown = set(ids) - set(self.catalog.asset_packs)
+        if unknown:
+            raise ContractError(
+                "unknown asset pack(s): " + ", ".join(sorted(unknown))
+            )
+        return tuple(self.catalog.asset_packs[item] for item in ids)
 
     def resolve_spec(
         self,
@@ -264,11 +285,22 @@ class BenchmarkAgent:
         warnings = self.runtime.validate_host(
             targets, dry_run=dry_run, require_uv=not skip_bootstrap
         )
-        commands = self.runtime.setup_commands(
+        commands: list[list[str]] = []
+        if profile:
+            for target in targets:
+                if target.local_asset_inventory:
+                    commands.extend(
+                        self._local_asset_check_commands(
+                            target,
+                            profile,
+                            allow_missing=not skip_provision,
+                        )
+                    )
+        commands.extend(self.runtime.setup_commands(
             targets,
             skip_bootstrap=skip_bootstrap,
             skip_provision=skip_provision,
-        )
+        ))
         groups: dict[str, list[TargetDefinition]] = {}
         for target in targets:
             groups.setdefault(target.runner_id, []).append(target)
@@ -315,11 +347,22 @@ class BenchmarkAgent:
             spec.targets, dry_run=dry_run, require_uv=not skip_bootstrap
         )
         runner = create_runner(spec.runner)
-        setup_commands = self.runtime.setup_commands(
+        setup_commands: list[list[str]] = []
+        if spec.profile:
+            for target in spec.targets:
+                if target.local_asset_inventory:
+                    setup_commands.extend(
+                        self._local_asset_check_commands(
+                            target,
+                            spec.profile,
+                            allow_missing=not skip_provision,
+                        )
+                    )
+        setup_commands.extend(self.runtime.setup_commands(
             spec.targets,
             skip_bootstrap=skip_bootstrap,
             skip_provision=skip_provision,
-        )
+        ))
         setup_commands.extend(
             runner.provision_commands(spec, skip_provision=skip_provision)
         )
@@ -471,13 +514,11 @@ class BenchmarkAgent:
             result["repository_check"] = command_text(command)
             return result
 
-        definition = self.catalog.runners[target.runner_id]
-        if not definition.capabilities.local_asset_inventory:
+        if not target.local_asset_inventory:
             raise UnsupportedOperation(
-                f"runner {target.runner_id} does not support profiled local-asset checks"
+                f"target {target_id} does not support profiled local-asset checks"
             )
-        runner = create_runner(definition)
-        commands = runner.local_asset_check_commands(profile)
+        commands = self._local_asset_check_commands(target, profile)
         if not commands:
             raise ContractError(
                 f"runner {target.runner_id} returned no local-asset check command"
@@ -490,6 +531,118 @@ class BenchmarkAgent:
             "commands": [command_text(command) for command in commands],
         }
         return result
+
+    def _local_asset_check_commands(
+        self,
+        target: TargetDefinition,
+        profile: str,
+        *,
+        allow_missing: bool = False,
+    ) -> list[list[str]]:
+        definition = self.catalog.runners[target.runner_id]
+        if target.docker.owner == "adapter":
+            return [
+                [
+                    sys.executable,
+                    "-m",
+                    "bench_goal_plus.docker_hooks",
+                    "inventory",
+                    "--target",
+                    target.target_id,
+                    "--profile",
+                    profile,
+                ]
+            ]
+        runner = create_runner(definition)
+        return runner.local_asset_check_commands(
+            profile, allow_missing=allow_missing
+        )
+
+    def check_asset_pack(
+        self,
+        pack: AssetPackDefinition,
+        *,
+        profile: str | None,
+        dry_run: bool,
+    ) -> dict[str, Any]:
+        selected_profile = profile or pack.default_profile
+        command = [
+            sys.executable,
+            str(pack.controller.relative_to(ROOT)),
+            "inventory",
+            "--profile",
+            selected_profile,
+        ]
+        self.executor.execute([command], dry_run=dry_run)
+        return {
+            "asset_pack": pack.as_dict(),
+            "profile": selected_profile,
+            "read_only": True,
+            "acquisition_attempted": False,
+            "commands": [command_text(command)],
+        }
+
+    def setup_asset_packs(
+        self,
+        packs: tuple[AssetPackDefinition, ...],
+        *,
+        profile: str | None,
+        skip_bootstrap: bool,
+        skip_provision: bool,
+        dry_run: bool,
+    ) -> dict[str, Any]:
+        if len(packs) != 1:
+            raise ContractError("setup currently accepts exactly one asset pack")
+        pack = packs[0]
+        selected_profile = profile or pack.default_profile
+        inventory_command = [
+            sys.executable,
+            str(pack.controller.relative_to(ROOT)),
+            "inventory",
+            "--profile",
+            selected_profile,
+        ]
+        commands: list[list[str]] = [inventory_command, ["docker", "info"]]
+        if not skip_bootstrap:
+            bootstrap = [sys.executable, "scripts/repro_env.py", "bootstrap"]
+            for upstream in pack.bootstrap_targets:
+                bootstrap.extend(["--only", upstream])
+            commands.append(bootstrap)
+        doctor = [sys.executable, "scripts/repro_env.py", "doctor"]
+        for upstream in pack.bootstrap_targets:
+            doctor.extend(["--only", upstream])
+        commands.append(doctor)
+        if not skip_provision:
+            if not pack.provision:
+                raise UnsupportedOperation(
+                    f"asset pack {pack.pack_id} does not support provision"
+                )
+            commands.append(
+                [
+                    sys.executable,
+                    str(pack.controller.relative_to(ROOT)),
+                    "provision",
+                    "--profile",
+                    selected_profile,
+                ]
+            )
+        commands.append(
+            [
+                sys.executable,
+                str(pack.controller.relative_to(ROOT)),
+                "doctor",
+                "--profile",
+                selected_profile,
+            ]
+        )
+        self.executor.execute(commands, dry_run=dry_run)
+        return {
+            "schema_version": 1,
+            "action": "setup",
+            "asset_packs": [pack.pack_id],
+            "profile": selected_profile,
+            "commands": [command_text(command) for command in commands],
+        }
 
     def _campaign_context(self, value: str | Path, benchmark: str | None):
         campaign = resolve_campaign_path(value)

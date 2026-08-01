@@ -5,6 +5,26 @@ Math、ADRS、prompt optimization 和 image generation tasks 的环境边界。
 这些任务可以交给 Best-of-N、EvoX、AdaEvolve 等方法，但不能因为换了搜索方法
 就重复计算 benchmark 数量。
 
+统一只读盘点与受管供给入口为：
+
+```bash
+python3 scripts/bench.py check \
+  --asset-pack skydiscover-cpu-evaluators --profile cpu-no-torch-19
+python3 scripts/bench.py setup \
+  --asset-pack skydiscover-cpu-evaluators --profile cpu-no-torch-19 \
+  --skip-provision
+```
+
+19 个 tag 是本地 evaluator build tag，不是公开 registry 镜像。只有盘点明确报告缺失且
+用户要求补齐后，才去掉 `--skip-provision`，从固定 SkyDiscover commit 和逐 context
+Git tree 构建。构建镜像记录 revision/tree labels；历史 Mac image ID 作为审计基线保留，
+不能用一次新的非锁定依赖构建冒充同一 image ID。构建所需的 `python:3.12-slim`
+固定 Linux/amd64 manifest 与 image ID；本地缺失时按 profile 登记的传输源尝试，
+并在导入后核对两者，国内源只用于加速同一份内容。Python requirements 使用
+profile 固定的 PyPI index；构建适配层只在 `.tmp/` 生成增加
+`ARG PIP_INDEX_URL` 的 Dockerfile，并把 index 写入 provenance label，不修改固定
+SkyDiscover checkout。
+
 ## 当前可用范围
 
 | 范围 | 当前路径 | Docker | Docker 空间 |

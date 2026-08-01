@@ -19,7 +19,9 @@ class BenchmarkRunner(ABC):
     def __init__(self, definition: RunnerDefinition) -> None:
         self.definition = definition
 
-    def local_asset_check_commands(self, profile: str) -> list[list[str]]:
+    def local_asset_check_commands(
+        self, profile: str, *, allow_missing: bool = False
+    ) -> list[list[str]]:
         raise UnsupportedOperation(
             f"runner {self.definition.runner_id} does not support profiled local-asset checks"
         )

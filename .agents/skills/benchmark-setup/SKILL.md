@@ -20,18 +20,22 @@ description: 自动盘点本地 Docker 镜像并部署或诊断 bench-goal-plus 
    `pi --version`。EdgeBench smoke 默认可跟随 `latest`，正式 campaign 应冻结已验证的
    `SFORGE_PI_PACKAGE_VERSION`。未选中的 agent 只作为
    diagnostic，不得阻塞 setup；只报告缺失项，不把凭据写入文件。
-3. 同时读取 registry 的 readiness Docker 边界和 runner 的可执行 Docker contract；
-   只有 `local_asset_inventory=true` 才能使用 profiled check。
+3. 同时读取 registry 的 readiness Docker 边界、target 的 inventory capability 和
+   runner 的可执行 Docker contract；只有 target 或 asset pack 声明
+   `local_asset_inventory=true` 才能使用 profiled check。不得因为共享 runner 中有一个
+   target 支持 inventory，就替其他 target 自动放行。
    需要 Docker 时先运行 `docker info`；失败则停止需要容器的路径。
 4. **任何 setup、数据下载、镜像拉取或构建之前，先执行只读本地 inventory gate**：
    `python3 scripts/bench.py check --benchmark <id> --profile <profile>`；使用 preset 时执行
-   `python3 scripts/bench.py check --preset <preset>`。逐项核对 task file、dataset revision、
+   `python3 scripts/bench.py check --preset <preset>`；独立 task pack 执行
+   `python3 scripts/bench.py check --asset-pack <id> --profile <profile>`。逐项核对 task file、dataset revision、
    精确 Work/Judge image tag、image ID 和关联容器。此命令不得 provision、fetch、pull、
    build、run 或检查凭据；失败只报告缺失项。不得把 provision 当作本地 inventory probe。
 5. inventory 后再通过
    `python3 scripts/bench.py setup --benchmark <id> --profile <profile> --skip-provision`
    （或对应 `--preset`）完成受管 bootstrap 和完整 doctor。全部通过时立即停止 setup，
    不得再调用 `provision`、`fetch-tasks` 或 `pull`。
+   Asset pack 使用 `setup --asset-pack <id> --profile <profile> --skip-provision`。
 6. 只有 inventory/doctor 明确列出缺失或错误的 task/data/image，并且用户要求或确认联网
    补齐时，才去掉 `--skip-provision` 执行已登记的 provision。只在诊断底层 bootstrap 时
    直接使用 `scripts/repro_env.py`。
@@ -52,8 +56,8 @@ description: 自动盘点本地 Docker 镜像并部署或诊断 bench-goal-plus 
 
 - `bootstrap --only` 接受 upstream key，不一定等于 registry benchmark id。
 - `mixed` 不代表无 Docker 等价可跑；只运行 `docker_scope` 明确允许的 host-portable task。
-- 不带 `--profile` 的 `check` 只是仓库契约检查，不是 Docker inventory。runner 不支持
-  profiled local-asset check 时必须默认拒绝，不得改用 provision 探测。
+- 不带 `--profile` 的 benchmark `check` 只是仓库契约检查，不是 Docker inventory。
+  target 不支持 profiled local-asset check 时必须默认拒绝，不得改用 provision 探测。
 - EdgeBench 的 `doctor` 是必要步骤；只有本地 task/data/image gate 失败时才需要
   `provision`。只拉源码不代表 work/judge image 和隔离能力可用，本地 gate 全部通过也不应
   重复拉取。

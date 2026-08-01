@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup = children.add_parser("setup")
     add_selection(setup)
+    setup.add_argument("--asset-pack", action="append", default=[])
     setup.add_argument("--skip-bootstrap", action="store_true")
     setup.add_argument("--skip-provision", action="store_true")
     setup.add_argument("--dry-run", action="store_true")
@@ -76,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = children.add_parser("check")
     add_selection(check)
+    check.add_argument("--asset-pack", action="append", default=[])
     check.add_argument("--dry-run", action="store_true")
     scaffold = children.add_parser("scaffold")
     scaffold.add_argument("--benchmark-id", required=True)
@@ -116,14 +118,19 @@ def render_catalog(agent: BenchmarkAgent, *, as_json: bool) -> int:
             f"runner {runner['id']}: {runner['kind']} "
             f"detach={capabilities['detach']} stop={capabilities['stop']} "
             f"resume={capabilities['resume']} C={capabilities['cell_concurrency']} "
-            f"assets={capabilities['local_asset_inventory']} "
             f"methods={','.join(runner['supported_methods'])}"
         )
     for target in payload["targets"]:
         docker = target["docker"]
         print(
             f"{target['id']}: runner={target['runner']} adapter={target['adapter'] or '-'} "
-            f"docker={docker['requirement']}/{docker['owner']}/{docker['provision_mode']}"
+            f"docker={docker['requirement']}/{docker['owner']}/{docker['provision_mode']} "
+            f"assets={target['local_asset_inventory']}"
+        )
+    for pack in payload["asset_packs"]:
+        print(
+            f"asset-pack {pack['id']}: profile={pack['default_profile']} "
+            f"provision={pack['provision']} assets=True"
         )
     for preset in payload["presets"]:
         print(f"preset {preset['id']}: {preset['description']}")
@@ -145,16 +152,30 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2))
         return 0
     if args.command == "setup":
-        targets, preset = agent.resolve_targets(
-            target_ids=args.benchmark, preset_id=args.preset
-        )
-        result = agent.setup(
-            targets,
-            profile=args.profile or (preset.profile if preset else None),
-            skip_bootstrap=args.skip_bootstrap,
-            skip_provision=args.skip_provision,
-            dry_run=args.dry_run,
-        )
+        if args.asset_pack:
+            if args.benchmark or args.preset:
+                raise ContractError(
+                    "use --asset-pack or --benchmark/--preset, not both"
+                )
+            packs = agent.resolve_asset_packs(args.asset_pack)
+            result = agent.setup_asset_packs(
+                packs,
+                profile=args.profile,
+                skip_bootstrap=args.skip_bootstrap,
+                skip_provision=args.skip_provision,
+                dry_run=args.dry_run,
+            )
+        else:
+            targets, preset = agent.resolve_targets(
+                target_ids=args.benchmark, preset_id=args.preset
+            )
+            result = agent.setup(
+                targets,
+                profile=args.profile or (preset.profile if preset else None),
+                skip_bootstrap=args.skip_bootstrap,
+                skip_provision=args.skip_provision,
+                dry_run=args.dry_run,
+            )
     elif args.command in {"plan", "start", "launch", "e2e"}:
         if args.command == "e2e" and args.prepare_only:
             raise ContractError("e2e cannot be combined with --prepare-only")
@@ -194,16 +215,28 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
         )
     elif args.command == "check":
-        targets, preset = agent.resolve_targets(
-            target_ids=args.benchmark, preset_id=args.preset
-        )
-        if len(targets) != 1:
-            raise ContractError("check accepts exactly one benchmark target")
-        result = agent.check(
-            targets[0].target_id,
-            profile=args.profile or (preset.profile if preset else None),
-            dry_run=args.dry_run,
-        )
+        if args.asset_pack:
+            if args.benchmark or args.preset:
+                raise ContractError(
+                    "use --asset-pack or --benchmark/--preset, not both"
+                )
+            packs = agent.resolve_asset_packs(args.asset_pack)
+            if len(packs) != 1:
+                raise ContractError("check accepts exactly one asset pack")
+            result = agent.check_asset_pack(
+                packs[0], profile=args.profile, dry_run=args.dry_run
+            )
+        else:
+            targets, preset = agent.resolve_targets(
+                target_ids=args.benchmark, preset_id=args.preset
+            )
+            if len(targets) != 1:
+                raise ContractError("check accepts exactly one benchmark target")
+            result = agent.check(
+                targets[0].target_id,
+                profile=args.profile or (preset.profile if preset else None),
+                dry_run=args.dry_run,
+            )
     else:
         raise AssertionError(args.command)
     print(json.dumps(result, indent=2))

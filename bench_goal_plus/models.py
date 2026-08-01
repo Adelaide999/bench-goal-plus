@@ -15,7 +15,6 @@ class RunnerCapabilities:
     resume: bool
     cell_concurrency: bool
     official_evaluator: bool
-    local_asset_inventory: bool
     resume_semantics: str
 
     def as_dict(self) -> dict[str, Any]:
@@ -64,6 +63,7 @@ class TargetDefinition:
     adapter_id: str | None
     bootstrap_targets: tuple[str, ...]
     docker: DockerContract
+    local_asset_inventory: bool
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +72,26 @@ class TargetDefinition:
             "adapter": self.adapter_id,
             "bootstrap_targets": list(self.bootstrap_targets),
             "docker": self.docker.as_dict(),
+            "local_asset_inventory": self.local_asset_inventory,
+        }
+
+
+@dataclass(frozen=True)
+class AssetPackDefinition:
+    pack_id: str
+    controller: Path
+    bootstrap_targets: tuple[str, ...]
+    default_profile: str
+    provision: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.pack_id,
+            "controller": str(self.controller),
+            "bootstrap_targets": list(self.bootstrap_targets),
+            "default_profile": self.default_profile,
+            "provision": self.provision,
+            "local_asset_inventory": True,
         }
 
 

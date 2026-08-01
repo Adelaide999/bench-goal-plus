@@ -32,6 +32,9 @@ def build_parser() -> argparse.ArgumentParser:
             child.add_argument("--method", action="append", choices=sorted(METHODS))
             child.add_argument("--model")
             child.add_argument("--local-assets-only", action="store_true")
+            child.add_argument(
+                "--allow-missing-local-assets", action="store_true"
+            )
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--profile", default="vliw-smoke")
     prepare_parser.add_argument("--campaign-id")
@@ -75,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
                 profile,
                 output=args.output,
                 local_assets_only=args.local_assets_only,
+                allow_missing_local_assets=args.allow_missing_local_assets,
             )
         prepare(args, profile)
         return 0

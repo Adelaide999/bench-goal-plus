@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import json
+import sys
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -44,11 +45,18 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertEqual(common, set(adapter_modules()))
         self.assertEqual(self.catalog.targets["edgebench"].runner_id, "edgebench-native")
         self.assertTrue(
-            self.catalog.runners["edgebench-native"].capabilities.local_asset_inventory
+            self.catalog.targets["edgebench"].local_asset_inventory
         )
         self.assertFalse(
-            self.catalog.runners["common-matrix"].capabilities.local_asset_inventory
+            self.catalog.targets["local-vliw"].local_asset_inventory
         )
+        self.assertTrue(
+            self.catalog.targets["frontier-cs-problem-0"].local_asset_inventory
+        )
+        self.assertTrue(
+            self.catalog.targets["ale-bench-lite"].local_asset_inventory
+        )
+        self.assertIn("skydiscover-cpu-evaluators", self.catalog.asset_packs)
         self.assertIn("openevolve-cpu-portable", self.catalog.targets)
         self.assertEqual(len(self.catalog.runners), 3)
         self.assertEqual(
@@ -163,11 +171,75 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertTrue(inventory["read_only"])
         self.assertFalse(inventory["acquisition_attempted"])
 
+    def test_setup_inventory_can_report_missing_assets_before_provision(self) -> None:
+        target = self.catalog.targets["edgebench"]
+        self.agent.setup(
+            (target,),
+            profile="vliw-smoke",
+            skip_bootstrap=True,
+            skip_provision=False,
+            dry_run=True,
+        )
+
+        inventory = self.executor.commands[0]
+        self.assertIn("--local-assets-only", inventory)
+        self.assertIn("--allow-missing-local-assets", inventory)
+        provision_index = next(
+            index
+            for index, command in enumerate(self.executor.commands)
+            if "provision" in command
+        )
+        self.assertGreater(provision_index, 0)
+
     def test_profiled_check_fails_closed_for_unsupported_runner(self) -> None:
-        with self.assertRaisesRegex(UnsupportedOperation, "does not support"):
+        with self.assertRaisesRegex(UnsupportedOperation, "target local-vliw"):
             self.agent.check(
                 "local-vliw", profile="cpu_portable", dry_run=True
             )
+
+    def test_profiled_check_routes_to_adapter_inventory_by_target(self) -> None:
+        result = self.agent.check(
+            "frontier-cs-problem-0", profile="problem-0", dry_run=True
+        )
+
+        self.assertEqual(len(self.executor.commands), 1)
+        self.assertEqual(self.executor.commands[0][0], sys.executable)
+        self.assertEqual(
+            self.executor.commands[0][-6:],
+            [
+                "bench_goal_plus.docker_hooks",
+                "inventory",
+                "--target",
+                "frontier-cs-problem-0",
+                "--profile",
+                "problem-0",
+            ],
+        )
+        self.assertTrue(result["local_asset_inventory"]["read_only"])
+
+    def test_asset_pack_check_and_setup_use_inventory_before_provision(self) -> None:
+        pack = self.agent.resolve_asset_packs(
+            ("skydiscover-cpu-evaluators",)
+        )[0]
+        checked = self.agent.check_asset_pack(
+            pack, profile=None, dry_run=True
+        )
+        self.assertEqual(checked["profile"], "cpu-no-torch-19")
+        self.assertIn("environment.py inventory", checked["commands"][0])
+
+        self.executor.commands.clear()
+        setup = self.agent.setup_asset_packs(
+            (pack,),
+            profile=None,
+            skip_bootstrap=False,
+            skip_provision=False,
+            dry_run=True,
+        )
+        rendered = setup["commands"]
+        self.assertIn("environment.py inventory", rendered[0])
+        self.assertIn("docker info", rendered[1])
+        self.assertTrue(any("environment.py provision" in item for item in rendered))
+        self.assertTrue(rendered[-1].endswith("environment.py doctor --profile cpu-no-torch-19"))
 
     def test_every_target_has_an_explicit_docker_owner_and_mode(self) -> None:
         for target in self.catalog.targets.values():
@@ -180,6 +252,11 @@ class BenchmarkAgentContractTest(unittest.TestCase):
                 loaded = load_adapter(target.adapter_id)
                 self.assertTrue(callable(getattr(loaded.module, "provision_environment", None)))
                 self.assertTrue(callable(getattr(loaded.module, "doctor_environment", None)))
+            if target.docker.owner == "adapter" and target.local_asset_inventory:
+                loaded = load_adapter(target.adapter_id)
+                self.assertTrue(
+                    callable(getattr(loaded.module, "local_asset_inventory", None))
+                )
 
     def test_skip_bootstrap_does_not_require_uv(self) -> None:
         target = self.catalog.targets["local-vliw"]

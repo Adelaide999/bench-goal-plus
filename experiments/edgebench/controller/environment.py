@@ -1354,6 +1354,7 @@ def doctor(
     *,
     output: Path | None = None,
     local_assets_only: bool = False,
+    allow_missing_local_assets: bool = False,
 ) -> int:
     payload = (
         local_asset_inventory(profile)
@@ -1363,4 +1364,6 @@ def doctor(
     if output:
         io.write_json(output, payload)
     print(json.dumps(payload, indent=2, ensure_ascii=False))
-    return 0 if payload["ok"] else 1
+    return 0 if payload["ok"] or (
+        local_assets_only and allow_missing_local_assets
+    ) else 1

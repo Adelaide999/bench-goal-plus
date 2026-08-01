@@ -9,13 +9,20 @@ from typing import Any
 
 from .errors import ContractError
 from .models import (
+    AssetPackDefinition,
     DockerContract,
     PresetDefinition,
     RunnerCapabilities,
     RunnerDefinition,
     TargetDefinition,
 )
-from .paths import ADAPTER_REGISTRY, ROOT, RUNNER_REGISTRY, UPSTREAM_REGISTRY
+from .paths import (
+    ADAPTER_REGISTRY,
+    ASSET_PACK_REGISTRY,
+    ROOT,
+    RUNNER_REGISTRY,
+    UPSTREAM_REGISTRY,
+)
 
 
 SAFE_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
@@ -40,14 +47,17 @@ class Catalog:
         self,
         *,
         runner_registry: Path = RUNNER_REGISTRY,
+        asset_pack_registry: Path = ASSET_PACK_REGISTRY,
         upstream_registry: Path = UPSTREAM_REGISTRY,
         adapter_registry: Path = ADAPTER_REGISTRY,
     ) -> None:
         self.runner_registry = runner_registry
+        self.asset_pack_registry = asset_pack_registry
         self.upstream_registry = upstream_registry
         self.adapter_registry = adapter_registry
         self.runners: dict[str, RunnerDefinition] = {}
         self.targets: dict[str, TargetDefinition] = {}
+        self.asset_packs: dict[str, AssetPackDefinition] = {}
         self.presets: dict[str, PresetDefinition] = {}
         self._load()
 
@@ -126,19 +136,11 @@ class Catalog:
             )
             if not all(isinstance(raw_capabilities.get(name), bool) for name in bool_fields):
                 raise ContractError(f"{runner_id}: capability flags must be boolean")
-            local_asset_inventory = raw_capabilities.get(
-                "local_asset_inventory", False
-            )
-            if not isinstance(local_asset_inventory, bool):
-                raise ContractError(
-                    f"{runner_id}: local_asset_inventory capability must be boolean"
-                )
             resume_semantics = raw_capabilities.get("resume_semantics")
             if not isinstance(resume_semantics, str) or not resume_semantics:
                 raise ContractError(f"{runner_id}: resume_semantics is required")
             capabilities = RunnerCapabilities(
                 **{name: raw_capabilities[name] for name in bool_fields},
-                local_asset_inventory=local_asset_inventory,
                 resume_semantics=resume_semantics,
             )
             self.runners[runner_id] = RunnerDefinition(
@@ -177,6 +179,11 @@ class Catalog:
                     f"{target_id}: bootstrap_targets must name managed upstreams"
                 )
             docker = self._docker_contract(target_id, entry.get("docker"))
+            local_asset_inventory = entry.get("local_asset_inventory")
+            if not isinstance(local_asset_inventory, bool):
+                raise ContractError(
+                    f"{target_id}: local_asset_inventory must be boolean"
+                )
             if docker.owner == "adapter" and adapter_id is None:
                 raise ContractError(
                     f"{target_id}: adapter-owned Docker needs an adapter"
@@ -201,6 +208,46 @@ class Catalog:
                 adapter_id=str(adapter_id) if adapter_id is not None else None,
                 bootstrap_targets=tuple(bootstrap),
                 docker=docker,
+                local_asset_inventory=local_asset_inventory,
+            )
+
+        asset_payload = read_json(self.asset_pack_registry)
+        if asset_payload.get("schema_version") != 1:
+            raise ContractError("asset pack registry schema_version must be 1")
+        for index, entry in enumerate(asset_payload.get("asset_packs", [])):
+            pack_id = self._safe_id(entry.get("id"), f"asset pack {index}")
+            if pack_id in self.asset_packs:
+                raise ContractError(f"duplicate asset pack id: {pack_id}")
+            controller_value = entry.get("controller")
+            if not isinstance(controller_value, str):
+                raise ContractError(f"{pack_id}: controller must be a path")
+            controller = ROOT / controller_value
+            if not controller.is_file():
+                raise ContractError(
+                    f"{pack_id}: controller does not exist: {controller_value!r}"
+                )
+            bootstrap = entry.get("bootstrap_targets")
+            if not isinstance(bootstrap, list) or not all(
+                isinstance(item, str) and item in upstreams for item in bootstrap
+            ):
+                raise ContractError(
+                    f"{pack_id}: bootstrap_targets must name managed upstreams"
+                )
+            default_profile = entry.get("default_profile")
+            if (
+                not isinstance(default_profile, str)
+                or SAFE_ID.fullmatch(default_profile) is None
+            ):
+                raise ContractError(f"{pack_id}: default_profile must be a safe id")
+            provision = entry.get("provision")
+            if not isinstance(provision, bool):
+                raise ContractError(f"{pack_id}: provision must be boolean")
+            self.asset_packs[pack_id] = AssetPackDefinition(
+                pack_id=pack_id,
+                controller=controller,
+                bootstrap_targets=tuple(bootstrap),
+                default_profile=default_profile,
+                provision=provision,
             )
 
         for index, entry in enumerate(payload.get("presets", [])):
@@ -238,6 +285,7 @@ class Catalog:
         return {
             "runners": [item.as_dict() for item in self.runners.values()],
             "targets": [item.as_dict() for item in self.targets.values()],
+            "asset_packs": [item.as_dict() for item in self.asset_packs.values()],
             "presets": [item.as_dict() for item in self.presets.values()],
         }
 

@@ -15,6 +15,7 @@ from .paths import ROOT, UPSTREAM_REGISTRY
 
 
 HOOKS = {
+    "inventory": "local_asset_inventory",
     "provision": "provision_environment",
     "doctor": "doctor_environment",
 }
@@ -28,7 +29,9 @@ def upstream_root(upstream_key: str) -> Path:
     return ROOT / "third_party" / str(entry["checkout_dir"])
 
 
-def invoke(action: str, target_id: str) -> dict[str, Any]:
+def invoke(
+    action: str, target_id: str, *, profile: str | None = None
+) -> dict[str, Any]:
     catalog = Catalog()
     try:
         target = catalog.targets[target_id]
@@ -36,15 +39,23 @@ def invoke(action: str, target_id: str) -> dict[str, Any]:
         raise ContractError(f"unknown target: {target_id}") from error
     if target.docker.owner != "adapter" or target.adapter_id is None:
         raise ContractError(f"{target_id}: Docker is not adapter-owned")
+    if action == "inventory" and not target.local_asset_inventory:
+        raise ContractError(f"{target_id}: local asset inventory is not enabled")
     loaded = load_adapter(target.adapter_id)
     hook_name = HOOKS[action]
     hook = getattr(loaded.module, hook_name, None)
     if not callable(hook):
         raise ContractError(
-            f"{target_id}: eager adapter Docker requires {hook_name}(upstream_root)"
+            f"{target_id}: adapter Docker action {action} requires {hook_name}"
         )
+    if action == "inventory" and not profile:
+        raise ContractError(f"{target_id}: inventory requires --profile")
     key = str(loaded.module.UPSTREAM_KEY)
-    result = hook(upstream_root(key))
+    result = (
+        hook(upstream_root(key), profile)
+        if action == "inventory"
+        else hook(upstream_root(key))
+    )
     if not isinstance(result, dict):
         raise ContractError(f"{target_id}: {hook_name} must return an object")
     return {"target": target_id, "action": action, **result}
@@ -54,8 +65,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=tuple(HOOKS))
     parser.add_argument("--target", required=True)
+    parser.add_argument("--profile")
     args = parser.parse_args(argv)
-    print(json.dumps(invoke(args.action, args.target), indent=2))
+    print(
+        json.dumps(
+            invoke(args.action, args.target, profile=args.profile), indent=2
+        )
+    )
     return 0
 
 

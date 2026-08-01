@@ -31,6 +31,7 @@ from adapters.portable import (  # noqa: E402
     write_json,
 )
 from bench_runtime_paths import make_preserved_temp_directory
+from bench_goal_plus.docker_inventory import inspect_exact_images
 
 
 CONTROLLER_PATH = Path(__file__).resolve()
@@ -44,6 +45,8 @@ CODEX_SANDBOX = "danger-full-access"
 CASE_SET_DESCRIPTION = "algorithmic/problem-0 official public case"
 IMAGE = "bench-goal-plus/frontier-cs-judge:07500f9"
 CONTAINER_NAME = "bench-goal-plus-frontier-cs-direct-07500f9"
+ASSET_PROFILE = "problem-0"
+EXPECTED_UPSTREAM_COMMIT = "07500f9e5751ddf86ef2760e0d35ff93e6a96a29"
 INVALID_SCORE = 0.0
 VERIFIER_TIMEOUT_SECONDS = 60
 RATIO_PATTERN = re.compile(r"Ratio:\s*([0-9]+(?:\.[0-9]+)?)")
@@ -153,6 +156,67 @@ def run(command: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess
         text=True,
         timeout=timeout,
     )
+
+
+def local_asset_inventory(
+    upstream_root: Path, profile: str | None
+) -> dict[str, Any]:
+    """Inspect the exact judge image and preserved container without mutation."""
+    if profile != ASSET_PROFILE:
+        raise ValueError(
+            f"Frontier-CS inventory profile must be {ASSET_PROFILE!r}"
+        )
+    upstream_root = upstream_root.expanduser().resolve()
+    try:
+        source_commit = git_commit(upstream_root)
+    except subprocess.CalledProcessError:
+        source_commit = None
+    inspected = inspect_exact_images(
+        [
+            {
+                "role": "judge",
+                "reference": IMAGE,
+                "required": True,
+                "expected_container": CONTAINER_NAME,
+            }
+        ]
+    )
+    image = inspected["images"][0]
+    image["architecture_matches"] = image.get("architecture") == "amd64"
+    source_files = {
+        "dockerfile": upstream_root / "algorithmic/Dockerfile",
+        "problem": problem_root(upstream_root),
+    }
+    source_ready = all(path.exists() for path in source_files.values())
+    ready = bool(
+        source_commit == EXPECTED_UPSTREAM_COMMIT
+        and source_ready
+        and image["present"]
+        and image["architecture_matches"]
+        and inspected["container_check"]["returncode"] == 0
+        and not inspected["container_check"]["parse_errors"]
+    )
+    return {
+        "schema_version": 1,
+        "action": "local-asset-inventory",
+        "profile": profile,
+        "read_only": True,
+        "acquisition_attempted": False,
+        "ready": ready,
+        "source": {
+            "path": str(upstream_root),
+            "expected_commit": EXPECTED_UPSTREAM_COMMIT,
+            "actual_commit": source_commit,
+            "commit_matches": source_commit == EXPECTED_UPSTREAM_COMMIT,
+            "files": {
+                name: {"path": str(path), "present": path.exists()}
+                for name, path in source_files.items()
+            },
+        },
+        "images": inspected["images"],
+        "container_check": inspected["container_check"],
+        "docker_commands": inspected["docker_commands"],
+    }
 
 
 def ensure_compile_container() -> None:

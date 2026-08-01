@@ -9,6 +9,7 @@ import hashlib
 import importlib
 import json
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -30,6 +31,7 @@ from adapters.portable import (  # noqa: E402
     utc_now,
     write_json,
 )
+from bench_goal_plus.docker_inventory import inspect_exact_images  # noqa: E402
 
 
 CONTROLLER_PATH = Path(__file__).resolve()
@@ -48,6 +50,11 @@ TOOL_CACHE = ROOT / ".bench-env/cache/ale-bench/ahc027-lite/tools"
 DEFAULT_STARTER = (
     ROOT / "evidence/runs/2026-07-21-ale-ahc027-plain-codex/solution.cpp"
 )
+ASSET_PROFILE = "ahc027-cpp20-202301"
+EXPECTED_UPSTREAM_COMMIT = "f7d927906dc1dcd860ee086e4560d576438b1354"
+CPP_IMAGE = "ale-bench:cpp20-202301"
+RUST_TOOL_IMAGE = "rust:1.79.0-buster"
+OPTIONAL_RUST_CANDIDATE_IMAGE = "ale-bench:rust-202301"
 
 
 def load_ale_bench(upstream_root: Path):
@@ -90,6 +97,71 @@ def install_tool_cache(ale_bench: Any) -> None:
 
     start_module.build_rust_tools = cached_build
     start_module._bench_goal_plus_tool_cache = True
+
+
+def local_asset_inventory(
+    upstream_root: Path, profile: str | None
+) -> dict[str, Any]:
+    """Inspect the fixed AHC027 C++ evaluator assets without building them."""
+    if profile != ASSET_PROFILE:
+        raise ValueError(f"ALE inventory profile must be {ASSET_PROFILE!r}")
+    upstream_root = upstream_root.expanduser().resolve()
+    try:
+        source_commit = git_commit(upstream_root)
+    except subprocess.CalledProcessError:
+        source_commit = None
+    expected_images = [
+        {"role": "candidate-cpp20", "reference": CPP_IMAGE, "required": True},
+        {"role": "rust-tool-builder", "reference": RUST_TOOL_IMAGE, "required": True},
+        {
+            "role": "optional-rust-candidate",
+            "reference": OPTIONAL_RUST_CANDIDATE_IMAGE,
+            "required": False,
+        },
+    ]
+    inspected = inspect_exact_images(expected_images)
+    for image in inspected["images"]:
+        image["architecture_matches"] = (
+            not image["present"] or image.get("architecture") == "amd64"
+        )
+    required_images = [
+        image for image in inspected["images"] if image["required"]
+    ]
+    cache = {
+        name: {
+            "path": str(TOOL_CACHE / name),
+            "present": (TOOL_CACHE / name).is_file(),
+        }
+        for name in ("gen", "tester", "vis")
+    }
+    ready = bool(
+        source_commit == EXPECTED_UPSTREAM_COMMIT
+        and DEFAULT_STARTER.is_file()
+        and all(image["present"] for image in required_images)
+        and all(image["architecture_matches"] for image in required_images)
+        and inspected["container_check"]["returncode"] == 0
+        and not inspected["container_check"]["parse_errors"]
+    )
+    return {
+        "schema_version": 1,
+        "action": "local-asset-inventory",
+        "profile": profile,
+        "read_only": True,
+        "acquisition_attempted": False,
+        "ready": ready,
+        "source": {
+            "path": str(upstream_root),
+            "expected_commit": EXPECTED_UPSTREAM_COMMIT,
+            "actual_commit": source_commit,
+            "commit_matches": source_commit == EXPECTED_UPSTREAM_COMMIT,
+            "starter": str(DEFAULT_STARTER),
+            "starter_present": DEFAULT_STARTER.is_file(),
+        },
+        "tool_cache": cache,
+        "images": inspected["images"],
+        "container_check": inspected["container_check"],
+        "docker_commands": inspected["docker_commands"],
+    }
 
 
 def task_text(statement: str) -> str:

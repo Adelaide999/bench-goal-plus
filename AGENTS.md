@@ -10,10 +10,12 @@
 
 1. 运行 `python3 scripts/bench.py catalog`，解析已登记的目标、预设、运行器、
    受支持方法、Docker 契约和能力标志。
-2. 对 catalog 声明 `local_asset_inventory=true` 的 Docker runner
-   （当前为 EdgeBench），在任何 setup、provision、fetch、pull 或 build 之前先运行
+2. 对 catalog 声明 `local_asset_inventory=true` 的 target，在任何 setup、provision、
+   fetch、pull 或 build 之前先运行
    `python3 scripts/bench.py check --benchmark <id> --profile <profile>`；使用 preset
-   时可改用 `--preset <id>`。检查失败只报告缺失项，不得把 provision 当成 inventory。
+   时可改用 `--preset <id>`。独立 task pack 使用
+   `python3 scripts/bench.py check --asset-pack <id> --profile <profile>`。检查失败只报告
+   缺失项，不得把 provision 当成 inventory。
 3. 环境、主机、Docker、上游代码和鉴权工作统一交给 `benchmark-setup`；
    正式 campaign 之前必须执行 `setup`/`doctor`。
 4. campaign 配置统一交给 `benchmark-run`；先执行 `plan`，再执行 `launch`，
@@ -47,7 +49,8 @@
 - `catalog`、`setup`、`plan`、`launch`、`status`、`stop`、`resume`、`finish`
   和 `check` 构成公开生命周期词汇。`start` 只是 `launch` 的兼容写法；`e2e`
   是前台运行的便捷路径。
-- 不带 `--profile` 的 `check` 只检查仓库契约，不是镜像 inventory。runner 支持时，
+- 不带 `--profile` 的 `check` 只检查仓库契约，不是镜像 inventory。对 benchmark
+  target 或 asset pack，只有它明确声明支持时，
   带 `--profile` 或 profile preset 的 `check` 必须是只读本地资产检查：不得 fetch、
   pull、build、run、provision 或检查凭据，只能读取 task/revision 元数据并执行精确
   image tag 的 `docker image inspect` 与一次 `docker ps -a`。
@@ -170,9 +173,10 @@ Goal Plus 结束后必须统计实际 subagent 数量并与 `K` 核对：
   scratch 不得使用主机全局 `/tmp`、`/private/tmp` 或 `/var/tmp`。
 - 不得自动删除 workspace、campaign 或 cache。冲突路径必须用 `_bak` 后缀保留，
   并在结果中报告。
-- EdgeBench 在任何镜像获取动作之前必须通过带 profile 的 `check` 显示本地精确
-  Work/Judge tag、image ID 和关联容器。检查发现缺失时只报告；取得用户明确确认后
-  才能进入 provision。所有诊断性 `docker run` 必须显式使用 `--pull never`。
+- 所有声明 inventory 的 target 和 asset pack 在任何镜像获取动作之前必须通过带
+  profile 的 `check` 显示本地精确 tag、image ID 和关联容器。检查发现缺失时只报告；
+  取得用户明确确认后才能进入 provision。
+- 所有诊断性 `docker run` 必须显式使用 `--pull never`。
 - setup 前必须执行 registry 的 `docker_requirement` 和 `docker_scope`。Docker
   不可用时，只能运行 `not_required` 路径；`mixed` target 只能运行其明确登记的
   portable task。不得用 host-only evaluator 代替容器化 official score。

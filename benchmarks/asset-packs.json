@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "asset_packs": [
+    {
+      "id": "skydiscover-cpu-evaluators",
+      "controller": "experiments/skydiscover/environment.py",
+      "bootstrap_targets": ["skydiscover"],
+      "default_profile": "cpu-no-torch-19",
+      "provision": true
+    }
+  ]
+}

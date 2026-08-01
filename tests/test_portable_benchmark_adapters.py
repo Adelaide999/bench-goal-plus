@@ -26,6 +26,45 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PortableBenchmarkAdapterTest(unittest.TestCase):
+    def test_adapter_asset_inventory_reports_missing_checkout(self) -> None:
+        container_check = {"returncode": 0, "parse_errors": []}
+        cases = (
+            (
+                ale,
+                ale.ASSET_PROFILE,
+                [
+                    {"required": True, "present": False},
+                    {"required": True, "present": False},
+                    {"required": False, "present": False},
+                ],
+            ),
+            (
+                frontier_cs,
+                frontier_cs.ASSET_PROFILE,
+                [{"required": True, "present": False}],
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            missing = Path(temporary) / "missing-checkout"
+            for adapter, profile, images in cases:
+                with (
+                    self.subTest(adapter=adapter.__name__),
+                    patch.object(
+                        adapter,
+                        "inspect_exact_images",
+                        return_value={
+                            "images": images,
+                            "container_check": container_check,
+                            "docker_commands": [],
+                        },
+                    ),
+                ):
+                    result = adapter.local_asset_inventory(missing, profile)
+
+                self.assertIsNone(result["source"]["actual_commit"])
+                self.assertFalse(result["source"]["commit_matches"])
+                self.assertFalse(result["ready"])
+
     def test_generic_runner_keeps_goal_plus_pi_entrypoints(self) -> None:
         self.assertIn("goal-plus-pi", experiment.METHODS)
         config = experiment.RunConfig(

@@ -32,7 +32,8 @@ gate for `required`/relevant `mixed` paths.
 ## Mirrors and pinned assets
 
 - Mandatory local-first gate: before setup or any command that can fetch task data or pull/build an
-  image, confirm catalog reports `assets=True`, then run the unified profiled check, for example:
+  image, confirm the selected target or asset pack reports `assets=True`, then run the unified
+  profiled check, for example:
 
   ```bash
   python3 scripts/bench.py check \
@@ -43,6 +44,27 @@ gate for `required`/relevant `mixed` paths.
   presence, actual/expected dataset revision, exact Work/Judge references, present/missing state,
   image ID, repo tags/digests, size, architecture, and existing containers using each image. It also
   emits `read_only: true` and `acquisition_attempted: false`.
+- Inventory belongs to the selected target, not its shared runner. Frontier-CS and ALE-Bench can
+  therefore expose adapter-owned checks while host-only targets on `common-matrix` remain rejected.
+- SkyDiscover's reviewed CPU evaluator set is an asset pack, not a benchmark target:
+
+  ```bash
+  python3 scripts/bench.py check \
+    --asset-pack skydiscover-cpu-evaluators --profile cpu-no-torch-19
+  python3 scripts/bench.py setup \
+    --asset-pack skydiscover-cpu-evaluators --profile cpu-no-torch-19 \
+    --skip-provision
+  ```
+
+  Its 19 local `:latest` tags are not published registry references. After the inventory reports
+  exact missing tags and acquisition is explicitly requested, setup without `--skip-provision`
+  builds the pinned upstream evaluator contexts, labels their revision/source tree, and reuses
+  shared Docker layers. The profile also freezes the Linux/amd64 `python:3.12-slim` manifest and
+  image ID. If that base is absent, provision transports the same pinned manifest through the
+  first working registered mirror and verifies its image ID; it does not probe with `docker pull`.
+  The generated build-only Dockerfile keeps the upstream instructions and adds only an
+  `ARG PIP_INDEX_URL`; the selected index is frozen in the profile and image provenance label.
+  Conflicting tags are retained with a `_bak` tag before replacement.
 - The profiled check is guaranteed not to run `provision`, `fetch-tasks`, pull, build, `docker run`,
   or credential probes. Its only Docker commands are `docker image inspect <exact-ref>` and one
   `docker ps -a --no-trunc --format '{{json .}}'`. A failed check only reports local gaps.
