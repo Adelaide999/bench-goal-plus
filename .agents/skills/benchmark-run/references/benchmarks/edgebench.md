@@ -31,6 +31,32 @@ provider 的 wire API 由 Pi registry 决定：`anthropic-messages` 和
 也使用同一 adapter；host 只提供 registry/credential，实际 agent 始终运行在
 EdgeBench Linux Work container 中。
 
+`goal-plus-pi-provider` 在开始计时前必须完成 provider runtime gate：使用 Work
+container 的实际运行用户和实际 `PI_CODING_AGENT_DIR` 执行
+`pi --list-models <provider>`，并核对精确 `PROVIDER/MODEL`。随后用短 JSON session
+取得 `thinking_start`/`thinking_delta` 或非零 reasoning usage，才可把 provider wiring
+记为通过。只在 host 上读取 registry、只通过 controller doctor，或只看到普通 assistant
+文本都不够。
+
+不要把 `openai-completions` 与 `openai-responses` 合并成一个模糊的“OpenAI 接口”：前者
+必须验证 `/chat/completions`，后者必须验证 `/responses`。`/responses` 返回 404 时，
+即使 Chat Completions 正常，也必须明确记录 Responses 不受支持并选择
+`openai-completions`。
+
+协议选择采用 Responses-first：`/responses` 最小请求成功后，还必须用 campaign 将采用的
+Pi 版本完成 streaming、tool call、tool result 和 final answer；通过后才选择
+`openai-responses`。只有这条链路失败时才验证并回退 `openai-completions`。DeepSeek
+V4 Flash 的 built-in `deepseek` provider 当前仍走 Chat；Responses 路径使用
+`deepseek-responses/deepseek-v4-flash` 自定义 registry。GLM-5.2 的 Z.AI 路径当前走
+`zai/glm-5.2` Chat Completions。DeepSeek 官方当前只声明 V4 Flash 支持 Responses；
+V4 Pro 不得复用该配置，除非后续官方能力和当次 live probe 都确认支持。
+
+EdgeBench Work container 不再精确锁死旧 Pi：默认
+`SFORGE_PI_PACKAGE_VERSION=latest`，安装输出必须记录解析后的 `pi --version`。短 capability
+smoke 可以跟随 latest；一小时等正式 campaign 必须在 profile 的
+`pi_package_version` 字段冻结刚通过 smoke 的精确版本，避免同一 campaign 中 npm tag
+漂移。
+
 一小时 VLIW Z.AI built-in provider preset：
 
 ```bash
@@ -67,6 +93,10 @@ status 必须保留 native campaign/cell/PID/trajectory 状态。Goal Plus cell 
 candidate、worker session/handle、verifier ledger、剩余时间和最新 Judge submission。
 stop 是保留 partial evidence 的 controller closeout；partial trajectory 不能被删除，
 也不能被伪装成原 trajectory 的无损 resume。
+
+仅做 provider/thinking smoke 时，观察到所需思考证据后立即 stop，并在同一轮执行
+`finish` 归档 partial evidence。报告必须标注这是 wiring smoke，不得作为 EdgeBench
+score 或完整 T 预算结果。
 
 ## Goal Plus completion evidence
 

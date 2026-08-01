@@ -163,9 +163,14 @@ def cell_environment(
     if agent.startswith("codex"):
         env["SFORGE_CODEX_REASONING_EFFORT"] = str(cell["reasoning_effort"])
     elif agent.startswith("pi"):
+        pi_env = {"SFORGE_PI_REASONING_EFFORT": str(cell["reasoning_effort"])}
+        if cell.get("pi_package_version"):
+            pi_env["SFORGE_PI_PACKAGE_VERSION"] = str(
+                cell["pi_package_version"]
+            )
         merge_agent_extra_env(
             env,
-            {"SFORGE_PI_REASONING_EFFORT": str(cell["reasoning_effort"])},
+            pi_env,
         )
     elif agent == "claude-code":
         env["SFORGE_CLAUDE_CACHE_OPT"] = "1"

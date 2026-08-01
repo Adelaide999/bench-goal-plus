@@ -211,6 +211,11 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
         raise ValueError(
             "goal_plus_finalization_grace_seconds must be non-negative"
         )
+    pi_package_version = profile.get("pi_package_version")
+    if pi_package_version is not None and (
+        not isinstance(pi_package_version, str) or not pi_package_version.strip()
+    ):
+        raise ValueError("pi_package_version must be a non-empty string")
     if profile.get("protocol_source") != "edgebench-official-codex":
         raise ValueError("EdgeBench profile must use edgebench-official-codex")
     reasons = profile.get("protocol_override_reasons")

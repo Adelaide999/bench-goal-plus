@@ -134,6 +134,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "claude_autocompact_percent": profile.get(
                     "claude_autocompact_percent"
                 ),
+                "pi_package_version": profile.get("pi_package_version"),
                 "wall_time_seconds": wall_time,
                 "live_search_concurrency": concurrency,
                 "outer_replicas": outer_replicas,
@@ -255,6 +256,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "methods": methods,
             "model": model,
             "reasoning_effort": reasoning,
+            "pi_package_version": profile.get("pi_package_version"),
             "api_protocol": api_protocol,
             "thinking": thinking,
             "wall_time_seconds": wall_time,

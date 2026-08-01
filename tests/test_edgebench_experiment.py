@@ -239,11 +239,13 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             api_provider["methods"], ["goal-plus-pi-provider"]
         )
         self.assertEqual(api_provider["model"], "glm-proxy/GLM-5.2")
+        self.assertEqual(api_provider["pi_package_version"], "0.83.0")
         self.assertEqual(api_provider["wall_time_seconds"], 3600)
         self.assertEqual(api_provider["concurrency"], 2)
         self.assertEqual(api_provider["cell_concurrency"], 1)
         self.assertEqual(zai_provider["methods"], ["goal-plus-pi-provider"])
         self.assertEqual(zai_provider["model"], "zai/glm-5.2")
+        self.assertEqual(zai_provider["pi_package_version"], "0.83.0")
         self.assertEqual(zai_provider["wall_time_seconds"], 3600)
         self.assertEqual(zai_provider["concurrency"], 2)
         self.assertEqual(zai_provider["cell_concurrency"], 1)
@@ -1112,6 +1114,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "sforge_agent": "pi-goal-plus",
                 "model": "gpt-5.6-sol",
                 "reasoning_effort": "medium",
+                "pi_package_version": "0.83.0",
                 "internet": True,
                 "inner_search_concurrency": 2,
                 "worker_runtime_seconds": 240,
@@ -1129,6 +1132,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(extra["SFORGE_GOAL_PLUS_PARALLEL_NUM"], "2")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "240")
         self.assertEqual(extra["SFORGE_PI_REASONING_EFFORT"], "medium")
+        self.assertEqual(extra["SFORGE_PI_PACKAGE_VERSION"], "0.83.0")
         self.assertEqual(
             extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "120"
         )

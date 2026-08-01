@@ -16,7 +16,9 @@ description: 自动部署或诊断 bench-goal-plus benchmark 环境、provider �
 1. 明确 benchmark、runner、macOS/Linux、agent 和 auth mode。若用户没有指定，
    从 preset/method 和当前 host 推导，并在执行前汇报选择。
 2. 确认 `git`、Python 3.10+、`uv`，再按 method 检查 agent runtime：Codex 路径要求
-   Codex CLI 0.144.1+，Pi 路径要求 registry 固定的 Pi 最低版本。未选中的 agent 只作为
+   Codex CLI 0.144.1+，Pi 路径要求 registry 固定的 Pi 最低版本；同时记录实际
+   `pi --version`。EdgeBench smoke 默认可跟随 `latest`，正式 campaign 应冻结已验证的
+   `SFORGE_PI_PACKAGE_VERSION`。未选中的 agent 只作为
    diagnostic，不得阻塞 setup；只报告缺失项，不把凭据写入文件。
 3. 同时读取 registry 的 readiness Docker 边界和 runner 的可执行 Docker contract。
    需要 Docker 时先运行 `docker info`；失败则停止需要容器的路径。
