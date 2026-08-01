@@ -205,8 +205,22 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
         raise ValueError("wall_time_seconds and concurrency must be positive")
     if int(profile.get("cell_concurrency", 1)) < 1:
         raise ValueError("cell_concurrency must be positive")
-    if int(profile.get("worker_runtime_seconds", 1)) < 1:
+    worker_runtime = int(
+        profile.get("worker_runtime_seconds", profile["wall_time_seconds"])
+    )
+    worker_min_runtime = int(profile.get("worker_min_runtime_seconds", 0))
+    worker_min_verifiers = int(profile.get("worker_min_verifier_runs", 0))
+    closeout_reserve = int(profile.get("closeout_reserve_seconds", 0))
+    if worker_runtime < 1:
         raise ValueError("worker_runtime_seconds must be positive")
+    if min(worker_min_runtime, worker_min_verifiers, closeout_reserve) < 0:
+        raise ValueError("Goal Plus worker lease values must be non-negative")
+    if worker_min_runtime and worker_min_runtime >= worker_runtime:
+        raise ValueError(
+            "worker_min_runtime_seconds must be less than worker_runtime_seconds"
+        )
+    if worker_runtime + closeout_reserve > int(profile["wall_time_seconds"]):
+        raise ValueError("worker runtime and closeout reserve must fit within wall time")
     if int(profile.get("goal_plus_finalization_grace_seconds", 300)) < 0:
         raise ValueError(
             "goal_plus_finalization_grace_seconds must be non-negative"

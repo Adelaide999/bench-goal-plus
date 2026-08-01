@@ -228,6 +228,9 @@ def cell_environment(
                 removals=thinking_controls,
             )
     if cell["method"] in GOAL_PLUS_METHODS:
+        annotator_model = str(cell["model"])
+        if cell["method"] == "goal-plus-pi-provider":
+            annotator_model = annotator_model.partition("/")[2]
         env["SFORGE_GOAL_PLUS_SOURCE_DIR"] = str(current_paths().goal_plus_root)
         extra_env = {
             "SFORGE_GOAL_PLUS_PARALLEL_NUM": str(cell["inner_search_concurrency"]),
@@ -237,11 +240,25 @@ def cell_environment(
             "SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS": str(
                 cell.get("goal_plus_finalization_grace_seconds", 300)
             ),
-            "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": str(cell["model"]),
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": annotator_model,
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": str(
                 cell["reasoning_effort"]
             ),
         }
+        if cell["method"] in {"goal-plus-pi", "goal-plus-pi-provider"}:
+            extra_env.update(
+                {
+                    "SFORGE_GOAL_PLUS_WORKER_MIN_RUNTIME_SECONDS": str(
+                        cell.get("worker_min_runtime_seconds", 0)
+                    ),
+                    "SFORGE_GOAL_PLUS_MIN_VERIFIER_RUNS": str(
+                        cell.get("worker_min_verifier_runs", 0)
+                    ),
+                    "SFORGE_GOAL_PLUS_CLOSEOUT_RESERVE_SECONDS": str(
+                        cell.get("closeout_reserve_seconds", 0)
+                    ),
+                }
+            )
         if api_base_url:
             extra_env.update(
                 {

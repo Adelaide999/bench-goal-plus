@@ -31,6 +31,9 @@ class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
                 agent_extra_env={
                     "SFORGE_GOAL_PLUS_PARALLEL_NUM": "2",
                     "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS": "240",
+                    "SFORGE_GOAL_PLUS_WORKER_MIN_RUNTIME_SECONDS": "180",
+                    "SFORGE_GOAL_PLUS_MIN_VERIFIER_RUNS": "1",
+                    "SFORGE_GOAL_PLUS_CLOSEOUT_RESERVE_SECONDS": "60",
                     "SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS": "120",
                 }
             )
@@ -42,6 +45,9 @@ class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
         )
         self.assertIn("omit the deprecated budget.max_candidates field", command)
         self.assertIn('"max_runtime_seconds": 240', command)
+        self.assertIn('"min_runtime_seconds": 180', command)
+        self.assertIn('"min_verifier_runs": 1', command)
+        self.assertIn("reserve_closeout_seconds to 60", command)
         self.assertNotIn('"max_turns"', command)
         self.assertIn("SFORGE_AGENT_HARD_DEADLINE", command)
         self.assertEqual(agent.get_finalization_grace_seconds(), 120)
