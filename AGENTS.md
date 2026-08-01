@@ -10,14 +10,18 @@
 
 1. 运行 `python3 scripts/bench.py catalog`，解析已登记的目标、预设、运行器、
    受支持方法、Docker 契约和能力标志。
-2. 环境、主机、Docker、上游代码和鉴权工作统一交给 `benchmark-setup`；
+2. 对 catalog 声明 `local_asset_inventory=true` 的 Docker runner
+   （当前为 EdgeBench），在任何 setup、provision、fetch、pull 或 build 之前先运行
+   `python3 scripts/bench.py check --benchmark <id> --profile <profile>`；使用 preset
+   时可改用 `--preset <id>`。检查失败只报告缺失项，不得把 provision 当成 inventory。
+3. 环境、主机、Docker、上游代码和鉴权工作统一交给 `benchmark-setup`；
    正式 campaign 之前必须执行 `setup`/`doctor`。
-3. campaign 配置统一交给 `benchmark-run`；先执行 `plan`，再执行 `launch`，
+4. campaign 配置统一交给 `benchmark-run`；先执行 `plan`，再执行 `launch`，
    记录 `T/K/C/R`，并返回生成的 campaign 路径。
-4. 长任务使用 `status` 以及已登记的 `stop`/`resume` 能力。不得替换、删除或
+5. 长任务使用 `status` 以及已登记的 `stop`/`resume` 能力。不得替换、删除或
    静默重启一个状态为 `partial` 的 campaign。
-5. native campaign 到达终态后，通过 `benchmark-report` 完成最终归档和导出。
-6. 新基准或新任务族统一交给 `benchmark-adapt`；在验收路径产生证据之前，
+6. native campaign 到达终态后，通过 `benchmark-report` 完成最终归档和导出。
+7. 新基准或新任务族统一交给 `benchmark-adapt`；在验收路径产生证据之前，
    不得把脚手架或注册表条目称为就绪。
 
 执行平台或基准专属命令之前，必须读取相关技能选定的参考文档。
@@ -43,6 +47,10 @@
 - `catalog`、`setup`、`plan`、`launch`、`status`、`stop`、`resume`、`finish`
   和 `check` 构成公开生命周期词汇。`start` 只是 `launch` 的兼容写法；`e2e`
   是前台运行的便捷路径。
+- 不带 `--profile` 的 `check` 只检查仓库契约，不是镜像 inventory。runner 支持时，
+  带 `--profile` 或 profile preset 的 `check` 必须是只读本地资产检查：不得 fetch、
+  pull、build、run、provision 或检查凭据，只能读取 task/revision 元数据并执行精确
+  image tag 的 `docker image inspect` 与一次 `docker ps -a`。
 - `scaffold` 是贡献者工具，它生成的内容不代表已经就绪。
 - 技能和基准本地脚本可以是上述统一入口的薄适配层，但不得再公开一套
   等价的第二 CLI。
@@ -162,6 +170,9 @@ Goal Plus 结束后必须统计实际 subagent 数量并与 `K` 核对：
   scratch 不得使用主机全局 `/tmp`、`/private/tmp` 或 `/var/tmp`。
 - 不得自动删除 workspace、campaign 或 cache。冲突路径必须用 `_bak` 后缀保留，
   并在结果中报告。
+- EdgeBench 在任何镜像获取动作之前必须通过带 profile 的 `check` 显示本地精确
+  Work/Judge tag、image ID 和关联容器。检查发现缺失时只报告；取得用户明确确认后
+  才能进入 provision。所有诊断性 `docker run` 必须显式使用 `--pull never`。
 - setup 前必须执行 registry 的 `docker_requirement` 和 `docker_scope`。Docker
   不可用时，只能运行 `not_required` 路径；`mixed` target 只能运行其明确登记的
   portable task。不得用 host-only evaluator 代替容器化 official score。

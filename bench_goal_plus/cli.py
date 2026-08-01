@@ -75,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     finish.add_argument("--dry-run", action="store_true")
 
     check = children.add_parser("check")
-    check.add_argument("--benchmark", required=True)
+    add_selection(check)
     check.add_argument("--dry-run", action="store_true")
     scaffold = children.add_parser("scaffold")
     scaffold.add_argument("--benchmark-id", required=True)
@@ -116,6 +116,7 @@ def render_catalog(agent: BenchmarkAgent, *, as_json: bool) -> int:
             f"runner {runner['id']}: {runner['kind']} "
             f"detach={capabilities['detach']} stop={capabilities['stop']} "
             f"resume={capabilities['resume']} C={capabilities['cell_concurrency']} "
+            f"assets={capabilities['local_asset_inventory']} "
             f"methods={','.join(runner['supported_methods'])}"
         )
     for target in payload["targets"]:
@@ -192,8 +193,19 @@ def main(argv: list[str] | None = None) -> int:
             xlsx_out=args.xlsx_out,
             dry_run=args.dry_run,
         )
+    elif args.command == "check":
+        targets, preset = agent.resolve_targets(
+            target_ids=args.benchmark, preset_id=args.preset
+        )
+        if len(targets) != 1:
+            raise ContractError("check accepts exactly one benchmark target")
+        result = agent.check(
+            targets[0].target_id,
+            profile=args.profile or (preset.profile if preset else None),
+            dry_run=args.dry_run,
+        )
     else:
-        result = agent.check(args.benchmark, dry_run=args.dry_run)
+        raise AssertionError(args.command)
     print(json.dumps(result, indent=2))
     return 0
 

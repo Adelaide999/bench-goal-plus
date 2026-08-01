@@ -15,6 +15,7 @@ class RunnerCapabilities:
     resume: bool
     cell_concurrency: bool
     official_evaluator: bool
+    local_asset_inventory: bool
     resume_semantics: str
 
     def as_dict(self) -> dict[str, Any]:

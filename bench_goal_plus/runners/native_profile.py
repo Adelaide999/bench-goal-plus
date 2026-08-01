@@ -29,6 +29,20 @@ def process_alive(pid: int | None) -> bool | None:
 
 
 class NativeProfileRunner(BenchmarkRunner):
+    def local_asset_check_commands(self, profile: str) -> list[list[str]]:
+        if not profile:
+            raise ContractError("native-profile local-asset check requires a profile")
+        return [
+            [
+                str(managed_python()),
+                str(self.definition.controller.relative_to(ROOT)),
+                "doctor",
+                "--profile",
+                profile,
+                "--local-assets-only",
+            ]
+        ]
+
     def provision_commands(
         self, spec: CampaignSpec, *, skip_provision: bool
     ) -> list[list[str]]:

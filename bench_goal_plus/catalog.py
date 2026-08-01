@@ -126,11 +126,19 @@ class Catalog:
             )
             if not all(isinstance(raw_capabilities.get(name), bool) for name in bool_fields):
                 raise ContractError(f"{runner_id}: capability flags must be boolean")
+            local_asset_inventory = raw_capabilities.get(
+                "local_asset_inventory", False
+            )
+            if not isinstance(local_asset_inventory, bool):
+                raise ContractError(
+                    f"{runner_id}: local_asset_inventory capability must be boolean"
+                )
             resume_semantics = raw_capabilities.get("resume_semantics")
             if not isinstance(resume_semantics, str) or not resume_semantics:
                 raise ContractError(f"{runner_id}: resume_semantics is required")
             capabilities = RunnerCapabilities(
                 **{name: raw_capabilities[name] for name in bool_fields},
+                local_asset_inventory=local_asset_inventory,
                 resume_semantics=resume_semantics,
             )
             self.runners[runner_id] = RunnerDefinition(

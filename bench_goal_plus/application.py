@@ -12,7 +12,7 @@ from typing import Any, Iterable
 from adapters.registry import load_adapter
 
 from .catalog import Catalog, read_json
-from .errors import ContractError
+from .errors import ContractError, UnsupportedOperation
 from .models import CampaignRef, CampaignSpec, EvidenceBundle, TargetDefinition
 from .paths import ROOT, RUNS_ROOT
 from .runners.factory import create_runner
@@ -439,7 +439,9 @@ class BenchmarkAgent:
             "commands": [command_text(finalize), command_text(report)],
         }
 
-    def check(self, target_id: str, *, dry_run: bool) -> dict[str, Any]:
+    def check(
+        self, target_id: str, *, profile: str | None = None, dry_run: bool
+    ) -> dict[str, Any]:
         try:
             target = self.catalog.targets[target_id]
         except KeyError as error:
@@ -457,15 +459,37 @@ class BenchmarkAgent:
                     f"{target_id}: eager adapter Docker is missing "
                     + ", ".join(missing_hooks)
                 )
-        command = [sys.executable, "scripts/status.py", "--check"]
-        self.executor.execute([command], dry_run=dry_run)
-        return {
+        result = {
             "benchmark": target.as_dict(),
             "runner": self.catalog.runners[target.runner_id].as_dict(),
             "adapter": adapter,
-            "repository_check": command_text(command),
             "validated": not dry_run,
         }
+        if profile is None:
+            command = [sys.executable, "scripts/status.py", "--check"]
+            self.executor.execute([command], dry_run=dry_run)
+            result["repository_check"] = command_text(command)
+            return result
+
+        definition = self.catalog.runners[target.runner_id]
+        if not definition.capabilities.local_asset_inventory:
+            raise UnsupportedOperation(
+                f"runner {target.runner_id} does not support profiled local-asset checks"
+            )
+        runner = create_runner(definition)
+        commands = runner.local_asset_check_commands(profile)
+        if not commands:
+            raise ContractError(
+                f"runner {target.runner_id} returned no local-asset check command"
+            )
+        self.executor.execute(commands, dry_run=dry_run)
+        result["local_asset_inventory"] = {
+            "profile": profile,
+            "read_only": True,
+            "acquisition_attempted": False,
+            "commands": [command_text(command) for command in commands],
+        }
+        return result
 
     def _campaign_context(self, value: str | Path, benchmark: str | None):
         campaign = resolve_campaign_path(value)

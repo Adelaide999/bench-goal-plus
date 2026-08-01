@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from ..errors import UnsupportedOperation
 from ..models import (
     CampaignRef,
     CampaignSpec,
@@ -17,6 +18,11 @@ from ..models import (
 class BenchmarkRunner(ABC):
     def __init__(self, definition: RunnerDefinition) -> None:
         self.definition = definition
+
+    def local_asset_check_commands(self, profile: str) -> list[list[str]]:
+        raise UnsupportedOperation(
+            f"runner {self.definition.runner_id} does not support profiled local-asset checks"
+        )
 
     @abstractmethod
     def provision_commands(

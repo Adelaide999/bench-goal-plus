@@ -97,6 +97,46 @@ class BenchmarkDocsTest(unittest.TestCase):
             r"python3 \.agents/skills/.*/scripts/.*\.py",
         )
 
+    def test_setup_skill_checks_local_assets_before_provision(self):
+        skill = (
+            ROOT / ".agents/skills/benchmark-setup/SKILL.md"
+        ).read_text(encoding="utf-8")
+        matrix = (
+            ROOT
+            / ".agents/skills/benchmark-setup/references/benchmark-matrix.md"
+        ).read_text(encoding="utf-8")
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        for required in (
+            "scripts/bench.py check --benchmark <id> --profile <profile>",
+            "local_asset_inventory=true",
+            "--skip-provision",
+            "不得把 provision 当作本地 inventory probe",
+            "失败只报告缺失项",
+            "全部通过时立即停止 setup",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, skill)
+        for required in (
+            "Mandatory local-first gate",
+            "assets=True",
+            "read_only: true",
+            "acquisition_attempted: false",
+            "docker image inspect <exact-ref>",
+            "docker ps -a --no-trunc",
+            "guaranteed not to run `provision`",
+            "do not run `provision`",
+            "even when those local tags already exist",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, matrix)
+        for required in (
+            "不带 `--profile` 的 `check` 只检查仓库契约",
+            "docker image inspect",
+            "所有诊断性 `docker run` 必须显式使用 `--pull never`",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, agents)
+
     def test_benchmark_run_requires_explicit_k_c_confirmation(self):
         text = (
             ROOT / ".agents/skills/benchmark-run/SKILL.md"

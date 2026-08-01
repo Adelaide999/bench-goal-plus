@@ -181,6 +181,146 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         _, profile = EDGE.load_profile("vliw-smoke")
         return profile
 
+    def write_dataset_revision(self, revision: str) -> None:
+        metadata = (
+            self.test_paths.tasks_dir
+            / ".cache"
+            / "huggingface"
+            / "download"
+            / "vliw_kernel_optimization.json.metadata"
+        )
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        metadata.write_text(revision + "\n", encoding="utf-8")
+
+    def test_local_asset_inventory_lists_exact_images_and_containers(self) -> None:
+        profile = self.profile()
+        self.write_dataset_revision(profile["dataset_revision"])
+        work_ref = "edgebench.work.vliw_kernel_optimization:work123"
+        judge_ref = "edgebench.judge.vliw_kernel_optimization:judge123"
+        commands = []
+        original = EDGE_IO.run_capture
+
+        def fake_run_capture(command, *, env=None):
+            commands.append(command)
+            if command[:3] == ["docker", "ps", "-a"]:
+                return {
+                    "returncode": 0,
+                    "stdout": json.dumps(
+                        {
+                            "ID": "container-work",
+                            "Names": "edgebench-work",
+                            "Image": work_ref,
+                            "ImageID": "sha256:work-id",
+                            "State": "running",
+                            "Status": "Up 5 minutes",
+                        }
+                    ),
+                    "stderr": "",
+                }
+            if command[:3] == ["docker", "image", "inspect"]:
+                reference = command[-1]
+                image_id = (
+                    "sha256:work-id"
+                    if reference == work_ref
+                    else "sha256:judge-id"
+                )
+                return {
+                    "returncode": 0,
+                    "stdout": json.dumps(
+                        [
+                            {
+                                "Id": image_id,
+                                "RepoTags": [reference],
+                                "RepoDigests": [
+                                    reference.split(":", 1)[0] + "@sha256:digest"
+                                ],
+                                "Size": 123456,
+                                "Architecture": "amd64",
+                                "Os": "linux",
+                            }
+                        ]
+                    ),
+                    "stderr": "",
+                }
+            self.fail(f"unexpected inventory command: {command}")
+
+        EDGE_IO.run_capture = fake_run_capture
+        try:
+            payload = EDGE.local_asset_inventory(profile)
+        finally:
+            EDGE_IO.run_capture = original
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["read_only"])
+        self.assertFalse(payload["acquisition_attempted"])
+        task = payload["tasks"][0]
+        self.assertTrue(task["task_file_present"])
+        self.assertTrue(task["dataset_revision_matches"])
+        self.assertEqual(
+            [image["reference"] for image in task["images"]],
+            [work_ref, judge_ref],
+        )
+        self.assertEqual(
+            [image["image_id"] for image in task["images"]],
+            ["sha256:work-id", "sha256:judge-id"],
+        )
+        self.assertEqual(task["images"][0]["containers"][0]["id"], "container-work")
+        self.assertEqual(payload["summary"]["images_present"], 2)
+        self.assertEqual(payload["docker_commands"], commands)
+        for command in commands:
+            self.assertTrue(
+                command[:3] in (
+                    ["docker", "ps", "-a"],
+                    ["docker", "image", "inspect"],
+                )
+            )
+            self.assertNotIn("pull", command)
+            self.assertNotIn("run", command)
+
+    def test_local_asset_inventory_reports_missing_exact_image(self) -> None:
+        profile = self.profile()
+        self.write_dataset_revision(profile["dataset_revision"])
+        missing_ref = "edgebench.judge.vliw_kernel_optimization:judge123"
+        original = EDGE_IO.run_capture
+
+        def fake_run_capture(command, *, env=None):
+            if command[:3] == ["docker", "ps", "-a"]:
+                return {"returncode": 0, "stdout": "", "stderr": ""}
+            if command[-1] == missing_ref:
+                return {
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "No such image",
+                }
+            reference = command[-1]
+            return {
+                "returncode": 0,
+                "stdout": json.dumps(
+                    [
+                        {
+                            "Id": "sha256:work-id",
+                            "RepoTags": [reference],
+                            "RepoDigests": [],
+                            "Size": 123456,
+                            "Architecture": "amd64",
+                            "Os": "linux",
+                        }
+                    ]
+                ),
+                "stderr": "",
+            }
+
+        EDGE_IO.run_capture = fake_run_capture
+        try:
+            payload = EDGE.local_asset_inventory(profile)
+        finally:
+            EDGE_IO.run_capture = original
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["summary"]["images_missing"], 1)
+        self.assertEqual(payload["missing_image_references"], [missing_ref])
+        self.assertEqual(payload["tasks"][0]["images"][1]["error"], "No such image")
+
     def test_full_codex_profile_covers_all_public_tasks(self) -> None:
         _, profile = EDGE.load_profile("full-codex-2h")
 
@@ -1624,6 +1764,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             EDGE_IO.run_capture = original
 
         self.assertTrue(result["passed"])
+        self.assertEqual(commands[0][2:4], ["--pull", "never"])
         self.assertIn("--cpus", commands[0])
         self.assertIn("--memory", commands[0])
         self.assertEqual(commands[-1][1:3], ["rm", "--force"])
@@ -1643,9 +1784,29 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             EDGE_IO.run_capture = original
 
         self.assertEqual(result["returncode"], 0)
+        self.assertEqual(captured[0][2:4], ["--pull", "never"])
         self.assertIn("-c", captured[0])
         self.assertNotIn("-lc", captured[0])
         self.assertIn("command -v cargo", captured[0][-1])
+
+    def test_docker_http_probe_never_pulls_diagnostic_image(self) -> None:
+        original = EDGE_IO.run_capture
+        captured = []
+
+        def fake_run_capture(command, *, env=None):
+            captured.append(command)
+            return {"returncode": 0, "stdout": "200", "stderr": ""}
+
+        EDGE_IO.run_capture = fake_run_capture
+        try:
+            result = EDGE.docker_http_probe(
+                "example:work", "http://host.docker.internal:3788/v1/models"
+            )
+        finally:
+            EDGE_IO.run_capture = original
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(captured[0][2:4], ["--pull", "never"])
 
     def test_codex_usage_reads_jsonl_agent_output(self) -> None:
         run = self.temp / "task-run"

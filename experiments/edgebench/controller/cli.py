@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
             child.add_argument("--output", type=Path)
             child.add_argument("--method", action="append", choices=sorted(METHODS))
             child.add_argument("--model")
+            child.add_argument("--local-assets-only", action="store_true")
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--profile", default="vliw-smoke")
     prepare_parser.add_argument("--campaign-id")
@@ -70,7 +71,11 @@ def main(argv: list[str] | None = None) -> int:
             protocol = api_protocol_for_methods(profile["methods"])
             if protocol == "pi-provider":
                 validate_pi_provider_model(profile["model"])
-            return doctor(profile, output=args.output)
+            return doctor(
+                profile,
+                output=args.output,
+                local_assets_only=args.local_assets_only,
+            )
         prepare(args, profile)
         return 0
     destination = campaign_dir(args.campaign)

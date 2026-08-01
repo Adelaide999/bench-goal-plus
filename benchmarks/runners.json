@@ -25,6 +25,7 @@
         "resume": false,
         "cell_concurrency": true,
         "official_evaluator": true,
+        "local_asset_inventory": true,
         "resume_semantics": "stopped campaigns are finalized as partial; retry uses a new campaign"
       }
     },
@@ -47,6 +48,7 @@
         "resume": true,
         "cell_concurrency": false,
         "official_evaluator": true,
+        "local_asset_inventory": false,
         "resume_semantics": "rerun only prepared or interrupted cells"
       }
     },
@@ -67,6 +69,7 @@
         "resume": true,
         "cell_concurrency": false,
         "official_evaluator": true,
+        "local_asset_inventory": false,
         "resume_semantics": "run-batch skips cells already present in campaign-results.json"
       }
     }

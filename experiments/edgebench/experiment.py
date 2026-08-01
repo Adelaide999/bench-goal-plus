@@ -39,6 +39,7 @@ from experiments.edgebench.controller.environment import (  # noqa: E402
     doctor_payload,
     ensure_local_task_exclude,
     judge_server_environment,
+    local_asset_inventory,
     loopback_api_target,
     provision,
     resolve_agent_api_config,

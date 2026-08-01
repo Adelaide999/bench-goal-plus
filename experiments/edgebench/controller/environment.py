@@ -466,6 +466,8 @@ def docker_http_probe(
     command = [
         "docker",
         "run",
+        "--pull",
+        "never",
         "--rm",
         "--entrypoint",
         "/bin/sh",
@@ -546,6 +548,8 @@ def docker_resource_limit_probe(
         [
             "docker",
             "run",
+            "--pull",
+            "never",
             "--detach",
             "--name",
             name,
@@ -671,7 +675,18 @@ def rust_image_runtime_probe(image: str, version: str) -> dict[str, Any]:
         f"rustc --version | grep -F 'rustc {version} '"
     )
     return io.run_capture(
-        ["docker", "run", "--rm", "--entrypoint", "/bin/bash", image, "-c", command]
+        [
+            "docker",
+            "run",
+            "--pull",
+            "never",
+            "--rm",
+            "--entrypoint",
+            "/bin/bash",
+            image,
+            "-c",
+            command,
+        ]
     )
 
 
@@ -687,6 +702,221 @@ def dataset_revision(task_id: str) -> str | None:
         return None
     lines = metadata.read_text(encoding="utf-8").splitlines()
     return lines[0].strip() if lines else None
+
+
+def _local_containers() -> tuple[
+    dict[str, Any], list[dict[str, Any]], list[str], list[str]
+]:
+    command = [
+        "docker",
+        "ps",
+        "-a",
+        "--no-trunc",
+        "--format",
+        "{{json .}}",
+    ]
+    result = io.run_capture(command)
+    containers: list[dict[str, Any]] = []
+    parse_errors: list[str] = []
+    if result["returncode"] == 0:
+        for line_number, line in enumerate(result["stdout"].splitlines(), start=1):
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as exc:
+                parse_errors.append(f"line {line_number}: {exc.msg}")
+                continue
+            if isinstance(item, dict):
+                containers.append(item)
+            else:
+                parse_errors.append(f"line {line_number}: expected a JSON object")
+    return result, containers, parse_errors, command
+
+
+def _container_summary(container: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": container.get("ID"),
+        "name": container.get("Names"),
+        "image": container.get("Image"),
+        "image_id": container.get("ImageID"),
+        "state": container.get("State"),
+        "status": container.get("Status"),
+    }
+
+
+def _inspect_local_image(
+    role: str,
+    reference: str,
+    containers: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[str]]:
+    command = ["docker", "image", "inspect", reference]
+    result = io.run_capture(command)
+    record: dict[str, Any] = {
+        "role": role,
+        "reference": reference,
+        "present": False,
+        "image_id": None,
+        "repo_tags": [],
+        "repo_digests": [],
+        "size_bytes": None,
+        "architecture": None,
+        "os": None,
+        "containers": [],
+    }
+    if result["returncode"] != 0:
+        record["error"] = result["stderr"] or "exact image reference is missing"
+        return record, command
+
+    try:
+        payload = json.loads(result["stdout"])
+        details = payload[0] if isinstance(payload, list) and payload else payload
+    except json.JSONDecodeError as exc:
+        record["error"] = f"docker image inspect returned invalid JSON: {exc.msg}"
+        return record, command
+    if not isinstance(details, dict):
+        record["error"] = "docker image inspect returned no image object"
+        return record, command
+
+    image_id = details.get("Id")
+    repo_tags = details.get("RepoTags") or []
+    repo_digests = details.get("RepoDigests") or []
+    if (
+        not isinstance(image_id, str)
+        or not isinstance(repo_tags, list)
+        or not isinstance(repo_digests, list)
+    ):
+        record["error"] = "docker image inspect returned an invalid image object"
+        return record, command
+    aliases = {
+        str(value)
+        for value in (reference, image_id, *repo_tags, *repo_digests)
+        if value
+    }
+    if isinstance(image_id, str) and image_id.startswith("sha256:"):
+        aliases.add(image_id.removeprefix("sha256:"))
+    matching = [
+        _container_summary(container)
+        for container in containers
+        if str(container.get("Image") or "") in aliases
+        or str(container.get("ImageID") or "") in aliases
+    ]
+    record.update(
+        {
+            "present": True,
+            "image_id": image_id,
+            "repo_tags": list(repo_tags),
+            "repo_digests": list(repo_digests),
+            "size_bytes": details.get("Size"),
+            "architecture": details.get("Architecture"),
+            "os": details.get("Os"),
+            "containers": matching,
+        }
+    )
+    return record, command
+
+
+def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
+    """Inspect exact local EdgeBench assets without acquiring or running anything."""
+
+    (
+        container_result,
+        containers,
+        container_parse_errors,
+        container_command,
+    ) = _local_containers()
+    docker_commands = [container_command]
+    expected_revision = str(profile["dataset_revision"])
+    tasks: list[dict[str, Any]] = []
+    for raw_task_id in profile["task_ids"]:
+        task_id = str(raw_task_id)
+        task_path = current_paths().tasks_dir / f"{task_id}.json"
+        try:
+            actual_revision = dataset_revision(task_id)
+        except (OSError, UnicodeError) as exc:
+            actual_revision = None
+            revision_error: str | None = str(exc)
+        else:
+            revision_error = None
+        task: dict[str, Any] = {
+            "task_id": task_id,
+            "task_file": str(task_path),
+            "task_file_present": task_path.is_file(),
+            "expected_dataset_revision": expected_revision,
+            "actual_dataset_revision": actual_revision,
+            "dataset_revision_matches": actual_revision == expected_revision,
+            "images": [],
+        }
+        if revision_error:
+            task["revision_error"] = revision_error
+        if task_path.is_file():
+            try:
+                references = task_images(task_id)
+            except (OSError, UnicodeError, KeyError, TypeError, ValueError) as exc:
+                task["task_error"] = str(exc)
+            else:
+                for role, reference in zip(("Work", "Judge"), references, strict=True):
+                    image, command = _inspect_local_image(role, reference, containers)
+                    task["images"].append(image)
+                    docker_commands.append(command)
+        tasks.append(task)
+
+    images = [image for task in tasks for image in task["images"]]
+    matched_container_ids = {
+        str(container.get("id") or container.get("name"))
+        for image in images
+        for container in image["containers"]
+    }
+    matched_container_ids.discard("None")
+    expected_image_count = len(tasks) * 2
+    present_image_count = sum(image["present"] for image in images)
+    summary = {
+        "tasks_expected": len(tasks),
+        "task_files_present": sum(task["task_file_present"] for task in tasks),
+        "task_revisions_matching": sum(
+            task["dataset_revision_matches"] for task in tasks
+        ),
+        "images_expected": expected_image_count,
+        "image_references_resolved": len(images),
+        "images_present": present_image_count,
+        "images_missing": expected_image_count - present_image_count,
+        "matching_containers": len(matched_container_ids),
+    }
+    container_inventory_ok = (
+        container_result["returncode"] == 0 and not container_parse_errors
+    )
+    ok = (
+        bool(tasks)
+        and summary["task_files_present"] == summary["tasks_expected"]
+        and summary["task_revisions_matching"] == summary["tasks_expected"]
+        and summary["image_references_resolved"] == expected_image_count
+        and summary["images_present"] == expected_image_count
+        and container_inventory_ok
+    )
+    return {
+        "schema_version": 1,
+        "action": "local-asset-inventory",
+        "checked_at": io.utc_now(),
+        "profile": str(profile["id"]),
+        "dataset_repository": str(profile["dataset_repository"]),
+        "expected_dataset_revision": expected_revision,
+        "read_only": True,
+        "acquisition_attempted": False,
+        "ok": ok,
+        "container_inventory": {
+            "ok": container_inventory_ok,
+            "containers_seen": len(containers),
+            "error": container_result["stderr"] or None,
+            "parse_errors": container_parse_errors,
+        },
+        "tasks": tasks,
+        "summary": summary,
+        "missing_image_references": [
+            image["reference"] for image in images if not image["present"]
+        ],
+        "unresolved_image_task_ids": [
+            task["task_id"] for task in tasks if len(task["images"]) != 2
+        ],
+        "docker_commands": docker_commands,
+    }
 
 
 def ensure_local_task_exclude() -> None:
@@ -1119,8 +1349,17 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     return report.payload()
 
 
-def doctor(profile: dict[str, Any], *, output: Path | None = None) -> int:
-    payload = doctor_payload(profile)
+def doctor(
+    profile: dict[str, Any],
+    *,
+    output: Path | None = None,
+    local_assets_only: bool = False,
+) -> int:
+    payload = (
+        local_asset_inventory(profile)
+        if local_assets_only
+        else doctor_payload(profile)
+    )
     if output:
         io.write_json(output, payload)
     print(json.dumps(payload, indent=2, ensure_ascii=False))

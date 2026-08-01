@@ -10,7 +10,8 @@ from adapters.registry import adapter_modules
 from adapters.registry import load_adapter
 from bench_goal_plus.application import BenchmarkAgent
 from bench_goal_plus.catalog import Catalog
-from bench_goal_plus.errors import ContractError
+from bench_goal_plus.cli import build_parser
+from bench_goal_plus.errors import ContractError, UnsupportedOperation
 from bench_goal_plus.runners.factory import create_runner
 from bench_goal_plus.models import CampaignRef
 from bench_goal_plus.runtime import RuntimeManager
@@ -42,6 +43,12 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         }
         self.assertEqual(common, set(adapter_modules()))
         self.assertEqual(self.catalog.targets["edgebench"].runner_id, "edgebench-native")
+        self.assertTrue(
+            self.catalog.runners["edgebench-native"].capabilities.local_asset_inventory
+        )
+        self.assertFalse(
+            self.catalog.runners["common-matrix"].capabilities.local_asset_inventory
+        )
         self.assertIn("openevolve-cpu-portable", self.catalog.targets)
         self.assertEqual(len(self.catalog.runners), 3)
         self.assertEqual(
@@ -127,6 +134,40 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             doctor[-4:],
             ["--model", "zai/glm-5.2", "--method", "goal-plus-pi-provider"],
         )
+
+    def test_profiled_check_routes_to_read_only_native_inventory(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "check",
+                "--benchmark",
+                "edgebench",
+                "--profile",
+                "vliw-smoke",
+            ]
+        )
+        self.assertEqual(args.benchmark, ["edgebench"])
+        self.assertEqual(args.profile, "vliw-smoke")
+
+        result = self.agent.check(
+            "edgebench", profile="vliw-smoke", dry_run=True
+        )
+
+        self.assertEqual(len(self.executor.commands), 1)
+        command = self.executor.commands[0]
+        self.assertEqual(
+            command[-4:],
+            ["doctor", "--profile", "vliw-smoke", "--local-assets-only"],
+        )
+        self.assertNotIn("provision", command)
+        inventory = result["local_asset_inventory"]
+        self.assertTrue(inventory["read_only"])
+        self.assertFalse(inventory["acquisition_attempted"])
+
+    def test_profiled_check_fails_closed_for_unsupported_runner(self) -> None:
+        with self.assertRaisesRegex(UnsupportedOperation, "does not support"):
+            self.agent.check(
+                "local-vliw", profile="cpu_portable", dry_run=True
+            )
 
     def test_every_target_has_an_explicit_docker_owner_and_mode(self) -> None:
         for target in self.catalog.targets.values():
