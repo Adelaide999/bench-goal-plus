@@ -1787,6 +1787,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
 
         command = EDGE.build_sforge_command(destination, plain)
 
+        self.assertLess(command.index("--silent"), command.index("run"))
         self.assertEqual(command[command.index("--replicas") + 1], "4")
         self.assertEqual(command[command.index("--replica-concurrency") + 1], "4")
         self.assertEqual(

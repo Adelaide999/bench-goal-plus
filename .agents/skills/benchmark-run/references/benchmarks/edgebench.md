@@ -82,6 +82,17 @@ python3 scripts/bench.py launch --preset edgebench-codex-2h
 该 preset 固定 51 tasks、Plain Codex、`gpt-5.6-sol`、`medium`、
 `T=7200,K=1,C=2,R=1`。`C=2` 表示两个 task cells 并发，不是两个 candidate。
 
+## Controller 日志边界
+
+对所有 detached EdgeBench cell，在 `run` 子命令前传入 SForge 全局参数
+`--silent`。把 cell 的 `controller.log` 只作为 SForge 子进程的启动、结束和错误控制台日志；
+完整 agent trajectory 以 SForge 的 `agent_output.txt` 为准。
+
+单 task、单 outer replica 在没有 `--silent` 时会触发 SForge verbose 模式，把容器内 agent
+stdout 原样复制到 `controller.log`。Pi JSON delta 尤其会绕过 `agent_output.txt` 的兼容过滤，
+重新产生数百 MiB 的重复快照。不得用压缩、轮转或另一层 JSON 过滤掩盖这条重复落盘路径；
+检查生成的 `command.json`，确认 `--silent` 位于 `run` 之前。
+
 ## 监控和停止
 
 ```bash

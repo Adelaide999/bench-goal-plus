@@ -46,6 +46,7 @@ def build_sforge_command(destination: Path, cell: dict[str, Any]) -> list[str]:
         str(cell_path / "sforge"),
         "--tasks-dir",
         str(paths.tasks_dir),
+        "--silent",
         "run",
         "--backend",
         str(cell.get("backend") or "docker"),
