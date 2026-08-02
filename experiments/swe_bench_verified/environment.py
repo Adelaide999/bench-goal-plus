@@ -21,14 +21,31 @@ from bench_goal_plus.loopback_bridge import (
 )
 from bench_runtime_paths import (
     configure_temp_environment,
+    ensure_temp_root,
     temporary_directory,
 )
 
-from .config import ROOT, SWEBENCH_ROOT, SweBenchContractError, utc_now, write_json
+from .config import (
+    GOAL_PLUS_ROOT,
+    ROOT,
+    SWEBENCH_ROOT,
+    SweBenchContractError,
+    utc_now,
+    write_json,
+)
 
 
 CODEX_ARCHIVE = Path.home() / ".cache/sforge/codex/codex-0.144.1-linux-x64.tgz"
 CODEX_RUNTIME_TMPFS = "/opt/codex:rw,exec,nosuid,nodev,size=512m"
+GOAL_PLUS_DEPENDENCY_LOCK = (
+    ROOT / "environment" / "swe-bench-goal-plus-requirements.lock"
+)
+GOAL_PLUS_VISIBLE_VERIFIER = (
+    ROOT / "experiments" / "swe_bench_verified" / "visible_test_verifier.py"
+)
+GOAL_PLUS_CONTROLLER = (
+    ROOT / "experiments" / "swe_bench_verified" / "goal_plus_controller.py"
+)
 PI_API_KEYS = {
     "zai": ("ZAI_API_KEY", "ZAI_CODING_CN_API_KEY"),
     "deepseek": ("DEEPSEEK_API_KEY",),
@@ -150,9 +167,13 @@ def _check(name: str, passed: bool, **details: Any) -> dict[str, Any]:
     return {"name": name, "passed": bool(passed), **details}
 
 
-def _git_value(*args: str) -> str | None:
-    result = run_capture(["git", "-C", str(SWEBENCH_ROOT), *args])
+def _git_value_at(root: Path, *args: str) -> str | None:
+    result = run_capture(["git", "-C", str(root), *args])
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _git_value(*args: str) -> str | None:
+    return _git_value_at(SWEBENCH_ROOT, *args)
 
 
 def _package_version(name: str) -> str | None:
@@ -306,6 +327,57 @@ def resolve_pi_runtime(model: str) -> dict[str, Any]:
         "credential_env": key_source,
         "credential_present": key_source is not None,
     }
+
+
+def goal_plus_install_script() -> str:
+    installer = (
+        "import os, sys; "
+        "cache = os.stat('/opt/pip-cache'); "
+        "os.chown('/opt/agent-tmp', cache.st_uid, cache.st_gid); "
+        "os.chown('/opt/goal-plus-runtime', cache.st_uid, cache.st_gid); "
+        "os.setgroups([]); "
+        "os.setgid(cache.st_gid); "
+        "os.setuid(cache.st_uid); "
+        "os.execv(sys.executable, [sys.executable, '-m', 'pip', 'install', "
+        "'--disable-pip-version-check', '--no-input', "
+        "'--target', '/opt/goal-plus-runtime', "
+        "'-r', '/opt/goal-plus-runtime-requirements.lock'])"
+    )
+    return " && ".join(
+        (
+            "export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH",
+            "mkdir -p /opt/goal-plus-runtime /opt/goal-plus-bin /opt/pi-home/.pi/agent",
+            f'python -c "{installer}"',
+            "ln -sf /opt/pi/dist/cli.js /opt/goal-plus-bin/pi",
+        )
+    )
+
+
+def goal_plus_runtime_environment() -> dict[str, str]:
+    return {
+        "HOME": "/opt/agent-tmp",
+        "TMPDIR": "/opt/agent-tmp",
+        "TMP": "/opt/agent-tmp",
+        "TEMP": "/opt/agent-tmp",
+        "PIP_CACHE_DIR": "/opt/pip-cache",
+        "PYTHONPATH": "/opt/goal-plus-runtime:/opt/goal-plus/src",
+    }
+
+
+def resolve_goal_plus_runtime(model: str) -> dict[str, Any]:
+    runtime = resolve_pi_runtime(model)
+    runtime.update(
+        {
+            "goal_plus_root": GOAL_PLUS_ROOT,
+            "goal_plus_dependency_lock": GOAL_PLUS_DEPENDENCY_LOCK,
+            "goal_plus_visible_verifier": GOAL_PLUS_VISIBLE_VERIFIER,
+            "goal_plus_controller": GOAL_PLUS_CONTROLLER,
+            "goal_plus_pip_cache": ensure_temp_root(
+                "swe-bench-verified/goal-plus-pip-cache"
+            ),
+        }
+    )
+    return runtime
 
 
 def _codex_container_probe(image: str, archive: Path) -> subprocess.CompletedProcess[str]:
@@ -475,6 +547,63 @@ def _pi_container_probe(
         ],
         timeout=120,
     )
+
+
+def _goal_plus_container_probe(
+    image: str, runtime: dict[str, Any]
+) -> subprocess.CompletedProcess[str]:
+    environment_names = [
+        name for name in ("PIP_INDEX_URL",) if os.environ.get(name)
+    ]
+    command = [
+        "docker",
+        "run",
+        "--pull",
+        "never",
+        "--rm",
+        "--tmpfs",
+        "/opt/agent-tmp:rw,nosuid,nodev,size=256m",
+        "--tmpfs",
+        "/opt/goal-plus-runtime:rw,exec,nosuid,nodev,size=512m",
+    ]
+    for name, value in goal_plus_runtime_environment().items():
+        command.extend(["-e", f"{name}={value}"])
+    for name in environment_names:
+        command.extend(["-e", name])
+    command.extend(
+        [
+            "--mount",
+            f"type=bind,src={runtime['node_root']},dst=/opt/node,readonly",
+            "--mount",
+            f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
+            "--mount",
+            f"type=bind,src={runtime['goal_plus_root']},dst=/opt/goal-plus,readonly",
+            "--mount",
+            "type=bind,"
+            f"src={runtime['goal_plus_dependency_lock']},"
+            "dst=/opt/goal-plus-runtime-requirements.lock,readonly",
+            "--mount",
+            "type=bind,"
+            f"src={runtime['goal_plus_visible_verifier']},"
+            "dst=/opt/swebench-visible-test-verifier.py,readonly",
+            "--mount",
+            "type=bind,"
+            f"src={runtime['goal_plus_controller']},"
+            "dst=/opt/swebench-goal-plus-controller.py,readonly",
+            "--mount",
+            f"type=bind,src={runtime['goal_plus_pip_cache']},dst=/opt/pip-cache",
+            "--entrypoint",
+            "sh",
+            image,
+            "-lc",
+            goal_plus_install_script()
+            + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
+            + " && pi --version"
+            + " && python -m goal_plus.pi_tool --help >/dev/null"
+            + " && python /opt/swebench-goal-plus-controller.py --help >/dev/null",
+        ]
+    )
+    return run_capture(command, timeout=600)
 
 
 def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
@@ -659,7 +788,11 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                         )
                     )
     else:
-        runtime = resolve_pi_runtime(profile["model"])
+        runtime = (
+            resolve_goal_plus_runtime(profile["model"])
+            if method == "goal-plus-pi"
+            else resolve_pi_runtime(profile["model"])
+        )
         paths_present = all(
             isinstance(runtime.get(name), Path) and runtime[name].exists()
             for name in ("node_root", "package_root", "pi_cli")
@@ -693,6 +826,78 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                     error=probe.stderr.strip()[-2000:],
                 )
             )
+        if method == "goal-plus-pi":
+            goal_plus_branch = _git_value_at(
+                runtime["goal_plus_root"], "branch", "--show-current"
+            )
+            goal_plus_head = _git_value_at(
+                runtime["goal_plus_root"], "rev-parse", "HEAD"
+            )
+            goal_plus_upstream = _git_value_at(
+                runtime["goal_plus_root"], "rev-parse", "--abbrev-ref", "@{upstream}"
+            )
+            goal_plus_dirty = _git_value_at(
+                runtime["goal_plus_root"], "status", "--porcelain"
+            )
+            goal_plus_assets_present = all(
+                isinstance(runtime.get(name), Path) and runtime[name].is_file()
+                for name in (
+                    "goal_plus_dependency_lock",
+                    "goal_plus_visible_verifier",
+                    "goal_plus_controller",
+                )
+            ) and (
+                runtime["goal_plus_root"] / ".pi" / "extensions" / "goal-plus.ts"
+            ).is_file()
+            checkout_valid = bool(
+                runtime["goal_plus_root"].is_dir()
+                and goal_plus_branch == "main"
+                and goal_plus_upstream == "origin/main"
+                and goal_plus_head
+                and goal_plus_dirty == ""
+            )
+            checks.extend(
+                [
+                    _check(
+                        "checkout:goal-plus",
+                        checkout_valid,
+                        path=str(runtime["goal_plus_root"]),
+                        branch=goal_plus_branch,
+                        upstream=goal_plus_upstream,
+                        commit=goal_plus_head,
+                        dirty=goal_plus_dirty not in (None, ""),
+                    ),
+                    _check(
+                        "goal-plus:container-assets",
+                        goal_plus_assets_present,
+                        dependency_lock=str(runtime["goal_plus_dependency_lock"]),
+                        visible_verifier=str(runtime["goal_plus_visible_verifier"]),
+                        controller=str(runtime["goal_plus_controller"]),
+                    ),
+                ]
+            )
+            if (
+                paths_present
+                and runtime["credential_present"]
+                and checkout_valid
+                and goal_plus_assets_present
+            ):
+                goal_plus_probe = _goal_plus_container_probe(image, runtime)
+                pip_cache_disabled = "cache has been disabled" in (
+                    goal_plus_probe.stderr.lower()
+                )
+                checks.append(
+                    _check(
+                        "goal-plus:container-runtime",
+                        goal_plus_probe.returncode == 0 and not pip_cache_disabled,
+                        version_output=goal_plus_probe.stdout.strip()[-2000:],
+                        error=goal_plus_probe.stderr.strip()[-2000:],
+                        pip_cache_enabled=not pip_cache_disabled,
+                        pip_index_env=(
+                            "PIP_INDEX_URL" if os.environ.get("PIP_INDEX_URL") else None
+                        ),
+                    )
+                )
 
     return {
         "schema_version": 1,

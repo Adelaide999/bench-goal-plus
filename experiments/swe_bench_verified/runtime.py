@@ -8,6 +8,7 @@ import os
 import subprocess
 import time
 from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -15,6 +16,7 @@ from bench_goal_plus.codex_provider import codex_responses_provider_args
 from bench_runtime_paths import configure_temp_environment, ensure_temp_root
 
 from .config import (
+    GOAL_PLUS_ROOT,
     ROOT,
     SWEBENCH_ROOT,
     SweBenchContractError,
@@ -27,11 +29,15 @@ from .config import (
 from .environment import (
     CODEX_RUNTIME_TMPFS,
     codex_container_responses_probe,
+    goal_plus_install_script,
+    goal_plus_runtime_environment,
     openai_responses_probe,
     resolve_codex_runtime,
+    resolve_goal_plus_runtime,
     resolve_pi_runtime,
     routed_codex_runtime,
 )
+from .goal_plus_evidence import collect_goal_plus_state
 
 
 MANIFEST = "campaign.json"
@@ -151,6 +157,11 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
 
     source_commit = _git_value(ROOT, "rev-parse", "HEAD")
     swebench_commit = _git_value(SWEBENCH_ROOT, "rev-parse", "HEAD")
+    goal_plus_commit = (
+        _git_value(GOAL_PLUS_ROOT, "rev-parse", "HEAD")
+        if profile["methods"][0] == "goal-plus-pi"
+        else None
+    )
     provider_contract = (
         dict(profile["agent_provider"])
         if profile["methods"][0] == "plain-codex"
@@ -215,6 +226,10 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
             ),
             "swebench_commit": swebench_commit,
             "swebench_checkout": str(SWEBENCH_ROOT),
+            "goal_plus_commit": goal_plus_commit,
+            "goal_plus_checkout": (
+                str(GOAL_PLUS_ROOT) if goal_plus_commit is not None else None
+            ),
         },
         "profile_snapshot": profile,
         "preserved_conflict": str(preserved) if preserved else None,
@@ -391,7 +406,11 @@ def _create_agent_container(
             ]
         )
     else:
-        runtime = runtime or resolve_pi_runtime(profile["model"])
+        runtime = runtime or (
+            resolve_goal_plus_runtime(profile["model"])
+            if method == "goal-plus-pi"
+            else resolve_pi_runtime(profile["model"])
+        )
         if not runtime["credential_present"]:
             raise SweBenchContractError(
                 f"Pi credential for provider {runtime['provider']} is missing"
@@ -408,6 +427,50 @@ def _create_agent_container(
                 f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
             ]
         )
+        if method == "goal-plus-pi":
+            required_assets = (
+                "goal_plus_root",
+                "goal_plus_dependency_lock",
+                "goal_plus_visible_verifier",
+                "goal_plus_controller",
+                "goal_plus_pip_cache",
+            )
+            missing = [
+                name
+                for name in required_assets
+                if not isinstance(runtime.get(name), Path)
+                or not runtime[name].exists()
+            ]
+            if missing:
+                raise SweBenchContractError(
+                    "Goal Plus container assets are missing: " + ", ".join(missing)
+                )
+            command.extend(
+                [
+                    "--tmpfs",
+                    "/opt/goal-plus-runtime:rw,exec,nosuid,nodev,size=512m",
+                    "--mount",
+                    "type=bind,"
+                    f"src={runtime['goal_plus_root']},"
+                    "dst=/opt/goal-plus,readonly",
+                    "--mount",
+                    "type=bind,"
+                    f"src={runtime['goal_plus_dependency_lock']},"
+                    "dst=/opt/goal-plus-runtime-requirements.lock,readonly",
+                    "--mount",
+                    "type=bind,"
+                    f"src={runtime['goal_plus_visible_verifier']},"
+                    "dst=/opt/swebench-visible-test-verifier.py,readonly",
+                    "--mount",
+                    "type=bind,"
+                    f"src={runtime['goal_plus_controller']},"
+                    "dst=/opt/swebench-goal-plus-controller.py,readonly",
+                    "--mount",
+                    "type=bind,"
+                    f"src={runtime['goal_plus_pip_cache']},"
+                    "dst=/opt/pip-cache",
+                ]
+            )
     if runtime is None:
         raise AssertionError("Agent runtime was not resolved")
     command.extend([profile["tasks"][0]["image"], "sleep", "infinity"])
@@ -470,12 +533,47 @@ def _initialize_agent_container(
             ],
             timeout=120,
         )
+    elif profile["methods"][0] == "goal-plus-pi":
+        environment = goal_plus_runtime_environment()
+        install_command = ["docker", "exec"]
+        for name, value in environment.items():
+            install_command.extend(["-e", f"{name}={value}"])
+        if os.environ.get("PIP_INDEX_URL"):
+            install_command.extend(["-e", "PIP_INDEX_URL"])
+        install_command.extend(
+            [
+                container_id,
+                "sh",
+                "-lc",
+                goal_plus_install_script()
+                + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
+                + " && pi --version",
+            ]
+        )
+        _docker_checked(install_command, timeout=600)
+        _docker_checked(
+            [
+                "docker",
+                "exec",
+                container_id,
+                "sh",
+                "-lc",
+                "mkdir -p /testbed/.goal-plus-verifiers && "
+                "printf '\\n.gp/\\n.goal-plus-verifiers/\\n' "
+                ">> /testbed/.git/info/exclude && "
+                "cp /opt/swebench-visible-test-verifier.py "
+                "/testbed/.goal-plus-verifiers/visible_test_verifier.py && "
+                "chmod 0555 "
+                "/testbed/.goal-plus-verifiers/visible_test_verifier.py",
+            ]
+        )
     return {
         "observed_head": observed,
         "base_commit": base_commit,
         "base_tree": base_tree,
         "observed_tree": observed_tree,
         "synthetic_head": observed != base_commit,
+        "goal_plus_initialized": profile["methods"][0] == "goal-plus-pi",
     }
 
 
@@ -491,6 +589,44 @@ def build_agent_prompt(task: dict[str, Any]) -> str:
         "Do not look for benchmark metadata, hidden tests, or an answer patch. "
         "Leave the final solution in the working tree.\n\n"
         f"Issue:\n{task['problem_statement']}\n"
+    )
+
+
+def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str:
+    hidden = set(task) & HIDDEN_INSTANCE_FIELDS
+    if hidden:
+        raise SweBenchContractError(
+            "Agent task unexpectedly contains hidden fields: " + ", ".join(sorted(hidden))
+        )
+    goal_plus = profile["goal_plus"]
+    return (
+        "/goal-plus mode=autonomous Solve the public repository issue below in "
+        "/testbed. Treat this as verifier-guided code repair and enter Search Mode. "
+        "Do not inspect benchmark metadata, hidden tests, dataset rows, reports, or "
+        "answer patches. The official SWE-bench harness remains hidden and runs only "
+        "after this Goal Plus session.\n\n"
+        "Freeze exactly one SearchSpec discovered from the public issue and repository. "
+        "Use source_path=/testbed, metric_name=visible_test_score, direction=maximize, "
+        "strategy.name=random, strategy.worker_host=pi-rpc, and "
+        "strategy.orchestration_mode=parallel_loops. Set budget.max_parallel="
+        f"{profile['concurrency']} and do not set the deprecated max_candidates field. "
+        "Set strategy.worker_budget.max_runtime_seconds="
+        f"{goal_plus['worker_runtime_seconds']} and "
+        "strategy.config.closeout_reserve_seconds="
+        f"{goal_plus['closeout_reserve_seconds']}. Use one fixed initial candidate and "
+        "continue the same bound Pi worker session; do not create replacement lanes.\n\n"
+        "Choose a focused visible test command using only the public issue and repository. "
+        "Both process and promotion ranking verifiers must invoke the materialized "
+        "artifact /testbed/.goal-plus-verifiers/visible_test_verifier.py with cwd=/testbed "
+        "and the candidate-relative command: "
+        "python .goal-plus-verifiers/visible_test_verifier.py "
+        f"--timeout-seconds {goal_plus['visible_verifier_timeout_seconds']} -- "
+        "<your visible test command>. Include that wrapper path in verifier_artifacts. "
+        "Keep .gp and .goal-plus-verifiers outside the editable artifact surface. "
+        "After worker completion, close the pool, select and promote verifier-backed "
+        "Evidence, apply the promotion patch to /testbed, record the Search result, "
+        "and finish the Goal Plus record.\n\n"
+        f"Public issue:\n{task['problem_statement']}\n"
     )
 
 
@@ -554,6 +690,58 @@ def _agent_command(
             "-",
         ]
     credential_env = str(runtime["credential_env"])
+    if profile["methods"][0] == "goal-plus-pi":
+        goal_plus_environment = {
+            **goal_plus_runtime_environment(),
+            "HOME": "/opt/pi-home",
+            "PI_CODING_AGENT_DIR": "/opt/pi-home/.pi/agent",
+            "GOAL_PLUS_ROOT": "/testbed/.gp",
+            "GOAL_PLUS_SEARCH_ROOT": "/testbed/.gp",
+            "GOAL_PLUS_SOURCE_PATH": "/opt/goal-plus",
+            "GOAL_PLUS_PI_MODEL": profile["model"],
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED": "1",
+            "GOAL_PLUS_OUTER_DEADLINE_AT": str(runtime["outer_deadline_at"]),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        command = [*common]
+        for name, value in goal_plus_environment.items():
+            command.extend(["-e", f"{name}={value}"])
+        command.extend(
+            [
+                "-e",
+                credential_env,
+                container_id,
+                "sh",
+                "-lc",
+                'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH; exec "$@"',
+                "swe-bench-goal-plus",
+                "/opt/node/bin/node",
+                "/opt/pi/dist/cli.js",
+                "--mode",
+                "json",
+                "--provider",
+                str(runtime["provider"]),
+                "--model",
+                profile["model"],
+                "--thinking",
+                profile["reasoning_effort"],
+                "--approve",
+                "--session-dir",
+                "/testbed/.gp/host-sessions/pi-main",
+                "--session-id",
+                str(runtime["main_session_id"]),
+                "--no-extensions",
+                "--no-skills",
+                "--no-prompt-templates",
+                "--no-context-files",
+                "--extension",
+                "/opt/goal-plus/.pi/extensions/goal-plus.ts",
+                "--skill",
+                "/opt/goal-plus/.pi/skills/goal-plus/SKILL.md",
+                str(runtime["goal_prompt"]),
+            ]
+        )
+        return command
     return [
         *common,
         "-e",
@@ -630,12 +818,173 @@ def extract_usage(output: str) -> dict[str, Any]:
     }
 
 
+def _goal_plus_closeout(
+    container_id: str,
+    profile: dict[str, Any],
+    runtime: dict[str, Any],
+) -> dict[str, Any]:
+    environment = {
+        **goal_plus_runtime_environment(),
+        "HOME": "/opt/pi-home",
+        "PI_CODING_AGENT_DIR": "/opt/pi-home/.pi/agent",
+        "GOAL_PLUS_ROOT": "/testbed/.gp",
+        "GOAL_PLUS_SEARCH_ROOT": "/testbed/.gp",
+        "GOAL_PLUS_SOURCE_PATH": "/opt/goal-plus",
+        "GOAL_PLUS_PI_MODEL": profile["model"],
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED": "1",
+        "GOAL_PLUS_OUTER_DEADLINE_AT": str(runtime["outer_deadline_at"]),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    command = ["docker", "exec"]
+    for name, value in environment.items():
+        command.extend(["-e", f"{name}={value}"])
+    command.extend(
+        [
+            container_id,
+            "python",
+            "/opt/swebench-goal-plus-controller.py",
+            "--root",
+            "/testbed/.gp",
+            "--source",
+            "/testbed",
+            "--pool-timeout-seconds",
+            str(min(60, profile["goal_plus"]["closeout_reserve_seconds"])),
+        ]
+    )
+    timeout = max(
+        600,
+        profile["goal_plus"]["closeout_reserve_seconds"]
+        + profile["goal_plus"]["visible_verifier_timeout_seconds"]
+        + 120,
+    )
+    try:
+        completed = _run(command, timeout=timeout)
+        error = None
+    except (OSError, subprocess.TimeoutExpired) as caught:
+        completed = None
+        error = f"{type(caught).__name__}: {caught}"
+    payload: dict[str, Any] = {}
+    if completed is not None:
+        for line in reversed(completed.stdout.splitlines()):
+            try:
+                candidate = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                payload = candidate
+                break
+        payload.update(
+            {
+                "returncode": completed.returncode,
+                "stdout_tail": completed.stdout[-4000:],
+                "stderr_tail": completed.stderr[-4000:],
+            }
+        )
+        if completed.returncode != 0 and not payload.get("error"):
+            payload["error"] = "Goal Plus controller closeout returned nonzero"
+    else:
+        payload = {
+            "completed": False,
+            "returncode": None,
+            "error": error,
+        }
+    payload["command"] = [*command]
+    return payload
+
+
+def _record_goal_plus_completion_check(
+    state: dict[str, Any],
+    name: str,
+    *,
+    expected: Any,
+    actual: Any,
+    passed: bool,
+) -> None:
+    completion = state.setdefault("completion", {})
+    checks = completion.setdefault("checks", {})
+    checks[name] = {
+        "expected": expected,
+        "actual": actual,
+        "passed": bool(passed),
+    }
+    failed = [key for key, check in checks.items() if not check.get("passed")]
+    completion["passed"] = not failed
+    completion["reason"] = (
+        None
+        if not failed
+        else "Goal Plus completion evidence failed: " + ", ".join(failed)
+    )
+
+
+def _export_goal_plus_state(
+    container_id: str,
+    destination: Path,
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    preserved = preserve_conflict(destination)
+    destination.mkdir(parents=True, exist_ok=False)
+    command = [
+        "docker",
+        "cp",
+        f"{container_id}:/testbed/.gp/.",
+        str(destination),
+    ]
+    try:
+        completed = _run(command, timeout=180)
+        exported = completed.returncode == 0
+        error = (
+            None
+            if exported
+            else completed.stderr.strip()
+            or completed.stdout.strip()
+            or "docker cp failed"
+        )
+    except (OSError, subprocess.TimeoutExpired) as caught:
+        exported = False
+        error = f"{type(caught).__name__}: {caught}"
+    state = collect_goal_plus_state(
+        destination,
+        expected_k=profile["concurrency"],
+        expected_worker_runtime_seconds=profile["goal_plus"][
+            "worker_runtime_seconds"
+        ],
+        expected_closeout_reserve_seconds=profile["goal_plus"][
+            "closeout_reserve_seconds"
+        ],
+        expected_visible_verifier_timeout_seconds=profile["goal_plus"][
+            "visible_verifier_timeout_seconds"
+        ],
+    )
+    _record_goal_plus_completion_check(
+        state,
+        "state_export",
+        expected=True,
+        actual=exported,
+        passed=exported,
+    )
+    return {
+        **state,
+        "export": {
+            "completed": exported,
+            "command": command,
+            "destination": str(destination),
+            "preserved_conflict": str(preserved) if preserved else None,
+            "error": error,
+        },
+    }
+
+
 def _run_agent(
     campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]
 ) -> dict[str, Any]:
     profile = manifest["profile_snapshot"]
+    method = profile["methods"][0]
     task = read_json(campaign / cell["task_file"])
-    prompt = build_agent_prompt(task)
+    prompt = (
+        build_goal_plus_prompt(task, profile)
+        if method == "goal-plus-pi"
+        else build_agent_prompt(task)
+    )
     cell_dir = (campaign / cell["task_file"]).parent
     (cell_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
     container_id = None
@@ -660,10 +1009,13 @@ def _run_agent(
     }
     runtime_public: dict[str, Any] = {}
     image_checkout: dict[str, Any] = {}
+    goal_plus_closeout: dict[str, Any] | None = None
+    goal_plus_state: dict[str, Any] | None = None
+    recorded_command: list[str] | None = None
     agent_error: str | None = None
     resources = ExitStack()
     try:
-        if profile["methods"][0] == "plain-codex":
+        if method == "plain-codex":
             runtime = resources.enter_context(
                 routed_codex_runtime(profile, campaign)
             )
@@ -677,7 +1029,11 @@ def _run_agent(
                     "OpenAI-compatible Responses probe failed through the runtime route"
                 )
         else:
-            runtime = resolve_pi_runtime(profile["model"])
+            runtime = (
+                resolve_goal_plus_runtime(profile["model"])
+                if method == "goal-plus-pi"
+                else resolve_pi_runtime(profile["model"])
+            )
             host_probe = None
         container_id, runtime = _create_agent_container(
             manifest["campaign_id"], profile, runtime
@@ -692,7 +1048,7 @@ def _run_agent(
             },
         }
         _save_manifest(campaign, manifest)
-        if profile["methods"][0] == "plain-codex":
+        if method == "plain-codex":
             runtime_public = {
                 "kind": "codex-openai-compatible-responses",
                 "archive": str(runtime["archive"]),
@@ -716,14 +1072,36 @@ def _run_agent(
             }
         else:
             runtime_public = {
-                "kind": "pi-container-runtime",
+                "kind": (
+                    "goal-plus-pi-container-runtime"
+                    if method == "goal-plus-pi"
+                    else "pi-container-runtime"
+                ),
                 "node_root": str(runtime["node_root"]),
                 "package_root": str(runtime["package_root"]),
                 "provider": runtime["provider"],
                 "credential_env": runtime["credential_env"],
             }
+            if method == "goal-plus-pi":
+                runtime_public.update(
+                    {
+                        "goal_plus_root": str(runtime["goal_plus_root"]),
+                        "goal_plus_commit": manifest["source"].get(
+                            "goal_plus_commit"
+                        ),
+                        "dependency_lock": str(
+                            runtime["goal_plus_dependency_lock"]
+                        ),
+                        "visible_verifier": str(
+                            runtime["goal_plus_visible_verifier"]
+                        ),
+                        "controller": str(runtime["goal_plus_controller"]),
+                        "pip_cache": str(runtime["goal_plus_pip_cache"]),
+                        "evidence_annotator": "disabled",
+                    }
+                )
         image_checkout = _initialize_agent_container(container_id, profile, runtime)
-        if profile["methods"][0] == "plain-codex":
+        if method == "plain-codex":
             container_probe = codex_container_responses_probe(
                 container_id,
                 runtime,
@@ -736,12 +1114,28 @@ def _run_agent(
                     "OpenAI-compatible Responses probe failed in the Agent container"
                 )
         setup_runtime_seconds = time.monotonic() - started
+        if method == "goal-plus-pi":
+            runtime["outer_deadline_at"] = (
+                datetime.now(timezone.utc)
+                + timedelta(seconds=profile["wall_time_seconds"])
+            ).isoformat()
+            runtime["main_session_id"] = "swe-bench-main-" + hashlib.sha256(
+                manifest["campaign_id"].encode("utf-8")
+            ).hexdigest()[:12]
+            runtime["goal_prompt"] = prompt
+            runtime_public["outer_deadline_at"] = runtime["outer_deadline_at"]
+            runtime_public["main_session_id"] = runtime["main_session_id"]
         command = _agent_command(container_id, profile, runtime)
+        recorded_command = (
+            [*command[:-1], "<goal-prompt>"]
+            if method == "goal-plus-pi"
+            else [*command]
+        )
         trajectory_started = time.monotonic()
         try:
             result = _run(
                 command,
-                input_text=prompt,
+                input_text=None if method == "goal-plus-pi" else prompt,
                 timeout=profile["wall_time_seconds"],
             )
             stdout, stderr, returncode = result.stdout, result.stderr, result.returncode
@@ -755,6 +1149,27 @@ def _run_agent(
             _docker_checked(["docker", "start", container_id], timeout=30)
 
         finalization_started = time.monotonic()
+        if method == "goal-plus-pi":
+            goal_plus_closeout = _goal_plus_closeout(container_id, profile, runtime)
+            goal_plus_state = _export_goal_plus_state(
+                container_id,
+                cell_dir / "goal-plus-state",
+                profile,
+            )
+            _record_goal_plus_completion_check(
+                goal_plus_state,
+                "controller_closeout",
+                expected=True,
+                actual=goal_plus_closeout.get("completed"),
+                passed=goal_plus_closeout.get("completed") is True,
+            )
+            _record_goal_plus_completion_check(
+                goal_plus_state,
+                "evidence_annotator_disabled",
+                expected="disabled",
+                actual=runtime_public.get("evidence_annotator"),
+                passed=runtime_public.get("evidence_annotator") == "disabled",
+            )
         _docker_checked(
             ["docker", "exec", container_id, "git", "-C", "/testbed", "add", "-N", "."]
         )
@@ -824,8 +1239,20 @@ def _run_agent(
     )
     patch_path = campaign / cell["patch_file"]
     patch_exists = patch_path.is_file() and bool(patch_path.read_text(encoding="utf-8").strip())
+    goal_plus_complete = bool(
+        goal_plus_state
+        and (goal_plus_state.get("completion") or {}).get("passed") is True
+    )
+    agent_completed = bool(
+        patch_exists
+        and (
+            goal_plus_complete
+            if method == "goal-plus-pi"
+            else returncode == 0
+        )
+    )
     return {
-        "state": "completed" if returncode == 0 and patch_exists else "partial",
+        "state": "completed" if agent_completed else "partial",
         "started_at": started_at,
         "completed_at": utc_now(),
         "runtime_seconds": trajectory_runtime_seconds,
@@ -836,8 +1263,11 @@ def _run_agent(
         "timed_out": timed_out,
         "patch_exists": patch_exists,
         "usage": extract_usage(stdout),
+        "command": recorded_command,
         "runtime": runtime_public,
         "image_checkout": image_checkout,
+        "goal_plus_closeout": goal_plus_closeout,
+        "goal_plus": goal_plus_state,
         "container": {
             "id": container_id,
             "name": container_name,
@@ -1007,16 +1437,31 @@ def execute_campaign(campaign: Path) -> int:
             )
         if cell["agent"]["patch_exists"]:
             cell["evaluation"] = _official_evaluation(campaign, manifest, cell)
-        if cell["evaluation"].get("state") == "completed":
+        goal_plus_completion = (
+            ((cell["agent"].get("goal_plus") or {}).get("completion") or {})
+            if cell.get("method") == "goal-plus-pi"
+            else {"passed": True, "reason": None}
+        )
+        score_complete = cell["evaluation"].get("state") == "completed"
+        topology_complete = goal_plus_completion.get("passed") is True
+        if score_complete and topology_complete:
             cell["state"] = "completed"
             manifest["state"] = "completed"
         else:
             cell["state"] = "partial"
-            cell["incomplete_reason"] = (
-                "Agent did not produce a patch"
-                if not cell["agent"]["patch_exists"]
-                else "official evaluator did not produce a valid report"
-            )
+            reasons = []
+            if not cell["agent"]["patch_exists"]:
+                reasons.append("Agent did not produce a patch")
+            elif not score_complete:
+                reasons.append("official evaluator did not produce a valid report")
+            if not topology_complete:
+                reasons.append(
+                    str(
+                        goal_plus_completion.get("reason")
+                        or "Goal Plus completion evidence is incomplete"
+                    )
+                )
+            cell["incomplete_reason"] = "; ".join(reasons)
             manifest["state"] = "partial"
             exit_code = 1
     except Exception as error:
@@ -1056,6 +1501,16 @@ def status_payload(campaign: Path) -> dict[str, Any]:
                 "evaluation_state": (cell.get("evaluation") or {}).get("state"),
                 "evaluator_calls": (cell.get("evaluation") or {}).get("calls"),
                 "resolved": (cell.get("evaluation") or {}).get("resolved"),
+                "actual_subagent_count": (
+                    ((cell.get("agent") or {}).get("goal_plus") or {}).get(
+                        "actual_subagent_count"
+                    )
+                ),
+                "goal_plus_completion": (
+                    ((cell.get("agent") or {}).get("goal_plus") or {}).get(
+                        "completion"
+                    )
+                ),
                 "incomplete_reason": cell.get("incomplete_reason"),
                 "error": cell.get("error"),
                 "retained_container": (

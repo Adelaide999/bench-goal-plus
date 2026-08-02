@@ -352,15 +352,15 @@
         "plain_codex": "partial",
         "goal_plus_codex": "n/a",
         "plain_pi": "partial",
-        "goal_plus_pi": "n/a",
+        "goal_plus_pi": "partial",
         "matched_baseline": "n/a",
         "campaign_ready": "partial"
       },
       "evidence": [],
-      "next_action": "Run the frozen sympy__sympy-16886 Plain Codex and Plain Pi campaigns through plan, launch, status, official evaluation, and finish; then archive minimal evidence.",
+      "next_action": "Run the frozen sympy__sympy-16886 Plain Codex, Plain Pi, and Goal Plus + Pi campaigns through plan, launch, status, official evaluation, and finish; then archive minimal evidence.",
       "blockers": [
         "Initial acceptance intentionally covers one Linux/amd64 Verified instance with K=1 and C=1; it does not claim a 500-instance campaign is ready.",
-        "Goal Plus methods are intentionally not registered for this runner yet.",
+        "Goal Plus + Pi is registered only for K=1 and has contract-test evidence but no archived real official-harness smoke yet.",
         "The official checkout is used as an unmodified managed third-party repository, so no project fork is currently required."
       ]
     },

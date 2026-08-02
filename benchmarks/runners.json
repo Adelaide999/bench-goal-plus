@@ -37,10 +37,14 @@
       "evidence_filename": "campaign-summary.json",
       "supported_methods": [
         "plain-codex",
-        "plain-pi"
+        "plain-pi",
+        "goal-plus-pi"
       ],
       "method_contracts": {
         "plain-pi": {
+          "model_format": "provider/model"
+        },
+        "goal-plus-pi": {
           "model_format": "provider/model"
         }
       },
@@ -121,7 +125,7 @@
       "id": "swe-bench-verified",
       "runner": "swe-bench-native",
       "adapter": null,
-      "bootstrap_targets": ["swebench"],
+      "bootstrap_targets": ["swebench", "goal_plus"],
       "local_asset_inventory": true,
       "default_inventory_profile": "sympy-16886-codex-smoke",
       "docker": {
@@ -355,6 +359,22 @@
       "expected_profile": {
         "task_count": 1,
         "methods": ["plain-pi"],
+        "model": "zai/glm-5.2",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "swe-bench-verified-sympy-16886-goal-plus-pi-smoke",
+      "description": "One-instance SWE-bench Verified Goal Plus + Pi official-harness smoke with T=1800, K=1, C=1, R=1.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "sympy-16886-goal-plus-pi-smoke",
+      "campaign_id_template": "swe-bench-verified-sympy-16886-goal-plus-pi-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi"],
         "model": "zai/glm-5.2",
         "reasoning_effort": "medium",
         "wall_time_seconds": 1800,

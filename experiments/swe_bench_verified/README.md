@@ -10,13 +10,14 @@ repository lifecycle through `python3 scripts/bench.py`.
 | Dataset | `SWE-bench/SWE-bench_Verified` at `91aa3ed51b709be6457e12d00300a6a596d4c6a3` |
 | Instance | `sympy__sympy-16886` |
 | Image | `swebench/sweb.eval.x86_64.sympy_1776_sympy-16886:latest` |
-| Methods | `plain-codex`, `plain-pi` |
+| Methods | `plain-codex`, `plain-pi`, `goal-plus-pi` |
 | Budget | `T=1800`, `K=1`, `C=1`, `R=1` |
 | Metric | official `resolved`, maximize |
 | Codex auth | `OPENAI_BASE_URL` + `OPENAI_API_KEY`, OpenAI-compatible Responses |
 
-Goal Plus, detached execution, stop/resume, `K>1`, `C>1`, and automatic image provisioning are
-not supported by this initial acceptance path.
+Detached execution, stop/resume, `K>1`, `C>1`, and automatic image provisioning are not supported
+by this initial acceptance path. Goal Plus + Pi is registered at `K=1` and remains readiness
+`partial` until its real official-harness smoke is archived.
 
 ## Isolation boundary
 
@@ -37,6 +38,14 @@ used by the repository's other direct-API Codex paths. On Linux, a loopback base
 the task container through the shared `systemd-socket-proxyd` bridge; setup verifies both host and
 container `POST /responses` before a campaign can start.
 
+Goal Plus + Pi starts one outer Pi JSON session through the project extension, then requires one
+candidate-bound `pi-rpc` worker in the shared Search state. Its frozen SearchSpec uses only an
+Agent-selected visible test command wrapped by the repository-owned numeric verifier. The wrapper
+does not read hidden dataset fields and is not the official score. On completion or timeout, the
+controller closes Pi pools, performs idempotent select/promote/apply closeout, exports `.gp` into the
+campaign, and only then disposes the Agent container. The separate official harness remains the sole
+owner of `resolved`.
+
 ## Public lifecycle
 
 Use the registered presets through the unified entrypoint:
@@ -50,6 +59,9 @@ python3 scripts/bench.py setup \
 python3 scripts/bench.py plan \
   --preset swe-bench-verified-sympy-16886-codex-smoke
 ```
+
+Use `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` for the Goal Plus + Pi path. It freezes
+`T=1800,K=1,C=1,R=1`, a 1500-second worker budget, and a 300-second Search closeout reserve.
 
 Run `launch` only after reviewing and confirming the resolved `T/K/C/R` block. A terminal campaign
 is archived with `finish`, which consumes `campaign-summary.json` and exports `report.md` plus the

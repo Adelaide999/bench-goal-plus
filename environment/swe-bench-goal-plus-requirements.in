@@ -1,0 +1,4 @@
+# Python dependencies installed into disposable SWE-bench Agent containers.
+fastmcp>=2.3,<3
+plotly>=6.5,<7
+pydantic>=2,<3

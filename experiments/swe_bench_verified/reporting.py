@@ -13,6 +13,8 @@ from .runtime import MANIFEST, TERMINAL_STATES
 def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> dict[str, Any]:
     evaluation = cell.get("evaluation") or {}
     agent = cell.get("agent") or {}
+    goal_plus = agent.get("goal_plus") or {}
+    goal_plus_completion = goal_plus.get("completion") or {}
     resolved = evaluation.get("resolved")
     final_metric = int(resolved) if isinstance(resolved, bool) else None
     return {
@@ -27,9 +29,11 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
         "incomplete_reason": cell.get("incomplete_reason") or cell.get("error"),
         "budget": {
             "wall_time_seconds": manifest["budget"]["wall_time_seconds"],
-            "live_search_concurrency": 1,
-            "cell_concurrency": 1,
-            "attempts": 1,
+            "live_search_concurrency": manifest["budget"][
+                "live_search_concurrency"
+            ],
+            "cell_concurrency": manifest["budget"]["cell_concurrency"],
+            "attempts": manifest["budget"]["attempts"],
         },
         "protocol": {
             "metric_name": "resolved",
@@ -42,6 +46,16 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
             "agent_provider": cell.get("agent_provider"),
             "official_evaluator": True,
             "official_evaluator_once": evaluation.get("calls") == 1,
+            "goal_plus": {
+                "required": cell["method"] == "goal-plus-pi",
+                "completion": goal_plus_completion or None,
+                "actual_subagent_count": goal_plus.get("actual_subagent_count"),
+                "runs": goal_plus.get("runs") or [],
+                "active_pi_pool_jobs": goal_plus.get("active_pi_pool_jobs") or [],
+                "evidence_annotator": (
+                    (agent.get("runtime") or {}).get("evidence_annotator")
+                ),
+            },
         },
         "score": {
             "final": final_metric,
@@ -63,7 +77,13 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
                     "complete" if isinstance(evaluation.get("calls"), int) else "missing"
                 ),
             },
-            "usage": agent.get("usage") or {"coverage": "unavailable"},
+            "usage": {
+                "outer_agent": agent.get("usage")
+                or {"coverage": "unavailable"},
+                "goal_plus_workers": goal_plus.get("worker_usage")
+                or {"coverage": "unavailable"},
+            },
+            "goal_plus_closeout": agent.get("goal_plus_closeout"),
             "agent_container": agent.get("container"),
         },
         "patch": {
@@ -78,6 +98,12 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
             "official_report": evaluation.get("report_file"),
             "official_stdout": evaluation.get("stdout_file"),
             "official_stderr": evaluation.get("stderr_file"),
+            "goal_plus_state": (
+                (goal_plus.get("export") or {}).get("destination")
+                if goal_plus
+                else None
+            ),
+            "goal_plus_export": goal_plus.get("export") if goal_plus else None,
         },
     }
 
@@ -90,12 +116,13 @@ def _markdown(summary: dict[str, Any]) -> str:
         "",
         f"Execution state: `{summary['state']}`.",
         "",
-        "| Task | Method | Model | Resolved | Patch applied | Evaluator calls |",
-        "|---|---|---|---:|---:|---:|",
+        "| Task | Method | Model | Resolved | Patch applied | Subagents | Evaluator calls |",
+        "|---|---|---|---:|---:|---:|---:|",
         (
             f"| {record['task_id']} | {record['method']} | {record['model']} | "
             f"{raw['resolved'] if raw['resolved'] is not None else ''} | "
             f"{raw['patch_applied'] if raw['patch_applied'] is not None else ''} | "
+            f"{record['protocol']['goal_plus']['actual_subagent_count'] if record['protocol']['goal_plus']['required'] else ''} | "
             f"{record['execution']['evaluator_calls']['total_claimed']} |"
         ),
         "",

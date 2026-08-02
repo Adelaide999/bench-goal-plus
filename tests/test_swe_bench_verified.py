@@ -15,7 +15,12 @@ from bench_goal_plus.errors import ContractError
 from bench_goal_plus.loopback_bridge import bridged_url, loopback_target
 from bench_goal_plus.runners.factory import create_runner
 from bench_runtime_paths import ensure_temp_root
-from experiments.swe_bench_verified import environment, reporting, runtime
+from experiments.swe_bench_verified import (
+    environment,
+    goal_plus_evidence,
+    reporting,
+    runtime,
+)
 from experiments.swe_bench_verified.config import (
     SweBenchContractError,
     load_profile,
@@ -32,6 +37,119 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def profile(self, profile_id: str) -> dict:
         return load_profile(profile_id)[1]
 
+    def test_goal_plus_installer_uses_the_bind_cache_owner(self) -> None:
+        script = environment.goal_plus_install_script()
+
+        self.assertIn("os.stat('/opt/pip-cache')", script)
+        self.assertIn("os.setgid(cache.st_gid)", script)
+        self.assertIn("os.setuid(cache.st_uid)", script)
+        self.assertIn("'/opt/goal-plus-runtime-requirements.lock'", script)
+        self.assertIn("PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH", script)
+        self.assertNotIn("PATH", environment.goal_plus_runtime_environment())
+        self.assertEqual(
+            environment.goal_plus_runtime_environment()["HOME"],
+            "/opt/agent-tmp",
+        )
+
+    def write_goal_plus_state(
+        self,
+        root: Path,
+        *,
+        max_parallel: int = 1,
+        session_count: int = 1,
+        verifier_runs: int = 1,
+    ) -> None:
+        run_id = "run_test"
+        candidate_id = "c001"
+        write_json(
+            root / "goal-plus/gp_test/goal.json",
+            {
+                "goal_plus_id": "gp_test",
+                "status": "complete",
+                "phase": "done",
+                "linked_search": {"run_id": run_id},
+            },
+        )
+        write_json(
+            root / f"runs/{run_id}/run.json",
+            {
+                "run_id": run_id,
+                "state": "promoted",
+                "frozen_spec_id": "spec_test",
+                "selected_candidate_id": candidate_id,
+            },
+        )
+        write_json(
+            root / "specs/spec_test/frozen_spec.json",
+            {
+                "spec": {
+                    "budget": {"max_parallel": max_parallel},
+                    "strategy": {
+                        "worker_host": "pi-rpc",
+                        "orchestration_mode": "parallel_loops",
+                        "worker_budget": {"max_runtime_seconds": 1500},
+                        "config": {"closeout_reserve_seconds": 300},
+                    },
+                    "process_verifiers": [
+                        {
+                            "name": "visible",
+                            "role": "ranking_signal",
+                            "command": [
+                                "python",
+                                ".goal-plus-verifiers/visible_test_verifier.py",
+                                "--timeout-seconds",
+                                "300",
+                                "--",
+                                "python",
+                                "-m",
+                                "pytest",
+                            ],
+                        }
+                    ],
+                    "promotion_verifiers": [
+                        {
+                            "name": "visible-promotion",
+                            "role": "ranking_signal",
+                            "command": [
+                                "python",
+                                ".goal-plus-verifiers/visible_test_verifier.py",
+                                "--timeout-seconds",
+                                "300",
+                                "--",
+                                "python",
+                                "-m",
+                                "pytest",
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+        write_json(
+            root / f"runs/{run_id}/candidates/{candidate_id}/candidate.json",
+            {"candidate_id": candidate_id, "iterations": [{"score": 1.0}]},
+        )
+        for index in range(session_count):
+            write_json(
+                root / f"runs/{run_id}/agent_sessions/agent_{index}.json",
+                {
+                    "host": "pi-rpc",
+                    "candidate_id": candidate_id,
+                    "host_handle": {
+                        "external_id": f"agent_{index}",
+                        "metadata": {
+                            "pi_metrics": {
+                                "usage_total": {"input_tokens": 10 + index}
+                            }
+                        },
+                    },
+                    "counters": {"verifier_runs": verifier_runs},
+                },
+            )
+        promotion = root / f"runs/{run_id}/promotion/{candidate_id}.patch"
+        promotion.parent.mkdir(parents=True, exist_ok=True)
+        promotion.write_text("diff --git a/a b/a\n", encoding="utf-8")
+
     def test_catalog_presets_freeze_methods_and_tkcr(self) -> None:
         agent = BenchmarkAgent(catalog=Catalog())
         codex = agent.resolve_spec(
@@ -40,6 +158,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         pi = agent.resolve_spec(
             preset_id="swe-bench-verified-sympy-16886-pi-smoke"
         )
+        goal_plus_pi = agent.resolve_spec(
+            preset_id="swe-bench-verified-sympy-16886-goal-plus-pi-smoke"
+        )
 
         self.assertEqual(codex.runner.runner_id, "swe-bench-native")
         self.assertEqual(codex.methods, ("plain-codex",))
@@ -47,6 +168,11 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(pi.methods, ("plain-pi",))
         self.assertEqual(pi.model, "zai/glm-5.2")
         self.assertEqual(pi.concurrency(), {"T": 1800, "K": 1, "C": 1, "R": 1})
+        self.assertEqual(goal_plus_pi.methods, ("goal-plus-pi",))
+        self.assertEqual(goal_plus_pi.model, "zai/glm-5.2")
+        self.assertEqual(
+            goal_plus_pi.concurrency(), {"T": 1800, "K": 1, "C": 1, "R": 1}
+        )
         self.assertTrue(codex.runner.capabilities.official_evaluator)
         self.assertTrue(codex.runner.capabilities.retain_containers)
         self.assertFalse(codex.runner.capabilities.detach)
@@ -63,6 +189,34 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.profile("sympy-16886-pi-smoke")["tasks"][0]["base_commit"],
             expected,
         )
+        self.assertEqual(
+            self.profile("sympy-16886-goal-plus-pi-smoke")["tasks"][0][
+                "base_commit"
+            ],
+            expected,
+        )
+
+    def test_goal_plus_profile_freezes_worker_and_closeout_budget(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-smoke")
+        self.assertEqual(
+            profile["goal_plus"],
+            {
+                "worker_runtime_seconds": 1500,
+                "closeout_reserve_seconds": 300,
+                "visible_verifier_timeout_seconds": 300,
+                "evidence_annotator": "disabled",
+            },
+        )
+
+        invalid = json.loads(json.dumps(profile))
+        invalid["goal_plus"]["worker_runtime_seconds"] = 1700
+        with self.assertRaisesRegex(SweBenchContractError, "must fit T"):
+            validate_profile(str(invalid["id"]), invalid)
+
+        invalid = json.loads(json.dumps(profile))
+        invalid["goal_plus"]["evidence_annotator"] = "enabled"
+        with self.assertRaisesRegex(SweBenchContractError, "disabled"):
+            validate_profile(str(invalid["id"]), invalid)
 
     def test_codex_profile_freezes_custom_responses_auth(self) -> None:
         profile = self.profile("sympy-16886-codex-smoke")
@@ -289,6 +443,123 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn("ZAI_API_KEY", probe)
         self.assertFalse(any(secret in argument for argument in probe))
 
+    def test_goal_plus_container_mounts_and_outer_pi_command_are_explicit(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-smoke")
+        secret = "not-for-command-lines"
+        with self.temporary_directory() as temporary:
+            assets = Path(temporary)
+            goal_plus_root = assets / "goal-plus"
+            goal_plus_root.mkdir()
+            dependency_lock = assets / "requirements.lock"
+            dependency_lock.write_text("pydantic==2.13.4\n", encoding="utf-8")
+            verifier = assets / "visible.py"
+            verifier.write_text("print('{}')\n", encoding="utf-8")
+            controller = assets / "controller.py"
+            controller.write_text("print('{}')\n", encoding="utf-8")
+            pip_cache = assets / "pip-cache"
+            pip_cache.mkdir()
+            runtime_info = {
+                "credential_env": "ZAI_API_KEY",
+                "credential_present": True,
+                "provider": "zai",
+                "model_id": "glm-5.2",
+                "node_root": Path("/host/node"),
+                "package_root": Path("/host/pi"),
+                "goal_plus_root": goal_plus_root,
+                "goal_plus_dependency_lock": dependency_lock,
+                "goal_plus_visible_verifier": verifier,
+                "goal_plus_controller": controller,
+                "goal_plus_pip_cache": pip_cache,
+            }
+            docker_commands: list[list[str]] = []
+
+            def docker_checked(command: list[str], *, timeout: int = 120) -> str:
+                del timeout
+                docker_commands.append(command)
+                return "container-id" if command[:2] == ["docker", "create"] else ""
+
+            with mock.patch.object(
+                runtime, "_docker_checked", side_effect=docker_checked
+            ):
+                runtime._create_agent_container(
+                    "goal-plus-campaign", profile, runtime_info
+                )
+
+            create = docker_commands[0]
+            joined = " ".join(create)
+            self.assertEqual(create[:4], ["docker", "create", "--pull", "never"])
+            self.assertIn("dst=/opt/goal-plus,readonly", joined)
+            self.assertIn("dst=/opt/pi,readonly", joined)
+            self.assertIn("dst=/opt/node,readonly", joined)
+            self.assertIn("dst=/opt/pip-cache", joined)
+            self.assertNotIn("dst=/opt/pip-cache,readonly", joined)
+            self.assertIn(
+                "/opt/goal-plus-runtime:rw,exec,nosuid,nodev,size=512m", create
+            )
+
+            prompt = runtime.build_goal_plus_prompt(
+                {"problem_statement": "Public issue text"}, profile
+            )
+            runtime_info.update(
+                {
+                    "outer_deadline_at": "2026-08-03T12:00:00+00:00",
+                    "main_session_id": "swe-bench-main-test",
+                    "goal_prompt": prompt,
+                }
+            )
+            with mock.patch.dict(os.environ, {"ZAI_API_KEY": secret}, clear=False):
+                command = runtime._agent_command(
+                    "container-id", profile, runtime_info
+                )
+
+            self.assertEqual(command[-1], prompt)
+            self.assertTrue(prompt.startswith("/goal-plus mode=autonomous"))
+            self.assertIn("budget.max_parallel=1", prompt)
+            self.assertIn("do not set the deprecated max_candidates", prompt)
+            self.assertIn("Public issue text", prompt)
+            self.assertIn("/opt/goal-plus/.pi/extensions/goal-plus.ts", command)
+            self.assertIn("/opt/goal-plus/.pi/skills/goal-plus/SKILL.md", command)
+            self.assertIn("GOAL_PLUS_ROOT=/testbed/.gp", command)
+            self.assertIn("GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED=1", command)
+            self.assertIn(
+                'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH; exec "$@"',
+                command,
+            )
+            self.assertIn("ZAI_API_KEY", command)
+            self.assertFalse(any(secret in argument for argument in command))
+
+    def test_goal_plus_durable_evidence_enforces_k_and_verifier_contract(self) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary) / "passing"
+            self.write_goal_plus_state(root)
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+            )
+
+            self.assertTrue(state["completion"]["passed"])
+            self.assertEqual(state["actual_subagent_count"], 1)
+            self.assertEqual(state["worker_usage"]["input_tokens"], 10)
+            self.assertEqual(state["worker_usage"]["sessions_covered"], 1)
+
+            mismatched = Path(temporary) / "mismatched"
+            self.write_goal_plus_state(mismatched, session_count=0)
+            mismatch = goal_plus_evidence.collect_goal_plus_state(
+                mismatched,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+            )
+            self.assertFalse(mismatch["completion"]["passed"])
+            self.assertEqual(mismatch["actual_subagent_count"], 0)
+            self.assertIn(
+                "bound_pi_worker_sessions", mismatch["completion"]["reason"]
+            )
+
     def test_codex_runtime_probe_and_agent_use_the_same_bounded_tmpfs(self) -> None:
         profile = self.profile("sympy-16886-codex-smoke")
         runtime_info = {
@@ -445,6 +716,100 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIsNotNone(result["runtime_seconds"])
             self.assertIsNotNone(result["finalization_grace_seconds"])
 
+    def test_goal_plus_state_is_exported_before_container_disposal(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-smoke")
+        runtime_info = {
+            "credential_env": "ZAI_API_KEY",
+            "provider": "zai",
+            "node_root": Path("/node"),
+            "package_root": Path("/pi"),
+            "goal_plus_root": Path("/goal-plus"),
+            "goal_plus_dependency_lock": Path("/requirements.lock"),
+            "goal_plus_visible_verifier": Path("/visible.py"),
+            "goal_plus_controller": Path("/controller.py"),
+            "goal_plus_pip_cache": Path("/pip-cache"),
+        }
+        with self.temporary_directory() as temporary:
+            campaign = Path(temporary)
+            cell_dir = campaign / "cells/goal-plus-pi"
+            cell_dir.mkdir(parents=True)
+            write_json(cell_dir / "task.json", {"problem_statement": "issue"})
+            cell = {
+                "task_file": "cells/goal-plus-pi/task.json",
+                "patch_file": "cells/goal-plus-pi/model.patch",
+                "method": "goal-plus-pi",
+                "model": profile["model"],
+            }
+            manifest = {
+                "campaign_id": "goal-plus-export-test",
+                "profile_snapshot": profile,
+                "source": {"goal_plus_commit": "a" * 40},
+            }
+            sequence: list[str] = []
+
+            def docker_checked(command: list[str], *, timeout: int = 120) -> str:
+                del timeout
+                if "diff" in command:
+                    return "diff --git a/a b/a\n"
+                if "status" in command:
+                    return " M a"
+                return ""
+
+            def export_state(*_args, **_kwargs):
+                sequence.append("export")
+                return {
+                    "actual_subagent_count": 1,
+                    "completion": {"passed": True, "reason": None},
+                    "worker_usage": {"coverage": "persisted_pi_worker_usage"},
+                }
+
+            def dispose(*_args, **_kwargs):
+                sequence.append("dispose")
+                return {
+                    "attempted": True,
+                    "removed": True,
+                    "retained": False,
+                    "stopped": None,
+                }
+
+            with (
+                mock.patch.object(
+                    runtime, "resolve_goal_plus_runtime", return_value=runtime_info
+                ),
+                mock.patch.object(
+                    runtime,
+                    "_create_agent_container",
+                    return_value=("container-id", runtime_info),
+                ),
+                mock.patch.object(runtime, "_initialize_agent_container"),
+                mock.patch.object(runtime, "_agent_command", return_value=["outer"]),
+                mock.patch.object(
+                    runtime,
+                    "_run",
+                    return_value=subprocess.CompletedProcess(["outer"], 0, "", ""),
+                ),
+                mock.patch.object(
+                    runtime,
+                    "_goal_plus_closeout",
+                    return_value={"completed": True},
+                ),
+                mock.patch.object(
+                    runtime, "_export_goal_plus_state", side_effect=export_state
+                ),
+                mock.patch.object(
+                    runtime, "_dispose_agent_container", side_effect=dispose
+                ),
+                mock.patch.object(
+                    runtime, "_docker_checked", side_effect=docker_checked
+                ),
+            ):
+                result = runtime._run_agent(campaign, manifest, cell)
+
+            self.assertEqual(sequence, ["export", "dispose"])
+            self.assertEqual(result["state"], "completed")
+            self.assertTrue(result["patch_exists"])
+            self.assertEqual(result["goal_plus"]["actual_subagent_count"], 1)
+
     def test_unconfirmed_agent_cleanup_blocks_official_evaluator(self) -> None:
         with self.temporary_directory() as temporary:
             campaign = Path(temporary)
@@ -530,6 +895,70 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(saved["state"], "completed")
             official.assert_called_once()
+
+    def test_goal_plus_evidence_failure_preserves_official_raw_score(self) -> None:
+        with self.temporary_directory() as temporary:
+            campaign = Path(temporary)
+            manifest = {
+                "schema_version": 1,
+                "campaign_id": "goal-plus-partial-test",
+                "benchmark_id": "swe-bench-verified",
+                "state": "prepared",
+                "methods": ["goal-plus-pi"],
+                "model": "zai/glm-5.2",
+                "budget": {"wall_time_seconds": 1800},
+                "cells": [
+                    {
+                        "cell_id": "cell",
+                        "task_id": "task",
+                        "method": "goal-plus-pi",
+                        "state": "prepared",
+                        "evaluation": {"state": "pending", "calls": 0},
+                    }
+                ],
+            }
+            write_json(campaign / "campaign.json", manifest)
+            agent_result = {
+                "state": "partial",
+                "patch_exists": True,
+                "goal_plus": {
+                    "actual_subagent_count": 0,
+                    "completion": {
+                        "passed": False,
+                        "reason": "Goal Plus completion evidence failed: bound_pi_worker_sessions",
+                    },
+                },
+                "container": {
+                    "cleanup": {
+                        "attempted": True,
+                        "removed": True,
+                        "retained": False,
+                    }
+                },
+            }
+            official_result = {
+                "state": "completed",
+                "calls": 1,
+                "resolved": True,
+                "patch_applied": True,
+            }
+            with (
+                mock.patch.object(runtime, "_run_agent", return_value=agent_result),
+                mock.patch.object(
+                    runtime, "_official_evaluation", return_value=official_result
+                ),
+            ):
+                exit_code = runtime.execute_campaign(campaign)
+
+            saved = json.loads((campaign / "campaign.json").read_text())
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(saved["state"], "partial")
+            self.assertTrue(saved["cells"][0]["evaluation"]["resolved"])
+            self.assertTrue(saved["cells"][0]["evaluation"]["patch_applied"])
+            self.assertIn(
+                "bound_pi_worker_sessions",
+                saved["cells"][0]["incomplete_reason"],
+            )
 
     def test_debug_disposition_stops_without_removing_agent_container(self) -> None:
         def run(command: list[str], **_kwargs):

@@ -6,12 +6,14 @@
 - Runner: `swe-bench-native`
 - Initial task: `sympy__sympy-16886`
 - Raw metric: official `resolved` boolean, direction `maximize`
-- Methods: `plain-codex` and `plain-pi`
-- Topology: one isolated outer Agent trajectory, so only `K=1,C=1,R=1` is accepted
+- Methods: `plain-codex`, `plain-pi`, and `goal-plus-pi`
+- Topology: Plain methods use one isolated outer trajectory; Goal Plus + Pi uses one outer Goal
+  Plus main session with one bound internal Pi worker. Initial acceptance restricts every method to
+  `K=1,C=1,R=1`
 - Final source JSON: `campaign-summary.json`
 
 The official harness owns final scoring in a separate container. The runner has no host-only score,
-provision, detach, stop, resume, cross-cell concurrency, or Goal Plus capability.
+provision, detach, stop, resume, or cross-cell concurrency.
 
 ## Presets
 
@@ -19,6 +21,7 @@ provision, detach, stop, resume, cross-cell concurrency, or Goal Plus capability
 | --- | --- | --- | --- |
 | `swe-bench-verified-sympy-16886-codex-smoke` | `gpt-5.6-sol`, medium | `1800/1/1/1` | profile-frozen `OPENAI_BASE_URL` + `OPENAI_API_KEY`, Responses |
 | `swe-bench-verified-sympy-16886-pi-smoke` | `zai/glm-5.2`, medium | `1800/1/1/1` | inherited `ZAI_API_KEY` |
+| `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` | `zai/glm-5.2`, medium | `1800/1/1/1` | inherited `ZAI_API_KEY` |
 
 The Pi credential value is never serialized. Docker receives only the selected environment variable
 name. The complete dataset row is host-side evaluator input; the Agent receives only the public
@@ -38,6 +41,13 @@ A cell is score-complete only when all of the following are present:
 An unresolved result is a valid completed score. Missing patch, missing report, unconfirmed
 container isolation, or a second evaluator attempt is `partial` or `failed`, not a zero-filled
 success.
+
+For `goal-plus-pi`, score completion additionally requires exported durable state proving exactly
+one terminal Goal Plus record and linked promoted Search run, a frozen spec with
+`budget.max_parallel=K`, `pi-rpc/parallel_loops`, the frozen worker/closeout budgets, one candidate,
+one bound Pi worker session, worker-origin verifier evidence, the registered visible-test wrapper,
+and no active Pi pool job. The controller exports `/testbed/.gp` before container disposal. Missing
+Goal Plus evidence downgrades the cell to `partial` while preserving any complete official raw score.
 
 ## Debug container retention
 
@@ -69,7 +79,7 @@ ends, so retention preserves the filesystem and process state boundary, not a li
 
 Run the profiled `check`, then `setup --skip-provision`, then `plan`. Before `launch`, show the
 resolved confirmation block required by the benchmark-run Skill. Because execution is foreground
-and non-resumable, run the two method campaigns sequentially. At terminal state, use unified
+and non-resumable, run the method campaigns sequentially. At terminal state, use unified
 `status` and `finish`; do not invoke the native controller as a second public CLI.
 
 Domestic mirrors are transport fallbacks only. They may not change the dataset revision, official
@@ -89,6 +99,11 @@ checkout branch, image tag, image ID, or evaluator implementation.
   and use the new planned campaign ID.
 - The shared Codex runtime and Pi installations are read-only host prerequisites. Mutable cache,
   campaign, evaluator, and temp paths must remain below the selected bench-goal-plus checkout.
+- Goal Plus + Pi installs the repository lock into the disposable Agent container and uses only the
+  repository-local `.tmp/swe-bench-verified/goal-plus-pip-cache` as a persistent writable cache.
+  Goal Plus source, Node, Pi, the dependency lock, and controller/verifier assets are mounted
+  read-only. `PIP_INDEX_URL` may select a domestic transport mirror, but it cannot change the lock,
+  image, dataset revision, or official evaluator.
 - Plain Codex does not use an OAuth auth file on this target. The profile freezes
   `auth_mode=openai-compatible`, `base_url_env=OPENAI_BASE_URL`,
   `api_key_env=OPENAI_API_KEY`, and `wire_api=responses`; doctor must prove the exact model through

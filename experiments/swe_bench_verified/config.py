@@ -13,8 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIR = Path(__file__).resolve().parent / "profiles"
 RUNS_ROOT = ROOT / "runs" / "swe-bench-verified"
 SWEBENCH_ROOT = ROOT / "third_party" / "swebench"
+GOAL_PLUS_ROOT = ROOT / "third_party" / "goal-plus"
 UPSTREAM_MANIFEST = ROOT / "environment" / "upstreams.json"
-SUPPORTED_METHODS = {"plain-codex", "plain-pi"}
+SUPPORTED_METHODS = {"plain-codex", "plain-pi", "goal-plus-pi"}
 SAFE_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 PROVIDER_ID = re.compile(r"[a-z][a-z0-9_-]*")
@@ -110,7 +111,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         or methods[0] not in SUPPORTED_METHODS
     ):
         raise SweBenchContractError(
-            f"{profile_id}: methods must select one supported Plain method"
+            f"{profile_id}: methods must select one supported method"
         )
     if not isinstance(profile.get("model"), str) or not profile["model"]:
         raise SweBenchContractError(f"{profile_id}: model is required")
@@ -164,15 +165,66 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 )
     elif profile.get("agent_provider") is not None:
         raise SweBenchContractError(
-            f"{profile_id}: Plain Pi provider is selected by PROVIDER/MODEL"
+            f"{profile_id}: Pi provider is selected by PROVIDER/MODEL"
         )
 
-    if methods[0] == "plain-pi":
+    if methods[0] in {"plain-pi", "goal-plus-pi"}:
         provider, separator, model_id = profile["model"].partition("/")
         if not separator or not provider or not model_id:
             raise SweBenchContractError(
-                f"{profile_id}: Plain Pi model must be PROVIDER/MODEL"
+                f"{profile_id}: Pi model must be PROVIDER/MODEL"
             )
+    if methods[0] == "goal-plus-pi":
+        goal_plus = profile.get("goal_plus")
+        required_fields = {
+            "worker_runtime_seconds",
+            "closeout_reserve_seconds",
+            "visible_verifier_timeout_seconds",
+            "evidence_annotator",
+        }
+        if not isinstance(goal_plus, dict) or set(goal_plus) != required_fields:
+            raise SweBenchContractError(
+                f"{profile_id}: Goal Plus + Pi requires an exact goal_plus contract"
+            )
+        worker_runtime = goal_plus["worker_runtime_seconds"]
+        closeout_reserve = goal_plus["closeout_reserve_seconds"]
+        verifier_timeout = goal_plus["visible_verifier_timeout_seconds"]
+        if (
+            not isinstance(worker_runtime, int)
+            or isinstance(worker_runtime, bool)
+            or worker_runtime < 1
+        ):
+            raise SweBenchContractError(
+                f"{profile_id}: goal_plus.worker_runtime_seconds must be positive"
+            )
+        if (
+            not isinstance(closeout_reserve, int)
+            or isinstance(closeout_reserve, bool)
+            or closeout_reserve < 1
+        ):
+            raise SweBenchContractError(
+                f"{profile_id}: goal_plus.closeout_reserve_seconds must be positive"
+            )
+        if worker_runtime + closeout_reserve > profile["wall_time_seconds"]:
+            raise SweBenchContractError(
+                f"{profile_id}: Goal Plus worker runtime and closeout reserve must fit T"
+            )
+        if (
+            not isinstance(verifier_timeout, int)
+            or isinstance(verifier_timeout, bool)
+            or verifier_timeout < 1
+        ):
+            raise SweBenchContractError(
+                f"{profile_id}: visible verifier timeout must be positive"
+            )
+        if goal_plus["evidence_annotator"] != "disabled":
+            raise SweBenchContractError(
+                f"{profile_id}: initial Goal Plus path requires disabled evidence annotator"
+            )
+    elif profile.get("goal_plus") is not None:
+        raise SweBenchContractError(
+            f"{profile_id}: goal_plus configuration is only valid for goal-plus-pi"
+        )
 
 
 def resolve_profile(

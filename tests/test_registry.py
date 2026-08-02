@@ -44,7 +44,7 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(item["stages"]["plain_codex"], "partial")
         self.assertEqual(item["stages"]["plain_pi"], "partial")
         self.assertEqual(item["stages"]["goal_plus_codex"], "n/a")
-        self.assertEqual(item["stages"]["goal_plus_pi"], "n/a")
+        self.assertEqual(item["stages"]["goal_plus_pi"], "partial")
 
 
 if __name__ == "__main__":

@@ -19,8 +19,9 @@ Agent 只看到 issue problem statement、仓库名、base commit 和任务镜�
 
 ### Agent 要做什么
 
-Plain Codex 或 Plain Pi 在精确的 SWE-bench task image 内修改 `/testbed`，检查代码并运行
-可见测试。初始路径固定一条隔离 outer trajectory，即 `K=1`。
+Plain Codex 或 Plain Pi 在精确的 SWE-bench task image 内运行一条隔离 outer trajectory。
+Goal Plus + Pi 运行一个 outer Goal Plus 主会话，并由它启动一个共享 Search 状态的内部
+Pi worker。当前三种方法都固定 `K=1,C=1,R=1`。
 
 ### 期待输出是什么
 
@@ -49,15 +50,17 @@ task image 始终保留：controller 固定使用官方 harness 的 `cache_level
 
 ## 实验怎么用
 
-当前提供两个冻结 preset：
+当前提供三个冻结 preset：
 
 | Preset | Method | Model | T/K/C/R |
 | --- | --- | --- | --- |
 | `swe-bench-verified-sympy-16886-codex-smoke` | Plain Codex | `gpt-5.6-sol`, medium | `1800/1/1/1` |
 | `swe-bench-verified-sympy-16886-pi-smoke` | Plain Pi | `zai/glm-5.2`, medium | `1800/1/1/1` |
+| `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` | Goal Plus + Pi | `zai/glm-5.2`, medium | `1800/1/1/1` |
 
-两个 campaign 顺序运行。runner 暂不支持 Goal Plus、provision、detach、stop、resume、
-`K>1` 或 `C>1`。真实 launch 前仍必须展示并确认解析后的 T/K/C/R。
+campaign 顺序运行。runner 暂不支持 provision、detach、stop、resume、`K>1` 或 `C>1`。
+真实 launch 前仍必须展示并确认解析后的 T/K/C/R。Goal Plus + Pi 虽已登记执行路径，但在
+真实官方 harness smoke 留下 evidence 前 readiness 仍为 partial。
 
 Codex preset 另外冻结 `auth_mode=openai-compatible`、`OPENAI_BASE_URL`、
 `OPENAI_API_KEY` 和 Responses wire API。Linux 上的 loopback endpoint 使用与 EdgeBench
@@ -69,6 +72,10 @@ Codex preset 另外冻结 `auth_mode=openai-compatible`、`OPENAI_BASE_URL`、
 报告保留 task、method、model、reasoning、dataset revision、SWE-bench commit、base commit、
 image、raw metric/direction、Agent 与 evaluator 墙钟时间、finalization grace、token coverage、
 evaluator calls 和 patch apply 状态。缺失 token 数据保持 unavailable，不补零。
+
+Goal Plus + Pi 还保留 frozen spec、candidate、绑定 Pi worker session、worker verifier、pool
+终态和 promotion patch。`.gp` 在 Agent 容器停止/删除前导出；这些 completion evidence
+缺失时保留官方 raw score，但 cell/campaign 标记为 partial。
 
 单题 smoke 可以证明方法接线与官方评分边界，但不能用于声称整个 Verified split 的通过率，
 也不能与不同 T/K/C/R 的结果做 matched comparison。

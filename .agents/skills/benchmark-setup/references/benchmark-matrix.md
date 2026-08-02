@@ -147,6 +147,43 @@ domestic index may accelerate the same locked artifacts, for example by setting
 `PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple` for the unified `setup` command. It must not
 change the requirements lock, dataset revision, task image tag/ID, or SWE-bench checkout commit.
 
+For `goal-plus-pi`, the additional lock is
+`environment/swe-bench-goal-plus-requirements.lock`. Doctor installs it into the diagnostic
+container's bounded `/opt/goal-plus-runtime` tmpfs and checks the Goal Plus/Pi CLI there. The real
+Agent container repeats that deterministic install. `PIP_INDEX_URL`, when present, is inherited by
+environment-variable name only; the selected index may accelerate transport but may not regenerate
+the lock. Persistent pip downloads are confined to
+`.tmp/swe-bench-verified/goal-plus-pip-cache`. Node, Pi package, Goal Plus source, the lock, visible
+verifier, and closeout controller are bind-mounted read-only and never modified on the host. The
+current exact SymPy image provides Python 3.11; a future image/profile must pass the same container
+install/import probe rather than assuming compatibility.
+
+Do not replace the task image's `PATH` with a generic host-style value. The current image resolves
+`python` from `/opt/miniconda3/bin` at Python 3.11.5; Goal Plus and Node paths are prepended while
+preserving the image value. If pip unexpectedly selects `cp310` wheels or rejects a lock release that
+requires Python 3.11, inspect the in-container `command -v python` and `python --version` first and
+treat it as runtime routing failure rather than changing the lock or image.
+
+The runtime tmpfs must be mounted `exec,nosuid,nodev`: locked packages such as `pydantic-core`,
+`lupa`, and `cffi` load native shared objects, and a default `noexec` tmpfs fails with
+`failed to map segment from shared object`. This exception applies only to the bounded Goal Plus
+Python runtime; `/opt/agent-tmp`, Pi home, and other scratch mounts remain non-executable. Preserve
+the task image and Docker daemon configuration when fixing this gate.
+
+On a shared Linux checkout, the repository-local pip cache normally belongs to the host user's
+numeric UID rather than container root. The installer drops only its pip subprocess to that cache
+owner and makes the disposable tmpfs target writable by the same UID; it must not `chown` the host
+cache, widen permissions on a shared home, or change Docker daemon settings. Treat pip's
+`cache has been disabled` warning as a failed doctor. If the default index is too slow, preserve the
+lock and rerun the unified doctor with a transport-only mirror:
+
+```bash
+PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+  python3 scripts/bench.py setup \
+  --preset swe-bench-verified-sympy-16886-goal-plus-pi-smoke \
+  --skip-provision
+```
+
 The current target has external image provisioning. If the exact task image is absent, report the
 missing tag and stop; do not automatically pull, retag a substitute, or mutate another user's image.
 The Codex runtime archive and Pi Node/package installations may be mounted read-only from the selected
@@ -165,5 +202,6 @@ expanded size, increase the bounded runtime tmpfs with a contract test, archive 
 with evaluator calls still at zero, and generate a new campaign ID. Do not resize Docker globally,
 rewrite the task image, or rerun a terminal campaign in place.
 Because the Codex binary executes from this mount, `/opt/codex` must explicitly allow `exec` while
-remaining `nosuid,nodev`; otherwise full doctor must fail with `Permission denied`. Other task tmpfs
-mounts do not inherit this exception.
+remaining `nosuid,nodev`; otherwise full doctor must fail with `Permission denied`. Only registered
+runtime mounts that execute binaries or load native libraries receive this exception; ordinary task
+scratch tmpfs mounts do not inherit it.
