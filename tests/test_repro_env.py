@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import subprocess
@@ -17,6 +18,53 @@ import repro_env  # noqa: E402
 
 
 class ReproEnvironmentTest(unittest.TestCase):
+    @staticmethod
+    def update_payload(*, current: bool) -> dict:
+        root_check = {
+            "name": "bench_goal_plus",
+            "path": str(ROOT),
+            "branch": "main",
+            "repository": "https://example.invalid/bench-goal-plus.git",
+            "passed": True,
+            "current_head": "a" * 40,
+            "advertised_head": "a" * 40,
+            "update_available": False,
+            "repair_required": False,
+            "clone_required": False,
+            "action_required": False,
+            "query_ok": True,
+            "transport": "fixture",
+            "query_error": None,
+            "blockers": [],
+        }
+        checkout = {
+            **root_check,
+            "name": "goal_plus",
+            "path": str(ROOT / "third_party/goal-plus"),
+            "repository": "https://example.invalid/goal-plus.git",
+        }
+        if not current:
+            checkout.update(
+                {
+                    "passed": False,
+                    "advertised_head": "b" * 40,
+                    "update_available": True,
+                    "action_required": True,
+                }
+            )
+        checks = [root_check, checkout]
+        return {
+            "schema_version": 1,
+            "ok": current,
+            "action_required": not current,
+            "updates_available": 0 if current else 1,
+            "repairs_required": 0,
+            "clones_required": 0,
+            "query_failures": 0,
+            "blocked": False,
+            "checks": checks,
+        }
+
     def test_manifest_tracks_portable_upstream_branches(self) -> None:
         manifest = repro_env.load_manifest(ROOT / "environment/upstreams.json")
         self.assertEqual(repro_env.DEFAULT_CHECKOUT_ROOT, ROOT / "third_party")
@@ -214,11 +262,176 @@ class ReproEnvironmentTest(unittest.TestCase):
         doctor = parser.parse_args(
             ["doctor", "--require-pi", "--require-codex"]
         )
+        check = parser.parse_args(
+            ["check", "--inventory-gated", "--yes"]
+        )
 
         self.assertTrue(bootstrap.require_pi)
         self.assertTrue(bootstrap.require_codex)
         self.assertTrue(doctor.require_pi)
         self.assertTrue(doctor.require_codex)
+        self.assertTrue(check.inventory_gated)
+        self.assertTrue(check.yes)
+
+    def test_remote_update_probe_does_not_fetch_tracking_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "source"
+            remote = temp / "remote.git"
+            checkout = temp / "checkout"
+            subprocess.run(["git", "init", "-q", "-b", "main", source], check=True)
+            subprocess.run(
+                ["git", "-C", source, "config", "user.name", "Test Controller"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    source,
+                    "config",
+                    "user.email",
+                    "test@example.invalid",
+                ],
+                check=True,
+            )
+            (source / "README.md").write_text("one\n")
+            subprocess.run(["git", "-C", source, "add", "README.md"], check=True)
+            subprocess.run(
+                ["git", "-C", source, "commit", "-q", "-m", "initial"],
+                check=True,
+            )
+            subprocess.run(["git", "init", "-q", "--bare", remote], check=True)
+            subprocess.run(
+                ["git", "-C", source, "remote", "add", "origin", str(remote)],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", source, "push", "-q", "-u", "origin", "main"],
+                check=True,
+            )
+            entry = {"repository": str(remote), "tracking_branch": "main"}
+            repro_env.ensure_checkout(checkout, entry)
+            before = repro_env.git_state(checkout, "main")
+
+            (source / "README.md").write_text("two\n")
+            subprocess.run(["git", "-C", source, "add", "README.md"], check=True)
+            subprocess.run(
+                ["git", "-C", source, "commit", "-q", "-m", "second"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", source, "push", "-q", "origin", "main"],
+                check=True,
+            )
+
+            update = repro_env.repository_update_check("fixture", checkout, entry)
+            after = repro_env.git_state(checkout, "main")
+
+            self.assertTrue(update["query_ok"])
+            self.assertTrue(update["update_available"])
+            self.assertTrue(update["action_required"])
+            self.assertEqual(after["head"], before["head"])
+            self.assertEqual(after["remote_head"], before["remote_head"])
+            self.assertNotEqual(update["advertised_head"], before["head"])
+
+    def test_update_decision_requires_tty_or_explicit_yes(self) -> None:
+        self.assertEqual(
+            repro_env.update_decision(
+                action_required=True,
+                assume_yes=False,
+                interactive=False,
+            ),
+            "non-interactive",
+        )
+        self.assertEqual(
+            repro_env.update_decision(
+                action_required=True,
+                assume_yes=True,
+                interactive=False,
+            ),
+            "accepted",
+        )
+        self.assertEqual(
+            repro_env.update_decision(
+                action_required=True,
+                assume_yes=False,
+                interactive=True,
+                response="no",
+            ),
+            "declined",
+        )
+        self.assertEqual(
+            repro_env.update_decision(
+                action_required=True,
+                assume_yes=False,
+                interactive=True,
+                response="yes",
+            ),
+            "accepted",
+        )
+
+    def test_noninteractive_environment_check_never_updates_implicitly(self) -> None:
+        args = argparse.Namespace(
+            manifest=ROOT / "environment/upstreams.json",
+            checkout_root=ROOT / "third_party",
+            venv=ROOT / ".bench-env/venv",
+            lock=ROOT / "environment/requirements.lock",
+            only=None,
+            inventory_gated=True,
+            yes=False,
+        )
+        doctor = {"ok": True}
+        updates = self.update_payload(current=False)
+        with (
+            patch.object(repro_env, "collect_doctor", return_value=doctor),
+            patch.object(
+                repro_env,
+                "collect_repository_updates",
+                return_value=updates,
+            ),
+            patch.object(repro_env, "bootstrap_environment") as bootstrap,
+            patch.object(repro_env.sys.stdin, "isatty", return_value=False),
+            patch("builtins.print"),
+        ):
+            result = repro_env.environment_check(args)
+
+        self.assertEqual(result, 1)
+        bootstrap.assert_not_called()
+
+    def test_explicit_yes_refreshes_managed_environment(self) -> None:
+        args = argparse.Namespace(
+            manifest=ROOT / "environment/upstreams.json",
+            checkout_root=ROOT / "third_party",
+            venv=ROOT / ".bench-env/venv",
+            lock=ROOT / "environment/requirements.lock",
+            only=None,
+            inventory_gated=True,
+            yes=True,
+        )
+        doctor = {"ok": True}
+        with (
+            patch.object(repro_env, "collect_doctor", return_value=doctor),
+            patch.object(
+                repro_env,
+                "collect_repository_updates",
+                side_effect=(
+                    self.update_payload(current=False),
+                    self.update_payload(current=True),
+                ),
+            ),
+            patch.object(
+                repro_env,
+                "bootstrap_environment",
+                return_value=doctor,
+            ) as bootstrap,
+            patch.object(repro_env.sys.stdin, "isatty", return_value=False),
+            patch("builtins.print"),
+        ):
+            result = repro_env.environment_check(args)
+
+        self.assertEqual(result, 0)
+        bootstrap.assert_called_once()
 
     def test_repository_normalization_equates_https_and_ssh_remotes(self) -> None:
         expected = "https://github.com/example/project"
@@ -238,6 +451,22 @@ class ReproEnvironmentTest(unittest.TestCase):
                 "https://github.com/example/project.git"
             ),
             expected,
+        )
+        self.assertEqual(
+            repro_env.repository_transport_url(
+                "git@github.com:example/project.git"
+            ),
+            "https://github.com/example/project.git",
+        )
+        self.assertEqual(
+            repro_env.repository_transport_url("/tmp/project.git"),
+            "/tmp/project.git",
+        )
+        self.assertEqual(
+            repro_env.redact_git_text(
+                "fatal: https://user:secret@example.invalid/project.git"
+            ),
+            "fatal: https://<redacted>@example.invalid/project.git",
         )
 
     def test_edgebench_rust_runtime_download_is_pinned_and_atomic(self) -> None:

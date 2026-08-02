@@ -78,6 +78,16 @@ def build_parser() -> argparse.ArgumentParser:
     check = children.add_parser("check")
     add_selection(check)
     check.add_argument("--asset-pack", action="append", default=[])
+    check.add_argument(
+        "--environment",
+        action="store_true",
+        help="check all asset inventories and managed Git repositories",
+    )
+    check.add_argument(
+        "--yes",
+        action="store_true",
+        help="accept a fast-forward environment update without prompting",
+    )
     check.add_argument("--dry-run", action="store_true")
     scaffold = children.add_parser("scaffold")
     scaffold.add_argument("--benchmark-id", required=True)
@@ -125,7 +135,8 @@ def render_catalog(agent: BenchmarkAgent, *, as_json: bool) -> int:
         print(
             f"{target['id']}: runner={target['runner']} adapter={target['adapter'] or '-'} "
             f"docker={docker['requirement']}/{docker['owner']}/{docker['provision_mode']} "
-            f"assets={target['local_asset_inventory']}"
+            f"assets={target['local_asset_inventory']} "
+            f"asset-profile={target['default_inventory_profile'] or '-'}"
         )
     for pack in payload["asset_packs"]:
         print(
@@ -215,7 +226,18 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
         )
     elif args.command == "check":
-        if args.asset_pack:
+        if args.environment:
+            if args.benchmark or args.preset or args.profile or args.asset_pack:
+                raise ContractError(
+                    "use --environment by itself; it checks every managed repository"
+                )
+            result = agent.check_environment(
+                assume_yes=args.yes,
+                dry_run=args.dry_run,
+            )
+        elif args.asset_pack:
+            if args.yes:
+                raise ContractError("--yes is only valid with --environment")
             if args.benchmark or args.preset:
                 raise ContractError(
                     "use --asset-pack or --benchmark/--preset, not both"
@@ -227,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
                 packs[0], profile=args.profile, dry_run=args.dry_run
             )
         else:
+            if args.yes:
+                raise ContractError("--yes is only valid with --environment")
             targets, preset = agent.resolve_targets(
                 target_ids=args.benchmark, preset_id=args.preset
             )

@@ -68,6 +68,19 @@ gate for `required`/relevant `mixed` paths.
 - The profiled check is guaranteed not to run `provision`, `fetch-tasks`, pull, build, `docker run`,
   or credential probes. Its only Docker commands are `docker image inspect <exact-ref>` and one
   `docker ps -a --no-trunc --format '{{json .}}'`. A failed check only reports local gaps.
+- The explicit aggregate environment check preserves that ordering across every registered asset
+  owner:
+
+  ```bash
+  python3 scripts/bench.py check --environment
+  ```
+
+  It runs each target's declared `default_inventory_profile` and every asset pack's default profile
+  before querying the registered Git branches with `git ls-remote`. In a TTY it lists changed
+  repositories and asks once before running the existing fast-forward-only bootstrap. In automation,
+  it reports updates without mutating anything unless `--yes` is explicit. Dirty, wrong-origin,
+  wrong-branch, divergent, or failed remote checks remain blocking; no image or dataset provision is
+  part of this command.
 - After inventory, run the managed bootstrap and full doctor without provisioning:
 
   ```bash

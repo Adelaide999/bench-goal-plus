@@ -114,12 +114,18 @@ edgebench-51-codex-gpt-5-6-sol-medium-2h-k1-c2-20260724-1811.xlsx
 基本命令保持一致：
 
 ```bash
+python3 scripts/bench.py check --environment
 python3 scripts/bench.py setup --benchmark <id>
 python3 scripts/bench.py plan --benchmark <id> ...
 python3 scripts/bench.py launch --benchmark <id> ...
 python3 scripts/bench.py status --campaign <path>
 python3 scripts/bench.py finish --campaign <path>
 ```
+
+`check --environment` 会先执行所有已登记的默认本地资产 inventory，再检查
+`bench-goal-plus`、Goal Plus 和全部受管 benchmark fork 的远端 branch。有更新时交互终端
+会询问是否统一 fast-forward；自动化只有显式增加 `--yes` 才会更新。dirty、错 branch、
+错 origin 或分叉 checkout 会停止，不会 reset、删除或覆盖。
 
 每类 runner 和各 benchmark 的实际差异由
 [Benchmark runner map](.agents/skills/benchmark-run/references/runner-map.md)

@@ -32,16 +32,21 @@ description: 自动盘点本地 Docker 镜像并部署或诊断 bench-goal-plus 
    精确 Work/Judge image tag、image ID 和关联容器。此命令不得 provision、fetch、pull、
    build、run 或检查凭据；失败只报告缺失项。不得把 provision 当作本地 inventory probe。
 5. inventory 后再通过
+   `python3 scripts/bench.py check --environment` 检查根仓库、Goal Plus 和所有受管
+   benchmark 的远端分支。该复合检查先执行 registry 声明的全部默认 inventory gate，
+   再以只读 `git ls-remote` 探测更新；交互终端检测到更新时统一询问，确认后仅允许
+   fast-forward。非交互环境只报告并失败关闭，需要明确使用 `--yes` 才能更新。
+6. 然后通过
    `python3 scripts/bench.py setup --benchmark <id> --profile <profile> --skip-provision`
    （或对应 `--preset`）完成受管 bootstrap 和完整 doctor。全部通过时立即停止 setup，
    不得再调用 `provision`、`fetch-tasks` 或 `pull`。
    Asset pack 使用 `setup --asset-pack <id> --profile <profile> --skip-provision`。
-6. 只有 inventory/doctor 明确列出缺失或错误的 task/data/image，并且用户要求或确认联网
+7. 只有 inventory/doctor 明确列出缺失或错误的 task/data/image，并且用户要求或确认联网
    补齐时，才去掉 `--skip-provision` 执行已登记的 provision。只在诊断底层 bootstrap 时
    直接使用 `scripts/repro_env.py`。
-7. 不得绕过 dirty、wrong-origin、wrong-branch、divergent、版本、auth、container
+8. 不得绕过 dirty、wrong-origin、wrong-branch、divergent、版本、auth、container
    architecture、network bridge 或 resource-limit 检查。
-8. 汇报 host/auth 组合、resolved branch/commit、Docker 状态、复用或新拉取的镜像、数据 revision、
+9. 汇报 host/auth 组合、resolved branch/commit、Docker 状态、复用或新拉取的镜像、数据 revision、
    pass/fail/partial 和下一步。
 
 ## 约束

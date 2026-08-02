@@ -78,6 +78,7 @@
       "adapter": null,
       "bootstrap_targets": ["edgebench"],
       "local_asset_inventory": true,
+      "default_inventory_profile": "vliw-smoke",
       "docker": {
         "requirement": "required",
         "owner": "runner",
@@ -91,6 +92,7 @@
       "adapter": "ale-bench-lite",
       "bootstrap_targets": ["ale_bench"],
       "local_asset_inventory": true,
+      "default_inventory_profile": "ahc027-cpp20-202301",
       "docker": {
         "requirement": "required",
         "owner": "adapter",
@@ -117,6 +119,7 @@
       "adapter": "frontier-cs-problem-0",
       "bootstrap_targets": ["frontier_cs"],
       "local_asset_inventory": true,
+      "default_inventory_profile": "problem-0",
       "docker": {
         "requirement": "required",
         "owner": "adapter",

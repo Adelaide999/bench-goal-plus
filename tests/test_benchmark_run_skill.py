@@ -56,6 +56,20 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertTrue(
             self.catalog.targets["ale-bench-lite"].local_asset_inventory
         )
+        self.assertEqual(
+            self.catalog.targets["edgebench"].default_inventory_profile,
+            "vliw-smoke",
+        )
+        self.assertEqual(
+            self.catalog.targets["ale-bench-lite"].default_inventory_profile,
+            "ahc027-cpp20-202301",
+        )
+        self.assertEqual(
+            self.catalog.targets[
+                "frontier-cs-problem-0"
+            ].default_inventory_profile,
+            "problem-0",
+        )
         self.assertIn("skydiscover-cpu-evaluators", self.catalog.asset_packs)
         self.assertIn("openevolve-cpu-portable", self.catalog.targets)
         self.assertEqual(len(self.catalog.runners), 3)
@@ -240,6 +254,45 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertIn("docker info", rendered[1])
         self.assertTrue(any("environment.py provision" in item for item in rendered))
         self.assertTrue(rendered[-1].endswith("environment.py doctor --profile cpu-no-torch-19"))
+
+    def test_environment_check_gates_assets_before_offering_git_updates(self) -> None:
+        args = build_parser().parse_args(
+            ["check", "--environment", "--yes", "--dry-run"]
+        )
+        self.assertTrue(args.environment)
+        self.assertTrue(args.yes)
+
+        result = self.agent.check_environment(assume_yes=True, dry_run=True)
+
+        rendered = result["commands"]
+        self.assertTrue(rendered[0].endswith("scripts/status.py --check"))
+        update_index = next(
+            index
+            for index, command in enumerate(rendered)
+            if "scripts/repro_env.py check" in command
+        )
+        self.assertEqual(update_index, len(rendered) - 1)
+        self.assertIn("--inventory-gated", rendered[-1])
+        self.assertTrue(rendered[-1].endswith("--yes"))
+        for profile in (
+            "vliw-smoke",
+            "ahc027-cpp20-202301",
+            "problem-0",
+            "cpu-no-torch-19",
+        ):
+            self.assertTrue(
+                any(profile in command for command in rendered[1:update_index]),
+                profile,
+            )
+        self.assertEqual(
+            [item["id"] for item in result["inventory_gates"]],
+            [
+                "edgebench",
+                "ale-bench-lite",
+                "frontier-cs-problem-0",
+                "skydiscover-cpu-evaluators",
+            ],
+        )
 
     def test_every_target_has_an_explicit_docker_owner_and_mode(self) -> None:
         for target in self.catalog.targets.values():

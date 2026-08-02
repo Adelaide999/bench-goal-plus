@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -41,6 +42,8 @@ def run(
     cwd: Path | None = None,
     check: bool = True,
     capture: bool = True,
+    env: dict[str, str] | None = None,
+    timeout: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
@@ -48,6 +51,8 @@ def run(
         capture_output=capture,
         text=True,
         check=check,
+        env=env,
+        timeout=timeout,
     )
 
 
@@ -111,6 +116,65 @@ def normalize_repository(value: str | None) -> str | None:
         host, path = ssh_match.groups()
         return f"https://{host.lower()}/{path}"
     return normalized
+
+
+def repository_transport_url(value: str) -> str:
+    normalized = value.rstrip("/")
+    ssh_match = re.fullmatch(r"(?:ssh://)?git@([^/:]+)[:/](.+)", normalized)
+    if ssh_match:
+        host, path = ssh_match.groups()
+        return f"https://{host.lower()}/{path}"
+    return normalized
+
+
+def redact_git_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return re.sub(r"((?:https?|ssh)://)[^/@\s]+@", r"\1<redacted>@", value)
+
+
+def _git_network_environment(*, ignore_global_config: bool) -> dict[str, str]:
+    environment = dict(os.environ)
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    environment["GCM_INTERACTIVE"] = "Never"
+    if ignore_global_config:
+        environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    return environment
+
+
+def run_remote_git(
+    primary: list[str],
+    fallback: list[str],
+    *,
+    check: bool,
+    timeout: int,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    failures: list[str] = []
+    attempts = (
+        (primary, False, "configured-remote"),
+        (fallback, True, "manifest-repository"),
+    )
+    for command, ignore_global_config, transport in attempts:
+        try:
+            result = run(
+                command,
+                check=False,
+                env=_git_network_environment(
+                    ignore_global_config=ignore_global_config
+                ),
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            failures.append(f"{transport}: timed out after {timeout}s")
+            continue
+        if result.returncode == 0:
+            return result, transport
+        detail = redact_git_text((result.stderr or result.stdout).strip()) or ""
+        failures.append(f"{transport}: {detail or f'exit {result.returncode}'}")
+    message = "; ".join(failures)
+    if check:
+        raise RuntimeError(f"Git remote operation failed: {message}")
+    return subprocess.CompletedProcess(primary, 1, "", message), "failed"
 
 
 def git_state(path: Path, tracking_branch: str | None = None) -> dict[str, Any]:
@@ -206,7 +270,16 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
                 f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
             ]
         )
-        run(fetch_command)
+        fallback_fetch = list(fetch_command)
+        fallback_fetch[fallback_fetch.index("origin")] = repository_transport_url(
+            entry["repository"]
+        )
+        run_remote_git(
+            fetch_command,
+            fallback_fetch,
+            check=True,
+            timeout=300,
+        )
         if entry.get("sparse_paths"):
             run(
                 [
@@ -244,7 +317,7 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
     ):
         raise RuntimeError(
             f"origin mismatch for {path}: expected {entry['repository']}, "
-            f"got {state['origin_url']}; use a separate checkout root"
+            f"got {redact_git_text(state['origin_url'])}; use a separate checkout root"
         )
     fetch_command = ["git", "-C", str(path), "fetch", "--prune"]
     if entry.get("sparse_paths"):
@@ -255,7 +328,16 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
             f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
         ]
     )
-    run(fetch_command)
+    fallback_fetch = list(fetch_command)
+    fallback_fetch[fallback_fetch.index("origin")] = repository_transport_url(
+        entry["repository"]
+    )
+    run_remote_git(
+        fetch_command,
+        fallback_fetch,
+        check=True,
+        timeout=300,
+    )
     state = git_state(path, branch)
     if state["branch"] is None:
         local_branch = run(
@@ -320,6 +402,188 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
             f"checkout {path} has unpublished or divergent commits on {branch}; "
             "push them to the tracked branch or use a separate checkout root"
         )
+
+
+def advertised_remote_head(
+    path: Path, entry: dict[str, Any]
+) -> dict[str, Any]:
+    branch = entry["tracking_branch"]
+    reference = f"refs/heads/{branch}"
+    primary = ["git", "-C", str(path), "ls-remote", "--exit-code", "origin", reference]
+    fallback = [
+        "git",
+        "ls-remote",
+        "--exit-code",
+        repository_transport_url(entry["repository"]),
+        reference,
+    ]
+    result, transport = run_remote_git(
+        primary,
+        fallback,
+        check=False,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "head": None,
+            "transport": transport,
+            "error": result.stderr.strip() or "remote query failed",
+        }
+    matches = [line.split() for line in result.stdout.splitlines() if line.strip()]
+    heads = [parts[0] for parts in matches if len(parts) == 2 and parts[1] == reference]
+    if len(heads) != 1:
+        return {
+            "ok": False,
+            "head": None,
+            "transport": transport,
+            "error": f"expected one advertised {reference}, got {len(heads)}",
+        }
+    return {
+        "ok": True,
+        "head": heads[0],
+        "transport": transport,
+        "error": None,
+    }
+
+
+def repository_update_check(
+    name: str, path: Path, entry: dict[str, Any]
+) -> dict[str, Any]:
+    branch = entry["tracking_branch"]
+    state = git_state(path, branch)
+    blockers: list[str] = []
+    if state["exists"] and not state["is_git"]:
+        blockers.append("checkout path is not a Git repository")
+    if state["dirty"]:
+        blockers.append("checkout has local changes")
+    if state["origin_url"] and normalize_repository(
+        state["origin_url"]
+    ) != normalize_repository(entry["repository"]):
+        blockers.append("origin does not match the registered repository")
+    if state["branch"] not in (None, branch):
+        blockers.append(
+            f"checkout is on {state['branch']!r}, expected {branch!r}"
+        )
+    remote = advertised_remote_head(path, entry)
+    update_available = bool(
+        remote["ok"] and state["head"] != remote["head"]
+    )
+    repair_required = bool(
+        state["exists"]
+        and state["is_git"]
+        and not blockers
+        and (
+            state["branch"] != branch
+            or state["upstream"] != f"origin/{branch}"
+            or state["remote_head"] != state["head"]
+        )
+    )
+    clone_required = not state["exists"]
+    action_required = update_available or repair_required or clone_required
+    passed = bool(remote["ok"] and not blockers and not action_required)
+    return {
+        "name": name,
+        "path": str(path),
+        "branch": branch,
+        "repository": redact_git_text(entry["repository"]),
+        "passed": passed,
+        "current_head": state["head"],
+        "advertised_head": remote["head"],
+        "update_available": update_available,
+        "repair_required": repair_required,
+        "clone_required": clone_required,
+        "action_required": action_required,
+        "query_ok": remote["ok"],
+        "transport": remote["transport"],
+        "query_error": remote["error"],
+        "blockers": blockers,
+    }
+
+
+def root_repository_entry(
+    root: Path = ROOT,
+) -> tuple[dict[str, Any] | None, str | None]:
+    state = git_state(root)
+    branch = state["branch"]
+    upstream = state["upstream"]
+    if not state["is_git"]:
+        return None, "bench-goal-plus root is not a Git repository"
+    if not branch:
+        return None, "bench-goal-plus root is on a detached HEAD"
+    if upstream != f"origin/{branch}":
+        return None, (
+            "bench-goal-plus root must track "
+            f"origin/{branch}; current upstream is {upstream!r}"
+        )
+    if not state["origin_url"]:
+        return None, "bench-goal-plus root has no origin URL"
+    return {
+        "repository": state["origin_url"],
+        "tracking_branch": branch,
+    }, None
+
+
+def collect_repository_updates(
+    manifest: dict[str, Any],
+    checkout_root: Path,
+    *,
+    only: list[str] | None = None,
+    include_root: bool = True,
+) -> dict[str, Any]:
+    sources: list[tuple[str, Path, dict[str, Any]]] = []
+    early_checks: list[dict[str, Any]] = []
+    if include_root:
+        root_entry, error = root_repository_entry()
+        if root_entry is None:
+            early_checks.append(
+                {
+                    "name": "bench_goal_plus",
+                    "path": str(ROOT),
+                    "passed": False,
+                    "action_required": False,
+                    "update_available": False,
+                    "repair_required": False,
+                    "clone_required": False,
+                    "query_ok": False,
+                    "query_error": error,
+                    "blockers": [error],
+                }
+            )
+        else:
+            sources.append(("bench_goal_plus", ROOT, root_entry))
+    chosen = selected_upstreams(manifest, only)
+    for name, entry in chosen.items():
+        sources.append(
+            (name, checkout_root / entry["checkout_dir"], entry)
+        )
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(8, max(1, len(sources)))
+    ) as executor:
+        checks = list(
+            executor.map(
+                lambda item: repository_update_check(*item),
+                sources,
+            )
+        )
+    checks = [*early_checks, *checks]
+    return {
+        "schema_version": 1,
+        "ok": all(item["passed"] for item in checks),
+        "action_required": any(item["action_required"] for item in checks),
+        "updates_available": sum(
+            1 for item in checks if item["update_available"]
+        ),
+        "repairs_required": sum(
+            1 for item in checks if item["repair_required"]
+        ),
+        "clones_required": sum(
+            1 for item in checks if item["clone_required"]
+        ),
+        "query_failures": sum(1 for item in checks if not item["query_ok"]),
+        "blocked": any(item["blockers"] for item in checks),
+        "checks": checks,
+    }
 
 
 def sha256_file(path: Path) -> str:
@@ -584,6 +848,7 @@ def collect_doctor(
                 "expected_branch": branch,
                 "expected_repository": entry["repository"],
                 **state,
+                "origin_url": redact_git_text(state["origin_url"]),
             }
         )
 
@@ -681,7 +946,7 @@ def collect_doctor(
     }
 
 
-def bootstrap(args: argparse.Namespace) -> int:
+def bootstrap_environment(args: argparse.Namespace) -> dict[str, Any]:
     manifest = load_manifest(args.manifest)
     checkout_root = args.checkout_root.expanduser().absolute()
     venv = args.venv.expanduser().absolute()
@@ -747,6 +1012,11 @@ def bootstrap(args: argparse.Namespace) -> int:
     )
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(payload, indent=2) + "\n")
+    return payload
+
+
+def bootstrap(args: argparse.Namespace) -> int:
+    payload = bootstrap_environment(args)
     print(json.dumps(payload, indent=2))
     return 0 if payload["ok"] else 1
 
@@ -763,6 +1033,137 @@ def doctor(args: argparse.Namespace) -> int:
     )
     print(json.dumps(payload, indent=2))
     return 0 if payload["ok"] else 1
+
+
+def _print_update_summary(updates: dict[str, Any]) -> None:
+    print("Repository updates or repairs are available:")
+    for item in updates["checks"]:
+        if not item["action_required"]:
+            continue
+        current = (item.get("current_head") or "missing")[:12]
+        advertised = (item.get("advertised_head") or "unknown")[:12]
+        labels = []
+        if item["update_available"]:
+            labels.append(f"{current} -> {advertised}")
+        if item["clone_required"]:
+            labels.append("clone")
+        if item["repair_required"]:
+            labels.append("repair tracking branch")
+        print(f"  {item['name']} ({item['branch']}): {', '.join(labels)}")
+
+
+def update_decision(
+    *,
+    action_required: bool,
+    assume_yes: bool,
+    interactive: bool,
+    response: str | None = None,
+) -> str:
+    if not action_required:
+        return "not-needed"
+    if assume_yes:
+        return "accepted"
+    if not interactive:
+        return "non-interactive"
+    answer = response
+    if answer is None:
+        answer = input("Update all repositories with fast-forward only? [y/N] ")
+    return "accepted" if answer.strip().lower() in {"y", "yes"} else "declined"
+
+
+def environment_check(args: argparse.Namespace) -> int:
+    manifest = load_manifest(args.manifest)
+    checkout_root = args.checkout_root.expanduser().absolute()
+    venv = args.venv.expanduser().absolute()
+    doctor_payload = collect_doctor(
+        manifest,
+        checkout_root,
+        venv,
+        args.lock,
+        only=args.only,
+    )
+    updates = collect_repository_updates(
+        manifest,
+        checkout_root,
+        only=args.only,
+        include_root=True,
+    )
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "action": "environment-check",
+        "ok": bool(doctor_payload["ok"] and updates["ok"]),
+        "doctor": doctor_payload,
+        "repository_updates": updates,
+        "inventory_gated": args.inventory_gated,
+        "decision": "not-needed",
+        "updated": False,
+    }
+    if updates["query_failures"] or updates["blocked"]:
+        result["decision"] = "blocked"
+        print(json.dumps(result, indent=2))
+        return 1
+    if not updates["action_required"]:
+        print(json.dumps(result, indent=2))
+        return 0 if result["ok"] else 1
+    _print_update_summary(updates)
+    if not args.inventory_gated:
+        result["decision"] = "inventory-required"
+        result["next_command"] = "python3 scripts/bench.py check --environment"
+        print(json.dumps(result, indent=2))
+        return 1
+    decision = update_decision(
+        action_required=True,
+        assume_yes=args.yes,
+        interactive=sys.stdin.isatty(),
+    )
+    result["decision"] = decision
+    if decision != "accepted":
+        if decision == "non-interactive":
+            result["next_command"] = (
+                "python3 scripts/bench.py check --environment --yes"
+            )
+        print(json.dumps(result, indent=2))
+        return 1
+
+    root_check = next(
+        item for item in updates["checks"] if item["name"] == "bench_goal_plus"
+    )
+    if root_check["action_required"]:
+        root_entry, error = root_repository_entry()
+        if root_entry is None:
+            raise RuntimeError(error or "cannot resolve bench-goal-plus root")
+        ensure_checkout(ROOT, root_entry)
+
+    update_args = argparse.Namespace(
+        manifest=args.manifest,
+        checkout_root=args.checkout_root,
+        venv=args.venv,
+        lock=args.lock,
+        only=args.only,
+        uv="uv",
+        skip_install=False,
+        require_pi=False,
+        require_codex=False,
+    )
+    doctor_payload = bootstrap_environment(update_args)
+    refreshed_manifest = load_manifest(args.manifest)
+    updates = collect_repository_updates(
+        refreshed_manifest,
+        checkout_root,
+        only=args.only,
+        include_root=True,
+    )
+    result.update(
+        {
+            "ok": bool(doctor_payload["ok"] and updates["ok"]),
+            "doctor": doctor_payload,
+            "repository_updates": updates,
+            "decision": "accepted",
+            "updated": True,
+        }
+    )
+    print(json.dumps(result, indent=2))
+    return 0 if result["ok"] else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -788,13 +1189,32 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.add_argument("--only", action="append")
     doctor_parser.add_argument("--require-pi", action="store_true")
     doctor_parser.add_argument("--require-codex", action="store_true")
+    check_parser = subparsers.add_parser(
+        "check",
+        help="inspect advertised repository heads without provisioning assets",
+    )
+    check_parser.add_argument("--only", action="append")
+    check_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="accept updates after the public inventory gate",
+    )
+    check_parser.add_argument(
+        "--inventory-gated",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     return parser
 
 
 def main() -> int:
     configure_temp_environment()
     args = build_parser().parse_args()
-    return bootstrap(args) if args.command == "bootstrap" else doctor(args)
+    if args.command == "bootstrap":
+        return bootstrap(args)
+    if args.command == "doctor":
+        return doctor(args)
+    return environment_check(args)
 
 
 if __name__ == "__main__":

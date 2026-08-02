@@ -39,9 +39,23 @@ benchmark 的 runbook 管理；源码 checkout 统一在 `third_party/`。
 ## 一键构建和检查
 
 ```bash
+python3 scripts/bench.py check --environment
 python3 scripts/repro_env.py bootstrap
 python3 scripts/repro_env.py doctor
 ```
+
+日常全环境检查使用统一公开入口 `check --environment`。它先运行 registry 中所有
+`default_inventory_profile` 和 asset pack 默认 profile 的只读本地资产盘点，再通过
+`git ls-remote` 查询 `bench-goal-plus`、Goal Plus、search backend 与全部 benchmark fork。
+检测到变化时，交互终端会列出旧/新 commit 并统一询问；确认后复用下述 bootstrap，只允许
+fast-forward。非交互调用默认只报告并返回非零；明确批准更新时使用：
+
+```bash
+python3 scripts/bench.py check --environment --yes
+```
+
+底层 `repro_env.py check` 不带 inventory gate 时不会应用更新；它只用于诊断统一入口的
+Git 探测。单 target 的 `check --benchmark ... --profile ...` 仍然严格只读，不查询远端。
 
 `bootstrap` 会：
 

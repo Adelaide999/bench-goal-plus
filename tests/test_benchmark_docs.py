@@ -108,6 +108,9 @@ class BenchmarkDocsTest(unittest.TestCase):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         for required in (
             "scripts/bench.py check --benchmark <id> --profile <profile>",
+            "scripts/bench.py check --environment",
+            "git ls-remote",
+            "fast-forward",
             "local_asset_inventory=true",
             "--skip-provision",
             "不得把 provision 当作本地 inventory probe",
@@ -118,6 +121,8 @@ class BenchmarkDocsTest(unittest.TestCase):
                 self.assertIn(required, skill)
         for required in (
             "Mandatory local-first gate",
+            "check --environment",
+            "default_inventory_profile",
             "assets=True",
             "read_only: true",
             "acquisition_attempted: false",
@@ -130,7 +135,8 @@ class BenchmarkDocsTest(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, matrix)
         for required in (
-            "不带 `--profile` 的 `check` 只检查仓库契约",
+            "不带 `--profile` 的 benchmark target `check` 只检查仓库契约",
+            "`check --environment` 是显式的全环境复合检查",
             "docker image inspect",
             "所有诊断性 `docker run` 必须显式使用 `--pull never`",
         ):

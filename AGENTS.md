@@ -49,7 +49,11 @@
 - `catalog`、`setup`、`plan`、`launch`、`status`、`stop`、`resume`、`finish`
   和 `check` 构成公开生命周期词汇。`start` 只是 `launch` 的兼容写法；`e2e`
   是前台运行的便捷路径。
-- 不带 `--profile` 的 `check` 只检查仓库契约，不是镜像 inventory。对 benchmark
+- 不带 `--profile` 的 benchmark target `check` 只检查仓库契约，不是镜像 inventory。
+  `check --environment` 是显式的全环境复合检查：先按 registry 的
+  `default_inventory_profile` 完成全部只读资产 gate，再用 `git ls-remote` 检查根仓库和
+  所有受管 checkout；只有交互确认或显式 `--yes` 后才能执行 fast-forward-only 更新。
+  对 benchmark
   target 或 asset pack，只有它明确声明支持时，
   带 `--profile` 或 profile preset 的 `check` 必须是只读本地资产检查：不得 fetch、
   pull、build、run、provision 或检查凭据，只能读取 task/revision 元数据并执行精确

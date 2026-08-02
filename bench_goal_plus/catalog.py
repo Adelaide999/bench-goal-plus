@@ -184,6 +184,21 @@ class Catalog:
                 raise ContractError(
                     f"{target_id}: local_asset_inventory must be boolean"
                 )
+            default_inventory_profile = entry.get("default_inventory_profile")
+            if local_asset_inventory:
+                if (
+                    not isinstance(default_inventory_profile, str)
+                    or SAFE_ID.fullmatch(default_inventory_profile) is None
+                ):
+                    raise ContractError(
+                        f"{target_id}: local asset inventory requires a safe "
+                        "default_inventory_profile"
+                    )
+            elif default_inventory_profile is not None:
+                raise ContractError(
+                    f"{target_id}: default_inventory_profile requires "
+                    "local_asset_inventory=true"
+                )
             if docker.owner == "adapter" and adapter_id is None:
                 raise ContractError(
                     f"{target_id}: adapter-owned Docker needs an adapter"
@@ -209,6 +224,7 @@ class Catalog:
                 bootstrap_targets=tuple(bootstrap),
                 docker=docker,
                 local_asset_inventory=local_asset_inventory,
+                default_inventory_profile=default_inventory_profile,
             )
 
         asset_payload = read_json(self.asset_pack_registry)

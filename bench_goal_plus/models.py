@@ -64,6 +64,7 @@ class TargetDefinition:
     bootstrap_targets: tuple[str, ...]
     docker: DockerContract
     local_asset_inventory: bool
+    default_inventory_profile: str | None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +74,7 @@ class TargetDefinition:
             "bootstrap_targets": list(self.bootstrap_targets),
             "docker": self.docker.as_dict(),
             "local_asset_inventory": self.local_asset_inventory,
+            "default_inventory_profile": self.default_inventory_profile,
         }
 
 

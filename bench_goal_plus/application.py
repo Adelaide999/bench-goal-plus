@@ -532,6 +532,58 @@ class BenchmarkAgent:
         }
         return result
 
+    def check_environment(self, *, assume_yes: bool, dry_run: bool) -> dict[str, Any]:
+        commands: list[list[str]] = [
+            [sys.executable, "scripts/status.py", "--check"]
+        ]
+        inventories: list[dict[str, str]] = []
+        for target in self.catalog.targets.values():
+            if not target.local_asset_inventory:
+                continue
+            profile = target.default_inventory_profile
+            if profile is None:
+                raise ContractError(
+                    f"{target.target_id}: missing default inventory profile"
+                )
+            target_commands = self._local_asset_check_commands(target, profile)
+            commands.extend(target_commands)
+            inventories.append(
+                {
+                    "kind": "benchmark",
+                    "id": target.target_id,
+                    "profile": profile,
+                }
+            )
+        for pack in self.catalog.asset_packs.values():
+            commands.append(
+                self._asset_pack_inventory_command(pack, pack.default_profile)
+            )
+            inventories.append(
+                {
+                    "kind": "asset-pack",
+                    "id": pack.pack_id,
+                    "profile": pack.default_profile,
+                }
+            )
+        update_command = [
+            sys.executable,
+            "scripts/repro_env.py",
+            "check",
+            "--inventory-gated",
+        ]
+        if assume_yes:
+            update_command.append("--yes")
+        commands.append(update_command)
+        self.executor.execute(commands, dry_run=dry_run)
+        return {
+            "schema_version": 1,
+            "action": "environment-check",
+            "inventory_gates": inventories,
+            "update_policy": "accept" if assume_yes else "prompt",
+            "commands": [command_text(command) for command in commands],
+            "validated": not dry_run,
+        }
+
     def _local_asset_check_commands(
         self,
         target: TargetDefinition,
@@ -566,13 +618,7 @@ class BenchmarkAgent:
         dry_run: bool,
     ) -> dict[str, Any]:
         selected_profile = profile or pack.default_profile
-        command = [
-            sys.executable,
-            str(pack.controller.relative_to(ROOT)),
-            "inventory",
-            "--profile",
-            selected_profile,
-        ]
+        command = self._asset_pack_inventory_command(pack, selected_profile)
         self.executor.execute([command], dry_run=dry_run)
         return {
             "asset_pack": pack.as_dict(),
@@ -581,6 +627,18 @@ class BenchmarkAgent:
             "acquisition_attempted": False,
             "commands": [command_text(command)],
         }
+
+    @staticmethod
+    def _asset_pack_inventory_command(
+        pack: AssetPackDefinition, profile: str
+    ) -> list[str]:
+        return [
+            sys.executable,
+            str(pack.controller.relative_to(ROOT)),
+            "inventory",
+            "--profile",
+            profile,
+        ]
 
     def setup_asset_packs(
         self,
