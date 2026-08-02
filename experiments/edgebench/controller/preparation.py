@@ -23,6 +23,52 @@ from .profiles import (
 )
 
 
+def _resolved_override_reasons(
+    *,
+    method: str,
+    method_config: dict[str, Any],
+    model: str,
+    reasoning: str | None,
+    backend: str,
+    wall_time: int,
+    concurrency: int,
+    cell_concurrency: int,
+    judge_concurrency: int,
+    eval_interval: int,
+    internet: bool,
+    internet_source: str,
+) -> dict[str, str]:
+    if method_config["inner_search"]:
+        attempts_reason = (
+            "R=1 uses one outer Goal Plus trajectory and maps "
+            f"K={concurrency} to internal workers"
+        )
+    else:
+        attempts_reason = (
+            f"K={concurrency} runs {concurrency} isolated outer Agent trajectories"
+        )
+    return {
+        "agent": f"method={method} selects SForge agent={method_config['agent']}",
+        "attempts_per_task": attempts_reason,
+        "backend": f"resolved campaign backend={backend}",
+        "cell_concurrency": (
+            f"C={cell_concurrency} controls concurrent task cells"
+        ),
+        "judge_concurrency": (
+            f"judge_concurrency={judge_concurrency} caps official Judge execution"
+        ),
+        "model": f"resolved campaign model={model}",
+        "reasoning_effort": f"resolved reasoning_effort={reasoning}",
+        "timeout": f"T={wall_time} seconds per task trajectory or Search run",
+        "eval_interval": (
+            f"effective hidden-Judge eval_interval={eval_interval} seconds"
+        ),
+        "internet": (
+            f"effective internet={str(internet).lower()} from {internet_source}"
+        ),
+    }
+
+
 def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     paths = current_paths()
     official_protocol = load_official_codex_protocol()
@@ -61,7 +107,6 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     worker_min_runtime = int(profile.get("worker_min_runtime_seconds", 0))
     worker_min_verifiers = int(profile.get("worker_min_verifier_runs", 0))
     closeout_reserve = int(profile.get("closeout_reserve_seconds", 0))
-    override_reasons = dict(profile["protocol_override_reasons"])
     profile_protocol_overrides = dict(profile.get("protocol_overrides") or {})
     allowed_protocol_override_fields = (
         ALLOWED_PROTOCOL_OVERRIDE_FIELDS | set(profile_protocol_overrides)
@@ -126,6 +171,25 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "reasoning_effort": reasoning,
                 "timeout": wall_time,
             }
+            internet_source = (
+                f"profiles/{profile['id']}.protocol_overrides.internet"
+                if "internet" in profile_protocol_overrides
+                else f"tasks/{task_id}.json"
+            )
+            override_reasons = _resolved_override_reasons(
+                method=method,
+                method_config=method_config,
+                model=model,
+                reasoning=reasoning,
+                backend=backend,
+                wall_time=wall_time,
+                concurrency=concurrency,
+                cell_concurrency=cell_concurrency,
+                judge_concurrency=judge_concurrency,
+                eval_interval=int(effective_contract["eval_interval"]),
+                internet=bool(effective_contract["internet"]),
+                internet_source=internet_source,
+            )
             differences = protocol_diff(
                 official=official_contract,
                 effective=effective_contract,
@@ -179,11 +243,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 ],
                 "stop_hook_enabled": not effective_contract["disable_stop_hook"],
                 "internet": effective_contract["internet"],
-                "internet_source": (
-                    f"profiles/{profile['id']}.protocol_overrides.internet"
-                    if "internet" in profile_protocol_overrides
-                    else f"tasks/{task_id}.json"
-                ),
+                "internet_source": internet_source,
                 "protocol_source": {
                     "path": official_protocol["source"],
                     "sha256": official_protocol["source_sha256"],

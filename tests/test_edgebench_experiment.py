@@ -10,6 +10,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from openpyxl import load_workbook
 
@@ -942,6 +943,107 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             1,
         )
         self.assertFalse(any(path.name in {".gp", ".goal-plus"} for path in destination.rglob("*")))
+
+    def test_prepare_recomputes_protocol_reasons_after_cli_tk_overrides(self) -> None:
+        _, profile = EDGE.load_profile(
+            "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1"
+        )
+        args = SimpleNamespace(
+            method=None,
+            wall_time_seconds=1200,
+            concurrency=1,
+            cell_concurrency=1,
+            model=None,
+            reasoning_effort=None,
+            campaign_id="unit-dynamic-protocol-reasons",
+        )
+
+        destination = EDGE.prepare(args, profile)
+        cell = json.loads(
+            (
+                destination
+                / "cells"
+                / "vliw_kernel_optimization--goal-plus-pi-provider"
+                / "cell.json"
+            ).read_text()
+        )
+        reasons = {
+            item["field"]: item["reason"] for item in cell["protocol_diff"]
+        }
+
+        self.assertIn("T=1200", reasons["timeout"])
+        self.assertIn("K=1", reasons["attempts_per_task"])
+        self.assertIn("C=1", reasons["cell_concurrency"])
+        self.assertIn("eval_interval=300", reasons["eval_interval"])
+        serialized = json.dumps(cell)
+        self.assertNotIn("one hour", serialized)
+        self.assertNotIn("one-hour", serialized)
+        self.assertNotIn("K=2", serialized)
+
+    def test_stop_default_wait_covers_normal_controller_closeout(self) -> None:
+        parsed = EDGE.build_parser().parse_args(
+            ["stop", "--campaign", "campaign"]
+        )
+        self.assertEqual(parsed.wait_seconds, 60)
+
+        campaign = self.temp / "stop-campaign"
+        campaign.mkdir()
+        EDGE.write_json(
+            campaign / "controller.json",
+            {"pid": 12345, "pgid": 12345, "state": "running"},
+        )
+        clock = {"now": 0.0}
+
+        def process_alive(_pid):
+            return clock["now"] < 25.0
+
+        def advance(seconds):
+            clock["now"] += seconds
+
+        with (
+            mock.patch.object(
+                EDGE_RUNTIME, "process_alive", side_effect=process_alive
+            ),
+            mock.patch.object(EDGE_RUNTIME.os, "kill"),
+            mock.patch.object(
+                EDGE_RUNTIME.time,
+                "monotonic",
+                side_effect=lambda: clock["now"],
+            ),
+            mock.patch.object(EDGE_RUNTIME.time, "sleep", side_effect=advance),
+        ):
+            result = EDGE_RUNTIME.stop_campaign(campaign, wait_seconds=60)
+
+        self.assertEqual(result, 0)
+        self.assertGreaterEqual(clock["now"], 25.0)
+        self.assertLess(clock["now"], 60.0)
+
+    def test_stop_still_reports_timeout_when_controller_exceeds_wait(self) -> None:
+        campaign = self.temp / "slow-stop-campaign"
+        campaign.mkdir()
+        EDGE.write_json(
+            campaign / "controller.json",
+            {"pid": 54321, "pgid": 54321, "state": "running"},
+        )
+        clock = {"now": 0.0}
+
+        def advance(seconds):
+            clock["now"] += seconds
+
+        with (
+            mock.patch.object(EDGE_RUNTIME, "process_alive", return_value=True),
+            mock.patch.object(EDGE_RUNTIME.os, "kill"),
+            mock.patch.object(
+                EDGE_RUNTIME.time,
+                "monotonic",
+                side_effect=lambda: clock["now"],
+            ),
+            mock.patch.object(EDGE_RUNTIME.time, "sleep", side_effect=advance),
+        ):
+            result = EDGE_RUNTIME.stop_campaign(campaign, wait_seconds=60)
+
+        self.assertEqual(result, 2)
+        self.assertGreaterEqual(clock["now"], 60.0)
 
     def test_prepare_applies_local_smoke_network_override_with_provenance(self) -> None:
         _, profile = EDGE.load_profile("vliw-codex-sol-medium-local-smoke")

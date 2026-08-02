@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
         elif name == "status":
             child.add_argument("--json", action="store_true")
         elif name == "stop":
-            child.add_argument("--wait-seconds", type=int, default=10)
+            child.add_argument("--wait-seconds", type=int, default=60)
         elif name == "finalize":
             child.add_argument("--local-fast-reference", type=Path)
     return parser
