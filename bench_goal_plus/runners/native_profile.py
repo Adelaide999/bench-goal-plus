@@ -90,6 +90,8 @@ class NativeProfileRunner(BenchmarkRunner):
                 command.extend([flag, str(value)])
         for method in spec.methods:
             command.extend(["--method", method])
+        if spec.retain_containers:
+            command.append("--retain-containers")
         campaign = CampaignRef(
             campaign_id=spec.campaign_id,
             path=ROOT / "runs" / target.target_id / spec.campaign_id,
@@ -188,7 +190,7 @@ class NativeProfileRunner(BenchmarkRunner):
         return self._campaign_command("finalize", campaign)
 
     def evidence_source(self, campaign: CampaignRef) -> Path:
-        return campaign.path / "comparison.json"
+        return campaign.path / self.definition.evidence_filename
 
     def _campaign_command(self, action: str, campaign: CampaignRef) -> list[str]:
         return [

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,9 +12,10 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
-
-import repro_env  # noqa: E402
+SPEC = importlib.util.spec_from_file_location("repro_env", ROOT / "scripts/repro_env.py")
+assert SPEC and SPEC.loader
+repro_env = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(repro_env)
 
 
 class ReproEnvironmentTest(unittest.TestCase):

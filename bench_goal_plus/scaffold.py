@@ -69,6 +69,7 @@ def scaffold_plan(
                 "id": f"{benchmark_id}-native",
                 "kind": "native-profile",
                 "controller": f"experiments/{benchmark_id}/experiment.py",
+                "evidence_filename": "campaign-summary.json",
                 "supported_methods": ["plain-codex"],
             }
         }

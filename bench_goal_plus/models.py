@@ -14,6 +14,7 @@ class RunnerCapabilities:
     stop: bool
     resume: bool
     cell_concurrency: bool
+    retain_containers: bool
     official_evaluator: bool
     resume_semantics: str
 
@@ -41,6 +42,7 @@ class RunnerDefinition:
     runner_id: str
     kind: str
     controller: Path
+    evidence_filename: str
     supported_methods: tuple[str, ...]
     capabilities: RunnerCapabilities
     method_contracts: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -50,6 +52,7 @@ class RunnerDefinition:
             "id": self.runner_id,
             "kind": self.kind,
             "controller": str(self.controller),
+            "evidence_filename": self.evidence_filename,
             "supported_methods": list(self.supported_methods),
             "capabilities": self.capabilities.as_dict(),
             "method_contracts": self.method_contracts,
@@ -134,6 +137,7 @@ class CampaignSpec:
     cell_concurrency: int | None = None
     worker_runtime_seconds: int | None = None
     worker_min_runtime_seconds: int | None = None
+    retain_containers: bool = False
     campaign_dir: Path | None = None
 
     @property
@@ -167,6 +171,7 @@ class CampaignSpec:
             "reasoning_effort": self.reasoning_effort,
             "worker_runtime_seconds": self.worker_runtime_seconds,
             "worker_min_runtime_seconds": self.worker_min_runtime_seconds,
+            "retain_containers": self.retain_containers,
             "concurrency": self.concurrency(),
         }
 

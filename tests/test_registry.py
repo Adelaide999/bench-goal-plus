@@ -28,7 +28,23 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(requirements["heurigym"], "not_required")
         self.assertEqual(requirements["autolab-cpu"], "mixed")
         self.assertEqual(requirements["edgebench"], "required")
+        self.assertEqual(requirements["swe-bench-verified"], "required")
         self.assertEqual(requirements["openevolve"], "not_required")
+
+    def test_swe_bench_readiness_keeps_methods_separate(self) -> None:
+        data = STATUS.load_registry()
+        item = next(
+            item for item in data["items"] if item["id"] == "swe-bench-verified"
+        )
+
+        self.assertEqual(item["gate_set"], "benchmark_methods")
+        self.assertEqual(
+            set(item["stages"]), set(data["gate_sets"]["benchmark_methods"])
+        )
+        self.assertEqual(item["stages"]["plain_codex"], "partial")
+        self.assertEqual(item["stages"]["plain_pi"], "partial")
+        self.assertEqual(item["stages"]["goal_plus_codex"], "n/a")
+        self.assertEqual(item["stages"]["goal_plus_pi"], "n/a")
 
 
 if __name__ == "__main__":

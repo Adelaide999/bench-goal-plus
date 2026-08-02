@@ -5,6 +5,7 @@
       "id": "edgebench-native",
       "kind": "native-profile",
       "controller": "experiments/edgebench/experiment.py",
+      "evidence_filename": "comparison.json",
       "supported_methods": [
         "plain-codex",
         "goal-plus-codex",
@@ -24,14 +25,41 @@
         "stop": true,
         "resume": false,
         "cell_concurrency": true,
+        "retain_containers": false,
         "official_evaluator": true,
         "resume_semantics": "stopped campaigns are finalized as partial; retry uses a new campaign"
+      }
+    },
+    {
+      "id": "swe-bench-native",
+      "kind": "native-profile",
+      "controller": "experiments/swe_bench_verified/experiment.py",
+      "evidence_filename": "campaign-summary.json",
+      "supported_methods": [
+        "plain-codex",
+        "plain-pi"
+      ],
+      "method_contracts": {
+        "plain-pi": {
+          "model_format": "provider/model"
+        }
+      },
+      "capabilities": {
+        "provision": false,
+        "detach": false,
+        "stop": false,
+        "resume": false,
+        "cell_concurrency": false,
+        "retain_containers": true,
+        "official_evaluator": true,
+        "resume_semantics": "initial acceptance supports one non-resumable task attempt; retry uses a new campaign"
       }
     },
     {
       "id": "common-matrix",
       "kind": "common-matrix",
       "controller": "experiments/benchmark_campaign/experiment.py",
+      "evidence_filename": "campaign-summary.json",
       "supported_methods": [
         "plain-codex",
         "goal-plus-codex",
@@ -46,6 +74,7 @@
         "stop": false,
         "resume": true,
         "cell_concurrency": false,
+        "retain_containers": false,
         "official_evaluator": true,
         "resume_semantics": "rerun only prepared or interrupted cells"
       }
@@ -54,6 +83,7 @@
       "id": "openevolve-batch",
       "kind": "openevolve-batch",
       "controller": "experiments/openevolve_compare/experiment.py",
+      "evidence_filename": "campaign-summary.json",
       "supported_methods": [
         "openevolve",
         "plain-codex",
@@ -66,6 +96,7 @@
         "stop": false,
         "resume": true,
         "cell_concurrency": false,
+        "retain_containers": false,
         "official_evaluator": true,
         "resume_semantics": "run-batch skips cells already present in campaign-results.json"
       }
@@ -84,6 +115,20 @@
         "owner": "runner",
         "provision_mode": "eager",
         "scope": "Native SForge owns task work containers, hidden judges, image provisioning, and official finalization."
+      }
+    },
+    {
+      "id": "swe-bench-verified",
+      "runner": "swe-bench-native",
+      "adapter": null,
+      "bootstrap_targets": ["swebench"],
+      "local_asset_inventory": true,
+      "default_inventory_profile": "sympy-16886-codex-smoke",
+      "docker": {
+        "requirement": "required",
+        "owner": "runner",
+        "provision_mode": "external",
+        "scope": "The Agent runs in the exact task evaluation image; the official SWE-bench harness owns a separate final evaluation container. The image is retained, and optional debug mode stops and retains the Agent container. No host-only score path is supported."
       }
     },
     {
@@ -274,6 +319,46 @@
         "reasoning_effort": "high",
         "wall_time_seconds": 3600,
         "concurrency": 2,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "swe-bench-verified-sympy-16886-codex-smoke",
+      "description": "One-instance SWE-bench Verified Plain Codex official-harness smoke with T=1800, K=1, C=1, R=1.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "sympy-16886-codex-smoke",
+      "campaign_id_template": "swe-bench-verified-sympy-16886-plain-codex-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["plain-codex"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "agent_provider": {
+          "id": "bench_proxy",
+          "name": "Benchmark OpenAI-compatible proxy",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "OPENAI_BASE_URL",
+          "api_key_env": "OPENAI_API_KEY",
+          "wire_api": "responses"
+        },
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "swe-bench-verified-sympy-16886-pi-smoke",
+      "description": "One-instance SWE-bench Verified Plain Pi official-harness smoke with T=1800, K=1, C=1, R=1.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "sympy-16886-pi-smoke",
+      "campaign_id_template": "swe-bench-verified-sympy-16886-plain-pi-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["plain-pi"],
+        "model": "zai/glm-5.2",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
         "cell_concurrency": 1
       }
     }

@@ -163,6 +163,25 @@ def print_table(data: dict) -> None:
             + " |"
         )
 
+    for gate_set, gates in data["gate_sets"].items():
+        if gate_set in {"benchmark", "search_backend"}:
+            continue
+        items = [item for item in data["items"] if item["gate_set"] == gate_set]
+        if not items:
+            continue
+        title = gate_set.replace("_", " ").title()
+        print(f"\n# {title}")
+        print("| Priority | Item | Docker | " + " | ".join(gates) + " |")
+        print("|---:|---|---|" + "---|" * len(gates))
+        for item in sorted(items, key=lambda value: value["priority"]):
+            values = [compact(item["stages"][gate]) for gate in gates]
+            docker = compact_docker(item["docker_requirement"])
+            print(
+                f"| {item['priority']} | {item['display_name']} | {docker} | "
+                + " | ".join(values)
+                + " |"
+            )
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()

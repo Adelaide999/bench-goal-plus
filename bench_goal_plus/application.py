@@ -112,6 +112,7 @@ class BenchmarkAgent:
         cell_concurrency: int | None = None,
         worker_runtime_seconds: int | None = None,
         worker_min_runtime_seconds: int | None = None,
+        retain_containers: bool = False,
     ) -> CampaignSpec:
         targets, preset = self.resolve_targets(target_ids=target_ids, preset_id=preset_id)
         runners = {item.runner_id for item in targets}
@@ -197,6 +198,11 @@ class BenchmarkAgent:
                 f"{runner_definition.runner_id} has not proven cross-cell "
                 "concurrency; use C=1"
             )
+        if retain_containers and not runner_definition.capabilities.retain_containers:
+            raise ContractError(
+                f"runner {runner_definition.runner_id} does not support retained "
+                "debug containers"
+            )
         if runner_definition.kind in {"common-matrix", "openevolve-batch"}:
             required = {
                 "--model": model,
@@ -270,6 +276,7 @@ class BenchmarkAgent:
             cell_concurrency=cell_concurrency,
             worker_runtime_seconds=worker_runtime_seconds,
             worker_min_runtime_seconds=worker_min_runtime_seconds,
+            retain_containers=retain_containers,
             campaign_dir=campaign_dir,
         )
 
@@ -307,18 +314,17 @@ class BenchmarkAgent:
         for runner_id, members in groups.items():
             definition = self.catalog.runners[runner_id]
             runner = create_runner(definition)
-            if definition.capabilities.provision:
-                spec = CampaignSpec(
-                    campaign_id="setup",
-                    targets=tuple(members),
-                    runner=definition,
-                    profile=profile,
+            spec = CampaignSpec(
+                campaign_id="setup",
+                targets=tuple(members),
+                runner=definition,
+                profile=profile,
+            )
+            commands.extend(
+                runner.provision_commands(
+                    spec, skip_provision=skip_provision
                 )
-                commands.extend(
-                    runner.provision_commands(
-                        spec, skip_provision=skip_provision
-                    )
-                )
+            )
         result = {
             "schema_version": 1,
             "action": "setup",
@@ -768,11 +774,21 @@ class BenchmarkAgent:
             result["resume"] = command_text([*base, "resume", "--campaign", str(campaign.path)])
         return result
 
-    @staticmethod
-    def _validate_preset_profile(preset: Any) -> None:
+    def _validate_preset_profile(self, preset: Any) -> None:
         if not preset.expected_profile or not preset.profile:
             return
-        profile = read_json(ROOT / "experiments/edgebench/profiles" / f"{preset.profile}.json")
+        runner_ids = {
+            self.catalog.targets[target_id].runner_id
+            for target_id in preset.benchmarks
+        }
+        if len(runner_ids) != 1:
+            raise ContractError(
+                f"preset {preset.preset_id} cannot mix profile roots"
+            )
+        runner = self.catalog.runners[next(iter(runner_ids))]
+        profile = read_json(
+            runner.controller.parent / "profiles" / f"{preset.profile}.json"
+        )
         observed = {
             "task_count": len(profile.get("task_ids", [])),
             "methods": profile.get("methods"),
@@ -782,6 +798,8 @@ class BenchmarkAgent:
             "concurrency": profile.get("concurrency"),
             "cell_concurrency": profile.get("cell_concurrency"),
         }
+        if "agent_provider" in preset.expected_profile:
+            observed["agent_provider"] = profile.get("agent_provider")
         if observed != preset.expected_profile:
             raise ContractError(
                 f"preset {preset.preset_id} profile drifted:\n"

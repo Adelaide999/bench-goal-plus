@@ -65,6 +65,9 @@
   不受支持的方法必须在 setup 或 prepare 之前被拒绝。
 - `catalog` 展示的能力就是契约。环境供给、后台运行、停止、恢复、任务单元并发或
   官方评测器在具备测试和可复现证据路径之前不得被声明为已支持。
+- `--retain-containers` 只能用于 catalog 声明 `retain_containers=true` 的 runner。保留模式
+  必须先停止 runner-owned debug container，再把精确 name/ID 和 disposition 写入 campaign；
+  `finish` 不得自动删除该 container，且该能力不得触发 image 删除、重标记或重建。
 
 ## T/K/C/R 契约
 

@@ -8,9 +8,10 @@
 |---|---|
 | `id` / `kind` | Stable runner ID and implementation selected by `runners/factory.py` |
 | `controller` | Existing repository controller; the Agent calls it instead of copying it |
+| `evidence_filename` | Native final JSON basename consumed by the unified `finish` path |
 | `supported_methods` | Canonical methods accepted during plan resolution; unknown methods fail before setup |
 | `method_contracts` | Optional per-method input constraints; `model_format: provider/model` requires an exact `PROVIDER/MODEL` value |
-| `capabilities` | `provision`, `detach`, `stop`, `resume`, `cell_concurrency`, official evaluator, and exact resume semantics |
+| `capabilities` | `provision`, `detach`, `stop`, `resume`, `cell_concurrency`, `retain_containers`, official evaluator, and exact resume semantics |
 
 Current kinds are `native-profile`, `common-matrix`, and `openevolve-batch`. If a new native
 lifecycle cannot implement this interface, add one runner implementation and tests; do not add
@@ -46,6 +47,12 @@ evaluator path. `external` means the Agent checks the prerequisite but does not 
 
 Presets are frozen examples over targets. They expand model, reasoning, T/K/C/R, methods, and
 profile into `agent-run.json`; they are never generic defaults.
+
+`retain_containers=true` only advertises support for the unified `plan/launch
+--retain-containers` debug option. The selected benchmark reference defines which runner-owned
+containers are retained. A retained container must be stopped and recorded in campaign evidence;
+finalization does not remove it. This capability never authorizes image removal, retagging, pulling,
+or rebuilding.
 
 ## Benchmark-specific completion
 

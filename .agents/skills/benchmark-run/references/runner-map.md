@@ -8,6 +8,7 @@
 | Runner | 何时使用 | 必读 reference |
 | --- | --- | --- |
 | `edgebench-native` | EdgeBench 的 SForge、Work/Judge container、native campaign | [EdgeBench](benchmarks/edgebench.md) |
+| `swe-bench-native` | SWE-bench Verified task image、patch 导出与官方 harness | [SWE-bench Verified](benchmarks/swe-bench-verified.md) |
 | `common-matrix` | 单 artifact + evaluator 的普通 benchmark adapter | [Common matrix](benchmarks/common-matrix.md) |
 | `openevolve-batch` | OpenEvolve `cpu_portable` task set 和原生 OpenEvolve 对比 | [OpenEvolve](benchmarks/openevolve.md) |
 
@@ -27,6 +28,7 @@ Common runner 统一 campaign lifecycle，但 task、artifact、evaluator、Dock
 | AutoLab | [docs/benchmarks/autolab-cpu.md](../../../../docs/benchmarks/autolab-cpu.md) |
 | SwarmResearch | [docs/benchmarks/swarmresearch-15.md](../../../../docs/benchmarks/swarmresearch-15.md) |
 | Frontier-CS | [docs/benchmarks/frontier-cs-algorithmic.md](../../../../docs/benchmarks/frontier-cs-algorithmic.md) |
+| SWE-bench Verified | [docs/benchmarks/swe-bench-verified.md](../../../../docs/benchmarks/swe-bench-verified.md) |
 | SkyDiscover task packs | [docs/benchmarks/skydiscover-task-packs.md](../../../../docs/benchmarks/skydiscover-task-packs.md) |
 
 存在 benchmark reference 只说明契约和当前状态被记录；是否可运行仍以 catalog、doctor、

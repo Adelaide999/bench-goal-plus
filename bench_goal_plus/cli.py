@@ -33,6 +33,11 @@ def add_start_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cell-concurrency", type=int)
     parser.add_argument("--worker-runtime-seconds", type=int)
     parser.add_argument("--worker-min-runtime-seconds", type=int)
+    parser.add_argument(
+        "--retain-containers",
+        action="store_true",
+        help="stop and retain runner-owned debug containers when supported",
+    )
     parser.add_argument("--skip-bootstrap", action="store_true")
     parser.add_argument("--skip-provision", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")
@@ -114,6 +119,7 @@ def spec_from_args(agent: BenchmarkAgent, args: argparse.Namespace):
         cell_concurrency=args.cell_concurrency,
         worker_runtime_seconds=args.worker_runtime_seconds,
         worker_min_runtime_seconds=args.worker_min_runtime_seconds,
+        retain_containers=args.retain_containers,
     )
 
 
@@ -128,6 +134,7 @@ def render_catalog(agent: BenchmarkAgent, *, as_json: bool) -> int:
             f"runner {runner['id']}: {runner['kind']} "
             f"detach={capabilities['detach']} stop={capabilities['stop']} "
             f"resume={capabilities['resume']} C={capabilities['cell_concurrency']} "
+            f"retain={capabilities['retain_containers']} "
             f"methods={','.join(runner['supported_methods'])}"
         )
     for target in payload["targets"]:

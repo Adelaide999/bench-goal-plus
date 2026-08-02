@@ -175,13 +175,19 @@ def generic_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def load_campaign(campaign: Path) -> tuple[str, dict[str, Any], Path | None]:
+def load_campaign(
+    campaign: Path,
+) -> tuple[str, dict[str, Any], Path | None, Path]:
     comparison = campaign / "comparison.json"
     summary = campaign / "campaign-summary.json"
     if comparison.is_file():
-        return "edgebench", read_json(comparison), campaign / "comparison.md"
+        payload = read_json(comparison)
+        kind = str(payload.get("report_kind") or "edgebench")
+        return kind, payload, campaign / "comparison.md", comparison
     if summary.is_file():
-        return "campaign", read_json(summary), campaign / "campaign-summary.md"
+        payload = read_json(summary)
+        kind = str(payload.get("report_kind") or "campaign")
+        return kind, payload, campaign / "campaign-summary.md", summary
     raise FileNotFoundError(
         f"no finalized comparison.json or campaign-summary.json under {campaign}"
     )
@@ -372,7 +378,7 @@ def safe_filename(value: str) -> str:
 
 
 def export(campaign: Path, markdown_out: Path | None, xlsx_out: Path | None) -> dict[str, str]:
-    kind, payload, source_markdown = load_campaign(campaign)
+    kind, payload, source_markdown, source_json = load_campaign(campaign)
     campaign_id = str(payload.get("campaign_id") or campaign.name)
     rows = edgebench_rows(payload) if kind == "edgebench" else generic_rows(payload)
     markdown_path = markdown_out or campaign / "report.md"
@@ -423,7 +429,7 @@ def export(campaign: Path, markdown_out: Path | None, xlsx_out: Path | None) -> 
             payload.get("attempts", (payload.get("budget") or {}).get("attempts")),
         ],
         ["generated_at", datetime.now(timezone.utc).isoformat()],
-        ["source_json", "comparison.json" if kind == "edgebench" else "campaign-summary.json"],
+        ["source_json", source_json.name],
     ]
     write_xlsx(xlsx_path, [("Summary", summary_rows), ("Results", tabular_rows(rows))])
     return {"markdown": str(markdown_path), "xlsx": str(xlsx_path)}

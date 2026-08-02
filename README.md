@@ -12,8 +12,8 @@ benchmark 的控制面仓库，主要服务 Goal Plus 相关项目。
 - 汇总原始指标与运行证据，生成 `report.md` 和以 campaign ID 命名的 `.xlsx`。
 - 用 scaffold、registry 和 contract tests 快速接入新 benchmark。
 
-当前重点路径是 EdgeBench + Codex。Goal Plus 可以作为其中一种运行方法和证据机制，
-但不是仓库本身的架构。
+当前重点路径包括 EdgeBench + Codex，以及单题 SWE-bench Verified Plain Codex/Pi smoke。
+Goal Plus 可以作为其中一种运行方法和证据机制，但不是仓库本身的架构。
 
 ## 快速开始
 

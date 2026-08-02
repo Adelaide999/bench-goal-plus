@@ -1,24 +1,35 @@
 # Shared runtime dependencies for branch-tracked benchmark and search-runtime checkouts.
 # Exact transitive versions are generated into requirements.lock.
 ahocorapy>=1.6,<2
+beautifulsoup4>=4,<5
 cairosvg>=2.7,<3
+chardet>=5,<6
 dacite>=1.9.2,<2
+datasets>=4,<5
 docker>=7,<8
 editables>=0.5,<1
 fastapi>=0.116,<1
 fastmcp>=2.3,<3
 flask>=3,<4
+ghapi>=1,<2
+gitpython>=3,<4
 hatchling>=1.27,<2
 huggingface-hub>=0.30,<2
+modal>=1,<2
 numpy>=2.5.1,<3
 openai>=2,<3
 openpyxl>=3.1.5,<4
 pillow>=11,<13
 polars>=1,<2
+pre-commit>=4,<5
 pydantic>=2,<3
 python-dotenv>=1.2.1,<2
 pyyaml>=6,<7
+requests>=2,<3
+rich>=13,<16
 scipy>=1.18,<2
 setuptools>=75,<82
+tenacity>=9,<10
 tqdm>=4.64,<5
+unidiff>=0.7.5,<1
 wheel>=0.45,<1

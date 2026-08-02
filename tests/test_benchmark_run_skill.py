@@ -72,7 +72,8 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         )
         self.assertIn("skydiscover-cpu-evaluators", self.catalog.asset_packs)
         self.assertIn("openevolve-cpu-portable", self.catalog.targets)
-        self.assertEqual(len(self.catalog.runners), 3)
+        self.assertIn("swe-bench-verified", self.catalog.targets)
+        self.assertEqual(len(self.catalog.runners), 4)
         self.assertEqual(
             self.catalog.runners["edgebench-native"].supported_methods,
             (
@@ -276,6 +277,7 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertTrue(rendered[-1].endswith("--yes"))
         for profile in (
             "vliw-smoke",
+            "sympy-16886-codex-smoke",
             "ahc027-cpp20-202301",
             "problem-0",
             "cpu-no-torch-19",
@@ -288,6 +290,7 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             [item["id"] for item in result["inventory_gates"]],
             [
                 "edgebench",
+                "swe-bench-verified",
                 "ale-bench-lite",
                 "frontier-cs-problem-0",
                 "skydiscover-cpu-evaluators",

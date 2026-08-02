@@ -13,6 +13,7 @@ BENCHMARK_DOCS = (
     "swarmresearch-15.md",
     "frontier-cs-algorithmic.md",
     "edgebench.md",
+    "swe-bench-verified.md",
 )
 TASK_PACK_DOCS = ("skydiscover-task-packs.md",)
 REQUIRED_CASE_SECTIONS = (

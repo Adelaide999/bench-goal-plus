@@ -42,6 +42,7 @@ Plain Codex / Goal Plus 入口，而不是“仓库能下载”或“代码看�
 | ALE-Bench Lite | `ahc027` | official-lite evaluator、Plain Codex、Goal Plus + Codex 已完成真实 E2E | Lite 其余 9 题尚未 campaign-ready |
 | Frontier-CS | `problem-0` | pinned judge image、Plain Codex、Goal Plus + Codex 已完成真实 E2E | 其余题尚未 materialize |
 | EdgeBench | VLIW Kernel Optimization | SForge work/judge、Plain Codex、Goal Plus lifecycle E2E 已通 | 8–12 个 gradient subset 尚未冻结 |
+| SWE-bench Verified | `sympy__sympy-16886` | Plain Codex/Pi native lifecycle 已接线，真实 E2E 验收中 | 当前只声明单题 Linux/amd64 smoke |
 
 这些任务可以在当前有 Docker 的 Mac 上跑，但不是 host-only 路径。启动前必须
 确认 `docker info` 成功，并保留镜像、冷启动和 evaluator 时间。
@@ -85,6 +86,7 @@ EvoX 的 runtime。
 | [SkyDiscover Math/ADRS task pack](skydiscover-task-packs.md) | **需要** | 非 Torch 19 tags：逻辑 `8.57 GB`、实际新增约 `2.49 GB`、建议 `10 GB` | Circle Packing、HotPotQA 和 Image Gen 仍有 host 路径 |
 | Frontier-CS | **需要** | 共用 judge `1.27 GB`；建议 `2 GB` | 当前 problem-0 评分需要 pinned judge image |
 | EdgeBench | **需要** | VLIW work + judge 逻辑 `2.23 GB`；单 case 建议 `5 GB` | SForge 需要 work container 和独立 hidden judge |
+| SWE-bench Verified | **需要** | 当前 SymPy task image 逻辑约 `2.56 GB` | Agent 与官方 harness 都要求精确 task image |
 | PERFOPT-Bench | 无法判定 | 未知 | executable artifact 不可访问；不是“不需要 Docker” |
 
 `local_examples/vliw_kernel_optimization` 可在无 Docker 主机运行 public 和
@@ -108,6 +110,7 @@ Docker 的机器只适用上表“不需要”路径。模型延迟、候选超�
 | SwarmResearch 论文任务集 | 15：Math 5 + ADRS 5 + ALE 5 | Circle Packing 已通；ADRS/ALE worker 布局待修 | evaluator-only 约 2–6 小时 | 公开轨迹任务 wall span 串行合计约 76.9 小时 |
 | Frontier-CS Algorithmic | 当前固定版本 188 | problem-0 已通；其余 task 尚未 materialize | reference/verifier 全扫约 1–3 小时 | 单次 agent/题约 10–30 小时；20 calls/题可能 100–300 小时 |
 | EdgeBench open-source subset | 51；先选 8–12 gradient cases | VLIW 的环境、Plain Codex、Goal Plus 已通；统一 controller 已接入 | 单候选/题通常 10 分钟–2 小时，取决于任务 | 正式 profile 建议每题 1–2 小时；8–12 题约 16–48 method-hours |
+| SWE-bench Verified | 500；当前固定 1 题 smoke | 单题镜像、doctor 和 Plain Codex/Pi controller 已接入 | 每个 method 5 分钟 Agent 预算，另加官方测试 | 完整 split 尚未开放 campaign capability |
 
 这些数字不应直接拿来横向比较方法速度：ALE 的一次 candidate 会跑多个 generated cases，AutoLab 的“2 小时”是长时 agent budget，Swarm 的公开 wall span包含并行研究者，而 Frontier-CS 的题量远大于其他集合。公平实验最终应以 **evaluator calls + wall time + model calls/tokens** 三组预算同时报告。
 
@@ -126,6 +129,7 @@ Goal Plus 的逐项接入改造、`K/E/Q` 三层并发和 matched-budget baselin
 | [SwarmResearch 15](swarmresearch-15.md) | 多 lineage / swarm 搜索是否能在大搜索空间中累积有效发现 | 26 圆装箱 |
 | [Frontier-CS Algorithmic](frontier-cs-algorithmic.md) | 面向开放算法研究问题生成可执行程序，并从连续 partial score 改进 | Polyomino Packing |
 | [EdgeBench](edgebench.md) | 在真实隔离 artifact + hidden judge 上利用连续 feedback 持续优化 | VLIW Kernel Optimization |
+| [SWE-bench Verified](swe-bench-verified.md) | 根据真实 issue 修复代码，并通过官方隐藏回归测试 | `sympy__sympy-16886` |
 
 PERFOPT-Bench 因缺少可执行公开 artifact 继续挂起，不进入本文档集。
 SkyDiscover 是 runtime，EvoX/OpenEvolve 是搜索方法，因此不作为 benchmark
@@ -147,6 +151,7 @@ SkyDiscover 是 runtime，EvoX/OpenEvolve 是搜索方法，因此不作为 benc
 5. **AutoLab 只选 6–10 个 CPU case**：先验证 persistence，不在 Mac 上消耗完整 60 小时。
 6. **SwarmResearch 15**：修好统一 evaluator/worker 后作为最终大实验 substrate。
 7. **Frontier-CS 选 10 题**：保留 188 题 track 作为题库，不在本地对所有方法全扫。
-8. **EdgeBench 冻结 8–12 个 gradient cases**：Mac 只做单题接线，正式多方法 campaign 放到 Linux。
+8. **SWE-bench Verified 单题 smoke**：先完成 Plain Codex/Pi 官方 harness 验收，再讨论扩大 panel。
+9. **EdgeBench 冻结 8–12 个 gradient cases**：Mac 只做单题接线，正式多方法 campaign 放到 Linux。
 
 空间与 Linux 节点规划见 [Docker 镜像空间计划](../docker-storage-plan.md)，工程门禁以 [`benchmarks/registry.json`](../../benchmarks/registry.json) 为唯一状态源。

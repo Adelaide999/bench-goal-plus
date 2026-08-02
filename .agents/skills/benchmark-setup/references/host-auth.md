@@ -34,6 +34,7 @@ offline/network-isolated protocol 已满足；正式 Linux 运行也不能跳过
 | EdgeBench Goal Plus + Pi provider API | Pi 显式 provider/model 与 API credential | Pi built-in provider 使用标准 key env；自定义 endpoint 使用 `SFORGE_PI_MODELS_FILE` 或 `~/.pi/agent/models.json` | 使用 `goal-plus-pi-provider`；model 必须写成 `PROVIDER/MODEL` |
 | EdgeBench Claude | Anthropic-compatible API | `SFORGE_AGENT_*` 或 `ANTHROPIC_*` env | key 和 base URL 都必需 |
 | Common/OpenEvolve 的 Codex 路径 | Codex native login，或显式 OpenAI-compatible endpoint | 省略 `--api-base` 使用 native login；显式 endpoint 使用 `OPENAI_API_KEY` | custom provider 使用 Responses wire API |
+| SWE-bench Verified Plain Codex | profile 固定的 OpenAI-compatible API | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | 只使用 Responses；不读取 OAuth；Linux loopback endpoint 必须桥入 task container |
 | Common/OpenEvolve 的 Pi、native OpenEvolve、SkyDiscover | OpenAI-compatible API | `--api-base` + `OPENAI_API_KEY` | 不是 Codex OAuth 路径 |
 
 ### Codex OAuth
@@ -76,6 +77,55 @@ export SFORGE_AGENT_API_BASE_URL='https://api.example.com/v1'
 
 controller 会从 host 和 Work container 各做一次鉴权 probe。manifest 只记录使用了哪个环境
 变量，不记录值。
+
+### SWE-bench Verified Plain Codex API
+
+SWE-bench 的冻结 Codex profile 不使用上面的 EdgeBench fallback 优先级。它精确选择：
+
+```text
+auth_mode=openai-compatible
+base_url_env=OPENAI_BASE_URL
+api_key_env=OPENAI_API_KEY
+wire_api=responses
+```
+
+因此，同一 shell 同时存在指向 Anthropic endpoint 的 `SFORGE_AGENT_*` 时，SWE controller
+也不得读取它。doctor 和 launch 必须解析同一 profile contract；Codex CLI 使用显式 custom
+provider，key 只通过 `docker exec -e OPENAI_API_KEY` 的变量名继承。OAuth auth file 不挂载进
+task container，任何 `chatgpt.com` 请求都表示配置回退 bug。
+
+先做 host wire probe：
+
+```bash
+python3 .agents/skills/benchmark-setup/scripts/probe_openai_wire.py \
+  --base-url "$OPENAI_BASE_URL" \
+  --model gpt-5.6-sol \
+  --api-key-env OPENAI_API_KEY \
+  --probe responses
+```
+
+若 `OPENAI_BASE_URL` 监听 `127.0.0.1`，Linux task container 不能直接使用该地址。controller
+复用 EdgeBench 的随机端口 `systemd-socket-proxyd` bridge，并保留 `/v1` base path。先检查：
+
+```bash
+command -v ip
+test -x /usr/bin/systemd-socket-activate
+test -x /lib/systemd/systemd-socket-proxyd
+```
+
+缺件时由主机管理员按发行版安装，不在 benchmark setup 中自动修改共享主机：
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install iproute2 systemd
+
+# RHEL / Rocky / AlmaLinux
+sudo dnf install iproute systemd
+```
+
+安装后仍需统一 `setup --skip-provision` 的完整 doctor 同时通过 host Responses、bridge 和
+task-container Responses；只通过 host probe 不能启动 campaign。macOS 当前不支持这条
+loopback bridge，必须使用容器可达的非-loopback URL。
 
 ### EdgeBench Pi OAuth
 

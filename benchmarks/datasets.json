@@ -153,8 +153,8 @@
       "source": {
         "repository": "https://github.com/SWE-bench/SWE-bench",
         "data": "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
-        "revision": null,
-        "revision_policy": "Pin a Hugging Face revision and use only for harness smoke or regression."
+        "revision": "91aa3ed51b709be6457e12d00300a6a596d4c6a3",
+        "revision_policy": "Use this exact Hugging Face revision only for harness smoke or regression."
       },
       "evaluator": {
         "kind": "hidden_repository_tests",
@@ -168,9 +168,17 @@
       "integration": {
         "harness": "swe-bench-native",
         "adapter_status": "adapter_pending",
-        "next_step": "Use a small pinned smoke panel to validate repository-lane reset and final judging."
+        "next_step": "Complete real Plain Codex and Plain Pi lifecycle evidence before promoting adapter readiness."
       },
       "panels": [
+        {
+          "id": "sympy-16886-smoke",
+          "purpose": "Single-instance repository and official-harness lifecycle smoke",
+          "target_size": 1,
+          "status": "frozen",
+          "selection": "Use the locally available amd64 evaluation image for the smallest first lifecycle acceptance path.",
+          "task_ids": ["sympy__sympy-16886"]
+        },
         {
           "id": "smoke-10",
           "purpose": "Repository harness regression",

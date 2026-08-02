@@ -86,6 +86,15 @@ class Catalog:
                 raise ContractError(
                     f"{runner_id}: controller does not exist: {controller_value!r}"
                 )
+            evidence_filename = entry.get("evidence_filename")
+            if (
+                not isinstance(evidence_filename, str)
+                or Path(evidence_filename).name != evidence_filename
+                or not evidence_filename.endswith(".json")
+            ):
+                raise ContractError(
+                    f"{runner_id}: evidence_filename must be a JSON basename"
+                )
             raw_methods = entry.get("supported_methods")
             if not isinstance(raw_methods, list) or not raw_methods:
                 raise ContractError(f"{runner_id}: supported_methods must be non-empty")
@@ -132,6 +141,7 @@ class Catalog:
                 "stop",
                 "resume",
                 "cell_concurrency",
+                "retain_containers",
                 "official_evaluator",
             )
             if not all(isinstance(raw_capabilities.get(name), bool) for name in bool_fields):
@@ -147,6 +157,7 @@ class Catalog:
                 runner_id=runner_id,
                 kind=kind,
                 controller=controller,
+                evidence_filename=evidence_filename,
                 supported_methods=supported_methods,
                 capabilities=capabilities,
                 method_contracts=method_contracts,

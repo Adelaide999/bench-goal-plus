@@ -26,6 +26,14 @@
       "dataset_repository": "ByteDance-Seed/EdgeBench",
       "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9"
     },
+    "swebench": {
+      "repository": "https://github.com/SWE-bench/SWE-bench.git",
+      "checkout_dir": "swebench",
+      "tracking_branch": "main",
+      "editable": true,
+      "dataset_repository": "SWE-bench/SWE-bench_Verified",
+      "dataset_revision": "91aa3ed51b709be6457e12d00300a6a596d4c6a3"
+    },
     "ale_bench": {
       "repository": "https://github.com/ck0123/ALE-Bench.git",
       "checkout_dir": "ale-bench",

@@ -23,6 +23,9 @@ sys.path.insert(0, str(ROOT))
 
 from bench_artifacts import read_json as load_json  # noqa: E402
 from bench_artifacts import utc_now, write_json  # noqa: E402
+from bench_goal_plus.codex_provider import (  # noqa: E402
+    codex_responses_provider_args,
+)
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
     describe_task,
@@ -347,18 +350,7 @@ def render_plain_prompt(
 
 
 def codex_provider_args(api_base: str) -> list[str]:
-    return [
-        "--config",
-        f'model_provider="{CODEX_PROVIDER_ID}"',
-        "--config",
-        f'model_providers.{CODEX_PROVIDER_ID}.name="Benchmark OpenAI-compatible proxy"',
-        "--config",
-        f"model_providers.{CODEX_PROVIDER_ID}.base_url={json.dumps(api_base)}",
-        "--config",
-        f'model_providers.{CODEX_PROVIDER_ID}.env_key="OPENAI_API_KEY"',
-        "--config",
-        f'model_providers.{CODEX_PROVIDER_ID}.wire_api="responses"',
-    ]
+    return codex_responses_provider_args(api_base, provider_id=CODEX_PROVIDER_ID)
 
 
 def codex_model_args(

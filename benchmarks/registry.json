@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "checked_at": "2026-07-24",
+  "checked_at": "2026-08-02",
   "status_values": ["pass", "partial", "todo", "blocked", "n/a"],
   "gate_sets": {
     "benchmark": [
@@ -10,6 +10,18 @@
       "legacy_agent_smoke",
       "plain_codex",
       "goal_plus_codex",
+      "matched_baseline",
+      "campaign_ready"
+    ],
+    "benchmark_methods": [
+      "source_forked",
+      "environment",
+      "official_verifier",
+      "native_baseline",
+      "plain_codex",
+      "goal_plus_codex",
+      "plain_pi",
+      "goal_plus_pi",
       "matched_baseline",
       "campaign_ready"
     ],
@@ -314,11 +326,50 @@
       ]
     },
     {
+      "id": "swe-bench-verified",
+      "display_name": "SWE-bench Verified smoke integration",
+      "kind": "benchmark",
+      "gate_set": "benchmark_methods",
+      "priority": 8,
+      "repositories": [
+        {
+          "role": "benchmark-harness",
+          "upstream_url": "https://github.com/SWE-bench/SWE-bench",
+          "fork_url": null,
+          "tracking_branch": "main",
+          "license": "MIT"
+        }
+      ],
+      "data_url": "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
+      "local_path": "third_party/swebench",
+      "docker_requirement": "required",
+      "docker_scope": "The Agent works in the exact amd64 task evaluation image, and the official SWE-bench harness owns a separate final evaluation container. There is no host-only score path.",
+      "stages": {
+        "source_forked": "n/a",
+        "environment": "partial",
+        "official_verifier": "partial",
+        "native_baseline": "n/a",
+        "plain_codex": "partial",
+        "goal_plus_codex": "n/a",
+        "plain_pi": "partial",
+        "goal_plus_pi": "n/a",
+        "matched_baseline": "n/a",
+        "campaign_ready": "partial"
+      },
+      "evidence": [],
+      "next_action": "Run the frozen sympy__sympy-16886 Plain Codex and Plain Pi campaigns through plan, launch, status, official evaluation, and finish; then archive minimal evidence.",
+      "blockers": [
+        "Initial acceptance intentionally covers one Linux/amd64 Verified instance with K=1 and C=1; it does not claim a 500-instance campaign is ready.",
+        "Goal Plus methods are intentionally not registered for this runner yet.",
+        "The official checkout is used as an unmodified managed third-party repository, so no project fork is currently required."
+      ]
+    },
+    {
       "id": "perfopt-bench",
       "display_name": "PERFOPT-Bench",
       "kind": "benchmark",
       "gate_set": "benchmark",
-      "priority": 8,
+      "priority": 9,
       "repositories": [
         {
           "role": "artifact",
