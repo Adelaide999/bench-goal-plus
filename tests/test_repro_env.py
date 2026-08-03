@@ -27,6 +27,7 @@ class ReproEnvironmentTest(unittest.TestCase):
                 "openevolve",
                 "goal_plus",
                 "edgebench",
+                "swe_evo",
                 "heurigym",
                 "ale_bench",
                 "autolab",
@@ -48,6 +49,14 @@ class ReproEnvironmentTest(unittest.TestCase):
             set(selected_edgebench), {"openevolve", "goal_plus", "edgebench"}
         )
         self.assertTrue(selected_edgebench["edgebench"]["editable"])
+        selected_swe_evo = repro_env.selected_upstreams(manifest, ["swe_evo"])
+        self.assertEqual(
+            set(selected_swe_evo), {"openevolve", "goal_plus", "swe_evo"}
+        )
+        self.assertEqual(
+            selected_swe_evo["swe_evo"]["dataset_revision"],
+            "9b83d5af943ba7a17567336f5b18239f73960219",
+        )
         selected_sky = repro_env.selected_upstreams(manifest, ["skydiscover"])
         self.assertEqual(
             set(selected_sky), {"openevolve", "goal_plus", "skydiscover"}

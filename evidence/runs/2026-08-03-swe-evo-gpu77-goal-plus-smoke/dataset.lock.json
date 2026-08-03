@@ -1,0 +1,11 @@
+{
+  "dataset_path": "third_party/swe-evo/hf_out/hf_dataset/test/data-00000-of-00001.arrow",
+  "dataset_sha256": "74e7c63160ada4ceba71d5d89a9bb7c9794f4574b384458d546eb65cdb730520",
+  "hidden_record_path": "evaluator/instances.json",
+  "schema_version": 1,
+  "selected_task_ids": [
+    "psf__requests_v2.12.2_v2.12.3"
+  ],
+  "upstream_commit": "9b83d5af943ba7a17567336f5b18239f73960219",
+  "worker_visibility": "problem statement and public repository identity only"
+}

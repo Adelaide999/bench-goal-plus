@@ -11,6 +11,43 @@ from scripts import benchmark_report
 
 
 class BenchmarkReportTest(unittest.TestCase):
+    def test_swe_evo_export_uses_official_trajectory_metrics(self) -> None:
+        payload = {
+            "benchmark_id": "swe-evo",
+            "campaign_id": "swe-evo-smoke",
+            "cells": [
+                {
+                    "task_id": "task-a",
+                    "method": "goal-plus-codex",
+                    "model": "model-a",
+                    "reasoning_effort": "medium",
+                    "selection_policy": "Goal Plus selected promotion",
+                    "wall_time_seconds": 60,
+                    "live_search_concurrency": 2,
+                    "observations": [
+                        {
+                            "trajectory": 1,
+                            "state": "completed",
+                            "official": True,
+                            "resolved": True,
+                            "fix_rate": 1.0,
+                            "patch_applied": True,
+                            "freeze": {
+                                "patch_sha256": "abc",
+                                "patch_bytes": 42,
+                                "integrity_ok": True,
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+        rows = benchmark_report.swe_evo_rows(payload)
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["official"])
+        self.assertEqual(rows[0]["fix_rate"], 1.0)
+        self.assertEqual(rows[0]["selection_policy"], "Goal Plus selected promotion")
+
     def temporary_campaign(self) -> tempfile.TemporaryDirectory[str]:
         temp_root = Path.cwd() / ".tmp" / "test-benchmark-report"
         temp_root.mkdir(parents=True, exist_ok=True)

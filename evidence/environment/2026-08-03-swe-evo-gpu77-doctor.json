@@ -1,0 +1,133 @@
+{
+  "benchmark_id": "swe-evo",
+  "checked_at": "2026-08-03T03:50:37+00:00",
+  "checks": [
+    {
+      "name": "runtime:repository-local-temp",
+      "passed": true,
+      "path": ".tmp"
+    },
+    {
+      "actual": "74e7c63160ada4ceba71d5d89a9bb7c9794f4574b384458d546eb65cdb730520",
+      "expected": "74e7c63160ada4ceba71d5d89a9bb7c9794f4574b384458d546eb65cdb730520",
+      "name": "dataset:arrow-sha256",
+      "passed": true
+    },
+    {
+      "count": 1,
+      "name": "dataset:selected-records",
+      "passed": true
+    },
+    {
+      "branch": "main",
+      "commit": "9b83d5af943ba7a17567336f5b18239f73960219",
+      "dirty": false,
+      "expected_branch": "main",
+      "expected_commit": "9b83d5af943ba7a17567336f5b18239f73960219",
+      "name": "checkout:swe-evo",
+      "passed": true,
+      "path": "/home/jenkins/.cache/bench-goal-plus/swe-evo-validation/third_party/swe-evo"
+    },
+    {
+      "branch": "mac",
+      "commit": "c0b942f669619d49a67783bfba7da3728cbdc1bc",
+      "dirty": false,
+      "expected_branch": "mac",
+      "expected_commit": null,
+      "name": "checkout:edgebench",
+      "passed": true,
+      "path": "/home/jenkins/.cache/bench-goal-plus/swe-evo-validation/third_party/edgebench"
+    },
+    {
+      "branch": "main",
+      "commit": "1e8a1221c8dee4bdee6d214826b23d8a7778ad11",
+      "dirty": false,
+      "expected_branch": "main",
+      "expected_commit": null,
+      "name": "checkout:goal-plus",
+      "passed": true,
+      "path": "/home/jenkins/.cache/bench-goal-plus/swe-evo-validation/third_party/goal-plus"
+    },
+    {
+      "name": "entrypoint:sforge",
+      "passed": true,
+      "path": "/home/jenkins/.cache/bench-goal-plus/swe-evo-validation/.bench-env/venv/bin/sforge"
+    },
+    {
+      "name": "entrypoint:managed-python",
+      "passed": true,
+      "path": "/home/jenkins/.cache/bench-goal-plus/swe-evo-validation/.bench-env/venv/bin/python"
+    },
+    {
+      "name": "runtime:codex-host-cache",
+      "passed": true,
+      "path": "/home/jenkins/.cache/sforge/codex/codex-0.144.1-linux-x64.tgz"
+    },
+    {
+      "actual": "x86_64",
+      "name": "docker:linux-amd64",
+      "passed": true
+    },
+    {
+      "name": "runtime:judge-port",
+      "passed": true,
+      "port": 28081,
+      "requirement": "free before campaign launch"
+    },
+    {
+      "api_base_url_source": "OPENAI_BASE_URL",
+      "api_key_source": "OPENAI_API_KEY",
+      "mode": "api_key",
+      "name": "auth:agent",
+      "passed": true
+    },
+    {
+      "architecture": "amd64",
+      "available": true,
+      "id": "sha256:92ca29389842e3abb2b4a6c90cafb266e3b4a5ca835c318bc0ee2bdd0eea7067",
+      "image": "ghcr.io/epoch-research/swe-bench.eval.x86_64.psf__requests-3738:latest",
+      "name": "image:source:psf__requests_v2.12.2_v2.12.3",
+      "os": "linux",
+      "passed": true,
+      "repo_digests": [
+        "ghcr.nju.edu.cn/epoch-research/swe-bench.eval.x86_64.psf__requests-3738@sha256:41767104d2506d564071a2ebf41e74f5c664dc155d75a90e91fa1d3d78aad534"
+      ]
+    },
+    {
+      "expected": "sha256:41767104d2506d564071a2ebf41e74f5c664dc155d75a90e91fa1d3d78aad534",
+      "name": "image:digest:psf__requests_v2.12.2_v2.12.3",
+      "passed": true,
+      "repo_digests": [
+        "ghcr.nju.edu.cn/epoch-research/swe-bench.eval.x86_64.psf__requests-3738@sha256:41767104d2506d564071a2ebf41e74f5c664dc155d75a90e91fa1d3d78aad534"
+      ]
+    },
+    {
+      "architecture": "amd64",
+      "available": true,
+      "id": "sha256:6303ce5ba2bd84e68700cde3418ca7972f7dc64e316eb3f4ef9aec51327f1169",
+      "image": "swe-evo.work.psf__requests_v2.12.2_v2.12.3:782690c72163",
+      "name": "image:work:psf__requests_v2.12.2_v2.12.3",
+      "os": "linux",
+      "passed": true,
+      "repo_digests": []
+    },
+    {
+      "architecture": "amd64",
+      "available": true,
+      "id": "sha256:cc8b2788072cc35315389d268507e801a437ba6f727fd77c4b001e09a972e9e1",
+      "image": "swe-evo.judge.psf__requests_v2.12.2_v2.12.3:782690c72163",
+      "name": "image:judge:psf__requests_v2.12.2_v2.12.3",
+      "os": "linux",
+      "passed": true,
+      "repo_digests": []
+    },
+    {
+      "name": "integrity:worker-payload",
+      "passed": true,
+      "task_count": 1
+    }
+  ],
+  "ok": true,
+  "profile": "ghcr-smoke-1",
+  "schema_version": 1
+}

@@ -1,0 +1,35 @@
+{
+  "images": [
+    {
+      "expected_source_digest": "sha256:41767104d2506d564071a2ebf41e74f5c664dc155d75a90e91fa1d3d78aad534",
+      "instance_id": "psf__requests_v2.12.2_v2.12.3",
+      "judge": {
+        "architecture": "amd64",
+        "available": true,
+        "id": "sha256:cc8b2788072cc35315389d268507e801a437ba6f727fd77c4b001e09a972e9e1",
+        "image": "swe-evo.judge.psf__requests_v2.12.2_v2.12.3:782690c72163",
+        "os": "linux",
+        "repo_digests": []
+      },
+      "source": {
+        "architecture": "amd64",
+        "available": true,
+        "id": "sha256:92ca29389842e3abb2b4a6c90cafb266e3b4a5ca835c318bc0ee2bdd0eea7067",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.x86_64.psf__requests-3738:latest",
+        "os": "linux",
+        "repo_digests": [
+          "ghcr.nju.edu.cn/epoch-research/swe-bench.eval.x86_64.psf__requests-3738@sha256:41767104d2506d564071a2ebf41e74f5c664dc155d75a90e91fa1d3d78aad534"
+        ]
+      },
+      "work": {
+        "architecture": "amd64",
+        "available": true,
+        "id": "sha256:6303ce5ba2bd84e68700cde3418ca7972f7dc64e316eb3f4ef9aec51327f1169",
+        "image": "swe-evo.work.psf__requests_v2.12.2_v2.12.3:782690c72163",
+        "os": "linux",
+        "repo_digests": []
+      }
+    }
+  ],
+  "schema_version": 1
+}

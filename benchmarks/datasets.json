@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-29",
+  "updated_at": "2026-08-03",
   "panel_status_values": [
     "selection_pending",
     "upstream_defined",
@@ -23,8 +23,8 @@
       "source": {
         "repository": "https://github.com/SWE-EVO/SWE-EVO",
         "data": "https://github.com/SWE-EVO/SWE-EVO/tree/main/hf_out/hf_dataset",
-        "revision": null,
-        "revision_policy": "Pin a reviewed upstream commit before materializing any panel."
+        "revision": "9b83d5af943ba7a17567336f5b18239f73960219",
+        "revision_policy": "Use the pinned upstream commit and Arrow SHA256 74e7c63160ada4ceba71d5d89a9bb7c9794f4574b384458d546eb65cdb730520."
       },
       "evaluator": {
         "kind": "repository_tests",
@@ -33,14 +33,25 @@
       "environment": {
         "lane_kind": "repository_container",
         "docker_requirement": "required",
-        "notes": "One long-lived repository container per lane; preserve test and patch ledgers."
+        "notes": "SForge provides one isolated repository worker per lane; final scoring always starts a fresh official evaluator container."
       },
       "integration": {
         "harness": "swe-evo-native",
-        "adapter_status": "adapter_pending",
-        "next_step": "Bootstrap the official 48-task source, audit build stability, then freeze the development panel."
+        "adapter_status": "ready",
+        "next_step": "Validate the frozen GHCR smoke, restore access to the remaining Docker Hub images, then select the development-12 panel."
       },
       "panels": [
+        {
+          "id": "ghcr-smoke-2",
+          "purpose": "Native worker, patch-freeze, and official-harness regression",
+          "target_size": 2,
+          "status": "frozen",
+          "selection": "One requests and one scikit-learn release-evolution task whose source images are hosted on GHCR.",
+          "task_ids": [
+            "psf__requests_v2.12.2_v2.12.3",
+            "scikit-learn__scikit-learn_0.20.1_0.20.2"
+          ]
+        },
         {
           "id": "development-12",
           "purpose": "T1 software mechanism calibration",

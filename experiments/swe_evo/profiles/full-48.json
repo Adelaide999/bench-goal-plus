@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "full-48",
+  "benchmark_id": "swe-evo",
+  "upstream_commit": "9b83d5af943ba7a17567336f5b18239f73960219",
+  "dataset_sha256": "74e7c63160ada4ceba71d5d89a9bb7c9794f4574b384458d546eb65cdb730520",
+  "task_ids": "all",
+  "methods": ["plain-codex", "goal-plus-codex"],
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "medium",
+  "wall_time_seconds": 7200,
+  "concurrency": 4,
+  "cell_concurrency": 2,
+  "worker_runtime_seconds": 6600,
+  "eval_interval_seconds": 900,
+  "judge_port": 28081,
+  "work_cpu_limit": 4,
+  "work_mem_limit": "16g",
+  "judge_cpu_limit": 2,
+  "judge_mem_limit": "8g",
+  "official_evaluator_timeout_seconds": 1800,
+  "image_provision_concurrency": 2
+}

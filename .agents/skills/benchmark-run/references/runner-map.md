@@ -5,6 +5,7 @@
 | Workload | Controller | Lifecycle |
 |---|---|---|
 | Native profile benchmark | benchmark-owned controller | `provision`, `doctor`, `prepare`, `run`, `status`, `stop`, `finalize` as declared |
+| SWE-EVO native repository benchmark | `experiments/swe_evo/experiment.py` | SForge worker/process judge, patch freeze, then SWE-EVO official final judge |
 | Standalone artifact task | `experiments/benchmark_compare/experiment.py` | low-level `prepare`, `run`; normally reached through matrix controller |
 | Benchmark x condition x seed matrix | `experiments/benchmark_campaign/experiment.py` | `list`, `prepare`, `run`, `status`, `summarize` |
 | OpenEvolve examples | `experiments/openevolve_compare/experiment.py` | single/batch prepare, run, report |

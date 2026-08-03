@@ -274,11 +274,54 @@
       ]
     },
     {
+      "id": "swe-evo",
+      "display_name": "SWE-EVO",
+      "kind": "benchmark",
+      "gate_set": "benchmark",
+      "priority": 7,
+      "repositories": [
+        {
+          "role": "benchmark-data-and-official-harness",
+          "upstream_url": "https://github.com/SWE-EVO/SWE-EVO",
+          "fork_url": null,
+          "tracking_branch": "main",
+          "license": "MIT"
+        }
+      ],
+      "data_url": "https://github.com/SWE-EVO/SWE-EVO/tree/main/hf_out/hf_dataset",
+      "local_path": "third_party/swe-evo",
+      "docker_requirement": "required",
+      "docker_scope": "SForge runs network-isolated Codex or Goal Plus workers and a non-official process judge. SWE-EVO's vendored SWE-bench harness alone owns final resolved, patch-apply, and fix-rate metrics in fresh containers.",
+      "stages": {
+        "source_forked": "partial",
+        "environment": "partial",
+        "official_verifier": "pass",
+        "legacy_agent_smoke": "todo",
+        "plain_codex": "todo",
+        "goal_plus_codex": "pass",
+        "matched_baseline": "todo",
+        "campaign_ready": "partial"
+      },
+      "evidence": [
+        "evidence/environment/2026-08-03-swe-evo-gpu77-doctor.json",
+        "evidence/environment/2026-08-03-swe-evo-official-gold-smoke.json",
+        "evidence/runs/2026-08-03-swe-evo-gpu77-goal-plus-smoke/comparison.json",
+        "evidence/runs/2026-08-03-swe-evo-gpu77-goal-plus-smoke/goal-plus-live-status.json",
+        "evidence/runs/2026-08-03-swe-evo-gpu77-goal-plus-smoke/evaluator/result.json",
+        "evidence/runs/2026-08-03-swe-evo-gpu77-goal-plus-smoke/evaluator/model.patch"
+      ],
+      "next_action": "Provision the remaining exact upstream images on gpu77, freeze the full-48 image lock, and then run a matched Plain Codex versus Goal Plus campaign.",
+      "blockers": [
+        "The public benchmark is tracked read-only because no accessible project fork is currently available; source_forked therefore cannot pass.",
+        "The one-task GHCR smoke is frozen and passes on gpu77, but the complete 48-task image panel has not been provisioned or digest-locked there yet."
+      ]
+    },
+    {
       "id": "edgebench",
       "display_name": "EdgeBench open-source subset",
       "kind": "benchmark",
       "gate_set": "benchmark",
-      "priority": 7,
+      "priority": 8,
       "repositories": [
         {
           "role": "benchmark-harness",
@@ -318,7 +361,7 @@
       "display_name": "PERFOPT-Bench",
       "kind": "benchmark",
       "gate_set": "benchmark",
-      "priority": 8,
+      "priority": 9,
       "repositories": [
         {
           "role": "artifact",

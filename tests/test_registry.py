@@ -28,6 +28,7 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(requirements["heurigym"], "not_required")
         self.assertEqual(requirements["autolab-cpu"], "mixed")
         self.assertEqual(requirements["edgebench"], "required")
+        self.assertEqual(requirements["swe-evo"], "required")
         self.assertEqual(requirements["openevolve"], "not_required")
 
 

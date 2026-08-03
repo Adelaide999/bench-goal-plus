@@ -43,9 +43,21 @@ class DatasetCatalogTest(unittest.TestCase):
         self.assertIn("arvo:47101", panel["task_ids"])
         self.assertIn("oss-fuzz:385167047", panel["task_ids"])
 
+    def test_swe_evo_has_pinned_ghcr_smoke_without_freezing_development_panel(self) -> None:
+        smoke = resolve_panel("swe-evo", "ghcr-smoke-2")
+        development = resolve_panel("swe-evo", "development-12")
+        self.assertEqual(smoke["status"], "frozen")
+        self.assertEqual(len(smoke["task_ids"]), 2)
+        self.assertEqual(development["status"], "selection_pending")
+        self.assertEqual(development["task_ids"], [])
+
     def test_frozen_panel_requires_revision_and_explicit_tasks(self) -> None:
         catalog = copy.deepcopy(load_catalog())
-        panel = catalog["datasets"][0]["panels"][0]
+        dataset = next(
+            item for item in catalog["datasets"] if item["id"] == "swe-evo"
+        )
+        dataset["source"]["revision"] = None
+        panel = next(item for item in dataset["panels"] if item["id"] == "development-12")
         panel["status"] = "frozen"
         errors = validate_catalog(catalog)
         self.assertTrue(any("source.revision" in error for error in errors))

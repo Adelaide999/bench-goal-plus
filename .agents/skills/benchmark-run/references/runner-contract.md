@@ -33,7 +33,10 @@ target-name branches to the CLI.
 | `provision_mode` | `eager`, `lazy`, `external`, `none` | When provisioning happens |
 | `scope` | text | What can and cannot run without Docker |
 
-`runner/eager` means the native controller exposes provision/doctor, as EdgeBench does.
+`runner/eager` means the native controller exposes provision/doctor, as EdgeBench and SWE-EVO do.
+For SWE-EVO, SForge owns worker/process-judge images while the vendored SWE-bench harness owns a
+second fresh-container final evaluation; the process judge must never be exported as the official
+score.
 `adapter/eager` requires `provision_environment(upstream_root)` and
 `doctor_environment(upstream_root)` hooks. `adapter/lazy` keeps container creation in the existing
 evaluator path. `external` means the Agent checks the prerequisite but does not create it.

@@ -1,0 +1,13 @@
+diff --git a/requests/models.py b/requests/models.py
+index cb44eddd909489f022364d1cfc1a13d7d258b1f1..25cd27d032d06134777341623cf1c4e507f5022d 100644
+--- a/requests/models.py
++++ b/requests/models.py
+@@ -349,7 +349,7 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
+         # Don't do any URL preparation for non-HTTP schemes like `mailto`,
+         # `data`, `http+unix` etc to work around exceptions from `url_parse`,
+         # which handles RFC 3986 only.
+-        if ':' in url and not url.lower().startswith(('http://', 'https://')):
++        if ':' in url and not url.lower().startswith('http'):
+             self.url = url
+             return
+ 

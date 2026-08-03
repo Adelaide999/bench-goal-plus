@@ -42,8 +42,9 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         }
         self.assertEqual(common, set(adapter_modules()))
         self.assertEqual(self.catalog.targets["edgebench"].runner_id, "edgebench-native")
+        self.assertEqual(self.catalog.targets["swe-evo"].runner_id, "swe-evo-native")
         self.assertIn("openevolve-cpu-portable", self.catalog.targets)
-        self.assertEqual(len(self.catalog.runners), 3)
+        self.assertEqual(len(self.catalog.runners), 4)
 
     def test_every_target_has_an_explicit_docker_owner_and_mode(self) -> None:
         for target in self.catalog.targets.values():
@@ -92,6 +93,23 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertIn("experiments/edgebench/experiment.py provision", rendered)
         self.assertIn("--cell-concurrency 2", rendered)
         self.assertIn("--detach", rendered)
+
+    def test_swe_evo_preset_uses_its_own_native_profile_directory(self) -> None:
+        spec = self.agent.resolve_spec(preset_id="swe-evo-goal-plus-smoke")
+        self.assertEqual(spec.target_ids, ("swe-evo",))
+        self.assertEqual(spec.methods, ("goal-plus-codex",))
+        self.assertEqual(spec.concurrency(), {"T": 900, "K": 2, "C": 1, "R": 1})
+        result = self.agent.start(
+            spec,
+            skip_bootstrap=False,
+            skip_provision=False,
+            prepare_only=False,
+            foreground=False,
+            dry_run=True,
+        )
+        rendered = "\n".join(result["commands"])
+        self.assertIn("experiments/swe_evo/experiment.py provision", rendered)
+        self.assertIn("--profile ghcr-smoke-1", rendered)
 
     def test_common_matrix_defaults_controller_concurrency_to_one(self) -> None:
         spec = self.agent.resolve_spec(

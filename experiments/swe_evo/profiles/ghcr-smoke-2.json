@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "ghcr-smoke-2",
+  "benchmark_id": "swe-evo",
+  "upstream_commit": "9b83d5af943ba7a17567336f5b18239f73960219",
+  "dataset_sha256": "74e7c63160ada4ceba71d5d89a9bb7c9794f4574b384458d546eb65cdb730520",
+  "task_ids": [
+    "psf__requests_v2.12.2_v2.12.3",
+    "scikit-learn__scikit-learn_0.20.1_0.20.2"
+  ],
+  "source_image_digests": {
+    "psf__requests_v2.12.2_v2.12.3": "sha256:41767104d2506d564071a2ebf41e74f5c664dc155d75a90e91fa1d3d78aad534",
+    "scikit-learn__scikit-learn_0.20.1_0.20.2": "sha256:0ee79f6026ac19827cf362efbb06d2fcea9f2b29547521d98c90fe746b896cc2"
+  },
+  "methods": ["plain-codex", "goal-plus-codex"],
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "medium",
+  "wall_time_seconds": 1800,
+  "concurrency": 2,
+  "cell_concurrency": 1,
+  "worker_runtime_seconds": 1500,
+  "eval_interval_seconds": 300,
+  "judge_port": 28081,
+  "work_cpu_limit": 4,
+  "work_mem_limit": "16g",
+  "judge_cpu_limit": 2,
+  "judge_mem_limit": "8g",
+  "official_evaluator_timeout_seconds": 1800,
+  "image_provision_concurrency": 1
+}

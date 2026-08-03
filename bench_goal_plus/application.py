@@ -507,11 +507,16 @@ class BenchmarkAgent:
             result["resume"] = command_text([*base, "resume", "--campaign", str(campaign.path)])
         return result
 
-    @staticmethod
-    def _validate_preset_profile(preset: Any) -> None:
+    def _validate_preset_profile(self, preset: Any) -> None:
         if not preset.expected_profile or not preset.profile:
             return
-        profile = read_json(ROOT / "experiments/edgebench/profiles" / f"{preset.profile}.json")
+        if len(preset.benchmarks) != 1:
+            raise ContractError(
+                f"preset {preset.preset_id} with a frozen native profile must select one target"
+            )
+        target = self.catalog.targets[preset.benchmarks[0]]
+        runner = self.catalog.runners[target.runner_id]
+        profile = read_json(runner.controller.parent / "profiles" / f"{preset.profile}.json")
         observed = {
             "task_count": len(profile.get("task_ids", [])),
             "methods": profile.get("methods"),

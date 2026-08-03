@@ -1,0 +1,86 @@
+{
+  "actual_worker_launch_count": 2,
+  "agent_session_count": 2,
+  "bound_worker_handles": [
+    {
+      "agent_session_id": "agent_20260803_033408_6a0194cc_001",
+      "external_id": "019fc5b1-2e16-7de2-9ffb-e1d0b4e83e46",
+      "host": "codex",
+      "task_name": "/root/search_agent_20260803_033408_6a0194cc_001"
+    },
+    {
+      "agent_session_id": "agent_20260803_033408_6a0194cc_002",
+      "external_id": "019fc5b0-c791-7d30-9b92-248f1e6206bc",
+      "host": "codex",
+      "task_name": "/root/search_agent_20260803_033408_6a0194cc_002"
+    }
+  ],
+  "candidate_count": 2,
+  "candidate_ids": [
+    "c001",
+    "c002"
+  ],
+  "captured_at": "2026-08-03T03:42:52.433521Z",
+  "goal_statuses": [
+    {
+      "goal_plus_id": "gp_0001",
+      "phase": "final_audit",
+      "status": "complete",
+      "updated_at": "2026-08-03T03:42:15Z"
+    }
+  ],
+  "promoted_candidate_ids": [
+    "c001"
+  ],
+  "schema_version": 1,
+  "search_run_states": {
+    "promoted": 1
+  },
+  "selected_candidate_ids": [
+    "c001"
+  ],
+  "terminal_ready": true,
+  "verifier_candidate_ids": [
+    "c001",
+    "c002"
+  ],
+  "verifier_ledger": [
+    {
+      "aggregate_score": 100.0,
+      "candidate_id": "c001",
+      "created_at": "2026-08-03T03:37:40Z",
+      "disposition": "keep",
+      "iteration": 1,
+      "process_passed": true,
+      "run_id": "run_20260803_033408_6a0194cc"
+    },
+    {
+      "aggregate_score": 100.0,
+      "candidate_id": "c002",
+      "created_at": "2026-08-03T03:38:05Z",
+      "disposition": "keep",
+      "iteration": 1,
+      "process_passed": true,
+      "run_id": "run_20260803_033408_6a0194cc"
+    }
+  ],
+  "worker_sessions": [
+    {
+      "agent_session_id": "agent_20260803_033408_6a0194cc_001",
+      "candidate_id": "c001",
+      "host": "codex",
+      "run_id": "run_20260803_033408_6a0194cc",
+      "updated_at": "2026-08-03T03:38:55Z",
+      "verifier_runs": 1
+    },
+    {
+      "agent_session_id": "agent_20260803_033408_6a0194cc_002",
+      "candidate_id": "c002",
+      "host": "codex",
+      "run_id": "run_20260803_033408_6a0194cc",
+      "updated_at": "2026-08-03T03:38:55Z",
+      "verifier_runs": 1
+    }
+  ],
+  "worker_verifier_runs": 2
+}

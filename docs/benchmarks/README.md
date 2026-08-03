@@ -42,6 +42,7 @@ Plain Codex / Goal Plus 入口，而不是“仓库能下载”或“代码看�
 | ALE-Bench Lite | `ahc027` | official-lite evaluator、Plain Codex、Goal Plus + Codex 已完成真实 E2E | Lite 其余 9 题尚未 campaign-ready |
 | Frontier-CS | `problem-0` | pinned judge image、Plain Codex、Goal Plus + Codex 已完成真实 E2E | 其余题尚未 materialize |
 | EdgeBench | VLIW Kernel Optimization | SForge work/judge、Plain Codex、Goal Plus lifecycle E2E 已通 | 8–12 个 gradient subset 尚未冻结 |
+| SWE-EVO | GHCR smoke（requests + scikit-learn） | SForge worker/process judge + 独立官方终局 evaluator | 全 48 题仍受 Docker Hub 镜像可达性阻塞 |
 
 这些任务可以在当前有 Docker 的 Mac 上跑，但不是 host-only 路径。启动前必须
 确认 `docker info` 成功，并保留镜像、冷启动和 evaluator 时间。
@@ -85,6 +86,7 @@ EvoX 的 runtime。
 | [SkyDiscover Math/ADRS task pack](skydiscover-task-packs.md) | **需要** | 非 Torch 19 tags：逻辑 `8.57 GB`、实际新增约 `2.49 GB`、建议 `10 GB` | Circle Packing、HotPotQA 和 Image Gen 仍有 host 路径 |
 | Frontier-CS | **需要** | 共用 judge `1.27 GB`；建议 `2 GB` | 当前 problem-0 评分需要 pinned judge image |
 | EdgeBench | **需要** | VLIW work + judge 逻辑 `2.23 GB`；单 case 建议 `5 GB` | SForge 需要 work container 和独立 hidden judge |
+| [SWE-EVO](swe-evo.md) | **需要** | 按题复用官方 source image，另建轻量 SForge work/judge 层；完整空间待 77 实测 | 无 Docker 不能冻结 workspace patch 或运行官方测试 |
 | PERFOPT-Bench | 无法判定 | 未知 | executable artifact 不可访问；不是“不需要 Docker” |
 
 `local_examples/vliw_kernel_optimization` 可在无 Docker 主机运行 public 和
@@ -108,6 +110,7 @@ Docker 的机器只适用上表“不需要”路径。模型延迟、候选超�
 | SwarmResearch 论文任务集 | 15：Math 5 + ADRS 5 + ALE 5 | Circle Packing 已通；ADRS/ALE worker 布局待修 | evaluator-only 约 2–6 小时 | 公开轨迹任务 wall span 串行合计约 76.9 小时 |
 | Frontier-CS Algorithmic | 当前固定版本 188 | problem-0 已通；其余 task 尚未 materialize | reference/verifier 全扫约 1–3 小时 | 单次 agent/题约 10–30 小时；20 calls/题可能 100–300 小时 |
 | EdgeBench open-source subset | 51；先选 8–12 gradient cases | VLIW 的环境、Plain Codex、Goal Plus 已通；统一 controller 已接入 | 单候选/题通常 10 分钟–2 小时，取决于任务 | 正式 profile 建议每题 1–2 小时；8–12 题约 16–48 method-hours |
+| SWE-EVO | 48；已冻结 2 题 GHCR smoke | native controller 已接入；全量镜像尚未就绪 | 单候选/题加官方终局测试约 20–90 分钟 | 默认 2 小时/题；完整 Plain + Goal Plus 约 192 method-hours（未计 K 内部并发） |
 
 这些数字不应直接拿来横向比较方法速度：ALE 的一次 candidate 会跑多个 generated cases，AutoLab 的“2 小时”是长时 agent budget，Swarm 的公开 wall span包含并行研究者，而 Frontier-CS 的题量远大于其他集合。公平实验最终应以 **evaluator calls + wall time + model calls/tokens** 三组预算同时报告。
 
@@ -126,6 +129,7 @@ Goal Plus 的逐项接入改造、`K/E/Q` 三层并发和 matched-budget baselin
 | [SwarmResearch 15](swarmresearch-15.md) | 多 lineage / swarm 搜索是否能在大搜索空间中累积有效发现 | 26 圆装箱 |
 | [Frontier-CS Algorithmic](frontier-cs-algorithmic.md) | 面向开放算法研究问题生成可执行程序，并从连续 partial score 改进 | Polyomino Packing |
 | [EdgeBench](edgebench.md) | 在真实隔离 artifact + hidden judge 上利用连续 feedback 持续优化 | VLIW Kernel Optimization |
+| [SWE-EVO](swe-evo.md) | 修复跨版本演进中的真实仓库回归，并由新版本测试验证补丁 | requests 2.12.2 → 2.12.3 |
 
 PERFOPT-Bench 因缺少可执行公开 artifact 继续挂起，不进入本文档集。
 SkyDiscover 是 runtime，EvoX/OpenEvolve 是搜索方法，因此不作为 benchmark
@@ -148,5 +152,6 @@ SkyDiscover 是 runtime，EvoX/OpenEvolve 是搜索方法，因此不作为 benc
 6. **SwarmResearch 15**：修好统一 evaluator/worker 后作为最终大实验 substrate。
 7. **Frontier-CS 选 10 题**：保留 188 题 track 作为题库，不在本地对所有方法全扫。
 8. **EdgeBench 冻结 8–12 个 gradient cases**：Mac 只做单题接线，正式多方法 campaign 放到 Linux。
+9. **SWE-EVO 先跑 2 题 GHCR smoke**：完整 48 题只在 Linux 且 exact images 全部通过 doctor 后启动。
 
 空间与 Linux 节点规划见 [Docker 镜像空间计划](../docker-storage-plan.md)，工程门禁以 [`benchmarks/registry.json`](../../benchmarks/registry.json) 为唯一状态源。

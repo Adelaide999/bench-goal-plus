@@ -16,6 +16,20 @@
       }
     },
     {
+      "id": "swe-evo-native",
+      "kind": "native-profile",
+      "controller": "experiments/swe_evo/experiment.py",
+      "capabilities": {
+        "provision": true,
+        "detach": true,
+        "stop": true,
+        "resume": false,
+        "cell_concurrency": true,
+        "official_evaluator": true,
+        "resume_semantics": "stopped campaigns preserve evidence; retry uses a new campaign and fresh task images"
+      }
+    },
+    {
       "id": "common-matrix",
       "kind": "common-matrix",
       "controller": "experiments/benchmark_campaign/experiment.py",
@@ -45,6 +59,18 @@
     }
   ],
   "targets": [
+    {
+      "id": "swe-evo",
+      "runner": "swe-evo-native",
+      "adapter": null,
+      "bootstrap_targets": ["swe_evo", "edgebench"],
+      "docker": {
+        "requirement": "required",
+        "owner": "runner",
+        "provision_mode": "eager",
+        "scope": "SForge owns isolated worker and process-judge containers; SWE-EVO's vendored SWE-bench harness owns fresh-container final scoring."
+      }
+    },
     {
       "id": "edgebench",
       "runner": "edgebench-native",
@@ -143,6 +169,22 @@
     }
   ],
   "presets": [
+    {
+      "id": "swe-evo-goal-plus-smoke",
+      "description": "One GHCR-hosted SWE-EVO task through Goal Plus and the official final evaluator.",
+      "benchmarks": ["swe-evo"],
+      "profile": "ghcr-smoke-1",
+      "campaign_id_template": "swe-evo-goal-plus-gpt-5-6-sol-medium-15m-k2-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-codex"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 900,
+        "concurrency": 2,
+        "cell_concurrency": 1
+      }
+    },
     {
       "id": "edgebench-codex-2h",
       "description": "Example full 51-task Plain Codex campaign; not a benchmark-run default.",

@@ -102,6 +102,40 @@ def edgebench_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def swe_evo_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for cell in payload.get("cells", []):
+        observations = cell.get("observations") or [None]
+        for observation in observations:
+            result = observation or {}
+            freeze = result.get("freeze") or {}
+            rows.append(
+                {
+                    "task_id": cell.get("task_id"),
+                    "method": cell.get("method"),
+                    "model": cell.get("model"),
+                    "reasoning_effort": cell.get("reasoning_effort"),
+                    "trajectory": result.get("trajectory"),
+                    "state": result.get("state"),
+                    "official": result.get("official", False),
+                    "resolved": result.get("resolved"),
+                    "fix_rate": result.get("fix_rate"),
+                    "patch_applied": result.get("patch_applied"),
+                    "fail_to_pass_success": result.get("fail_to_pass_success"),
+                    "fail_to_pass_failure": result.get("fail_to_pass_failure"),
+                    "pass_to_pass_failure": result.get("pass_to_pass_failure"),
+                    "patch_sha256": freeze.get("patch_sha256"),
+                    "patch_bytes": freeze.get("patch_bytes"),
+                    "integrity_ok": freeze.get("integrity_ok"),
+                    "selection_policy": cell.get("selection_policy"),
+                    "wall_time_seconds": cell.get("wall_time_seconds"),
+                    "live_search_concurrency_k": cell.get("live_search_concurrency"),
+                    "error": result.get("error"),
+                }
+            )
+    return rows
+
+
 def generic_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
     for record in payload.get("records", []):
@@ -159,7 +193,9 @@ def load_campaign(campaign: Path) -> tuple[str, dict[str, Any], Path | None]:
     comparison = campaign / "comparison.json"
     summary = campaign / "campaign-summary.json"
     if comparison.is_file():
-        return "edgebench", read_json(comparison), campaign / "comparison.md"
+        payload = read_json(comparison)
+        kind = "swe-evo" if payload.get("benchmark_id") == "swe-evo" else "edgebench"
+        return kind, payload, campaign / "comparison.md"
     if summary.is_file():
         return "campaign", read_json(summary), campaign / "campaign-summary.md"
     raise FileNotFoundError(
@@ -354,7 +390,13 @@ def safe_filename(value: str) -> str:
 def export(campaign: Path, markdown_out: Path | None, xlsx_out: Path | None) -> dict[str, str]:
     kind, payload, source_markdown = load_campaign(campaign)
     campaign_id = str(payload.get("campaign_id") or campaign.name)
-    rows = edgebench_rows(payload) if kind == "edgebench" else generic_rows(payload)
+    rows = (
+        edgebench_rows(payload)
+        if kind == "edgebench"
+        else swe_evo_rows(payload)
+        if kind == "swe-evo"
+        else generic_rows(payload)
+    )
     markdown_path = markdown_out or campaign / "report.md"
     xlsx_path = xlsx_out or campaign / f"{safe_filename(campaign_id)}.xlsx"
     if source_markdown and source_markdown.is_file():
