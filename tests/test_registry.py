@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import unittest
 from pathlib import Path
 
@@ -41,15 +42,72 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(
             set(item["stages"]), set(data["gate_sets"]["benchmark_methods"])
         )
-        self.assertEqual(item["stages"]["plain_codex"], "partial")
-        self.assertEqual(item["stages"]["plain_pi"], "partial")
+        self.assertEqual(item["stages"]["plain_codex"], "pass")
+        self.assertEqual(item["stages"]["plain_pi"], "pass")
         self.assertEqual(item["stages"]["goal_plus_codex"], "n/a")
         self.assertEqual(item["stages"]["goal_plus_pi"], "pass")
         self.assertEqual(item["stages"]["official_verifier"], "pass")
         self.assertEqual(item["stages"]["campaign_ready"], "partial")
+        self.assertEqual(
+            set(item["stage_evidence"]),
+            {"official_verifier", "plain_codex", "plain_pi", "goal_plus_pi"},
+        )
         self.assertTrue(item["evidence"])
         for relative_path in item["evidence"]:
             self.assertTrue((ROOT / relative_path).is_file(), relative_path)
+
+        for stage, method in {
+            "plain_codex": "plain-codex",
+            "plain_pi": "plain-pi",
+            "goal_plus_pi": "goal-plus-pi",
+        }.items():
+            paths = item["stage_evidence"][stage]
+            summary_path = next(path for path in paths if path.endswith("summary.json"))
+            summary = json.loads((ROOT / summary_path).read_text())
+            self.assertEqual(summary["status"], "completed")
+            self.assertEqual(summary["method"]["id"], method)
+            self.assertEqual(
+                {key: summary["budget"][key] for key in ("T", "K", "C", "R")},
+                {"T": 1800, "K": 1, "C": 1, "R": 1},
+            )
+            self.assertEqual(summary["execution"]["official_evaluator_calls"], 1)
+            self.assertTrue(summary["execution"]["agent_container_removed"])
+            self.assertTrue(summary["result"]["score_valid"])
+            self.assertTrue(summary["result"]["patch_non_empty"])
+            self.assertIs(summary["result"]["resolved"], True)
+            self.assertIs(summary["result"]["patch_successfully_applied"], True)
+
+        for relative_path in item["stage_evidence"]["official_verifier"]:
+            report = json.loads((ROOT / relative_path).read_text())
+            result = report["sympy__sympy-16886"]
+            self.assertIs(result["resolved"], True)
+            self.assertIs(result["patch_successfully_applied"], True)
+
+    def test_benchmark_method_pass_requires_stage_evidence(self) -> None:
+        data = STATUS.load_registry()
+        item = next(
+            item for item in data["items"] if item["id"] == "swe-bench-verified"
+        )
+        del item["stage_evidence"]["plain_pi"]
+
+        self.assertIn(
+            "swe-bench-verified.plain_pi: pass requires method-specific stage_evidence",
+            STATUS.validate(data),
+        )
+
+    def test_stage_evidence_must_be_in_flat_evidence_list(self) -> None:
+        data = STATUS.load_registry()
+        item = next(
+            item for item in data["items"] if item["id"] == "swe-bench-verified"
+        )
+        path = item["stage_evidence"]["plain_codex"][0]
+        item["evidence"].remove(path)
+
+        self.assertIn(
+            "swe-bench-verified.plain_codex: stage evidence is absent from the "
+            f"item evidence list: {path}",
+            STATUS.validate(data),
+        )
 
 
 if __name__ == "__main__":

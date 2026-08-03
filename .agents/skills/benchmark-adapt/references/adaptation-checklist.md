@@ -42,6 +42,9 @@
 - Persist resolved source commit, task/evaluator identity, commands without secrets, native score/direction, wall time, calls/tokens with coverage, and terminal/incomplete reason.
 - Ensure `scripts/benchmark_report.py` can consume the final JSON shape or add a normalization path plus tests.
 - Record official verifier readiness and every declared `supported_methods` entry separately. Split rows when auth/provider paths differ, even if they share an agent family.
+- Treat `finish` output as campaign-local evidence, not a registry promotion. For each accepted real
+  E2E, commit a reviewed and sanitized minimum under `evidence/runs/`, map it to the exact registry
+  stage through `stage_evidence`, and update that stage in the same acceptance change.
 
 ## 7. Gates
 

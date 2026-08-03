@@ -18,6 +18,11 @@
 
 Never replace a missing value with zero. JSON remains the machine source of truth; XLSX is a loss-minimized review view, not a new source of truth.
 
+Campaign-local `finish` artifacts do not themselves change benchmark readiness. A new
+benchmark/method acceptance must separately project the reviewed, secret-free minimum into
+`evidence/runs/` and bind it to the exact registry stage; that contributor workflow is owned by
+`benchmark-adapt`.
+
 ## EdgeBench filename
 
 The fixed launcher creates ids like:

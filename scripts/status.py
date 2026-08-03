@@ -83,9 +83,50 @@ def validate(data: dict) -> list[str]:
                 ):
                     errors.append(f"{item_id}: tracking_branch must be a safe branch name")
 
-        for evidence in item.get("evidence", []):
+        evidence_entries = item.get("evidence", [])
+        evidence_set = set(evidence_entries)
+        for evidence in evidence_entries:
             if not (ROOT / evidence).is_file():
                 errors.append(f"{item_id}: missing evidence file {evidence}")
+
+        stage_evidence = item.get("stage_evidence")
+        if stage_evidence is not None and not isinstance(stage_evidence, dict):
+            errors.append(f"{item_id}: stage_evidence must be an object")
+            stage_evidence = {}
+        if isinstance(stage_evidence, dict):
+            for gate, paths in stage_evidence.items():
+                if gate not in item.get("stages", {}):
+                    errors.append(
+                        f"{item_id}: stage_evidence references unknown stage {gate!r}"
+                    )
+                    continue
+                if not isinstance(paths, list) or not paths:
+                    errors.append(
+                        f"{item_id}.{gate}: stage_evidence must be a non-empty list"
+                    )
+                    continue
+                for evidence in paths:
+                    if evidence not in evidence_set:
+                        errors.append(
+                            f"{item_id}.{gate}: stage evidence is absent from the "
+                            f"item evidence list: {evidence}"
+                        )
+
+        if gate_set == "benchmark_methods":
+            claim_gates = expected - {
+                "source_forked",
+                "environment",
+                "matched_baseline",
+                "campaign_ready",
+            }
+            for gate in sorted(claim_gates):
+                if (
+                    item.get("stages", {}).get(gate) == "pass"
+                    and not (stage_evidence or {}).get(gate)
+                ):
+                    errors.append(
+                        f"{item_id}.{gate}: pass requires method-specific stage_evidence"
+                    )
 
     return errors
 

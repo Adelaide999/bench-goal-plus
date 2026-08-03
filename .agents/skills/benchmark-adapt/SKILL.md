@@ -43,6 +43,12 @@ description: 把新 benchmark、task family，或现有 runner 的新 method/pro
 分别为 `pass`/`partial`/`fail`，并逐项链接命令和 evidence。即使底层 agent 相同，只要
 OAuth、API credential、provider registry 或 wire API 的执行路径不同，也要分行记录。
 
+`finish` 的 `reported` 只表示 campaign-local JSON、Markdown 和 XLSX 已生成，不会自动提升
+source registry。真实 E2E 通过后，必须在同一验收变更中把经过审计和脱敏的最小证据投影到
+`evidence/runs/`，通过 registry `stage_evidence` 绑定到 exact method，再把该 method 提升为
+`pass`。不得让已有完整 PASS evidence 的 method 继续停在 `partial`，也不得创建没有
+method-specific evidence 的 `pass`。
+
 ## Gotchas
 
 - registry 中“存在”不等于 E2E ready；没有实际命令/evidence 只能是 `partial`。

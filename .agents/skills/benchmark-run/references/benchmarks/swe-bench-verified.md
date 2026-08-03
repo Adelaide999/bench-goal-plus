@@ -33,10 +33,14 @@ The Luna profile materializes a campaign-local Pi `models.json` containing only 
 socket bridge as Plain Codex; doctor must pass host Responses, task-container Responses, and Pi's
 exact `bench-openai/gpt-5.6-luna` model listing before launch.
 
-The archived Linux/amd64 `sympy__sympy-16886` Luna/high smoke passes the complete `K=1,C=1`
-Goal Plus + Pi and official-harness contract. Its minimal evidence is
-[`summary.json`](../../../../../evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/summary.json).
-Plain Codex, Plain Pi, `K>1`, other instances, and split-wide readiness remain separate claims.
+The archived Linux/amd64 `sympy__sympy-16886` smokes pass the complete `K=1,C=1`
+official-harness contract for
+[Plain Codex](../../../../../evidence/runs/2026-08-02-swe-bench-verified-plain-codex-sol/summary.json),
+[Plain Pi](../../../../../evidence/runs/2026-08-02-swe-bench-verified-plain-pi-glm/summary.json),
+and [Goal Plus + Pi](../../../../../evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/summary.json).
+The two Plain development smokes preserve their dirty-at-prepare provenance and later acceptance
+commit instead of rewriting it. `K>1`, other instances, and split-wide readiness remain separate
+claims.
 
 ## Completion evidence
 
@@ -92,6 +96,11 @@ Run the profiled `check`, then `setup --skip-provision`, then `plan`. Before `la
 resolved confirmation block required by the benchmark-run Skill. Because execution is foreground
 and non-resumable, run the method campaigns sequentially. At terminal state, use unified
 `status` and `finish`; do not invoke the native controller as a second public CLI.
+
+`finish` creates campaign-local final evidence and reports; it does not edit the source registry.
+During adaptation acceptance, project the reviewed, secret-free minimum into `evidence/runs/`, map
+it to the exact method through registry `stage_evidence`, and promote that method in the same
+change. A `benchmark_methods` pass without method-specific evidence fails repository validation.
 
 Domestic mirrors are transport fallbacks only. They may not change the dataset revision, official
 checkout branch, image tag, image ID, or evaluator implementation.

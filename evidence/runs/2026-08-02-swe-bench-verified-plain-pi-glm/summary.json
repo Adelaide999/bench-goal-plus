@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "swe_bench_verified_official_harness_smoke",
+  "run_date": "2026-08-02",
+  "status": "completed",
+  "campaign_id": "swe-bench-verified-sympy-16886-plain-pi-30m-k1-c1-r1-20260802-2316",
+  "task": {
+    "benchmark": "swe-bench-verified",
+    "instance_id": "sympy__sympy-16886",
+    "dataset": "SWE-bench/SWE-bench_Verified",
+    "dataset_revision": "91aa3ed51b709be6457e12d00300a6a596d4c6a3",
+    "base_commit": "c50643a49811e9fe2f4851adff4313ad46f7325e",
+    "metric": "resolved",
+    "direction": "maximize"
+  },
+  "method": {
+    "id": "plain-pi",
+    "model": "zai/glm-5.2",
+    "reasoning_effort": "medium",
+    "provider": "zai",
+    "auth_mode": "provider-api",
+    "credential_reference": "ZAI_API_KEY"
+  },
+  "budget": {
+    "T": 1800,
+    "K": 1,
+    "C": 1,
+    "R": 1
+  },
+  "source": {
+    "bench_goal_plus_prepare_commit": "c29ce7174abe0fa1e182c949779aba25d86a5836",
+    "bench_goal_plus_acceptance_commit": "904cae6415c4af173f644da3d52959db499bd9cc",
+    "bench_goal_plus_dirty_at_prepare": true,
+    "dirty_at_prepare_explanation": "The SWE-bench native runner was exercised before its implementation commit; the resulting runner changes were committed later as 904cae6. This development-smoke provenance is preserved rather than rewritten.",
+    "swebench_commit": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9"
+  },
+  "environment": {
+    "platform": "linux/amd64",
+    "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-16886:latest",
+    "inventory_check": "pass",
+    "full_doctor": "pass",
+    "provider_auth": "pass",
+    "image_base_tree_match": "pass"
+  },
+  "execution": {
+    "agent_runtime_seconds": 295.3280958668329,
+    "agent_total_runtime_seconds": 297.4805474001914,
+    "agent_setup_runtime_seconds": 1.2038147440180182,
+    "finalization_grace_seconds": 0.9486253780778497,
+    "evaluator_runtime_seconds": 42.37985552800819,
+    "official_evaluator_calls": 1,
+    "agent_container_removed": true,
+    "credentials_persisted": false,
+    "usage": {
+      "coverage": "unavailable"
+    }
+  },
+  "result": {
+    "resolved": true,
+    "patch_successfully_applied": true,
+    "score_valid": true,
+    "patch_non_empty": true,
+    "fail_to_pass": [
+      "test_encode_morse"
+    ],
+    "pass_to_pass_failures": []
+  },
+  "artifacts": {
+    "sanitized_agent_run": "evidence/runs/2026-08-02-swe-bench-verified-plain-pi-glm/agent-run.json",
+    "model_patch": "evidence/runs/2026-08-02-swe-bench-verified-plain-pi-glm/model.patch",
+    "official_report": "evidence/runs/2026-08-02-swe-bench-verified-plain-pi-glm/official-report.json",
+    "full_run_directory": "runs/swe-bench-verified/swe-bench-verified-sympy-16886-plain-pi-30m-k1-c1-r1-20260802-2316",
+    "full_run_directory_policy": "ignored and preserved locally",
+    "sha256": {
+      "raw_agent_run_snapshot": "75909d73b483003f9b76e700081a2fdbc9ebc73afeb44dd4e36dc583fa5303c6",
+      "sanitized_agent_run": "bc106d1f3d9352aaac41b2a7a2ac6461d0925f51eff4d8626376637f8449e14b",
+      "final_campaign_manifest": "ab332df205595efd9824de859025f03d4fd69ee654cbfbf6be2d450b58b9894e",
+      "final_campaign_summary": "b3de9acc3bdfba89470e1b1ac6d15cb56db78bd2247c59e3f4b5393757810688",
+      "model_patch": "fe05aeab62cedc8ca00c2813bd3b09a3f77655b3bda0b0e43278639b84f7303b",
+      "raw_official_report": "54d6f49054774b7bd92b3ec99c2fc58116fa8376214cf3be839c5c2c78d24096",
+      "archived_official_report": "64649cc77425045f791e259aaee534728a05cbba51dd8c199d0878cf37de1114"
+    }
+  },
+  "reproduction": {
+    "check": "python3 scripts/bench.py check --preset swe-bench-verified-sympy-16886-pi-smoke",
+    "plan": "python3 scripts/bench.py plan --preset swe-bench-verified-sympy-16886-pi-smoke --campaign-id <new-campaign-id> --skip-bootstrap --skip-provision",
+    "launch": "python3 scripts/bench.py launch --preset swe-bench-verified-sympy-16886-pi-smoke --campaign-id <new-campaign-id> --skip-bootstrap --skip-provision",
+    "status": "python3 scripts/bench.py status --campaign runs/swe-bench-verified/<new-campaign-id>",
+    "finish": "python3 scripts/bench.py finish --campaign runs/swe-bench-verified/<new-campaign-id>"
+  },
+  "limitations": [
+    "This smoke proves the registered Plain Pi K=1, C=1 path for one Linux/amd64 Verified instance, not the 500-instance split.",
+    "The development run preceded implementation commit 904cae6; campaign_ready remains partial and the source provenance caveat is retained.",
+    "Pi token usage was unavailable and has not been converted to zero.",
+    "K>1, C>1, detach, stop, and resume are not claimed for this runner."
+  ],
+  "secret_scan": {
+    "scope": "committed evidence projection",
+    "result": "clean",
+    "credential_values_persisted": false
+  }
+}

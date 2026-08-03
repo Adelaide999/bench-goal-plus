@@ -16,10 +16,10 @@ repository lifecycle through `python3 scripts/bench.py`.
 | Codex auth | `OPENAI_BASE_URL` + `OPENAI_API_KEY`, OpenAI-compatible Responses |
 
 Detached execution, stop/resume, `K>1`, `C>1`, and automatic image provisioning are not supported
-by this initial acceptance path. Goal Plus + Pi at `K=1,C=1` passed the archived Linux/amd64
-official-harness smoke in
-`evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/summary.json`; this does not extend
-the claim to other topologies or the full Verified split.
+by this initial acceptance path. Plain Codex, Plain Pi, and Goal Plus + Pi at `K=1,C=1` passed
+archived Linux/amd64 official-harness smokes under `evidence/runs/`; this does not extend the claim
+to other topologies or the full Verified split. The two Plain development smokes retain their
+dirty-at-prepare provenance and later acceptance commit explicitly.
 
 ## Isolation boundary
 
@@ -70,6 +70,11 @@ profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning
 Run `launch` only after reviewing and confirming the resolved `T/K/C/R` block. A terminal campaign
 is archived with `finish`, which consumes `campaign-summary.json` and exports `report.md` plus the
 campaign-named workbook.
+
+That `finish` archive is campaign-local. For adaptation readiness, review and sanitize the minimum
+evidence into `evidence/runs/`, bind it to the exact method with registry `stage_evidence`, and
+promote the method in the same change. Repository validation rejects a method pass without that
+mapping.
 
 The task image itself is never removed by this controller. The official evaluator is fixed to
 `cache_level=instance`, `clean=false`, and `force_rebuild=false`. To preserve the stopped Agent

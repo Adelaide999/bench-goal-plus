@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "sanitized_agent_run_projection",
+  "source_snapshot_sha256": "75909d73b483003f9b76e700081a2fdbc9ebc73afeb44dd4e36dc583fa5303c6",
+  "campaign_id": "swe-bench-verified-sympy-16886-plain-pi-30m-k1-c1-r1-20260802-2316",
+  "target": "swe-bench-verified",
+  "runner_id": "swe-bench-native",
+  "runner_kind": "native-profile",
+  "preset": "swe-bench-verified-sympy-16886-pi-smoke",
+  "profile": "sympy-16886-pi-smoke",
+  "method": "plain-pi",
+  "model": "zai/glm-5.2",
+  "reasoning_effort": "medium",
+  "seed": 1,
+  "retain_containers": false,
+  "concurrency": {
+    "T": 1800,
+    "K": 1,
+    "C": 1,
+    "R": 1
+  },
+  "provider_contract": {
+    "auth_mode": "provider-api",
+    "provider": "zai",
+    "credential_env": "ZAI_API_KEY"
+  },
+  "lifecycle": [
+    "check",
+    "doctor",
+    "prepare",
+    "run",
+    "status",
+    "finish"
+  ],
+  "terminal_state": "completed",
+  "report_source": "campaign-summary.json",
+  "credential_values_persisted": false
+}

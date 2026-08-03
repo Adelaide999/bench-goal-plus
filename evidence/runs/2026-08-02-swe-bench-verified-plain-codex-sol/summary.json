@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "kind": "swe_bench_verified_official_harness_smoke",
+  "run_date": "2026-08-02",
+  "status": "completed",
+  "campaign_id": "swe-bench-verified-sympy-16886-plain-codex-30m-k1-c1-r1-20260802-2311",
+  "task": {
+    "benchmark": "swe-bench-verified",
+    "instance_id": "sympy__sympy-16886",
+    "dataset": "SWE-bench/SWE-bench_Verified",
+    "dataset_revision": "91aa3ed51b709be6457e12d00300a6a596d4c6a3",
+    "base_commit": "c50643a49811e9fe2f4851adff4313ad46f7325e",
+    "metric": "resolved",
+    "direction": "maximize"
+  },
+  "method": {
+    "id": "plain-codex",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "provider": "bench_proxy",
+    "auth_mode": "openai-compatible",
+    "wire_api": "responses",
+    "credential_reference": "OPENAI_API_KEY"
+  },
+  "budget": {
+    "T": 1800,
+    "K": 1,
+    "C": 1,
+    "R": 1
+  },
+  "source": {
+    "bench_goal_plus_prepare_commit": "c29ce7174abe0fa1e182c949779aba25d86a5836",
+    "bench_goal_plus_acceptance_commit": "904cae6415c4af173f644da3d52959db499bd9cc",
+    "bench_goal_plus_dirty_at_prepare": true,
+    "dirty_at_prepare_explanation": "The SWE-bench native runner was exercised before its implementation commit; the resulting runner changes were committed later as 904cae6. This development-smoke provenance is preserved rather than rewritten.",
+    "swebench_commit": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9"
+  },
+  "environment": {
+    "platform": "linux/amd64",
+    "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-16886:latest",
+    "inventory_check": "pass",
+    "full_doctor": "pass",
+    "host_responses_probe": "pass",
+    "task_container_responses_probe": "pass",
+    "image_base_tree_match": "pass"
+  },
+  "execution": {
+    "agent_runtime_seconds": 80.18063032603823,
+    "agent_total_runtime_seconds": 89.1869327139575,
+    "agent_setup_runtime_seconds": 8.076705720974132,
+    "finalization_grace_seconds": 0.9295667251572013,
+    "evaluator_runtime_seconds": 47.515787860844284,
+    "official_evaluator_calls": 1,
+    "agent_container_removed": true,
+    "credentials_persisted": false,
+    "usage": {
+      "input_tokens": 116196,
+      "cached_input_tokens": 97536,
+      "output_tokens": 1453,
+      "coverage": "agent_reported"
+    }
+  },
+  "result": {
+    "resolved": true,
+    "patch_successfully_applied": true,
+    "score_valid": true,
+    "patch_non_empty": true,
+    "fail_to_pass": [
+      "test_encode_morse"
+    ],
+    "pass_to_pass_failures": []
+  },
+  "artifacts": {
+    "sanitized_agent_run": "evidence/runs/2026-08-02-swe-bench-verified-plain-codex-sol/agent-run.json",
+    "model_patch": "evidence/runs/2026-08-02-swe-bench-verified-plain-codex-sol/model.patch",
+    "official_report": "evidence/runs/2026-08-02-swe-bench-verified-plain-codex-sol/official-report.json",
+    "full_run_directory": "runs/swe-bench-verified/swe-bench-verified-sympy-16886-plain-codex-30m-k1-c1-r1-20260802-2311",
+    "full_run_directory_policy": "ignored and preserved locally",
+    "sha256": {
+      "raw_agent_run_snapshot": "f0a2bfc33c386a7db9b762a94cd88b4a07f3150ca273325acc5a8e9725004269",
+      "sanitized_agent_run": "e0ba9018341a07c299a05f659433f0b09a197b0e58482006903afa4bbfb8377b",
+      "final_campaign_manifest": "3553e025964a95c0fc52b1a719d55ad7426be941d57d0b978518e2601172b658",
+      "final_campaign_summary": "90b5bb17adf80d842012b047f62994fecc9255e0eb02fdc6c66a1a33b928069c",
+      "model_patch": "a651f9dc68369f004895ec7275a2b69be67b0c0bb2716a83036dbccbb3c3863d",
+      "raw_official_report": "54d6f49054774b7bd92b3ec99c2fc58116fa8376214cf3be839c5c2c78d24096",
+      "archived_official_report": "64649cc77425045f791e259aaee534728a05cbba51dd8c199d0878cf37de1114"
+    }
+  },
+  "reproduction": {
+    "check": "python3 scripts/bench.py check --preset swe-bench-verified-sympy-16886-codex-smoke",
+    "plan": "python3 scripts/bench.py plan --preset swe-bench-verified-sympy-16886-codex-smoke --campaign-id <new-campaign-id> --skip-bootstrap --skip-provision",
+    "launch": "python3 scripts/bench.py launch --preset swe-bench-verified-sympy-16886-codex-smoke --campaign-id <new-campaign-id> --skip-bootstrap --skip-provision",
+    "status": "python3 scripts/bench.py status --campaign runs/swe-bench-verified/<new-campaign-id>",
+    "finish": "python3 scripts/bench.py finish --campaign runs/swe-bench-verified/<new-campaign-id>"
+  },
+  "limitations": [
+    "This smoke proves the registered Plain Codex K=1, C=1 path for one Linux/amd64 Verified instance, not the 500-instance split.",
+    "The development run preceded implementation commit 904cae6; campaign_ready remains partial and the source provenance caveat is retained.",
+    "K>1, C>1, detach, stop, and resume are not claimed for this runner."
+  ],
+  "secret_scan": {
+    "scope": "committed evidence projection",
+    "result": "clean",
+    "credential_values_persisted": false
+  }
+}

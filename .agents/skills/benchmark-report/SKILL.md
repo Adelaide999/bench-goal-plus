@@ -24,6 +24,11 @@ python3 scripts/bench.py finish --campaign runs/<family>/<campaign-id>
 6. 打开或解析 XLSX 验证 workbook 非损坏、行数与 JSON records/cells 一致、表头冻结且可筛选。
 7. 再次读取 campaign 状态，分别汇报“执行终态”和“归档结果”，以及 final/partial 状态、有效结果覆盖、缺失 telemetry、protocol mismatch、产物绝对路径和 source JSON。
 
+这里的“归档”仅指 campaign-local final evidence 与报告。`finish` 不修改
+`benchmarks/registry.json`，也不把文件写入可提交的 `evidence/runs/`。当真实 run 是新
+benchmark/method 的接入验收时，报告完成后继续路由到 `$benchmark-adapt`：审计并脱敏最小
+证据、写入 method-specific `stage_evidence`，并在同一变更中更新 readiness。
+
 ## 状态表述
 
 `finish` 是终态后的归档与报告阶段，不是 benchmark 仍在执行的信号。必须使用无歧义表述：

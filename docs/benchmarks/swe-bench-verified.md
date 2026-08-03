@@ -60,10 +60,16 @@ task image 始终保留：controller 固定使用官方 harness 的 `cache_level
 | `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | Goal Plus + Pi | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` |
 
 campaign 顺序运行。runner 暂不支持 provision、detach、stop、resume、`K>1` 或 `C>1`。
-真实 launch 前仍必须展示并确认解析后的 T/K/C/R。Goal Plus + Pi 的 Luna/high、`K=1,C=1`
-路径已通过归档的真实官方 harness smoke；证据见
-[`summary.json`](../../evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/summary.json)。
-这个 pass 不扩展到 `K>1`、其他实例或完整 500 题 split。
+真实 launch 前仍必须展示并确认解析后的 T/K/C/R。以下 `K=1,C=1` 路径均已通过归档的
+真实官方 harness smoke：
+
+- [Plain Codex](../../evidence/runs/2026-08-02-swe-bench-verified-plain-codex-sol/summary.json)
+- [Plain Pi](../../evidence/runs/2026-08-02-swe-bench-verified-plain-pi-glm/summary.json)
+- [Goal Plus + Pi，Luna/high](../../evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/summary.json)
+
+这些 pass 不扩展到 `K>1`、其他实例或完整 500 题 split。两个 Plain development smoke
+保留了 prepare 时工作树非 clean、随后由 `904cae6` 收录实现的 provenance；不会把它改写成
+clean run，完整 campaign readiness 仍为 partial。
 
 Codex preset 另外冻结 `auth_mode=openai-compatible`、`OPENAI_BASE_URL`、
 `OPENAI_API_KEY` 和 Responses wire API。Linux 上的 loopback endpoint 使用与 EdgeBench
@@ -94,6 +100,11 @@ Goal Plus + Pi 还保留 frozen spec、candidate、绑定 Pi worker session、wo
 - Dataset revision：[`benchmarks/datasets.json`](../../benchmarks/datasets.json)
 - Native controller：[`experiments/swe_bench_verified/README.md`](../../experiments/swe_bench_verified/README.md)
 - Readiness：[`benchmarks/registry.json`](../../benchmarks/registry.json)
+
+`finish` 的 `reported` 表示 campaign-local JSON、Markdown 和 XLSX 已生成，不会自动修改
+Git registry。适配验收必须把已审计的最小证据投影到 `evidence/runs/`，通过
+`stage_evidence` 绑定到具体 method，并在同一变更中提升该 method；validator 会拒绝没有
+method-specific evidence 的 `pass`。
 
 下载源只允许加速传输。国内 PyPI 或 Hugging Face mirror 不得替换锁定 revision、精确 Docker
 tag、image ID 或官方 evaluator；目标镜像已存在时不会主动 pull。
