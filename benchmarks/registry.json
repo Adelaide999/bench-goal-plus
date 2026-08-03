@@ -347,20 +347,25 @@
       "stages": {
         "source_forked": "n/a",
         "environment": "partial",
-        "official_verifier": "partial",
+        "official_verifier": "pass",
         "native_baseline": "n/a",
         "plain_codex": "partial",
         "goal_plus_codex": "n/a",
         "plain_pi": "partial",
-        "goal_plus_pi": "partial",
+        "goal_plus_pi": "pass",
         "matched_baseline": "n/a",
         "campaign_ready": "partial"
       },
-      "evidence": [],
-      "next_action": "Run the frozen sympy__sympy-16886 Plain Codex, Plain Pi, and Goal Plus + Pi campaigns through plan, launch, status, official evaluation, and finish; then archive minimal evidence.",
+      "evidence": [
+        "evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/summary.json",
+        "evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/agent-run.json",
+        "evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/model.patch",
+        "evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/official-report.json"
+      ],
+      "next_action": "Run the frozen sympy__sympy-16886 Plain Codex and Plain Pi campaigns through plan, launch, status, official evaluation, and finish; keep K>1 and broader Verified coverage partial until separately proven.",
       "blockers": [
         "Initial acceptance intentionally covers one Linux/amd64 Verified instance with K=1 and C=1; it does not claim a 500-instance campaign is ready.",
-        "Goal Plus + Pi is registered only for K=1 and has contract-test evidence but no archived real official-harness smoke yet.",
+        "Goal Plus + Pi has passed the archived K=1 official-harness smoke, but K>1 and broader instance coverage remain unproven.",
         "The official checkout is used as an unmodified managed third-party repository, so no project fork is currently required."
       ]
     },

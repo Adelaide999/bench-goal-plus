@@ -44,7 +44,12 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(item["stages"]["plain_codex"], "partial")
         self.assertEqual(item["stages"]["plain_pi"], "partial")
         self.assertEqual(item["stages"]["goal_plus_codex"], "n/a")
-        self.assertEqual(item["stages"]["goal_plus_pi"], "partial")
+        self.assertEqual(item["stages"]["goal_plus_pi"], "pass")
+        self.assertEqual(item["stages"]["official_verifier"], "pass")
+        self.assertEqual(item["stages"]["campaign_ready"], "partial")
+        self.assertTrue(item["evidence"])
+        for relative_path in item["evidence"]:
+            self.assertTrue((ROOT / relative_path).is_file(), relative_path)
 
 
 if __name__ == "__main__":

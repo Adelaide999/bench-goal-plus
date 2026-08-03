@@ -16,8 +16,10 @@ repository lifecycle through `python3 scripts/bench.py`.
 | Codex auth | `OPENAI_BASE_URL` + `OPENAI_API_KEY`, OpenAI-compatible Responses |
 
 Detached execution, stop/resume, `K>1`, `C>1`, and automatic image provisioning are not supported
-by this initial acceptance path. Goal Plus + Pi is registered at `K=1` and remains readiness
-`partial` until its real official-harness smoke is archived.
+by this initial acceptance path. Goal Plus + Pi at `K=1,C=1` passed the archived Linux/amd64
+official-harness smoke in
+`evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/summary.json`; this does not extend
+the claim to other topologies or the full Verified split.
 
 ## Isolation boundary
 

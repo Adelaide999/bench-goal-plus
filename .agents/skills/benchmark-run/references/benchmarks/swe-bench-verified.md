@@ -33,6 +33,11 @@ The Luna profile materializes a campaign-local Pi `models.json` containing only 
 socket bridge as Plain Codex; doctor must pass host Responses, task-container Responses, and Pi's
 exact `bench-openai/gpt-5.6-luna` model listing before launch.
 
+The archived Linux/amd64 `sympy__sympy-16886` Luna/high smoke passes the complete `K=1,C=1`
+Goal Plus + Pi and official-harness contract. Its minimal evidence is
+[`summary.json`](../../../../../evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/summary.json).
+Plain Codex, Plain Pi, `K>1`, other instances, and split-wide readiness remain separate claims.
+
 ## Completion evidence
 
 A cell is score-complete only when all of the following are present:

@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "kind": "swe_bench_verified_official_harness_smoke",
+  "run_date": "2026-08-03",
+  "status": "completed",
+  "campaign_id": "swe-bench-verified-sympy-16886-goal-plus-pi-gpt-5-6-luna-high-30m-k1-c1-r1-20260803-0946",
+  "task": {
+    "benchmark": "swe-bench-verified",
+    "instance_id": "sympy__sympy-16886",
+    "dataset": "SWE-bench/SWE-bench_Verified",
+    "dataset_revision": "91aa3ed51b709be6457e12d00300a6a596d4c6a3",
+    "base_commit": "c50643a49811e9fe2f4851adff4313ad46f7325e",
+    "metric": "resolved",
+    "direction": "maximize"
+  },
+  "method": {
+    "id": "goal-plus-pi",
+    "model": "bench-openai/gpt-5.6-luna",
+    "reasoning_effort": "high",
+    "provider": "bench-openai",
+    "auth_mode": "openai-compatible",
+    "wire_api": "responses",
+    "credential_reference": "OPENAI_API_KEY"
+  },
+  "budget": {
+    "T": 1800,
+    "K": 1,
+    "C": 1,
+    "R": 1,
+    "worker_runtime_seconds": 1500,
+    "closeout_reserve_seconds": 300
+  },
+  "source": {
+    "bench_goal_plus_prepare_commit": "6f6933666c7c2431e18d78bf1ae98f4e814a1659",
+    "bench_goal_plus_revalidation_commit": "cc2b136",
+    "bench_goal_plus_dirty_at_prepare": true,
+    "dirty_at_prepare_explanation": "The only worktree entry was the user-owned untracked 1.md; registered source files were clean.",
+    "swebench_commit": "f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+    "goal_plus_commit": "1e8a1221c8dee4bdee6d214826b23d8a7778ad11"
+  },
+  "environment": {
+    "platform": "linux/amd64",
+    "image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-16886:latest",
+    "image_id": "sha256:8d3a78075416ffa94f89a782daeef6c09ffd40fbc9360616bd9153cd36856103",
+    "inventory_check": "pass",
+    "full_doctor": "pass",
+    "host_responses_probe": "pass",
+    "task_container_responses_probe": "pass",
+    "pi_model_listing": "bench-openai/gpt-5.6-luna",
+    "pi_version": "0.83.0"
+  },
+  "execution": {
+    "agent_runtime_seconds": 947.313833019929,
+    "agent_total_runtime_seconds": 1000.2291876019444,
+    "agent_setup_runtime_seconds": 46.064369247993454,
+    "finalization_grace_seconds": 6.850898251868784,
+    "evaluator_runtime_seconds": 40.82547688786872,
+    "official_evaluator_calls": 1,
+    "actual_subagent_count": 1,
+    "candidate_count": 1,
+    "bound_pi_worker_sessions": 1,
+    "worker_verifier_candidate_count": 1,
+    "active_pi_pool_jobs": 0,
+    "goal_plus_completion_passed": true,
+    "agent_container_removed": true,
+    "credentials_persisted": false,
+    "worker_usage": {
+      "input": 24533,
+      "cacheRead": 153600,
+      "cacheWrite": 0,
+      "output": 3240,
+      "assistantMessages": 13,
+      "sessions_covered": 1,
+      "coverage": "persisted_pi_worker_usage"
+    },
+    "outer_agent_usage_coverage": "unavailable"
+  },
+  "result": {
+    "resolved": true,
+    "patch_successfully_applied": true,
+    "score_valid": true,
+    "patch_non_empty": true,
+    "fail_to_pass": [
+      "test_encode_morse"
+    ],
+    "pass_to_pass_failures": []
+  },
+  "evidence_revalidation": {
+    "prior_state": "partial",
+    "prior_reason": "Goal Plus completion evidence failed: visible_verifiers",
+    "root_cause": "The old normalizer required ranking_signal for both verifier classes instead of promotion_gate for the promotion verifier.",
+    "source": "cells/goal-plus-pi/goal-plus-state",
+    "completion_passed": true,
+    "result_state": "completed",
+    "official_evaluator_rerun": false
+  },
+  "artifacts": {
+    "sanitized_agent_run": "evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/agent-run.json",
+    "model_patch": "evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/model.patch",
+    "official_report": "evidence/runs/2026-08-03-swe-bench-verified-goal-plus-pi-luna/official-report.json",
+    "full_run_directory": "runs/swe-bench-verified/swe-bench-verified-sympy-16886-goal-plus-pi-gpt-5-6-luna-high-30m-k1-c1-r1-20260803-0946",
+    "full_run_directory_policy": "ignored and preserved locally",
+    "sha256": {
+      "raw_agent_run": "479346f25d3e63a4a4dbe797fcf665f29b705dd6f6b7c12533f7eab41c5457bf",
+      "sanitized_agent_run": "79245c6fdb704ceaa65dce4bd1a19473d8725cc865fc33f66c620b8779e268de",
+      "final_campaign_manifest": "5b8a43b396679acc8fb935cf65a9c20544f148e6983aa4b2aada7fa00dc044ed",
+      "final_campaign_summary": "e79369e964e2785d4dca02156b0cec74992e2f6ddab587421ef5844c3d4e1a61",
+      "model_patch": "fe05aeab62cedc8ca00c2813bd3b09a3f77655b3bda0b0e43278639b84f7303b",
+      "raw_official_report": "54d6f49054774b7bd92b3ec99c2fc58116fa8376214cf3be839c5c2c78d24096",
+      "archived_official_report": "64649cc77425045f791e259aaee534728a05cbba51dd8c199d0878cf37de1114",
+      "goal_plus_candidate": "c7b5e9b56731b65f29df6724ffac58cf8607211d59be345ad955999b41715ea7"
+    }
+  },
+  "reproduction": {
+    "check": "python3 scripts/bench.py check --preset swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke",
+    "plan": "python3 scripts/bench.py plan --preset swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke --campaign-id swe-bench-verified-sympy-16886-goal-plus-pi-gpt-5-6-luna-high-30m-k1-c1-r1-20260803-0946 --skip-bootstrap --skip-provision",
+    "launch": "python3 scripts/bench.py launch --preset swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke --campaign-id swe-bench-verified-sympy-16886-goal-plus-pi-gpt-5-6-luna-high-30m-k1-c1-r1-20260803-0946 --skip-bootstrap --skip-provision",
+    "status": "python3 scripts/bench.py status --campaign runs/swe-bench-verified/swe-bench-verified-sympy-16886-goal-plus-pi-gpt-5-6-luna-high-30m-k1-c1-r1-20260803-0946",
+    "finish": "python3 scripts/bench.py finish --campaign runs/swe-bench-verified/swe-bench-verified-sympy-16886-goal-plus-pi-gpt-5-6-luna-high-30m-k1-c1-r1-20260803-0946"
+  },
+  "validation": {
+    "registry_check": "pass",
+    "unit_tests": 274,
+    "unit_test_result": "pass",
+    "workbook_parse": "pass"
+  },
+  "limitations": [
+    "This smoke proves the registered Goal Plus + Pi K=1, C=1 path for one Linux/amd64 Verified instance, not the 500-instance split.",
+    "Plain Codex and Plain Pi remain separately unvalidated by a real archived campaign.",
+    "K>1, C>1, detach, stop, and resume are not claimed for this runner."
+  ],
+  "secret_scan": {
+    "scope": "committed evidence projection",
+    "result": "clean",
+    "credential_values_persisted": false
+  }
+}
