@@ -7,7 +7,143 @@ from pathlib import Path
 from typing import Any
 
 from .config import SweBenchContractError, read_json, utc_now, write_json
+from .goal_plus_evidence import collect_goal_plus_state, record_completion_check
 from .runtime import MANIFEST, TERMINAL_STATES
+
+
+def _container_isolated(agent: dict[str, Any]) -> bool:
+    cleanup = (agent.get("container") or {}).get("cleanup") or {}
+    return cleanup.get("removed") is True or (
+        cleanup.get("retained") is True and cleanup.get("stopped") is True
+    )
+
+
+def _revalidate_goal_plus_cell(
+    campaign: Path,
+    manifest: dict[str, Any],
+    cell: dict[str, Any],
+) -> bool:
+    if cell.get("method") != "goal-plus-pi" or cell.get("state") not in {
+        "completed",
+        "partial",
+    }:
+        return False
+    profile = manifest.get("profile_snapshot") or {}
+    goal_plus_profile = profile.get("goal_plus") or {}
+    task_file = cell.get("task_file")
+    if not isinstance(task_file, str):
+        return False
+    campaign_root = campaign.resolve()
+    state_root = (campaign / Path(task_file).parent / "goal-plus-state").resolve()
+    if not state_root.is_relative_to(campaign_root) or not state_root.is_dir():
+        return False
+    try:
+        refreshed = collect_goal_plus_state(
+            state_root,
+            expected_k=int(profile["concurrency"]),
+            expected_worker_runtime_seconds=int(
+                goal_plus_profile["worker_runtime_seconds"]
+            ),
+            expected_closeout_reserve_seconds=int(
+                goal_plus_profile["closeout_reserve_seconds"]
+            ),
+            expected_visible_verifier_timeout_seconds=int(
+                goal_plus_profile["visible_verifier_timeout_seconds"]
+            ),
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+    agent = cell.get("agent") or {}
+    previous_goal_plus = agent.get("goal_plus") or {}
+    previous_completion = previous_goal_plus.get("completion") or {}
+    export = previous_goal_plus.get("export") or {}
+    closeout = agent.get("goal_plus_closeout") or {}
+    annotator = (agent.get("runtime") or {}).get("evidence_annotator")
+    record_completion_check(
+        refreshed,
+        "state_export",
+        expected=True,
+        actual=export.get("completed"),
+        passed=export.get("completed") is True,
+    )
+    record_completion_check(
+        refreshed,
+        "controller_closeout",
+        expected=True,
+        actual=closeout.get("completed"),
+        passed=closeout.get("completed") is True,
+    )
+    record_completion_check(
+        refreshed,
+        "evidence_annotator_disabled",
+        expected="disabled",
+        actual=annotator,
+        passed=annotator == "disabled",
+    )
+    refreshed["export"] = export
+    agent["goal_plus"] = refreshed
+    cell["agent"] = agent
+
+    evaluation = cell.get("evaluation") or {}
+    patch_file = cell.get("patch_file")
+    patch_exists = False
+    if isinstance(patch_file, str):
+        patch_path = (campaign / patch_file).resolve()
+        patch_exists = (
+            patch_path.is_relative_to(campaign_root)
+            and patch_path.is_file()
+            and bool(patch_path.read_text(encoding="utf-8").strip())
+        )
+    prior_state = cell.get("state")
+    prior_reason = cell.get("incomplete_reason")
+    failures = []
+    if cell.get("error"):
+        failures.append(str(cell["error"]))
+    if not patch_exists:
+        failures.append("Agent did not produce a non-empty patch")
+    if not _container_isolated(agent):
+        failures.append("Agent container isolation is incomplete")
+    if evaluation.get("state") != "completed":
+        failures.append("official evaluator did not produce a valid report")
+    if evaluation.get("calls") != 1:
+        failures.append("official evaluator call count is not exactly one")
+    if not isinstance(evaluation.get("resolved"), bool):
+        failures.append("official evaluator resolved metric is not boolean")
+    if not isinstance(evaluation.get("patch_applied"), bool):
+        failures.append("official evaluator patch apply metric is not boolean")
+    if refreshed["completion"]["passed"] is not True:
+        failures.append(
+            str(
+                refreshed["completion"].get("reason")
+                or "Goal Plus completion evidence is incomplete"
+            )
+        )
+
+    if not failures:
+        agent["state"] = "completed"
+        cell["state"] = "completed"
+        cell.pop("incomplete_reason", None)
+    else:
+        agent["state"] = "partial"
+        cell["state"] = "partial"
+        cell["incomplete_reason"] = "; ".join(failures)
+    changed = (
+        previous_completion != refreshed["completion"]
+        or prior_state != cell.get("state")
+        or prior_reason != cell.get("incomplete_reason")
+    )
+    if not changed:
+        return False
+    cell["evidence_revalidation"] = {
+        "at": utc_now(),
+        "source": str(state_root.relative_to(campaign_root)),
+        "prior_state": prior_state,
+        "prior_incomplete_reason": prior_reason,
+        "completion_passed": refreshed["completion"]["passed"],
+        "result_state": cell["state"],
+    }
+    return True
 
 
 def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> dict[str, Any]:
@@ -104,6 +240,7 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
                 else None
             ),
             "goal_plus_export": goal_plus.get("export") if goal_plus else None,
+            "evidence_revalidation": cell.get("evidence_revalidation"),
         },
     }
 
@@ -140,6 +277,20 @@ def finalize_campaign(campaign: Path) -> dict[str, Any]:
         raise SweBenchContractError(
             f"campaign is not terminal: {manifest.get('state')!r}"
         )
+    revalidated = False
+    for cell in manifest["cells"]:
+        revalidated = (
+            _revalidate_goal_plus_cell(campaign, manifest, cell) or revalidated
+        )
+    if revalidated:
+        if all(cell.get("state") == "completed" for cell in manifest["cells"]):
+            manifest["state"] = "completed"
+        elif any(cell.get("state") == "failed" for cell in manifest["cells"]):
+            manifest["state"] = "failed"
+        else:
+            manifest["state"] = "partial"
+        manifest["evidence_revalidated_at"] = utc_now()
+        write_json(campaign / MANIFEST, manifest)
     records = [_record(campaign, manifest, cell) for cell in manifest["cells"]]
     evaluated = [
         record

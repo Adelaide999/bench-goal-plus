@@ -24,6 +24,7 @@ from experiments.swe_bench_verified import (
 from experiments.swe_bench_verified.config import (
     SweBenchContractError,
     load_profile,
+    read_json,
     validate_profile,
     write_json,
 )
@@ -109,7 +110,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "promotion_verifiers": [
                         {
                             "name": "visible-promotion",
-                            "role": "ranking_signal",
+                            "role": "promotion_gate",
                             "command": [
                                 "python",
                                 ".goal-plus-verifiers/visible_test_verifier.py",
@@ -654,6 +655,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(state["actual_subagent_count"], 1)
             self.assertEqual(state["worker_usage"]["input_tokens"], 10)
             self.assertEqual(state["worker_usage"]["sessions_covered"], 1)
+            visible = state["completion"]["checks"]["visible_verifiers"]["actual"]
+            self.assertTrue(visible["process"]["passed"])
+            self.assertTrue(visible["promotion"]["passed"])
+            self.assertEqual(
+                visible["promotion"]["verifiers"][0]["role"], "promotion_gate"
+            )
 
             mismatched = Path(temporary) / "mismatched"
             self.write_goal_plus_state(mismatched, session_count=0)
@@ -1248,6 +1255,113 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(loaded["aggregates"]["resolved_count"], 0)
             self.assertEqual(markdown, campaign / "campaign-summary.md")
             self.assertEqual(source_json, campaign / "campaign-summary.json")
+
+    def test_finalize_recovers_evidence_parser_downgrade(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-luna-high-smoke")
+        with self.temporary_directory() as temporary:
+            campaign = Path(temporary)
+            state_root = campaign / "cells/goal-plus-pi/goal-plus-state"
+            self.write_goal_plus_state(state_root)
+            patch_file = campaign / "cells/goal-plus-pi/model.patch"
+            patch_file.write_text("diff --git a/a b/a\n", encoding="utf-8")
+            manifest = {
+                "schema_version": 1,
+                "campaign_id": "goal-plus-revalidation-test",
+                "benchmark_id": "swe-bench-verified",
+                "state": "partial",
+                "profile_snapshot": profile,
+                "budget": {
+                    "wall_time_seconds": 1800,
+                    "live_search_concurrency": 1,
+                    "cell_concurrency": 1,
+                    "attempts": 1,
+                },
+                "dataset": {"name": "dataset", "revision": "a" * 40},
+                "source": {"swebench_commit": "b" * 40},
+                "cells": [
+                    {
+                        "task_id": "task",
+                        "cell_id": "goal-plus-pi--task",
+                        "task_file": "cells/goal-plus-pi/task.json",
+                        "patch_file": "cells/goal-plus-pi/model.patch",
+                        "method": "goal-plus-pi",
+                        "model": profile["model"],
+                        "reasoning_effort": "high",
+                        "state": "partial",
+                        "incomplete_reason": (
+                            "Goal Plus completion evidence failed: visible_verifiers"
+                        ),
+                        "image": "image:latest",
+                        "base_commit": "c" * 40,
+                        "agent": {
+                            "state": "partial",
+                            "patch_exists": True,
+                            "runtime": {"evidence_annotator": "disabled"},
+                            "goal_plus_closeout": {"completed": True, "returncode": 0},
+                            "goal_plus": {
+                                "completion": {
+                                    "passed": False,
+                                    "reason": (
+                                        "Goal Plus completion evidence failed: "
+                                        "visible_verifiers"
+                                    ),
+                                },
+                                "export": {
+                                    "completed": True,
+                                    "destination": str(state_root),
+                                },
+                            },
+                            "container": {
+                                "cleanup": {
+                                    "removed": True,
+                                    "retained": False,
+                                }
+                            },
+                        },
+                        "evaluation": {
+                            "state": "completed",
+                            "calls": 1,
+                            "resolved": True,
+                            "patch_applied": True,
+                        },
+                    }
+                ],
+            }
+            write_json(campaign / "campaign.json", manifest)
+
+            summary = reporting.finalize_campaign(campaign)
+            recovered = read_json(campaign / "campaign.json")
+
+            self.assertEqual(summary["state"], "completed")
+            self.assertEqual(summary["records"][0]["status"], "succeeded")
+            self.assertTrue(
+                summary["records"][0]["protocol"]["goal_plus"]["completion"][
+                    "passed"
+                ]
+            )
+            self.assertEqual(recovered["state"], "completed")
+            self.assertEqual(recovered["cells"][0]["state"], "completed")
+            self.assertNotIn("incomplete_reason", recovered["cells"][0])
+            revalidation = recovered["cells"][0]["evidence_revalidation"]
+            self.assertEqual(revalidation["prior_state"], "partial")
+            self.assertIn("visible_verifiers", revalidation["prior_incomplete_reason"])
+            self.assertTrue(revalidation["completion_passed"])
+
+            recovered["state"] = "partial"
+            recovered_cell = recovered["cells"][0]
+            recovered_cell["state"] = "partial"
+            recovered_cell["agent"]["state"] = "partial"
+            recovered_cell["evaluation"]["calls"] = 2
+            recovered_cell.pop("evidence_revalidation", None)
+            write_json(campaign / "campaign.json", recovered)
+
+            rejected = reporting.finalize_campaign(campaign)
+            self.assertEqual(rejected["state"], "partial")
+            self.assertEqual(rejected["records"][0]["status"], "partial")
+            self.assertIn(
+                "call count is not exactly one",
+                rejected["records"][0]["incomplete_reason"],
+            )
 
 
 if __name__ == "__main__":

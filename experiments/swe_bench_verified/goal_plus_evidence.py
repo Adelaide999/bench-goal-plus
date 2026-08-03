@@ -36,6 +36,26 @@ def _check(expected: Any, actual: Any, passed: bool) -> dict[str, Any]:
     return {"expected": expected, "actual": actual, "passed": bool(passed)}
 
 
+def record_completion_check(
+    state: dict[str, Any],
+    name: str,
+    *,
+    expected: Any,
+    actual: Any,
+    passed: bool,
+) -> None:
+    completion = state.setdefault("completion", {})
+    checks = completion.setdefault("checks", {})
+    checks[name] = _check(expected, actual, passed)
+    failed = [key for key, check in checks.items() if not check.get("passed")]
+    completion["passed"] = not failed
+    completion["reason"] = (
+        None
+        if not failed
+        else "Goal Plus completion evidence failed: " + ", ".join(failed)
+    )
+
+
 def _usage_from_sessions(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     totals: dict[str, int | float] = {}
     covered = 0
@@ -58,7 +78,10 @@ def _usage_from_sessions(sessions: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _visible_verifier_contract(
-    verifiers: Any, *, expected_timeout_seconds: int
+    verifiers: Any,
+    *,
+    expected_role: str,
+    expected_timeout_seconds: int,
 ) -> dict[str, Any]:
     records = verifiers if isinstance(verifiers, list) else []
     normalized = []
@@ -88,7 +111,7 @@ def _visible_verifier_contract(
             }
         )
     passed = any(
-        item["role"] == "ranking_signal"
+        item["role"] == expected_role
         and item["wrapper_present"]
         and item["wrapper_timeout_seconds"] == expected_timeout_seconds
         for item in normalized
@@ -148,10 +171,12 @@ def collect_goal_plus_state(
         )
         process_verifiers = _visible_verifier_contract(
             spec.get("process_verifiers"),
+            expected_role="ranking_signal",
             expected_timeout_seconds=expected_visible_verifier_timeout_seconds,
         )
         promotion_verifiers = _visible_verifier_contract(
             spec.get("promotion_verifiers"),
+            expected_role="promotion_gate",
             expected_timeout_seconds=expected_visible_verifier_timeout_seconds,
         )
         candidates = sorted(path.parent.glob("candidates/*/candidate.json"))

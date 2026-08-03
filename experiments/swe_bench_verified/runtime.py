@@ -38,7 +38,7 @@ from .environment import (
     routed_codex_runtime,
     routed_pi_runtime,
 )
-from .goal_plus_evidence import collect_goal_plus_state
+from .goal_plus_evidence import collect_goal_plus_state, record_completion_check
 
 
 MANIFEST = "campaign.json"
@@ -937,30 +937,6 @@ def _goal_plus_closeout(
     return payload
 
 
-def _record_goal_plus_completion_check(
-    state: dict[str, Any],
-    name: str,
-    *,
-    expected: Any,
-    actual: Any,
-    passed: bool,
-) -> None:
-    completion = state.setdefault("completion", {})
-    checks = completion.setdefault("checks", {})
-    checks[name] = {
-        "expected": expected,
-        "actual": actual,
-        "passed": bool(passed),
-    }
-    failed = [key for key, check in checks.items() if not check.get("passed")]
-    completion["passed"] = not failed
-    completion["reason"] = (
-        None
-        if not failed
-        else "Goal Plus completion evidence failed: " + ", ".join(failed)
-    )
-
-
 def _export_goal_plus_state(
     container_id: str,
     destination: Path,
@@ -1000,7 +976,7 @@ def _export_goal_plus_state(
             "visible_verifier_timeout_seconds"
         ],
     )
-    _record_goal_plus_completion_check(
+    record_completion_check(
         state,
         "state_export",
         expected=True,
@@ -1254,14 +1230,14 @@ def _run_agent(
                 cell_dir / "goal-plus-state",
                 profile,
             )
-            _record_goal_plus_completion_check(
+            record_completion_check(
                 goal_plus_state,
                 "controller_closeout",
                 expected=True,
                 actual=goal_plus_closeout.get("completed"),
                 passed=goal_plus_closeout.get("completed") is True,
             )
-            _record_goal_plus_completion_check(
+            record_completion_check(
                 goal_plus_state,
                 "evidence_annotator_disabled",
                 expected="disabled",
