@@ -24,6 +24,7 @@ from experiments.swe_bench_verified import (
 from experiments.swe_bench_verified.config import (
     SweBenchContractError,
     load_profile,
+    managed_upstream_branch,
     read_json,
     validate_profile,
     write_json,
@@ -167,6 +168,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke"
             )
         )
+        acceptance_off = agent.resolve_spec(
+            preset_id="swe-bench-verified-sympy-16886-acceptance-view-off-smoke"
+        )
+        acceptance_on = agent.resolve_spec(
+            preset_id="swe-bench-verified-sympy-16886-acceptance-view-on-smoke"
+        )
 
         self.assertEqual(codex.runner.runner_id, "swe-bench-native")
         self.assertEqual(codex.methods, ("plain-codex",))
@@ -185,6 +192,13 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(
             luna_goal_plus_pi.concurrency(),
             {"T": 1800, "K": 1, "C": 1, "R": 1},
+        )
+        self.assertEqual(acceptance_off.methods, acceptance_on.methods)
+        self.assertEqual(acceptance_off.model, acceptance_on.model)
+        self.assertEqual(acceptance_off.reasoning_effort, acceptance_on.reasoning_effort)
+        self.assertEqual(
+            acceptance_off.concurrency(),
+            acceptance_on.concurrency(),
         )
         self.assertTrue(codex.runner.capabilities.official_evaluator)
         self.assertTrue(codex.runner.capabilities.retain_containers)
@@ -224,6 +238,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "closeout_reserve_seconds": 300,
                 "visible_verifier_timeout_seconds": 300,
                 "evidence_annotator": "disabled",
+                "acceptance_view_enabled": True,
             },
         )
 
@@ -292,6 +307,42 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         invalid["agent_provider"]["id"] = "other-provider"
         with self.assertRaisesRegex(SweBenchContractError, "must match"):
             validate_profile(str(invalid["id"]), invalid)
+
+    def test_acceptance_view_ablation_profiles_only_switch_the_boolean(self) -> None:
+        enabled = self.profile("sympy-16886-goal-plus-pi-luna-high-smoke")
+        disabled = self.profile(
+            "sympy-16886-goal-plus-pi-luna-high-acceptance-off-smoke"
+        )
+
+        self.assertTrue(enabled["goal_plus"]["acceptance_view_enabled"])
+        self.assertFalse(disabled["goal_plus"]["acceptance_view_enabled"])
+        enabled_without_ablation = json.loads(json.dumps(enabled))
+        disabled_without_ablation = json.loads(json.dumps(disabled))
+        enabled_without_ablation["id"] = "ablation"
+        disabled_without_ablation["id"] = "ablation"
+        enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+        disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+        self.assertEqual(enabled_without_ablation, disabled_without_ablation)
+
+        self.assertEqual(
+            runtime._goal_plus_acceptance_view_environment(enabled),
+            {"GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "1"},
+        )
+        self.assertEqual(
+            runtime._goal_plus_acceptance_view_environment(disabled),
+            {"GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "0"},
+        )
+
+        invalid = json.loads(json.dumps(enabled))
+        invalid["goal_plus"]["acceptance_view_enabled"] = "yes"
+        with self.assertRaisesRegex(SweBenchContractError, "must be boolean"):
+            validate_profile(str(invalid["id"]), invalid)
+
+    def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
+        self.assertEqual(
+            managed_upstream_branch("goal_plus"),
+            "codex/acceptance-view-ablation",
+        )
 
     def test_luna_pi_runtime_writes_environment_reference_not_secret(self) -> None:
         profile = self.profile("sympy-16886-goal-plus-pi-luna-high-smoke")

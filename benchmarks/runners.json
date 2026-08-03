@@ -405,6 +405,56 @@
         "concurrency": 1,
         "cell_concurrency": 1
       }
+    },
+    {
+      "id": "swe-bench-verified-sympy-16886-acceptance-view-off-smoke",
+      "description": "One-instance SWE-bench Verified Goal Plus + Pi mechanism ablation with Acceptance View disabled.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "sympy-16886-goal-plus-pi-luna-high-acceptance-off-smoke",
+      "campaign_id_template": "swe-bench-verified-sympy-16886-acceptance-view-off-gpt-5-6-luna-high-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi"],
+        "model": "bench-openai/gpt-5.6-luna",
+        "reasoning_effort": "high",
+        "agent_provider": {
+          "id": "bench-openai",
+          "name": "Benchmark OpenAI-compatible proxy",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "OPENAI_BASE_URL",
+          "api_key_env": "OPENAI_API_KEY",
+          "wire_api": "responses"
+        },
+        "acceptance_view_enabled": false,
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "swe-bench-verified-sympy-16886-acceptance-view-on-smoke",
+      "description": "One-instance SWE-bench Verified Goal Plus + Pi mechanism ablation with Acceptance View enabled.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "sympy-16886-goal-plus-pi-luna-high-smoke",
+      "campaign_id_template": "swe-bench-verified-sympy-16886-acceptance-view-on-gpt-5-6-luna-high-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi"],
+        "model": "bench-openai/gpt-5.6-luna",
+        "reasoning_effort": "high",
+        "agent_provider": {
+          "id": "bench-openai",
+          "name": "Benchmark OpenAI-compatible proxy",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "OPENAI_BASE_URL",
+          "api_key_env": "OPENAI_API_KEY",
+          "wire_api": "responses"
+        },
+        "acceptance_view_enabled": true,
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
     }
   ]
 }

@@ -30,6 +30,7 @@ from .config import (
     ROOT,
     SWEBENCH_ROOT,
     SweBenchContractError,
+    managed_upstream_branch,
     utc_now,
     write_json,
 )
@@ -1122,6 +1123,7 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                     )
                 )
         if method == "goal-plus-pi":
+            expected_goal_plus_branch = managed_upstream_branch("goal_plus")
             goal_plus_branch = _git_value_at(
                 runtime["goal_plus_root"], "branch", "--show-current"
             )
@@ -1146,8 +1148,8 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             ).is_file()
             checkout_valid = bool(
                 runtime["goal_plus_root"].is_dir()
-                and goal_plus_branch == "main"
-                and goal_plus_upstream == "origin/main"
+                and goal_plus_branch == expected_goal_plus_branch
+                and goal_plus_upstream == f"origin/{expected_goal_plus_branch}"
                 and goal_plus_head
                 and goal_plus_dirty == ""
             )
@@ -1159,6 +1161,7 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                         path=str(runtime["goal_plus_root"]),
                         branch=goal_plus_branch,
                         upstream=goal_plus_upstream,
+                        expected_branch=expected_goal_plus_branch,
                         commit=goal_plus_head,
                         dirty=goal_plus_dirty not in (None, ""),
                     ),

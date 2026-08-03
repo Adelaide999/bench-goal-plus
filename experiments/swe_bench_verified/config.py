@@ -51,6 +51,16 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def managed_upstream_branch(name: str) -> str:
+    entry = (read_json(UPSTREAM_MANIFEST).get("upstreams") or {}).get(name)
+    branch = entry.get("tracking_branch") if isinstance(entry, dict) else None
+    if not isinstance(branch, str) or not branch:
+        raise SweBenchContractError(
+            f"managed upstream {name!r} has no tracking_branch"
+        )
+    return branch
+
+
 def _validate_openai_provider(
     profile_id: str, provider: Any, *, label: str
 ) -> dict[str, Any]:
@@ -200,6 +210,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             "closeout_reserve_seconds",
             "visible_verifier_timeout_seconds",
             "evidence_annotator",
+            "acceptance_view_enabled",
         }
         if not isinstance(goal_plus, dict) or set(goal_plus) != required_fields:
             raise SweBenchContractError(
@@ -239,6 +250,10 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         if goal_plus["evidence_annotator"] != "disabled":
             raise SweBenchContractError(
                 f"{profile_id}: initial Goal Plus path requires disabled evidence annotator"
+            )
+        if not isinstance(goal_plus["acceptance_view_enabled"], bool):
+            raise SweBenchContractError(
+                f"{profile_id}: goal_plus.acceptance_view_enabled must be boolean"
             )
     elif profile.get("goal_plus") is not None:
         raise SweBenchContractError(

@@ -67,6 +67,12 @@ Use `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` for the Goal Plus + Pi p
 Use `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` for the same topology with the
 profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning.
 
+For the Acceptance View mechanism ablation, run
+`swe-bench-verified-sympy-16886-acceptance-view-off-smoke` and
+`swe-bench-verified-sympy-16886-acceptance-view-on-smoke`. Both profiles freeze the same task,
+provider, model, reasoning, and `T/K/C/R`; only `GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED` differs. The
+official SWE-bench `resolved` result remains the sole hard score.
+
 Run `launch` only after reviewing and confirming the resolved `T/K/C/R` block. A terminal campaign
 is archived with `finish`, which consumes `campaign-summary.json` and exports `report.md` plus the
 campaign-named workbook.

@@ -181,6 +181,11 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
         "model": profile["model"],
         "reasoning_effort": profile["reasoning_effort"],
         "agent_provider": provider_contract,
+        "acceptance_view_enabled": (
+            profile["goal_plus"]["acceptance_view_enabled"]
+            if profile["methods"][0] == "goal-plus-pi"
+            else None
+        ),
         "state": "prepared",
         "task_file": str((cell_dir / "task.json").relative_to(destination)),
         "patch_file": str((cell_dir / "model.patch").relative_to(destination)),
@@ -655,6 +660,14 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
     )
 
 
+def _goal_plus_acceptance_view_environment(profile: dict[str, Any]) -> dict[str, str]:
+    return {
+        "GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": (
+            "1" if profile["goal_plus"]["acceptance_view_enabled"] else "0"
+        )
+    }
+
+
 def _agent_command(
     container_id: str, profile: dict[str, Any], runtime: dict[str, Any]
 ) -> list[str]:
@@ -718,6 +731,7 @@ def _agent_command(
     if profile["methods"][0] == "goal-plus-pi":
         goal_plus_environment = {
             **goal_plus_runtime_environment(),
+            **_goal_plus_acceptance_view_environment(profile),
             "HOME": "/opt/pi-home",
             "PI_CODING_AGENT_DIR": "/opt/pi-home/.pi/agent",
             "GOAL_PLUS_ROOT": "/testbed/.gp",
@@ -870,6 +884,7 @@ def _goal_plus_closeout(
 ) -> dict[str, Any]:
     environment = {
         **goal_plus_runtime_environment(),
+        **_goal_plus_acceptance_view_environment(profile),
         "HOME": "/opt/pi-home",
         "PI_CODING_AGENT_DIR": "/opt/pi-home/.pi/agent",
         "GOAL_PLUS_ROOT": "/testbed/.gp",

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "id": "sympy-16886-goal-plus-pi-luna-high-smoke",
+  "id": "sympy-16886-goal-plus-pi-luna-high-acceptance-off-smoke",
   "benchmark_id": "swe-bench-verified",
   "dataset": {
     "name": "SWE-bench/SWE-bench_Verified",
@@ -37,6 +37,6 @@
     "closeout_reserve_seconds": 300,
     "visible_verifier_timeout_seconds": 300,
     "evidence_annotator": "disabled",
-    "acceptance_view_enabled": true
+    "acceptance_view_enabled": false
   }
 }

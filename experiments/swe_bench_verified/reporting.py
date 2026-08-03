@@ -184,6 +184,7 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
             "official_evaluator_once": evaluation.get("calls") == 1,
             "goal_plus": {
                 "required": cell["method"] == "goal-plus-pi",
+                "acceptance_view_enabled": cell.get("acceptance_view_enabled"),
                 "completion": goal_plus_completion or None,
                 "actual_subagent_count": goal_plus.get("actual_subagent_count"),
                 "runs": goal_plus.get("runs") or [],
