@@ -35,7 +35,7 @@ offline/network-isolated protocol 已满足；正式 Linux 运行也不能跳过
 | EdgeBench Claude | Anthropic-compatible API | `SFORGE_AGENT_*` 或 `ANTHROPIC_*` env | key 和 base URL 都必需 |
 | Common/OpenEvolve 的 Codex 路径 | Codex native login，或显式 OpenAI-compatible endpoint | 省略 `--api-base` 使用 native login；显式 endpoint 使用 `OPENAI_API_KEY` | custom provider 使用 Responses wire API |
 | SWE-bench Verified Plain Codex | profile 固定的 OpenAI-compatible API | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | 只使用 Responses；不读取 OAuth；Linux loopback endpoint 必须桥入 task container |
-| SWE-bench Verified Plain/Goal Plus Pi | Pi built-in provider API | profile 中的 `PROVIDER/MODEL` + provider 标准 key env | 当前冻结 `zai/glm-5.2` + `ZAI_API_KEY`；不读取 EdgeBench Pi OAuth |
+| SWE-bench Verified Plain/Goal Plus Pi | Pi built-in provider API，或 profile-frozen OpenAI-compatible provider | profile 中的 `PROVIDER/MODEL` + provider 标准 key env，或 `OPENAI_BASE_URL` + `OPENAI_API_KEY` | Z.AI profile 使用 `zai/glm-5.2`；Luna profile 使用 `bench-openai/gpt-5.6-luna` + Responses；均不读取 EdgeBench Pi OAuth |
 | Common/OpenEvolve 的 Pi、native OpenEvolve、SkyDiscover | OpenAI-compatible API | `--api-base` + `OPENAI_API_KEY` | 不是 Codex OAuth 路径 |
 
 ### Codex OAuth
@@ -134,6 +134,14 @@ SWE-bench 的 Pi profile 使用精确 `PROVIDER/MODEL`。当前 Plain Pi 和 Goa
 都冻结 `zai/glm-5.2`，只按 Pi built-in provider 规则继承 `ZAI_API_KEY`；credential value
 不进入 Docker 命令、manifest 或报告。该路径不读取 `SFORGE_PI_AUTH_FILE`、
 `openai-codex` OAuth，也不使用 EdgeBench 的 `SFORGE_AGENT_*` fallback。
+
+`swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` 另行冻结
+`bench-openai/gpt-5.6-luna`、high、Responses、`OPENAI_BASE_URL` 和
+`OPENAI_API_KEY`。controller 在仓库内 campaign/doctor 临时目录生成只含
+`$OPENAI_API_KEY` 引用的 Pi `models.json`；不会读取或修改宿主默认 Pi registry。loopback
+URL 必须通过 Linux socket bridge，并依次通过 host Responses、task-container Responses 和
+容器内 `pi --offline --list-models bench-openai`。任一失败都不得回退到 `chatgpt.com`、OAuth
+或 Z.AI provider。
 
 Goal Plus + Pi 的 host Node、Pi package 和受管 Goal Plus checkout 只读挂载进精确 task
 image。Python 依赖来自 `environment/swe-bench-goal-plus-requirements.lock`，安装到一次性

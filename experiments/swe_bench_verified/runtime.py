@@ -36,6 +36,7 @@ from .environment import (
     resolve_goal_plus_runtime,
     resolve_pi_runtime,
     routed_codex_runtime,
+    routed_pi_runtime,
 )
 from .goal_plus_evidence import collect_goal_plus_state
 
@@ -164,7 +165,7 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
     )
     provider_contract = (
         dict(profile["agent_provider"])
-        if profile["methods"][0] == "plain-codex"
+        if profile.get("agent_provider") is not None
         else {
             "auth_mode": "provider-api",
             "provider": profile["model"].partition("/")[0],
@@ -407,9 +408,9 @@ def _create_agent_container(
         )
     else:
         runtime = runtime or (
-            resolve_goal_plus_runtime(profile["model"])
+            resolve_goal_plus_runtime(profile)
             if method == "goal-plus-pi"
-            else resolve_pi_runtime(profile["model"])
+            else resolve_pi_runtime(profile)
         )
         if not runtime["credential_present"]:
             raise SweBenchContractError(
@@ -427,6 +428,18 @@ def _create_agent_container(
                 f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
             ]
         )
+        models_file = runtime.get("models_file")
+        if isinstance(models_file, Path):
+            if not models_file.is_file():
+                raise SweBenchContractError(
+                    f"Pi custom provider config is missing: {models_file}"
+                )
+            command.extend(
+                [
+                    "--mount",
+                    f"type=bind,src={models_file.parent},dst=/opt/pi-provider,readonly",
+                ]
+            )
         if method == "goal-plus-pi":
             required_assets = (
                 "goal_plus_root",
@@ -521,6 +534,18 @@ def _initialize_agent_container(
     _docker_checked(
         ["docker", "exec", container_id, "git", "-C", "/testbed", "clean", "-fdx"]
     )
+    if isinstance(runtime.get("models_file"), Path):
+        _docker_checked(
+            [
+                "docker",
+                "exec",
+                container_id,
+                "sh",
+                "-lc",
+                "mkdir -p /opt/pi-home/.pi/agent && "
+                "cp /opt/pi-provider/models.json /opt/pi-home/.pi/agent/models.json",
+            ]
+        )
     if profile["methods"][0] == "plain-codex":
         _docker_checked(
             [
@@ -706,6 +731,15 @@ def _agent_command(
         command = [*common]
         for name, value in goal_plus_environment.items():
             command.extend(["-e", f"{name}={value}"])
+        if runtime.get("bridge_host"):
+            command.extend(
+                [
+                    "-e",
+                    f"NO_PROXY={runtime['bridge_host']}",
+                    "-e",
+                    f"no_proxy={runtime['bridge_host']}",
+                ]
+            )
         command.extend(
             [
                 "-e",
@@ -742,6 +776,16 @@ def _agent_command(
             ]
         )
         return command
+    bridge_environment = (
+        [
+            "-e",
+            f"NO_PROXY={runtime['bridge_host']}",
+            "-e",
+            f"no_proxy={runtime['bridge_host']}",
+        ]
+        if runtime.get("bridge_host")
+        else []
+    )
     return [
         *common,
         "-e",
@@ -750,6 +794,7 @@ def _agent_command(
         "PI_CODING_AGENT_DIR=/opt/pi-home/.pi/agent",
         "-e",
         credential_env,
+        *bridge_environment,
         container_id,
         "/opt/node/bin/node",
         "/opt/pi/dist/cli.js",
@@ -1029,12 +1074,30 @@ def _run_agent(
                     "OpenAI-compatible Responses probe failed through the runtime route"
                 )
         else:
-            runtime = (
-                resolve_goal_plus_runtime(profile["model"])
-                if method == "goal-plus-pi"
-                else resolve_pi_runtime(profile["model"])
-            )
-            host_probe = None
+            if profile.get("agent_provider") is not None:
+                runtime = resources.enter_context(
+                    routed_pi_runtime(
+                        profile,
+                        campaign,
+                        goal_plus=method == "goal-plus-pi",
+                    )
+                )
+                host_probe = openai_responses_probe(
+                    str(runtime["runtime_api_base_url"]),
+                    api_key_env=str(runtime["api_key_env"]),
+                    model=str(runtime["model_id"]),
+                )
+                if not host_probe["passed"]:
+                    raise SweBenchContractError(
+                        "Pi OpenAI-compatible Responses probe failed through the runtime route"
+                    )
+            else:
+                runtime = (
+                    resolve_goal_plus_runtime(profile)
+                    if method == "goal-plus-pi"
+                    else resolve_pi_runtime(profile)
+                )
+                host_probe = None
         container_id, runtime = _create_agent_container(
             manifest["campaign_id"], profile, runtime
         )
@@ -1082,6 +1145,29 @@ def _run_agent(
                 "provider": runtime["provider"],
                 "credential_env": runtime["credential_env"],
             }
+            if runtime.get("custom_provider"):
+                runtime_public.update(
+                    {
+                        "provider_name": runtime["provider_name"],
+                        "auth_mode": runtime["auth_mode"],
+                        "wire_api": runtime["wire_api"],
+                        "base_url_env": runtime["base_url_env"],
+                        "api_key_env": runtime["api_key_env"],
+                        "api_base_url": runtime["api_base_url"],
+                        "runtime_api_base_url": runtime["runtime_api_base_url"],
+                        "models_file": str(runtime["models_file"]),
+                        "bridge": (
+                            {
+                                key: value
+                                for key, value in runtime["bridge"].items()
+                                if key != "pid"
+                            }
+                            if runtime["bridge"]
+                            else None
+                        ),
+                        "host_responses_probe": host_probe,
+                    }
+                )
             if method == "goal-plus-pi":
                 runtime_public.update(
                     {
@@ -1112,6 +1198,18 @@ def _run_agent(
             if not container_probe["passed"]:
                 raise SweBenchContractError(
                     "OpenAI-compatible Responses probe failed in the Agent container"
+                )
+        elif runtime.get("custom_provider"):
+            container_probe = codex_container_responses_probe(
+                container_id,
+                runtime,
+                model=str(runtime["model_id"]),
+                existing_container=True,
+            )
+            runtime_public["container_responses_probe"] = container_probe
+            if not container_probe["passed"]:
+                raise SweBenchContractError(
+                    "Pi OpenAI-compatible Responses probe failed in the Agent container"
                 )
         setup_runtime_seconds = time.monotonic() - started
         if method == "goal-plus-pi":

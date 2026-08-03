@@ -161,6 +161,11 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         goal_plus_pi = agent.resolve_spec(
             preset_id="swe-bench-verified-sympy-16886-goal-plus-pi-smoke"
         )
+        luna_goal_plus_pi = agent.resolve_spec(
+            preset_id=(
+                "swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke"
+            )
+        )
 
         self.assertEqual(codex.runner.runner_id, "swe-bench-native")
         self.assertEqual(codex.methods, ("plain-codex",))
@@ -172,6 +177,13 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(goal_plus_pi.model, "zai/glm-5.2")
         self.assertEqual(
             goal_plus_pi.concurrency(), {"T": 1800, "K": 1, "C": 1, "R": 1}
+        )
+        self.assertEqual(luna_goal_plus_pi.methods, ("goal-plus-pi",))
+        self.assertEqual(luna_goal_plus_pi.model, "bench-openai/gpt-5.6-luna")
+        self.assertEqual(luna_goal_plus_pi.reasoning_effort, "high")
+        self.assertEqual(
+            luna_goal_plus_pi.concurrency(),
+            {"T": 1800, "K": 1, "C": 1, "R": 1},
         )
         self.assertTrue(codex.runner.capabilities.official_evaluator)
         self.assertTrue(codex.runner.capabilities.retain_containers)
@@ -191,6 +203,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         )
         self.assertEqual(
             self.profile("sympy-16886-goal-plus-pi-smoke")["tasks"][0][
+                "base_commit"
+            ],
+            expected,
+        )
+        self.assertEqual(
+            self.profile("sympy-16886-goal-plus-pi-luna-high-smoke")["tasks"][0][
                 "base_commit"
             ],
             expected,
@@ -252,6 +270,63 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(resolved["api_key_env"], "OPENAI_API_KEY")
         self.assertEqual(resolved["api_base_url"], values["OPENAI_BASE_URL"])
         self.assertNotIn("api_key", resolved)
+
+    def test_luna_pi_profile_freezes_custom_responses_provider(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-luna-high-smoke")
+        self.assertEqual(profile["model"], "bench-openai/gpt-5.6-luna")
+        self.assertEqual(profile["reasoning_effort"], "high")
+        self.assertEqual(
+            profile["agent_provider"],
+            {
+                "id": "bench-openai",
+                "name": "Benchmark OpenAI-compatible proxy",
+                "auth_mode": "openai-compatible",
+                "base_url_env": "OPENAI_BASE_URL",
+                "api_key_env": "OPENAI_API_KEY",
+                "wire_api": "responses",
+            },
+        )
+
+        invalid = json.loads(json.dumps(profile))
+        invalid["agent_provider"]["id"] = "other-provider"
+        with self.assertRaisesRegex(SweBenchContractError, "must match"):
+            validate_profile(str(invalid["id"]), invalid)
+
+    def test_luna_pi_runtime_writes_environment_reference_not_secret(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-luna-high-smoke")
+        secret = "not-for-provider-config"
+        values = {
+            "OPENAI_BASE_URL": "http://127.0.0.1:3788/v1",
+            "OPENAI_API_KEY": secret,
+        }
+        with mock.patch.dict(os.environ, values, clear=False):
+            runtime_info = environment.resolve_pi_runtime(profile)
+
+        self.assertTrue(runtime_info["custom_provider"])
+        self.assertEqual(runtime_info["provider"], "bench-openai")
+        self.assertEqual(runtime_info["model_id"], "gpt-5.6-luna")
+        self.assertEqual(runtime_info["credential_env"], "OPENAI_API_KEY")
+        self.assertNotIn("api_key", runtime_info)
+
+        runtime_info["runtime_api_base_url"] = "http://192.0.2.10:45678/v1"
+        with self.temporary_directory() as temporary:
+            models_file = Path(temporary) / "provider-runtime/models.json"
+            environment.write_pi_models_config(
+                models_file,
+                runtime_info,
+                reasoning_effort=profile["reasoning_effort"],
+            )
+            raw = models_file.read_text(encoding="utf-8")
+            payload = json.loads(raw)
+
+        provider = payload["providers"]["bench-openai"]
+        self.assertEqual(provider["baseUrl"], "http://192.0.2.10:45678/v1")
+        self.assertEqual(provider["api"], "openai-responses")
+        self.assertEqual(provider["apiKey"], "$OPENAI_API_KEY")
+        self.assertEqual(
+            provider["models"][0]["thinkingLevelMap"], {"high": "high"}
+        )
+        self.assertNotIn(secret, raw)
 
     def test_loopback_bridge_preserves_the_responses_base_path(self) -> None:
         self.assertEqual(
@@ -442,6 +517,41 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         probe = capture.call_args.args[0]
         self.assertIn("ZAI_API_KEY", probe)
         self.assertFalse(any(secret in argument for argument in probe))
+
+    def test_custom_pi_container_probe_mounts_generated_provider_config(self) -> None:
+        secret = "not-for-command-lines"
+        with self.temporary_directory() as temporary:
+            models_file = Path(temporary) / "provider-runtime/models.json"
+            models_file.parent.mkdir(parents=True)
+            models_file.write_text("{\"providers\": {}}\n", encoding="utf-8")
+            runtime_info = {
+                "credential_env": "OPENAI_API_KEY",
+                "provider": "bench-openai",
+                "model_id": "gpt-5.6-luna",
+                "node_root": Path("/opt/node-host"),
+                "package_root": Path("/opt/pi-host"),
+                "models_file": models_file,
+                "bridge_host": "192.0.2.10",
+            }
+            completed = subprocess.CompletedProcess([], 0, "gpt-5.6-luna", "")
+            with (
+                mock.patch.dict(
+                    os.environ, {"OPENAI_API_KEY": secret}, clear=False
+                ),
+                mock.patch.object(
+                    environment, "run_capture", return_value=completed
+                ) as capture,
+            ):
+                environment._pi_container_probe("image:latest", runtime_info)
+
+        command = capture.call_args.args[0]
+        joined = " ".join(str(item) for item in command)
+        self.assertEqual(command[:4], ["docker", "run", "--pull", "never"])
+        self.assertIn("OPENAI_API_KEY", command)
+        self.assertIn("dst=/opt/provider,readonly", joined)
+        self.assertIn("PI_CODING_AGENT_DIR=/opt/pi-home/.pi/agent", command)
+        self.assertIn("NO_PROXY=192.0.2.10", command)
+        self.assertNotIn(secret, joined)
 
     def test_goal_plus_container_mounts_and_outer_pi_command_are_explicit(self) -> None:
         profile = self.profile("sympy-16886-goal-plus-pi-smoke")

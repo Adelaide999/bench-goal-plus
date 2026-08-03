@@ -22,10 +22,16 @@ provision, detach, stop, resume, or cross-cell concurrency.
 | `swe-bench-verified-sympy-16886-codex-smoke` | `gpt-5.6-sol`, medium | `1800/1/1/1` | profile-frozen `OPENAI_BASE_URL` + `OPENAI_API_KEY`, Responses |
 | `swe-bench-verified-sympy-16886-pi-smoke` | `zai/glm-5.2`, medium | `1800/1/1/1` | inherited `ZAI_API_KEY` |
 | `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` | `zai/glm-5.2`, medium | `1800/1/1/1` | inherited `ZAI_API_KEY` |
+| `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | profile-frozen `OPENAI_BASE_URL` + `OPENAI_API_KEY`, Responses |
 
 The Pi credential value is never serialized. Docker receives only the selected environment variable
 name. The complete dataset row is host-side evaluator input; the Agent receives only the public
 issue allowlist.
+
+The Luna profile materializes a campaign-local Pi `models.json` containing only the endpoint and
+`$OPENAI_API_KEY` environment reference. A Linux loopback endpoint uses the same repository-owned
+socket bridge as Plain Codex; doctor must pass host Responses, task-container Responses, and Pi's
+exact `bench-openai/gpt-5.6-luna` model listing before launch.
 
 ## Completion evidence
 

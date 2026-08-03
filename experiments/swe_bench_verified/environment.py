@@ -307,17 +307,28 @@ def routed_codex_runtime(
             closer()
 
 
-def resolve_pi_runtime(model: str) -> dict[str, Any]:
+def resolve_pi_runtime(profile: dict[str, Any]) -> dict[str, Any]:
     node_command = shutil.which("node")
     pi_command = shutil.which("pi")
     node_binary = Path(node_command).resolve() if node_command else None
     pi_cli = Path(pi_command).resolve() if pi_command else None
     node_root = node_binary.parent.parent if node_binary else None
     package_root = pi_cli.parent.parent if pi_cli else None
+    model = str(profile["model"])
     provider, _, model_id = model.partition("/")
-    key_names = PI_API_KEYS.get(provider, ())
-    key_source = next((name for name in key_names if os.environ.get(name)), None)
-    return {
+    provider_contract = profile.get("agent_provider")
+    if provider_contract is not None:
+        base_url_env = str(provider_contract["base_url_env"])
+        api_key_env = str(provider_contract["api_key_env"])
+        key_source = api_key_env if os.environ.get(api_key_env) else None
+        custom_provider = True
+    else:
+        base_url_env = None
+        api_key_env = None
+        key_names = PI_API_KEYS.get(provider, ())
+        key_source = next((name for name in key_names if os.environ.get(name)), None)
+        custom_provider = False
+    runtime = {
         "node_root": node_root,
         "node_binary": node_binary,
         "package_root": package_root,
@@ -326,7 +337,112 @@ def resolve_pi_runtime(model: str) -> dict[str, Any]:
         "model_id": model_id,
         "credential_env": key_source,
         "credential_present": key_source is not None,
+        "custom_provider": custom_provider,
+        "models_file": None,
     }
+    if custom_provider:
+        runtime.update(
+            {
+                "provider_name": str(provider_contract["name"]),
+                "auth_mode": str(provider_contract["auth_mode"]),
+                "wire_api": str(provider_contract["wire_api"]),
+                "base_url_env": base_url_env,
+                "api_key_env": api_key_env,
+                "api_base_url": os.environ.get(str(base_url_env)),
+            }
+        )
+    return runtime
+
+
+def write_pi_models_config(
+    path: Path, runtime: dict[str, Any], *, reasoning_effort: str
+) -> None:
+    credential_env = str(runtime["credential_env"])
+    payload = {
+        "providers": {
+            str(runtime["provider"]): {
+                "baseUrl": str(runtime["runtime_api_base_url"]),
+                "api": "openai-responses",
+                "apiKey": f"${credential_env}",
+                "authHeader": True,
+                "models": [
+                    {
+                        "id": str(runtime["model_id"]),
+                        "name": f"{runtime['model_id']} benchmark proxy",
+                        "reasoning": True,
+                        "thinkingLevelMap": {
+                            reasoning_effort: reasoning_effort,
+                        },
+                        "input": ["text"],
+                        "contextWindow": 272000,
+                        "maxTokens": 32000,
+                        "cost": {
+                            "input": 0,
+                            "output": 0,
+                            "cacheRead": 0,
+                            "cacheWrite": 0,
+                        },
+                        "compat": {
+                            "supportsDeveloperRole": True,
+                            "supportsReasoningEffort": True,
+                        },
+                    }
+                ],
+            }
+        }
+    }
+    write_json(path, payload)
+
+
+@contextmanager
+def routed_pi_runtime(
+    profile: dict[str, Any], destination: Path, *, goal_plus: bool = False
+) -> Iterator[dict[str, Any]]:
+    runtime = (
+        resolve_goal_plus_runtime(profile) if goal_plus else resolve_pi_runtime(profile)
+    )
+    if not runtime["custom_provider"]:
+        yield runtime
+        return
+    if not runtime.get("api_base_url") or not runtime["credential_present"]:
+        raise SweBenchContractError(
+            "Pi custom provider requires the profile-selected OpenAI-compatible base URL and key"
+        )
+    runtime["runtime_api_base_url"] = str(runtime["api_base_url"])
+    runtime["bridge_host"] = None
+    runtime["bridge"] = None
+    closer = None
+    try:
+        target = loopback_target(str(runtime["api_base_url"]))
+        if target is not None:
+            bridge_host = default_route_ipv4(root=ROOT)
+            _, metadata, closer = start_socket_bridge(
+                destination,
+                name="pi-agent-api",
+                listen_host=bridge_host,
+                target_host=target[0],
+                target_port=target[1],
+                root=ROOT,
+                display_path=lambda path: str(path.relative_to(ROOT)),
+            )
+            runtime["bridge_host"] = bridge_host
+            runtime["bridge"] = metadata
+            runtime["runtime_api_base_url"] = bridged_url(
+                str(runtime["api_base_url"]),
+                bridge_host,
+                int(metadata["listen_port"]),
+            )
+        models_file = destination / "provider-runtime" / "models.json"
+        write_pi_models_config(
+            models_file,
+            runtime,
+            reasoning_effort=str(profile["reasoning_effort"]),
+        )
+        runtime["models_file"] = models_file
+        yield runtime
+    finally:
+        if closer is not None:
+            closer()
 
 
 def goal_plus_install_script() -> str:
@@ -364,8 +480,8 @@ def goal_plus_runtime_environment() -> dict[str, str]:
     }
 
 
-def resolve_goal_plus_runtime(model: str) -> dict[str, Any]:
-    runtime = resolve_pi_runtime(model)
+def resolve_goal_plus_runtime(profile: dict[str, Any]) -> dict[str, Any]:
+    runtime = resolve_pi_runtime(profile)
     runtime.update(
         {
             "goal_plus_root": GOAL_PLUS_ROOT,
@@ -525,28 +641,64 @@ def _pi_container_probe(
 ) -> subprocess.CompletedProcess[str]:
     provider = str(runtime["provider"])
     credential_env = str(runtime["credential_env"])
-    return run_capture(
-        [
-            "docker",
-            "run",
-            "--pull",
-            "never",
-            "--rm",
-            "-e",
-            credential_env,
-            "--mount",
-            f"type=bind,src={runtime['node_root']},dst=/opt/node,readonly",
-            "--mount",
-            f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
-            image,
-            "/opt/node/bin/node",
-            "/opt/pi/dist/cli.js",
-            "--offline",
-            "--list-models",
-            provider,
-        ],
-        timeout=120,
-    )
+    command = [
+        "docker",
+        "run",
+        "--pull",
+        "never",
+        "--rm",
+        "-e",
+        credential_env,
+        "--mount",
+        f"type=bind,src={runtime['node_root']},dst=/opt/node,readonly",
+        "--mount",
+        f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
+    ]
+    if runtime.get("bridge_host"):
+        command.extend(
+            [
+                "-e",
+                f"NO_PROXY={runtime['bridge_host']}",
+                "-e",
+                f"no_proxy={runtime['bridge_host']}",
+            ]
+        )
+    models_file = runtime.get("models_file")
+    if isinstance(models_file, Path):
+        command.extend(
+            [
+                "--tmpfs",
+                "/opt/pi-home:rw,nosuid,nodev,size=128m",
+                "-e",
+                "HOME=/opt/pi-home",
+                "-e",
+                "PI_CODING_AGENT_DIR=/opt/pi-home/.pi/agent",
+                "--mount",
+                f"type=bind,src={models_file.parent},dst=/opt/provider,readonly",
+                "--entrypoint",
+                "sh",
+                image,
+                "-lc",
+                "mkdir -p /opt/pi-home/.pi/agent && "
+                "cp /opt/provider/models.json /opt/pi-home/.pi/agent/models.json && "
+                "exec /opt/node/bin/node /opt/pi/dist/cli.js "
+                "--offline --list-models \"$@\"",
+                "swe-bench-pi-probe",
+                provider,
+            ]
+        )
+    else:
+        command.extend(
+            [
+                image,
+                "/opt/node/bin/node",
+                "/opt/pi/dist/cli.js",
+                "--offline",
+                "--list-models",
+                provider,
+            ]
+        )
+    return run_capture(command, timeout=120)
 
 
 def _goal_plus_container_probe(
@@ -789,9 +941,9 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                     )
     else:
         runtime = (
-            resolve_goal_plus_runtime(profile["model"])
+            resolve_goal_plus_runtime(profile)
             if method == "goal-plus-pi"
-            else resolve_pi_runtime(profile["model"])
+            else resolve_pi_runtime(profile)
         )
         paths_present = all(
             isinstance(runtime.get(name), Path) and runtime[name].exists()
@@ -813,19 +965,162 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                 ),
             ]
         )
-        if paths_present and runtime["credential_present"]:
-            probe = _pi_container_probe(image, runtime)
+        pi_model_ready = False
+        if runtime["custom_provider"]:
+            api_config_valid = bool(
+                runtime.get("auth_mode") == "openai-compatible"
+                and runtime.get("wire_api") == "responses"
+                and runtime.get("api_base_url")
+                and runtime["credential_present"]
+            )
             checks.append(
                 _check(
-                    "pi:container-model",
-                    probe.returncode == 0
-                    and str(runtime["model_id"]) in probe.stdout,
+                    "pi:openai-compatible-config",
+                    api_config_valid,
                     provider=runtime["provider"],
-                    model=runtime["model_id"],
-                    output=probe.stdout.strip()[-2000:],
-                    error=probe.stderr.strip()[-2000:],
+                    auth_mode=runtime.get("auth_mode"),
+                    wire_api=runtime.get("wire_api"),
+                    base_url_env=runtime.get("base_url_env"),
+                    api_key_env=runtime.get("api_key_env"),
+                    base_url=runtime.get("api_base_url"),
                 )
             )
+            host_probe = (
+                openai_responses_probe(
+                    str(runtime["api_base_url"]),
+                    api_key_env=str(runtime["api_key_env"]),
+                    model=str(runtime["model_id"]),
+                )
+                if api_config_valid
+                else {
+                    "passed": False,
+                    "http_status": None,
+                    "error": "custom provider configuration is incomplete",
+                }
+            )
+            checks.append(
+                _check(
+                    "pi:host-responses",
+                    bool(host_probe["passed"]),
+                    **{
+                        key: value
+                        for key, value in host_probe.items()
+                        if key != "passed"
+                    },
+                )
+            )
+            route_recorded = False
+            container_recorded = False
+            model_recorded = False
+            try:
+                if not paths_present or not api_config_valid:
+                    raise SweBenchContractError(
+                        "Pi runtime or custom provider configuration is incomplete"
+                    )
+                with temporary_directory(
+                    prefix="pi-api-doctor-",
+                    namespace="swe-bench-verified",
+                ) as destination:
+                    with routed_pi_runtime(
+                        profile,
+                        destination,
+                        goal_plus=method == "goal-plus-pi",
+                    ) as routed:
+                        route_recorded = True
+                        checks.append(
+                            _check(
+                                "pi:container-api-route",
+                                True,
+                                loopback_bridge=routed["bridge"] is not None,
+                                bridge=(
+                                    {
+                                        key: value
+                                        for key, value in routed["bridge"].items()
+                                        if key != "pid"
+                                    }
+                                    if routed["bridge"]
+                                    else None
+                                ),
+                                runtime_base_url=routed["runtime_api_base_url"],
+                            )
+                        )
+                        container_probe = codex_container_responses_probe(
+                            image,
+                            routed,
+                            model=str(routed["model_id"]),
+                        )
+                        container_recorded = True
+                        checks.append(
+                            _check(
+                                "pi:container-responses",
+                                bool(container_probe["passed"]),
+                                **{
+                                    key: value
+                                    for key, value in container_probe.items()
+                                    if key != "passed"
+                                },
+                            )
+                        )
+                        model_probe = _pi_container_probe(image, routed)
+                        model_recorded = True
+                        model_passed = bool(
+                            model_probe.returncode == 0
+                            and str(routed["model_id"]) in model_probe.stdout
+                        )
+                        checks.append(
+                            _check(
+                                "pi:container-model",
+                                model_passed,
+                                provider=routed["provider"],
+                                model=routed["model_id"],
+                                output=model_probe.stdout.strip()[-2000:],
+                                error=model_probe.stderr.strip()[-2000:],
+                            )
+                        )
+                        pi_model_ready = bool(
+                            host_probe["passed"]
+                            and container_probe["passed"]
+                            and model_passed
+                        )
+            except Exception as error:
+                detail = f"{type(error).__name__}: {error}"
+                if not route_recorded:
+                    checks.append(
+                        _check("pi:container-api-route", False, error=detail)
+                    )
+                if not container_recorded:
+                    checks.append(
+                        _check("pi:container-responses", False, error=detail)
+                    )
+                if not model_recorded:
+                    checks.append(_check("pi:container-model", False, error=detail))
+        else:
+            if paths_present and runtime["credential_present"]:
+                probe = _pi_container_probe(image, runtime)
+                pi_model_ready = bool(
+                    probe.returncode == 0
+                    and str(runtime["model_id"]) in probe.stdout
+                )
+                checks.append(
+                    _check(
+                        "pi:container-model",
+                        pi_model_ready,
+                        provider=runtime["provider"],
+                        model=runtime["model_id"],
+                        output=probe.stdout.strip()[-2000:],
+                        error=probe.stderr.strip()[-2000:],
+                    )
+                )
+            else:
+                checks.append(
+                    _check(
+                        "pi:container-model",
+                        False,
+                        provider=runtime["provider"],
+                        model=runtime["model_id"],
+                        error="Pi runtime or credential is missing",
+                    )
+                )
         if method == "goal-plus-pi":
             goal_plus_branch = _git_value_at(
                 runtime["goal_plus_root"], "branch", "--show-current"
@@ -877,8 +1172,7 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                 ]
             )
             if (
-                paths_present
-                and runtime["credential_present"]
+                pi_model_ready
                 and checkout_valid
                 and goal_plus_assets_present
             ):

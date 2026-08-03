@@ -158,6 +158,13 @@ verifier, and closeout controller are bind-mounted read-only and never modified 
 current exact SymPy image provides Python 3.11; a future image/profile must pass the same container
 install/import probe rather than assuming compatibility.
 
+The Luna/high profile uses the existing OpenAI-compatible Responses endpoint through a generated,
+campaign-local Pi registry. Its registry contains an environment reference, never the key value.
+When `OPENAI_BASE_URL` is loopback, setup uses the same `systemd-socket-proxyd` prerequisites as the
+Plain Codex path and verifies the exact `gpt-5.6-luna` model from both host and task container before
+checking Pi model visibility. Do not point `SFORGE_PI_MODELS_FILE` at another user's registry or
+modify the host default Pi configuration for this profile.
+
 Do not replace the task image's `PATH` with a generic host-style value. The current image resolves
 `python` from `/opt/miniconda3/bin` at Python 3.11.5; Goal Plus and Node paths are prepended while
 preserving the image value. If pip unexpectedly selects `cp310` wheels or rejects a lock release that

@@ -381,6 +381,30 @@
         "concurrency": 1,
         "cell_concurrency": 1
       }
+    },
+    {
+      "id": "swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke",
+      "description": "One-instance SWE-bench Verified Goal Plus + Pi smoke using the OpenAI-compatible gpt-5.6-luna provider with high reasoning and T=1800, K=1, C=1, R=1.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "sympy-16886-goal-plus-pi-luna-high-smoke",
+      "campaign_id_template": "swe-bench-verified-sympy-16886-goal-plus-pi-gpt-5-6-luna-high-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi"],
+        "model": "bench-openai/gpt-5.6-luna",
+        "reasoning_effort": "high",
+        "agent_provider": {
+          "id": "bench-openai",
+          "name": "Benchmark OpenAI-compatible proxy",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "OPENAI_BASE_URL",
+          "api_key_env": "OPENAI_API_KEY",
+          "wire_api": "responses"
+        },
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
     }
   ]
 }

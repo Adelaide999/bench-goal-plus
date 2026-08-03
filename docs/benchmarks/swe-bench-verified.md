@@ -50,13 +50,14 @@ task image 始终保留：controller 固定使用官方 harness 的 `cache_level
 
 ## 实验怎么用
 
-当前提供三个冻结 preset：
+当前提供四个冻结 preset：
 
 | Preset | Method | Model | T/K/C/R |
 | --- | --- | --- | --- |
 | `swe-bench-verified-sympy-16886-codex-smoke` | Plain Codex | `gpt-5.6-sol`, medium | `1800/1/1/1` |
 | `swe-bench-verified-sympy-16886-pi-smoke` | Plain Pi | `zai/glm-5.2`, medium | `1800/1/1/1` |
 | `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` | Goal Plus + Pi | `zai/glm-5.2`, medium | `1800/1/1/1` |
+| `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | Goal Plus + Pi | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` |
 
 campaign 顺序运行。runner 暂不支持 provision、detach、stop、resume、`K>1` 或 `C>1`。
 真实 launch 前仍必须展示并确认解析后的 T/K/C/R。Goal Plus + Pi 虽已登记执行路径，但在
@@ -66,6 +67,11 @@ Codex preset 另外冻结 `auth_mode=openai-compatible`、`OPENAI_BASE_URL`、
 `OPENAI_API_KEY` 和 Responses wire API。Linux 上的 loopback endpoint 使用与 EdgeBench
 相同的 `systemd-socket-proxyd` bridge；doctor 会分别验证 host 和实际 task container 的
 `POST /responses`。该路径不读取 OAuth auth file；日志里出现 `chatgpt.com` 应视为路由错误。
+
+Luna Goal Plus + Pi preset 复用同一组 OpenAI-compatible Responses 环境变量，但通过
+campaign-local Pi provider registry 选择 `bench-openai/gpt-5.6-luna`。该 registry 只保存
+环境变量引用；loopback endpoint 同样经过 Linux bridge，doctor 会验证 host、task container
+和 Pi 模型列表三层接线。
 
 ## 可复用对比数据
 

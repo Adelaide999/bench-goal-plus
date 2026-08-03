@@ -62,6 +62,8 @@ python3 scripts/bench.py plan \
 
 Use `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` for the Goal Plus + Pi path. It freezes
 `T=1800,K=1,C=1,R=1`, a 1500-second worker budget, and a 300-second Search closeout reserve.
+Use `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` for the same topology with the
+profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning.
 
 Run `launch` only after reviewing and confirming the resolved `T/K/C/R` block. A terminal campaign
 is archived with `finish`, which consumes `campaign-summary.json` and exports `report.md` plus the

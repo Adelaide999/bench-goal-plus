@@ -51,6 +51,41 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _validate_openai_provider(
+    profile_id: str, provider: Any, *, label: str
+) -> dict[str, Any]:
+    required_fields = {
+        "id",
+        "name",
+        "auth_mode",
+        "base_url_env",
+        "api_key_env",
+        "wire_api",
+    }
+    if not isinstance(provider, dict) or set(provider) != required_fields:
+        raise SweBenchContractError(
+            f"{profile_id}: {label} requires an exact agent_provider contract"
+        )
+    if PROVIDER_ID.fullmatch(str(provider["id"])) is None:
+        raise SweBenchContractError(f"{profile_id}: invalid agent_provider.id")
+    if not isinstance(provider["name"], str) or not provider["name"]:
+        raise SweBenchContractError(f"{profile_id}: agent_provider.name is required")
+    if provider["auth_mode"] != "openai-compatible":
+        raise SweBenchContractError(
+            f"{profile_id}: {label} auth_mode must be openai-compatible"
+        )
+    if provider["wire_api"] != "responses":
+        raise SweBenchContractError(
+            f"{profile_id}: {label} wire_api must be responses"
+        )
+    for field in ("base_url_env", "api_key_env"):
+        if ENVIRONMENT_NAME.fullmatch(str(provider[field])) is None:
+            raise SweBenchContractError(
+                f"{profile_id}: agent_provider.{field} must be an environment name"
+            )
+    return provider
+
+
 def load_profile(profile_id: str) -> tuple[Path, dict[str, Any]]:
     if SAFE_ID.fullmatch(profile_id) is None:
         raise SweBenchContractError(f"unsafe profile id: {profile_id!r}")
@@ -133,37 +168,12 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             f"{profile_id}: retain_containers must be boolean"
         )
     if methods[0] == "plain-codex":
-        provider = profile.get("agent_provider")
-        required_provider_fields = {
-            "id",
-            "name",
-            "auth_mode",
-            "base_url_env",
-            "api_key_env",
-            "wire_api",
-        }
-        if not isinstance(provider, dict) or set(provider) != required_provider_fields:
-            raise SweBenchContractError(
-                f"{profile_id}: Plain Codex requires an exact agent_provider contract"
-            )
-        if PROVIDER_ID.fullmatch(str(provider["id"])) is None:
-            raise SweBenchContractError(f"{profile_id}: invalid agent_provider.id")
-        if not isinstance(provider["name"], str) or not provider["name"]:
-            raise SweBenchContractError(f"{profile_id}: agent_provider.name is required")
-        if provider["auth_mode"] != "openai-compatible":
-            raise SweBenchContractError(
-                f"{profile_id}: Plain Codex auth_mode must be openai-compatible"
-            )
-        if provider["wire_api"] != "responses":
-            raise SweBenchContractError(
-                f"{profile_id}: Plain Codex wire_api must be responses"
-            )
-        for field in ("base_url_env", "api_key_env"):
-            if ENVIRONMENT_NAME.fullmatch(str(provider[field])) is None:
-                raise SweBenchContractError(
-                    f"{profile_id}: agent_provider.{field} must be an environment name"
-                )
-    elif profile.get("agent_provider") is not None:
+        _validate_openai_provider(
+            profile_id, profile.get("agent_provider"), label="Plain Codex"
+        )
+    elif methods[0] not in {"plain-pi", "goal-plus-pi"} and profile.get(
+        "agent_provider"
+    ) is not None:
         raise SweBenchContractError(
             f"{profile_id}: Pi provider is selected by PROVIDER/MODEL"
         )
@@ -174,6 +184,15 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             raise SweBenchContractError(
                 f"{profile_id}: Pi model must be PROVIDER/MODEL"
             )
+        provider_contract = profile.get("agent_provider")
+        if provider_contract is not None:
+            provider_contract = _validate_openai_provider(
+                profile_id, provider_contract, label="Pi custom provider"
+            )
+            if provider_contract["id"] != provider:
+                raise SweBenchContractError(
+                    f"{profile_id}: agent_provider.id must match the Pi model provider"
+                )
     if methods[0] == "goal-plus-pi":
         goal_plus = profile.get("goal_plus")
         required_fields = {
