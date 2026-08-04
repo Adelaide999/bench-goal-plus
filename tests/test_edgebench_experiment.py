@@ -391,16 +391,17 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(zai_provider["concurrency"], 2)
         self.assertEqual(zai_provider["cell_concurrency"], 1)
 
-    def test_pi_provider_profile_requires_qualified_provider_model(self) -> None:
+    def test_pi_provider_profile_requires_qualified_role_models(self) -> None:
         _, profile = EDGE.load_profile(
             "vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1"
         )
-        profile["model"] = "GLM-5.2"
-        path = self.temp / "invalid-pi-provider-model.json"
-        path.write_text(json.dumps(profile), encoding="utf-8")
-
-        with self.assertRaisesRegex(ValueError, "PROVIDER/MODEL"):
-            EDGE.load_profile(path)
+        for field in ("model", "worker_model", "evidence_annotator_model"):
+            with self.subTest(field=field):
+                invalid = {**profile, field: "unqualified-model"}
+                path = self.temp / f"invalid-{field}.json"
+                path.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "PROVIDER/MODEL"):
+                    EDGE.load_profile(path)
 
     def test_profile_rejects_invalid_eval_interval_override(self) -> None:
         _, profile = EDGE.load_profile("vliw-codex-sol-medium-local-smoke")
@@ -944,10 +945,18 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertFalse(any(path.name in {".gp", ".goal-plus"} for path in destination.rglob("*")))
 
-    def test_prepare_recomputes_protocol_reasons_after_cli_tk_overrides(self) -> None:
+    def test_prepare_recomputes_overrides_and_routes_pi_role_models(self) -> None:
         _, profile = EDGE.load_profile(
             "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1"
         )
+        role_config = {
+            "worker_model": "worker-provider/worker-model",
+            "worker_reasoning_effort": "medium",
+            "evidence_annotator_model": "annotation-provider/annotation-model",
+            "evidence_annotator_reasoning_effort": "low",
+            "evidence_annotator_timeout_seconds": 900,
+        }
+        profile.update(role_config)
         args = SimpleNamespace(
             method=None,
             wall_time_seconds=1200,
@@ -979,6 +988,41 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertNotIn("one hour", serialized)
         self.assertNotIn("one-hour", serialized)
         self.assertNotIn("K=2", serialized)
+        campaign = EDGE.read_json(destination / "campaign.json")
+        for payload in (cell, campaign):
+            self.assertEqual(
+                {key: payload[key] for key in role_config},
+                role_config,
+            )
+
+        models_path = self.temp / "runtime-models.json"
+        env = EDGE.cell_environment(
+            cell,
+            pi_models_file=models_path,
+            pi_provider_credentials={"TEST_API_KEY": "test-secret"},
+        )
+        extra = dict(
+            item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+        field_map = {
+            "SFORGE_GOAL_PLUS_WORKER_MODEL": "worker_model",
+            "SFORGE_GOAL_PLUS_WORKER_REASONING_EFFORT": "worker_reasoning_effort",
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": "evidence_annotator_model",
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": (
+                "evidence_annotator_reasoning_effort"
+            ),
+            "SFORGE_GOAL_PLUS_EVIDENCE_ANNOTATOR_TIMEOUT_SECONDS": (
+                "evidence_annotator_timeout_seconds"
+            ),
+        }
+        for env_name, profile_name in field_map.items():
+            self.assertEqual(extra[env_name], str(role_config[profile_name]))
+        self.assertEqual(
+            extra["SFORGE_PI_AUX_MODELS"],
+            "worker-provider/worker-model annotation-provider/annotation-model",
+        )
+        self.assertEqual(env["SFORGE_PI_MODELS_FILE"], str(models_path))
+        self.assertEqual(env["TEST_API_KEY"], "test-secret")
 
     def test_stop_default_wait_covers_normal_controller_closeout(self) -> None:
         parsed = EDGE.build_parser().parse_args(
@@ -1739,6 +1783,111 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertIsNone(
             EDGE.loopback_api_target("https://api.example.com/v1")
         )
+
+    def test_pi_role_models_get_independent_loopback_bridges(self) -> None:
+        def provider(port: int, key: str, *model_ids: str) -> dict:
+            return {
+                "baseUrl": f"http://127.0.0.1:{port}/v1",
+                "apiKey": f"${key}",
+                "models": [{"id": model_id} for model_id in model_ids],
+            }
+
+        models = self.temp / "models.json"
+        EDGE.write_json(
+            models,
+            {
+                "providers": {
+                    "main-provider": provider(
+                        18080,
+                        "MAIN_API_KEY",
+                        "main-model",
+                        "annotator-model",
+                        "unused-model",
+                    ),
+                    "worker-provider": provider(
+                        18081, "WORKER_API_KEY", "worker-model"
+                    ),
+                }
+            },
+        )
+        resources = EDGE.RuntimeResources()
+        controller = {"bridges": []}
+
+        def bridge(pid: int, port: int) -> tuple:
+            return SimpleNamespace(pid=pid), {"listen_port": port}, mock.Mock()
+
+        bridges = mock.Mock(
+            side_effect=[bridge(101, 28080), bridge(102, 28081)]
+        )
+        probes = mock.Mock(
+            return_value={"passed": True, "status": "200", "stderr": None}
+        )
+        profile = {
+            "model": "main-provider/main-model",
+            "worker_model": "worker-provider/worker-model",
+            "evidence_annotator_model": "main-provider/annotator-model",
+            "task_ids": ["vliw_kernel_optimization"],
+        }
+        with mock.patch.dict(
+            EDGE_RUNTIME.os.environ,
+            {
+                "SFORGE_PI_MODELS_FILE": str(models),
+                "MAIN_API_KEY": "main-secret",
+                "WORKER_API_KEY": "worker-secret",
+            },
+            clear=False,
+        ), mock.patch.object(
+            EDGE_RUNTIME, "default_route_ipv4", return_value="192.0.2.10"
+        ), mock.patch.object(
+            EDGE_RUNTIME, "start_socket_bridge", bridges
+        ), mock.patch.object(
+            EDGE_RUNTIME, "docker_http_probe", probes
+        ), mock.patch.object(
+            EDGE_RUNTIME, "task_images", return_value=("example:work", "example:judge")
+        ):
+            EDGE_RUNTIME.prepare_pi_provider_runtime(
+                resources, self.temp, profile, controller
+            )
+
+        runtime_registry = json.loads(resources.pi_models_file.read_text())
+        self.assertEqual(bridges.call_count, 2)
+        self.assertCountEqual(
+            [call.kwargs["model"] for call in probes.call_args_list],
+            ["main-model", "worker-model", "annotator-model"],
+        )
+        self.assertEqual(
+            {
+                provider: config["baseUrl"]
+                for provider, config in runtime_registry["providers"].items()
+            },
+            {
+                "main-provider": "http://192.0.2.10:28080/v1",
+                "worker-provider": "http://192.0.2.10:28081/v1",
+            },
+        )
+        self.assertEqual(
+            [
+                model["id"]
+                for model in runtime_registry["providers"]["main-provider"][
+                    "models"
+                ]
+            ],
+            ["main-model", "annotator-model"],
+        )
+        self.assertEqual(
+            resources.pi_provider_credentials,
+            {"MAIN_API_KEY": "main-secret", "WORKER_API_KEY": "worker-secret"},
+        )
+        self.assertEqual(
+            controller["pi_provider_roles"],
+            {
+                "main": "main-provider/main-model",
+                "worker": "worker-provider/worker-model",
+                "evidence_annotator": "main-provider/annotator-model",
+                "credential_envs": ["MAIN_API_KEY", "WORKER_API_KEY"],
+            },
+        )
+        self.assertNotIn("secret", json.dumps(runtime_registry))
 
     def test_cell_environment_maps_api_key_and_bridge(self) -> None:
         env = EDGE.cell_environment(

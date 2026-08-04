@@ -107,6 +107,34 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     worker_min_runtime = int(profile.get("worker_min_runtime_seconds", 0))
     worker_min_verifiers = int(profile.get("worker_min_verifier_runs", 0))
     closeout_reserve = int(profile.get("closeout_reserve_seconds", 0))
+    role_fields = (
+        "worker_model",
+        "worker_reasoning_effort",
+        "evidence_annotator_model",
+        "evidence_annotator_reasoning_effort",
+        "evidence_annotator_timeout_seconds",
+    )
+    role_config: dict[str, Any] = {}
+    if api_protocol == "pi-provider" and any(
+        field in profile for field in role_fields
+    ):
+        role_config = {
+            "worker_model": str(profile.get("worker_model") or model),
+            "worker_reasoning_effort": str(
+                profile.get("worker_reasoning_effort") or reasoning or "high"
+            ),
+            "evidence_annotator_model": str(
+                profile.get("evidence_annotator_model") or model
+            ),
+            "evidence_annotator_reasoning_effort": str(
+                profile.get("evidence_annotator_reasoning_effort")
+                or reasoning
+                or "high"
+            ),
+            "evidence_annotator_timeout_seconds": int(
+                profile.get("evidence_annotator_timeout_seconds", 1800)
+            ),
+        }
     profile_protocol_overrides = dict(profile.get("protocol_overrides") or {})
     allowed_protocol_override_fields = (
         ALLOWED_PROTOCOL_OVERRIDE_FIELDS | set(profile_protocol_overrides)
@@ -171,6 +199,9 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "reasoning_effort": reasoning,
                 "timeout": wall_time,
             }
+            for role_field in ("worker_model", "evidence_annotator_model"):
+                if role_field in profile:
+                    effective_contract[role_field] = role_config[role_field]
             internet_source = (
                 f"profiles/{profile['id']}.protocol_overrides.internet"
                 if "internet" in profile_protocol_overrides
@@ -190,6 +221,12 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 internet=bool(effective_contract["internet"]),
                 internet_source=internet_source,
             )
+            for role_field in ("worker_model", "evidence_annotator_model"):
+                if role_field in profile:
+                    override_reasons[role_field] = (
+                        f"resolved campaign {role_field}="
+                        f"{role_config[role_field]}"
+                    )
             differences = protocol_diff(
                 official=official_contract,
                 effective=effective_contract,
@@ -206,6 +243,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "backend": backend,
                 "model": model,
                 "reasoning_effort": reasoning,
+                **role_config,
                 "thinking": thinking,
                 "claude_context_window_tokens": profile.get(
                     "claude_context_window_tokens"
@@ -294,6 +332,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "methods": methods,
         "model": model,
         "reasoning_effort": reasoning,
+        **role_config,
         "api_protocol": api_protocol,
         "thinking": thinking,
         "wall_time_seconds": wall_time,
@@ -335,6 +374,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "methods": methods,
             "model": model,
             "reasoning_effort": reasoning,
+            **role_config,
             "pi_package_version": profile.get("pi_package_version"),
             "api_protocol": api_protocol,
             "thinking": thinking,

@@ -175,6 +175,10 @@ manifest 并令 campaign 失去官方同口径标记。
 的资源来源标签，不是 runtime agent 选择。Pi campaign 仍由 `goal-plus-pi-provider`
 和 `PROVIDER/MODEL` 决定，完全不会因为该字段改用 Codex。
 
+主 Agent、Candidate Worker 和 Evidence Annotation 使用不同 Pi 模型时，参考
+[`examples/pi-role-models`](examples/pi-role-models/README.md)。该示例包含宿主
+provider registry、角色 profile 和 Docker 启动流程，但不注册为正式 preset。
+
 `concurrency=K` 控制同一题内的 Plain Codex replicas 或 Goal Plus workers；
 `cell_concurrency` 控制同时运行的不同 task × method cells，默认是 1。为了避免
 无意中把两个并发层相乘，需要跨题并行时应在同一个 campaign profile 中显式设置

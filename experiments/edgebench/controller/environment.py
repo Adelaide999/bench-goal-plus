@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -28,6 +29,7 @@ from .profiles import (
     METHODS,
     api_protocol_for_methods,
     load_official_codex_protocol,
+    pi_provider_role_model_refs,
     profile_task_protocol,
 )
 
@@ -240,6 +242,71 @@ def resolve_pi_provider(
             }
         )
     return result
+
+
+def resolve_pi_provider_bundle(
+    model_refs: list[str] | tuple[str, ...],
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    source = os.environ if env is None else env
+    unique_refs = list(dict.fromkeys(str(ref) for ref in model_refs))
+    statuses = [resolve_pi_provider(ref, source) for ref in unique_refs]
+    errors = [
+        f"{ref}: {status['error']}"
+        for ref, status in zip(unique_refs, statuses, strict=True)
+        if not status["valid"]
+    ]
+    registry: dict[str, Any] = {"providers": {}}
+    credential_envs = sorted(
+        {
+            str(status["credential_env"])
+            for status in statuses
+            if status.get("credential_env")
+        }
+    )
+    registry_cache: dict[str, Any] = {}
+    for ref, status in zip(unique_refs, statuses, strict=True):
+        if not status["valid"] or status["models_path"] is None:
+            continue
+        models_path = str(status["models_path"])
+        if models_path not in registry_cache:
+            try:
+                registry_cache[models_path] = json.loads(
+                    Path(models_path).read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError, AttributeError) as exc:
+                errors.append(f"{ref}: invalid Pi models file: {exc}")
+                continue
+        provider = str(status["provider"])
+        model_id = str(status["model"])
+        provider_config = registry_cache[models_path].get("providers", {}).get(
+            provider
+        )
+        if not isinstance(provider_config, dict):
+            errors.append(f"{ref}: provider config disappeared during resolution")
+            continue
+        selected_models = [
+            copy.deepcopy(item)
+            for item in provider_config.get("models", [])
+            if isinstance(item, dict) and item.get("id") == model_id
+        ]
+        if provider not in registry["providers"]:
+            selected = copy.deepcopy(provider_config)
+            selected["models"] = []
+            registry["providers"][provider] = selected
+        existing = registry["providers"][provider]["models"]
+        existing_ids = {item.get("id") for item in existing}
+        existing.extend(
+            item for item in selected_models if item.get("id") not in existing_ids
+        )
+    return {
+        "valid": not errors,
+        "error": "; ".join(errors) if errors else None,
+        "model_refs": unique_refs,
+        "models": statuses,
+        "credential_envs": credential_envs,
+        "registry": registry,
+    }
 
 
 def loopback_api_target(base_url: str) -> tuple[str, int] | None:
@@ -983,9 +1050,14 @@ def _check_auth(
     codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
     auth = Path(auth_override).expanduser() if auth_override else codex_home / "auth.json"
     pi_auth_status = resolve_pi_auth()
-    pi_provider_status = (
-        resolve_pi_provider(str(profile["model"]))
+    pi_provider_bundle = (
+        resolve_pi_provider_bundle(pi_provider_role_model_refs(profile))
         if api_protocol == "pi-provider"
+        else None
+    )
+    pi_provider_status = (
+        pi_provider_bundle["models"][0]
+        if pi_provider_bundle is not None
         else None
     )
     api_key = api_config["api_key"]
@@ -997,7 +1069,7 @@ def _check_auth(
     auth_ready = (
         (not needs_codex or bool(api_key) or auth.is_file())
         and (not needs_pi_oauth or bool(pi_auth_status["valid"]))
-        and (pi_provider_status is None or bool(pi_provider_status["valid"]))
+        and (pi_provider_bundle is None or bool(pi_provider_bundle["valid"]))
         and (not needs_claude or bool(api_key))
     )
     report.add(
@@ -1029,7 +1101,7 @@ def _check_auth(
         if pi_provider_status is not None:
             report.add(
                 "auth:pi",
-                bool(pi_provider_status["valid"]),
+                bool(pi_provider_bundle["valid"]),
                 mode="provider-api",
                 provider=pi_provider_status["provider"],
                 model=pi_provider_status["model"],
@@ -1037,7 +1109,18 @@ def _check_auth(
                 model_registered=pi_provider_status["model_registered"],
                 credential_mode=pi_provider_status["credential_mode"],
                 credential_env=pi_provider_status["credential_env"],
-                error=pi_provider_status["error"],
+                role_models=[
+                    {
+                        "provider": status["provider"],
+                        "model": status["model"],
+                        "model_registered": status["model_registered"],
+                        "credential_env": status["credential_env"],
+                        "valid": status["valid"],
+                        "error": status["error"],
+                    }
+                    for status in pi_provider_bundle["models"]
+                ],
+                error=pi_provider_bundle["error"],
             )
         else:
             report.add(

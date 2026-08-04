@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "vliw-goal-plus-pi-role-models-example",
+  "description": "Two-provider Docker example with Terra main/annotation roles and two Qwen3.7-Plus workers.",
+  "protocol_source": "edgebench-official-codex",
+  "backend": "docker",
+  "dataset_repository": "ByteDance-Seed/EdgeBench",
+  "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+  "registry": "seededge",
+  "task_ids": [
+    "vliw_kernel_optimization"
+  ],
+  "methods": [
+    "goal-plus-pi-provider"
+  ],
+  "model": "bench-openai/gpt-5.6-terra",
+  "reasoning_effort": "high",
+  "worker_model": "glm-proxy/Qwen3.7-Plus",
+  "worker_reasoning_effort": "high",
+  "evidence_annotator_model": "bench-openai/gpt-5.6-terra",
+  "evidence_annotator_reasoning_effort": "high",
+  "evidence_annotator_timeout_seconds": 300,
+  "pi_package_version": "0.83.0",
+  "wall_time_seconds": 1800,
+  "concurrency": 2,
+  "worker_runtime_seconds": 1500,
+  "worker_min_runtime_seconds": 1200,
+  "worker_min_verifier_runs": 1,
+  "closeout_reserve_seconds": 300,
+  "goal_plus_finalization_grace_seconds": 300,
+  "cell_concurrency": 1,
+  "judge_concurrency": 1,
+  "judge_port": 8080,
+  "protocol_overrides": {
+    "eval_interval": 300,
+    "internet": true
+  },
+  "protocol_override_reasons": {
+    "agent": "the example exercises Goal Plus hosted by Pi through explicit API providers",
+    "backend": "the example uses the local Docker backend",
+    "model": "the main Goal Plus session uses the validated GPT-5.6 Terra model",
+    "worker_model": "the two Candidate Workers use the validated Qwen3.7-Plus provider path",
+    "evidence_annotator_model": "Evidence Annotation uses the validated GPT-5.6 Terra model",
+    "reasoning_effort": "reasoning effort is pinned explicitly for reproducibility",
+    "timeout": "the example uses a thirty-minute campaign budget",
+    "attempts_per_task": "one outer Goal Plus trajectory maps K=2 to two internal workers",
+    "cell_concurrency": "the example runs one task cell",
+    "judge_concurrency": "the local shared Judge is serialized",
+    "eval_interval": "the example records hidden-Judge progress every five minutes",
+    "internet": "the selected API providers require the validated open-network container path"
+  }
+}
