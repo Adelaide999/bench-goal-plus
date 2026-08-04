@@ -27,10 +27,10 @@ def _revalidate_goal_plus_cell(
     manifest: dict[str, Any],
     cell: dict[str, Any],
 ) -> bool:
-    if cell.get("method") != "goal-plus-pi" or cell.get("state") not in {
-        "completed",
-        "partial",
-    }:
+    if (
+        cell.get("method") not in {"goal-plus-codex", "goal-plus-pi"}
+        or cell.get("state") not in {"completed", "partial"}
+    ):
         return False
     profile = manifest.get("profile_snapshot") or {}
     goal_plus_profile = profile.get("goal_plus") or {}
@@ -194,7 +194,7 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
             "official_evaluator": True,
             "official_evaluator_once": evaluation.get("calls") == 1,
             "goal_plus": {
-                "required": cell["method"] == "goal-plus-pi",
+                "required": cell["method"] in {"goal-plus-codex", "goal-plus-pi"},
                 "acceptance_view_enabled": cell.get("acceptance_view_enabled"),
                 "completion": goal_plus_completion or None,
                 "actual_subagent_count": goal_plus.get("actual_subagent_count"),

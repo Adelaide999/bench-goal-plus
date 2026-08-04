@@ -181,6 +181,7 @@ def collect_goal_plus_state(
     expected_visible_verifier_timeout_seconds: int,
     expected_acceptance_view_enabled: bool = False,
     expected_evidence_annotator_enabled: bool = False,
+    expected_worker_host: str = "pi-rpc",
 ) -> dict[str, Any]:
     goal_records = []
     for path in sorted((root / "goal-plus").glob("gp_*/goal.json")):
@@ -270,7 +271,7 @@ def collect_goal_plus_state(
                 else None
             )
             if (
-                session.get("host") == "pi-rpc"
+                session.get("host") == expected_worker_host
                 and isinstance(candidate_id, str)
                 and candidate_id
                 and isinstance(bound_id, str)
@@ -426,7 +427,7 @@ def collect_goal_plus_state(
             bool(selected_run and selected_run.get("max_parallel") == expected_k),
         ),
         "worker_topology": _check(
-            "pi-rpc/parallel_loops",
+            f"{expected_worker_host}/parallel_loops",
             (
                 f"{selected_run.get('worker_host')}/"
                 f"{selected_run.get('orchestration_mode')}"
@@ -435,7 +436,7 @@ def collect_goal_plus_state(
             ),
             bool(
                 selected_run
-                and selected_run.get("worker_host") == "pi-rpc"
+                and selected_run.get("worker_host") == expected_worker_host
                 and selected_run.get("orchestration_mode") == "parallel_loops"
             ),
         ),

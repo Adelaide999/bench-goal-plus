@@ -10,7 +10,7 @@ repository lifecycle through `python3 scripts/bench.py`.
 | Dataset | `SWE-bench/SWE-bench_Verified` at `91aa3ed51b709be6457e12d00300a6a596d4c6a3` |
 | Instance | `sympy__sympy-16886` |
 | Image | `swebench/sweb.eval.x86_64.sympy_1776_sympy-16886:latest` |
-| Methods | `plain-codex`, `plain-pi`, `goal-plus-pi` |
+| Methods | `plain-codex`, `plain-pi`, `goal-plus-codex`, `goal-plus-pi` |
 | Budget | `T=1800`, `K=1`, `C=1`, `R=1` |
 | Metric | official `resolved`, maximize |
 | Codex auth | `OPENAI_BASE_URL` + `OPENAI_API_KEY`, OpenAI-compatible Responses |
@@ -80,6 +80,10 @@ Use `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` for the Goal Plus + Pi p
 `T=1800,K=1,C=1,R=1`, a 1500-second worker budget, and a 300-second Search closeout reserve.
 Use `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` for the same topology with the
 profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning.
+
+Use `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-smoke` for a five-minute native
+Codex host check. It uses the host Codex ChatGPT login and therefore requires outbound access to
+`chatgpt.com`; connectivity failure is a campaign partial, never a verifier result.
 
 For the Acceptance View mechanism ablation, run
 `swe-bench-verified-sympy-16886-acceptance-view-off-smoke` and

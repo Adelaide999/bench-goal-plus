@@ -53,6 +53,32 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "/opt/agent-tmp",
         )
 
+        codex_script = environment.goal_plus_install_script(include_pi=False)
+        self.assertIn("goal_plus.server", codex_script)
+        self.assertNotIn("/opt/pi/dist", codex_script)
+        self.assertNotIn("/opt/goal-plus-bin/pi", codex_script)
+
+    def test_goal_plus_codex_profile_uses_native_auth_and_codex_workers(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-codex-acceptance-smoke")
+        self.assertEqual(profile["methods"], ["goal-plus-codex"])
+        self.assertNotIn("agent_provider", profile)
+
+        prompt = runtime.build_goal_plus_prompt(
+            {"problem_statement": "Public issue text"}, profile
+        )
+        command = runtime._agent_command(
+            "container-id",
+            profile,
+            {"outer_deadline_at": "2026-08-04T12:00:00+00:00"},
+        )
+        joined = " ".join(command)
+        self.assertIn("strategy.worker_host=codex", prompt)
+        self.assertIn("GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED=1", command)
+        self.assertIn("gpt-5.6-sol", command)
+        self.assertNotIn("OPENAI_API_KEY", joined)
+        self.assertNotIn("agents.enabled", joined)
+        self.assertEqual(command[-1], "-")
+
     def test_goal_plus_controller_drains_views_before_search_selection(self) -> None:
         controller = environment.GOAL_PLUS_CONTROLLER.read_text(encoding="utf-8")
         drain = controller.index(
@@ -71,6 +97,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         verifier_runs: int = 1,
         acceptance_view: bool = False,
         evidence_annotations: bool = False,
+        worker_host: str = "pi-rpc",
     ) -> None:
         run_id = "run_test"
         candidate_id = "c001"
@@ -95,7 +122,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         spec = {
             "budget": {"max_parallel": max_parallel},
             "strategy": {
-                "worker_host": "pi-rpc",
+                "worker_host": worker_host,
                 "orchestration_mode": "parallel_loops",
                 "worker_budget": {"max_runtime_seconds": 1500},
                 "config": {"closeout_reserve_seconds": 300},
@@ -225,7 +252,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             write_json(
                 root / f"runs/{run_id}/agent_sessions/agent_{index}.json",
                 {
-                    "host": "pi-rpc",
+                    "host": worker_host,
                     "candidate_id": candidate_id,
                     "host_handle": {
                         "external_id": f"agent_{index}",
@@ -241,6 +268,25 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         promotion = root / f"runs/{run_id}/promotion/{candidate_id}.patch"
         promotion.parent.mkdir(parents=True, exist_ok=True)
         promotion.write_text("diff --git a/a b/a\n", encoding="utf-8")
+
+    def test_goal_plus_codex_completion_accepts_codex_worker_sessions(self) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary)
+            self.write_goal_plus_state(root, worker_host="codex")
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_host="codex",
+            )
+
+        self.assertTrue(state["completion"]["passed"])
+        self.assertEqual(
+            state["completion"]["checks"]["worker_topology"]["actual"],
+            "codex/parallel_loops",
+        )
 
     def test_catalog_presets_freeze_methods_and_tkcr(self) -> None:
         agent = BenchmarkAgent(catalog=Catalog())
@@ -566,15 +612,15 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         ):
             runtime._initialize_agent_container("container-id", profile, {})
 
-    def test_goal_plus_and_unqualified_pi_model_fail_before_prepare(self) -> None:
+    def test_goal_plus_codex_resolves_and_unqualified_pi_model_fails(self) -> None:
         agent = BenchmarkAgent(catalog=Catalog())
-        with self.assertRaisesRegex(ContractError, "does not support.*goal-plus-codex"):
-            agent.resolve_spec(
-                target_ids=("swe-bench-verified",),
-                profile="sympy-16886-codex-smoke",
-                methods=("goal-plus-codex",),
-                model="gpt-5.6-sol",
+        goal_plus_codex = agent.resolve_spec(
+            preset_id=(
+                "swe-bench-verified-sympy-16886-"
+                "goal-plus-codex-acceptance-smoke"
             )
+        )
+        self.assertEqual(goal_plus_codex.methods, ("goal-plus-codex",))
         with self.assertRaisesRegex(ContractError, "PROVIDER/MODEL"):
             agent.resolve_spec(
                 target_ids=("swe-bench-verified",),

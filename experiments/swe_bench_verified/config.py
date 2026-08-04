@@ -15,7 +15,12 @@ RUNS_ROOT = ROOT / "runs" / "swe-bench-verified"
 SWEBENCH_ROOT = ROOT / "third_party" / "swebench"
 GOAL_PLUS_ROOT = ROOT / "third_party" / "goal-plus"
 UPSTREAM_MANIFEST = ROOT / "environment" / "upstreams.json"
-SUPPORTED_METHODS = {"plain-codex", "plain-pi", "goal-plus-pi"}
+SUPPORTED_METHODS = {
+    "plain-codex",
+    "plain-pi",
+    "goal-plus-codex",
+    "goal-plus-pi",
+}
 SAFE_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 PROVIDER_ID = re.compile(r"[a-z][a-z0-9_-]*")
@@ -181,9 +186,10 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         _validate_openai_provider(
             profile_id, profile.get("agent_provider"), label="Plain Codex"
         )
-    elif methods[0] not in {"plain-pi", "goal-plus-pi"} and profile.get(
-        "agent_provider"
-    ) is not None:
+    elif (
+        methods[0] not in {"plain-pi", "goal-plus-pi", "goal-plus-codex"}
+        and profile.get("agent_provider") is not None
+    ):
         raise SweBenchContractError(
             f"{profile_id}: Pi provider is selected by PROVIDER/MODEL"
         )
@@ -203,7 +209,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 raise SweBenchContractError(
                     f"{profile_id}: agent_provider.id must match the Pi model provider"
                 )
-    if methods[0] == "goal-plus-pi":
+    if methods[0] in {"goal-plus-codex", "goal-plus-pi"}:
         goal_plus = profile.get("goal_plus")
         required_fields = {
             "worker_runtime_seconds",
@@ -214,7 +220,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         }
         if not isinstance(goal_plus, dict) or set(goal_plus) != required_fields:
             raise SweBenchContractError(
-                f"{profile_id}: Goal Plus + Pi requires an exact goal_plus contract"
+                f"{profile_id}: Goal Plus requires an exact goal_plus contract"
             )
         worker_runtime = goal_plus["worker_runtime_seconds"]
         closeout_reserve = goal_plus["closeout_reserve_seconds"]
@@ -286,7 +292,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 raise SweBenchContractError(
                     f"{profile_id}: Goal Plus Evidence annotator timeout must be 1..600"
                 )
-            if provider_contract is None:
+            if methods[0] == "goal-plus-pi" and provider_contract is None:
                 raise SweBenchContractError(
                     f"{profile_id}: Codex Evidence annotator requires agent_provider"
                 )
@@ -300,7 +306,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             )
     elif profile.get("goal_plus") is not None:
         raise SweBenchContractError(
-            f"{profile_id}: goal_plus configuration is only valid for goal-plus-pi"
+            f"{profile_id}: goal_plus configuration requires a Goal Plus method"
         )
 
 

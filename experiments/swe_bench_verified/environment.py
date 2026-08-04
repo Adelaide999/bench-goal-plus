@@ -446,7 +446,7 @@ def routed_pi_runtime(
             closer()
 
 
-def goal_plus_install_script() -> str:
+def goal_plus_install_script(*, include_pi: bool = True) -> str:
     installer = (
         "import os, sys; "
         "cache = os.stat('/opt/pip-cache'); "
@@ -460,14 +460,22 @@ def goal_plus_install_script() -> str:
         "'--target', '/opt/goal-plus-runtime', "
         "'-r', '/opt/goal-plus-runtime-requirements.lock'])"
     )
-    return " && ".join(
-        (
-            "export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH",
-            "mkdir -p /opt/goal-plus-runtime /opt/goal-plus-bin /opt/pi-home/.pi/agent",
-            f'python -c "{installer}"',
-            "ln -sf /opt/pi/dist/cli.js /opt/goal-plus-bin/pi",
+    commands = [
+        "export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH",
+        "mkdir -p /opt/goal-plus-runtime /opt/goal-plus-bin",
+        f'python -c "{installer}"',
+        "printf '#!/bin/sh\\nexec python -m goal_plus.server \"$@\"\\n' "
+        "> /opt/goal-plus-bin/goal-plus",
+        "chmod 0555 /opt/goal-plus-bin/goal-plus",
+    ]
+    if include_pi:
+        commands.extend(
+            [
+                "mkdir -p /opt/pi-home/.pi/agent",
+                "ln -sf /opt/pi/dist/cli.js /opt/goal-plus-bin/pi",
+            ]
         )
-    )
+    return " && ".join(commands)
 
 
 def goal_plus_runtime_environment() -> dict[str, str]:
@@ -508,6 +516,32 @@ def resolve_goal_plus_runtime(profile: dict[str, Any]) -> dict[str, Any]:
         }
     )
     return runtime
+
+
+def resolve_goal_plus_codex_runtime(profile: dict[str, Any]) -> dict[str, Any]:
+    archive = Path(os.environ.get("SWEBENCH_CODEX_RUNTIME_ARCHIVE", CODEX_ARCHIVE))
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    auth_file = codex_home / "auth.json"
+    annotator = profile["goal_plus"]["evidence_annotator"]
+    return {
+        "archive": archive,
+        "archive_present": archive.is_file(),
+        "auth_file": auth_file,
+        "credential_present": auth_file.is_file(),
+        "auth_mode": "chatgpt",
+        "goal_plus_root": GOAL_PLUS_ROOT,
+        "goal_plus_dependency_lock": GOAL_PLUS_DEPENDENCY_LOCK,
+        "goal_plus_visible_verifier": GOAL_PLUS_VISIBLE_VERIFIER,
+        "goal_plus_controller": GOAL_PLUS_CONTROLLER,
+        "goal_plus_pip_cache": ensure_temp_root(
+            "swe-bench-verified/goal-plus-pip-cache"
+        ),
+        "goal_plus_evidence_annotator": (
+            dict(annotator) if isinstance(annotator, dict) else None
+        ),
+        "goal_plus_codex_archive": archive,
+        "goal_plus_codex_archive_present": archive.is_file(),
+    }
 
 
 def _codex_container_probe(image: str, archive: Path) -> subprocess.CompletedProcess[str]:
@@ -869,7 +903,85 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         )
     )
     runtime: dict[str, Any]
-    if method == "plain-codex":
+    if method == "goal-plus-codex":
+        runtime = resolve_goal_plus_codex_runtime(profile)
+        checks.extend(
+            [
+                _check(
+                    "codex:runtime-archive",
+                    runtime["archive_present"],
+                    path=str(runtime["archive"]),
+                ),
+                _check(
+                    "codex:chatgpt-auth",
+                    runtime["credential_present"],
+                    auth_file=str(runtime["auth_file"]),
+                ),
+            ]
+        )
+        if runtime["archive_present"]:
+            probe = _codex_container_probe(image, runtime["archive"])
+            checks.append(
+                _check(
+                    "codex:container-runtime",
+                    probe.returncode == 0,
+                    version=(probe.stdout or probe.stderr).strip(),
+                )
+            )
+        expected_goal_plus_branch = managed_upstream_branch("goal_plus")
+        goal_plus_branch = _git_value_at(
+            runtime["goal_plus_root"], "branch", "--show-current"
+        )
+        goal_plus_head = _git_value_at(
+            runtime["goal_plus_root"], "rev-parse", "HEAD"
+        )
+        goal_plus_upstream = _git_value_at(
+            runtime["goal_plus_root"], "rev-parse", "--abbrev-ref", "@{upstream}"
+        )
+        goal_plus_dirty = _git_value_at(
+            runtime["goal_plus_root"], "status", "--porcelain"
+        )
+        assets_present = all(
+            isinstance(runtime.get(name), Path) and runtime[name].is_file()
+            for name in (
+                "goal_plus_dependency_lock",
+                "goal_plus_visible_verifier",
+                "goal_plus_controller",
+            )
+        ) and (
+            runtime["goal_plus_root"] / ".codex" / "skills" / "goal-plus"
+        ).is_dir()
+        checks.extend(
+            [
+                _check(
+                    "checkout:goal-plus",
+                    bool(
+                        runtime["goal_plus_root"].is_dir()
+                        and goal_plus_branch == expected_goal_plus_branch
+                        and goal_plus_upstream
+                        == f"origin/{expected_goal_plus_branch}"
+                        and goal_plus_head
+                        and goal_plus_dirty == ""
+                    ),
+                    path=str(runtime["goal_plus_root"]),
+                    branch=goal_plus_branch,
+                    upstream=goal_plus_upstream,
+                    expected_branch=expected_goal_plus_branch,
+                    commit=goal_plus_head,
+                    dirty=goal_plus_dirty not in (None, ""),
+                ),
+                _check(
+                    "goal-plus:container-assets",
+                    assets_present,
+                    dependency_lock=str(runtime["goal_plus_dependency_lock"]),
+                    visible_verifier=str(runtime["goal_plus_visible_verifier"]),
+                    controller=str(runtime["goal_plus_controller"]),
+                    evidence_annotator="codex",
+                    codex_archive=str(runtime["archive"]),
+                ),
+            ]
+        )
+    elif method == "plain-codex":
         runtime = resolve_codex_runtime(profile)
         api_config_valid = bool(
             runtime["auth_mode"] == "openai-compatible"
