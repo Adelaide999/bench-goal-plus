@@ -77,6 +77,59 @@ def _usage_from_sessions(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _evidence_annotations(run_dir: Path, expected_iterations: int) -> dict[str, Any]:
+    entries: list[dict[str, Any]] = []
+    states: dict[str, int] = {}
+    usage: dict[str, int | float] = {}
+    for path in sorted(
+        run_dir.glob("candidates/*/evidence-annotations/iteration-*.json")
+    ):
+        task = _read_object(path)
+        state = str(task.get("state") or "unknown")
+        states[state] = states.get(state, 0) + 1
+        task_usage = (
+            task.get("usage") if isinstance(task.get("usage"), dict) else {}
+        )
+        for name, value in task_usage.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                usage[name] = usage.get(name, 0) + value
+        view = task.get("view") if isinstance(task.get("view"), dict) else None
+        profile = task.get("profile") if isinstance(task.get("profile"), dict) else {}
+        entries.append(
+            {
+                "candidate_id": task.get("candidate_id"),
+                "iteration": task.get("iteration"),
+                "state": state,
+                "annotator_host": profile.get("host"),
+                "view": view,
+                "last_error": task.get("last_error"),
+            }
+        )
+    completed_views = [
+        item
+        for item in entries
+        if item["state"] == "completed"
+        and isinstance(item.get("view"), dict)
+        and bool(item["view"].get("description"))
+    ]
+    return {
+        "expected_iterations": expected_iterations,
+        "task_count": len(entries),
+        "states": dict(sorted(states.items())),
+        "entries": entries,
+        "usage": {
+            **dict(sorted(usage.items())),
+            "tasks": len(entries),
+            "coverage": "persisted Codex Evidence annotator usage",
+        },
+        "all_completed": bool(
+            expected_iterations > 0
+            and len(entries) == expected_iterations
+            and len(completed_views) == expected_iterations
+        ),
+    }
+
+
 def _visible_verifier_contract(
     verifiers: Any,
     *,
@@ -126,6 +179,8 @@ def collect_goal_plus_state(
     expected_worker_runtime_seconds: int,
     expected_closeout_reserve_seconds: int,
     expected_visible_verifier_timeout_seconds: int,
+    expected_acceptance_view_enabled: bool = False,
+    expected_evidence_annotator_enabled: bool = False,
 ) -> dict[str, Any]:
     goal_records = []
     for path in sorted((root / "goal-plus").glob("gp_*/goal.json")):
@@ -180,6 +235,25 @@ def collect_goal_plus_state(
             expected_timeout_seconds=expected_visible_verifier_timeout_seconds,
         )
         candidates = sorted(path.parent.glob("candidates/*/candidate.json"))
+        candidate_records = [_read_object(candidate) for candidate in candidates]
+        expected_annotation_iterations = sum(
+            len(candidate.get("iterations") or [])
+            for candidate in candidate_records
+            if isinstance(candidate.get("iterations"), list)
+        )
+        acceptance_contract = (
+            spec.get("acceptance_view")
+            if isinstance(spec.get("acceptance_view"), dict)
+            else None
+        )
+        evidence_annotator_spec = (
+            strategy.get("evidence_annotator")
+            if isinstance(strategy.get("evidence_annotator"), dict)
+            else None
+        )
+        annotations = _evidence_annotations(
+            path.parent, expected_annotation_iterations
+        )
         sessions = [
             _read_object(session_path)
             for session_path in sorted(path.parent.glob("agent_sessions/agent_*.json"))
@@ -226,6 +300,9 @@ def collect_goal_plus_state(
                 "orchestration_mode": strategy.get("orchestration_mode"),
                 "worker_budget": worker_budget,
                 "strategy_config": strategy_config,
+                "acceptance_view_contract": acceptance_contract,
+                "evidence_annotator_spec": evidence_annotator_spec,
+                "evidence_annotations": annotations,
                 "process_visible_verifiers": process_verifiers,
                 "promotion_visible_verifiers": promotion_verifiers,
                 "candidate_count": len(candidates),
@@ -264,6 +341,71 @@ def collect_goal_plus_state(
     )
     exact_one_session_per_candidate = bool(
         len(counts) == expected_k and all(value == 1 for value in counts.values())
+    )
+    acceptance_contract = (
+        selected_run.get("acceptance_view_contract") if selected_run else None
+    )
+    acceptance_criteria = (
+        acceptance_contract.get("criteria")
+        if isinstance(acceptance_contract, dict)
+        and isinstance(acceptance_contract.get("criteria"), list)
+        else []
+    )
+    expected_criterion_ids = [
+        str(item.get("id"))
+        for item in acceptance_criteria
+        if isinstance(item, dict) and item.get("id")
+    ]
+    acceptance_contract_passed = bool(
+        (
+            expected_acceptance_view_enabled
+            and 3 <= len(acceptance_criteria) <= 8
+            and len(expected_criterion_ids) == len(acceptance_criteria)
+            and len(set(expected_criterion_ids)) == len(expected_criterion_ids)
+        )
+        or (not expected_acceptance_view_enabled and acceptance_contract is None)
+    )
+    annotations = (
+        selected_run.get("evidence_annotations", {}) if selected_run else {}
+    )
+    annotation_entries = (
+        annotations.get("entries", []) if isinstance(annotations, dict) else []
+    )
+
+    def acceptance_ids(entry: dict[str, Any]) -> list[str] | None:
+        view = entry.get("view") if isinstance(entry.get("view"), dict) else {}
+        assessment = (
+            view.get("acceptance_view")
+            if isinstance(view.get("acceptance_view"), dict)
+            else None
+        )
+        if assessment is None:
+            return None
+        criteria = assessment.get("criteria")
+        if not isinstance(criteria, list):
+            return []
+        return [
+            str(item.get("criterion_id"))
+            for item in criteria
+            if isinstance(item, dict) and item.get("criterion_id")
+        ]
+
+    annotations_passed = bool(
+        not expected_evidence_annotator_enabled
+        or (
+            annotations.get("all_completed") is True
+            and annotation_entries
+            and all(
+                entry.get("annotator_host") == "codex"
+                for entry in annotation_entries
+            )
+            and all(
+                acceptance_ids(entry) == expected_criterion_ids
+                if expected_acceptance_view_enabled
+                else acceptance_ids(entry) is None
+                for entry in annotation_entries
+            )
+        )
     )
     checks = {
         "durable_state": _check(True, root.is_dir(), root.is_dir()),
@@ -345,6 +487,47 @@ def collect_goal_plus_state(
                 and selected_run.get("promotion_visible_verifiers", {}).get("passed")
             ),
         ),
+        "acceptance_view_contract": _check(
+            (
+                "3..8 frozen task-specific criteria"
+                if expected_acceptance_view_enabled
+                else "disabled"
+            ),
+            acceptance_contract,
+            acceptance_contract_passed,
+        ),
+        "global_evidence_view": _check(
+            (
+                "completed descriptions plus Acceptance View"
+                if expected_acceptance_view_enabled
+                else (
+                    "completed descriptions"
+                    if expected_evidence_annotator_enabled
+                    else "disabled"
+                )
+            ),
+            annotations,
+            annotations_passed,
+        ),
+        "view_agent_contract": _check(
+            (
+                "independent codex host"
+                if expected_evidence_annotator_enabled
+                else "disabled"
+            ),
+            selected_run.get("evidence_annotator_spec") if selected_run else None,
+            bool(
+                not expected_evidence_annotator_enabled
+                or (
+                    selected_run
+                    and isinstance(
+                        selected_run.get("evidence_annotator_spec"), dict
+                    )
+                    and selected_run["evidence_annotator_spec"].get("host")
+                    == "codex"
+                )
+            ),
+        ),
         "candidates": _check(
             expected_k,
             selected_run.get("candidate_count") if selected_run else 0,
@@ -398,6 +581,11 @@ def collect_goal_plus_state(
             int(selected_run.get("bound_session_count") or 0) if selected_run else 0
         ),
         "worker_usage": _usage_from_sessions(all_bound_sessions),
+        "evidence_annotator_usage": (
+            selected_run.get("evidence_annotations", {}).get("usage", {})
+            if selected_run
+            else {"coverage": "unavailable"}
+        ),
         "completion": {
             "required": True,
             "passed": not failed,

@@ -8,7 +8,11 @@ from typing import Any
 
 from .config import SweBenchContractError, read_json, utc_now, write_json
 from .goal_plus_evidence import collect_goal_plus_state, record_completion_check
-from .runtime import MANIFEST, TERMINAL_STATES
+from .runtime import (
+    MANIFEST,
+    TERMINAL_STATES,
+    _goal_plus_evidence_annotator_public,
+)
 
 
 def _container_isolated(agent: dict[str, Any]) -> bool:
@@ -50,6 +54,12 @@ def _revalidate_goal_plus_cell(
             expected_visible_verifier_timeout_seconds=int(
                 goal_plus_profile["visible_verifier_timeout_seconds"]
             ),
+            expected_acceptance_view_enabled=bool(
+                goal_plus_profile["acceptance_view_enabled"]
+            ),
+            expected_evidence_annotator_enabled=isinstance(
+                goal_plus_profile["evidence_annotator"], dict
+            ),
         )
     except (KeyError, TypeError, ValueError):
         return False
@@ -60,6 +70,7 @@ def _revalidate_goal_plus_cell(
     export = previous_goal_plus.get("export") or {}
     closeout = agent.get("goal_plus_closeout") or {}
     annotator = (agent.get("runtime") or {}).get("evidence_annotator")
+    expected_annotator = _goal_plus_evidence_annotator_public(profile)
     record_completion_check(
         refreshed,
         "state_export",
@@ -76,10 +87,10 @@ def _revalidate_goal_plus_cell(
     )
     record_completion_check(
         refreshed,
-        "evidence_annotator_disabled",
-        expected="disabled",
+        "evidence_annotator_runtime",
+        expected=expected_annotator,
         actual=annotator,
-        passed=annotator == "disabled",
+        passed=annotator == expected_annotator,
     )
     refreshed["export"] = export
     agent["goal_plus"] = refreshed
@@ -218,6 +229,8 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
                 "outer_agent": agent.get("usage")
                 or {"coverage": "unavailable"},
                 "goal_plus_workers": goal_plus.get("worker_usage")
+                or {"coverage": "unavailable"},
+                "view_agent": goal_plus.get("evidence_annotator_usage")
                 or {"coverage": "unavailable"},
             },
             "goal_plus_closeout": agent.get("goal_plus_closeout"),

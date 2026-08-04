@@ -53,6 +53,15 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "/opt/agent-tmp",
         )
 
+    def test_goal_plus_controller_drains_views_before_search_selection(self) -> None:
+        controller = environment.GOAL_PLUS_CONTROLLER.read_text(encoding="utf-8")
+        drain = controller.index(
+            "annotated_in_closeout = drain_evidence_annotations(root, run_id)"
+        )
+        selection = controller.index("selection = tools.search_select(run_id)")
+
+        self.assertLess(drain, selection)
+
     def write_goal_plus_state(
         self,
         root: Path,
@@ -60,6 +69,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         max_parallel: int = 1,
         session_count: int = 1,
         verifier_runs: int = 1,
+        acceptance_view: bool = False,
+        evidence_annotations: bool = False,
     ) -> None:
         run_id = "run_test"
         candidate_id = "c001"
@@ -81,56 +92,135 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "selected_candidate_id": candidate_id,
             },
         )
-        write_json(
-            root / "specs/spec_test/frozen_spec.json",
-            {
-                "spec": {
-                    "budget": {"max_parallel": max_parallel},
-                    "strategy": {
-                        "worker_host": "pi-rpc",
-                        "orchestration_mode": "parallel_loops",
-                        "worker_budget": {"max_runtime_seconds": 1500},
-                        "config": {"closeout_reserve_seconds": 300},
-                    },
-                    "process_verifiers": [
-                        {
-                            "name": "visible",
-                            "role": "ranking_signal",
-                            "command": [
-                                "python",
-                                ".goal-plus-verifiers/visible_test_verifier.py",
-                                "--timeout-seconds",
-                                "300",
-                                "--",
-                                "python",
-                                "-m",
-                                "pytest",
-                            ],
+        spec = {
+            "budget": {"max_parallel": max_parallel},
+            "strategy": {
+                "worker_host": "pi-rpc",
+                "orchestration_mode": "parallel_loops",
+                "worker_budget": {"max_runtime_seconds": 1500},
+                "config": {"closeout_reserve_seconds": 300},
+                **(
+                    {
+                        "evidence_annotator": {
+                            "host": "codex",
+                            "model": None,
+                            "reasoning_effort": None,
+                            "timeout_seconds": 300,
+                            "provider": None,
+                            "pi_provider": None,
                         }
-                    ],
-                    "promotion_verifiers": [
-                        {
-                            "name": "visible-promotion",
-                            "role": "promotion_gate",
-                            "command": [
-                                "python",
-                                ".goal-plus-verifiers/visible_test_verifier.py",
-                                "--timeout-seconds",
-                                "300",
-                                "--",
-                                "python",
-                                "-m",
-                                "pytest",
-                            ],
-                        }
+                    }
+                    if evidence_annotations
+                    else {}
+                ),
+            },
+            "process_verifiers": [
+                {
+                    "name": "visible",
+                    "role": "ranking_signal",
+                    "command": [
+                        "python",
+                        ".goal-plus-verifiers/visible_test_verifier.py",
+                        "--timeout-seconds",
+                        "300",
+                        "--",
+                        "python",
+                        "-m",
+                        "pytest",
                     ],
                 }
+            ],
+            "promotion_verifiers": [
+                {
+                    "name": "visible-promotion",
+                    "role": "promotion_gate",
+                    "command": [
+                        "python",
+                        ".goal-plus-verifiers/visible_test_verifier.py",
+                        "--timeout-seconds",
+                        "300",
+                        "--",
+                        "python",
+                        "-m",
+                        "pytest",
+                    ],
+                }
+            ],
+        }
+        acceptance_criteria = [
+            {
+                "id": "issue_requirements",
+                "category": "issue_coverage",
+                "description": "Cover every requirement stated in the issue.",
+                "importance": "high",
+                "evidence_hints": ["patch", "visible verifier result"],
             },
-        )
+            {
+                "id": "boundary_inputs",
+                "category": "edge_cases",
+                "description": "Handle relevant boundary inputs.",
+                "importance": "medium",
+                "evidence_hints": ["tests", "changed branches"],
+            },
+            {
+                "id": "regression_risk",
+                "category": "regression",
+                "description": "Avoid regressions and incompatible behavior.",
+                "importance": "high",
+                "evidence_hints": ["diff", "regression tests"],
+            },
+        ]
+        if acceptance_view:
+            spec["acceptance_view"] = {
+                "rubric_name": "SWE-bench task-specific quality",
+                "benchmark_context": (
+                    "The official verifier remains the sole hard PASS/FAIL result."
+                ),
+                "criteria": acceptance_criteria,
+                "tie_policy": "retain_latest",
+                "affects_final_result": False,
+            }
+        write_json(root / "specs/spec_test/frozen_spec.json", {"spec": spec})
         write_json(
             root / f"runs/{run_id}/candidates/{candidate_id}/candidate.json",
             {"candidate_id": candidate_id, "iterations": [{"score": 1.0}]},
         )
+        if evidence_annotations:
+            assessment = (
+                {
+                    "criteria": [
+                        {
+                            "criterion_id": item["id"],
+                            "status": "covered",
+                            "confidence": "high",
+                            "evidence": ["Persisted test evidence."],
+                            "rationale": "The candidate evidence covers this criterion.",
+                        }
+                        for item in acceptance_criteria
+                    ],
+                    "summary": "All frozen soft criteria are covered.",
+                }
+                if acceptance_view
+                else None
+            )
+            write_json(
+                root
+                / (
+                    f"runs/{run_id}/candidates/{candidate_id}/"
+                    "evidence-annotations/iteration-0001.json"
+                ),
+                {
+                    "candidate_id": candidate_id,
+                    "iteration": 1,
+                    "state": "completed",
+                    "profile": {"host": "codex"},
+                    "usage": {"input_tokens": 40, "output_tokens": 10},
+                    "view": {
+                        "description": "Independent description of candidate evidence.",
+                        "acceptance_view": assessment,
+                    },
+                },
+            )
         for index in range(session_count):
             write_json(
                 root / f"runs/{run_id}/agent_sessions/agent_{index}.json",
@@ -238,7 +328,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "closeout_reserve_seconds": 300,
                 "visible_verifier_timeout_seconds": 300,
                 "evidence_annotator": "disabled",
-                "acceptance_view_enabled": True,
+                "acceptance_view_enabled": False,
             },
         )
 
@@ -249,7 +339,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
         invalid = json.loads(json.dumps(profile))
         invalid["goal_plus"]["evidence_annotator"] = "enabled"
-        with self.assertRaisesRegex(SweBenchContractError, "disabled"):
+        with self.assertRaisesRegex(SweBenchContractError, "contract is invalid"):
             validate_profile(str(invalid["id"]), invalid)
 
     def test_codex_profile_freezes_custom_responses_auth(self) -> None:
@@ -302,6 +392,15 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "wire_api": "responses",
             },
         )
+        self.assertEqual(
+            profile["goal_plus"]["evidence_annotator"],
+            {
+                "kind": "codex",
+                "model": "gpt-5.6-luna",
+                "reasoning_effort": "high",
+                "timeout_seconds": 300,
+            },
+        )
 
         invalid = json.loads(json.dumps(profile))
         invalid["agent_provider"]["id"] = "other-provider"
@@ -323,14 +422,25 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
         disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
         self.assertEqual(enabled_without_ablation, disabled_without_ablation)
+        task = {"problem_statement": "Public issue text"}
+        self.assertEqual(
+            runtime.build_goal_plus_prompt(task, enabled),
+            runtime.build_goal_plus_prompt(task, disabled),
+        )
 
         self.assertEqual(
             runtime._goal_plus_acceptance_view_environment(enabled),
-            {"GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "1"},
+            {
+                "GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "1",
+                "GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED": "1",
+            },
         )
         self.assertEqual(
             runtime._goal_plus_acceptance_view_environment(disabled),
-            {"GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "0"},
+            {
+                "GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "0",
+                "GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED": "0",
+            },
         )
 
         invalid = json.loads(json.dumps(enabled))
@@ -361,6 +471,25 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertNotIn("api_key", runtime_info)
 
         runtime_info["runtime_api_base_url"] = "http://192.0.2.10:45678/v1"
+        annotator_environment = runtime._goal_plus_evidence_annotator_environment(
+            profile, runtime_info
+        )
+        self.assertEqual(
+            annotator_environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"],
+            "gpt-5.6-luna",
+        )
+        self.assertEqual(
+            annotator_environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT"],
+            "high",
+        )
+        self.assertEqual(
+            annotator_environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL"],
+            "http://192.0.2.10:45678/v1",
+        )
+        self.assertEqual(
+            annotator_environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED"], "0"
+        )
+        self.assertNotIn(secret, annotator_environment.values())
         with self.temporary_directory() as temporary:
             models_file = Path(temporary) / "provider-runtime/models.json"
             environment.write_pi_models_config(
@@ -679,16 +808,96 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("budget.max_parallel=1", prompt)
             self.assertIn("do not set the deprecated max_candidates", prompt)
             self.assertIn("Public issue text", prompt)
+            self.assertIn("derive 3 to 8 task-specific soft criteria", prompt)
+            self.assertIn("strategy.evidence_annotator.host=codex", prompt)
+            self.assertIn("never changes the official binary result", prompt)
             self.assertIn("/opt/goal-plus/.pi/extensions/goal-plus.ts", command)
             self.assertIn("/opt/goal-plus/.pi/skills/goal-plus/SKILL.md", command)
             self.assertIn("GOAL_PLUS_ROOT=/testbed/.gp", command)
             self.assertIn("GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED=1", command)
+            self.assertIn("GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED=0", command)
             self.assertIn(
                 'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH; exec "$@"',
                 command,
             )
             self.assertIn("ZAI_API_KEY", command)
             self.assertFalse(any(secret in argument for argument in command))
+
+    def test_goal_plus_luna_container_mounts_codex_view_agent_runtime(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-luna-high-smoke")
+        secret = "not-for-command-lines"
+        with self.temporary_directory() as temporary:
+            assets = Path(temporary)
+            path_assets = {
+                "goal_plus_root": assets / "goal-plus",
+                "goal_plus_dependency_lock": assets / "requirements.lock",
+                "goal_plus_visible_verifier": assets / "visible.py",
+                "goal_plus_controller": assets / "controller.py",
+                "goal_plus_pip_cache": assets / "pip-cache",
+                "goal_plus_codex_archive": assets / "codex.tgz",
+            }
+            path_assets["goal_plus_root"].mkdir()
+            path_assets["goal_plus_pip_cache"].mkdir()
+            for name, path in path_assets.items():
+                if name not in {"goal_plus_root", "goal_plus_pip_cache"}:
+                    path.write_text("fixture\n", encoding="utf-8")
+            runtime_info = {
+                **path_assets,
+                "credential_env": "OPENAI_API_KEY",
+                "credential_present": True,
+                "provider": "bench-openai",
+                "provider_name": "Benchmark OpenAI-compatible proxy",
+                "model_id": "gpt-5.6-luna",
+                "node_root": Path("/host/node"),
+                "package_root": Path("/host/pi"),
+                "runtime_api_base_url": "http://192.0.2.10:45678/v1",
+                "outer_deadline_at": "2026-08-03T12:00:00+00:00",
+                "goal_plus_evidence_annotator": profile["goal_plus"][
+                    "evidence_annotator"
+                ],
+            }
+            docker_commands: list[list[str]] = []
+
+            def docker_checked(command: list[str], *, timeout: int = 120) -> str:
+                del timeout
+                docker_commands.append(command)
+                return "container-id" if command[:2] == ["docker", "create"] else ""
+
+            with mock.patch.object(
+                runtime, "_docker_checked", side_effect=docker_checked
+            ):
+                runtime._create_agent_container(
+                    "goal-plus-view-agent", profile, runtime_info
+                )
+
+            completed = subprocess.CompletedProcess(
+                ["docker", "exec"], 0, '{"completed": true}\n', ""
+            )
+            with (
+                mock.patch.dict(
+                    os.environ, {"OPENAI_API_KEY": secret}, clear=False
+                ),
+                mock.patch.object(runtime, "_run", return_value=completed) as capture,
+            ):
+                closeout = runtime._goal_plus_closeout(
+                    "container-id", profile, runtime_info
+                )
+
+        create = docker_commands[0]
+        joined = " ".join(create)
+        self.assertIn("/opt/codex:rw,exec,nosuid,nodev,size=512m", create)
+        self.assertIn("/opt/codex-home:rw,nosuid,nodev,size=32m", create)
+        self.assertIn("dst=/opt/runtime/codex.tgz,readonly", joined)
+        closeout_command = capture.call_args.args[0]
+        self.assertTrue(closeout["completed"])
+        self.assertIn("OPENAI_API_KEY", closeout_command)
+        self.assertIn("GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED=1", closeout_command)
+        self.assertIn(
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL=gpt-5.6-luna",
+            closeout_command,
+        )
+        self.assertFalse(any(secret in argument for argument in closeout_command))
+        self.assertEqual(capture.call_args.kwargs["timeout"], 1020)
 
     def test_goal_plus_durable_evidence_enforces_k_and_verifier_contract(self) -> None:
         with self.temporary_directory() as temporary:
@@ -727,6 +936,63 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn(
                 "bound_pi_worker_sessions", mismatch["completion"]["reason"]
             )
+
+    def test_goal_plus_durable_evidence_enforces_global_acceptance_view(self) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary) / "acceptance-on"
+            self.write_goal_plus_state(
+                root, acceptance_view=True, evidence_annotations=True
+            )
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_acceptance_view_enabled=True,
+                expected_evidence_annotator_enabled=True,
+            )
+
+            self.assertTrue(state["completion"]["passed"])
+            self.assertTrue(
+                state["completion"]["checks"]["acceptance_view_contract"]["passed"]
+            )
+            self.assertTrue(
+                state["completion"]["checks"]["global_evidence_view"]["passed"]
+            )
+            self.assertEqual(state["evidence_annotator_usage"]["input_tokens"], 40)
+
+            missing = Path(temporary) / "acceptance-missing"
+            self.write_goal_plus_state(missing)
+            missing_state = goal_plus_evidence.collect_goal_plus_state(
+                missing,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_acceptance_view_enabled=True,
+                expected_evidence_annotator_enabled=True,
+            )
+            self.assertFalse(missing_state["completion"]["passed"])
+            self.assertIn(
+                "acceptance_view_contract", missing_state["completion"]["reason"]
+            )
+            self.assertIn(
+                "global_evidence_view", missing_state["completion"]["reason"]
+            )
+
+            off = Path(temporary) / "acceptance-off"
+            self.write_goal_plus_state(off, evidence_annotations=True)
+            off_state = goal_plus_evidence.collect_goal_plus_state(
+                off,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_acceptance_view_enabled=False,
+                expected_evidence_annotator_enabled=True,
+            )
+            self.assertTrue(off_state["completion"]["passed"])
 
     def test_codex_runtime_probe_and_agent_use_the_same_bounded_tmpfs(self) -> None:
         profile = self.profile("sympy-16886-codex-smoke")
@@ -1312,7 +1578,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         with self.temporary_directory() as temporary:
             campaign = Path(temporary)
             state_root = campaign / "cells/goal-plus-pi/goal-plus-state"
-            self.write_goal_plus_state(state_root)
+            self.write_goal_plus_state(
+                state_root, acceptance_view=True, evidence_annotations=True
+            )
             patch_file = campaign / "cells/goal-plus-pi/model.patch"
             patch_file.write_text("diff --git a/a b/a\n", encoding="utf-8")
             manifest = {
@@ -1347,7 +1615,13 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                         "agent": {
                             "state": "partial",
                             "patch_exists": True,
-                            "runtime": {"evidence_annotator": "disabled"},
+                            "runtime": {
+                                "evidence_annotator": (
+                                    runtime._goal_plus_evidence_annotator_public(
+                                        profile
+                                    )
+                                )
+                            },
                             "goal_plus_closeout": {"completed": True, "returncode": 0},
                             "goal_plus": {
                                 "completion": {
@@ -1389,6 +1663,17 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 summary["records"][0]["protocol"]["goal_plus"]["completion"][
                     "passed"
                 ]
+            )
+            self.assertIsNotNone(
+                summary["records"][0]["protocol"]["goal_plus"]["runs"][0][
+                    "acceptance_view_contract"
+                ]
+            )
+            self.assertEqual(
+                summary["records"][0]["execution"]["usage"]["view_agent"][
+                    "input_tokens"
+                ],
+                40,
             )
             self.assertEqual(recovered["state"], "completed")
             self.assertEqual(recovered["cells"][0]["state"], "completed")

@@ -36,7 +36,12 @@
     "worker_runtime_seconds": 1500,
     "closeout_reserve_seconds": 300,
     "visible_verifier_timeout_seconds": 300,
-    "evidence_annotator": "disabled",
+    "evidence_annotator": {
+      "kind": "codex",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "high",
+      "timeout_seconds": 300
+    },
     "acceptance_view_enabled": true
   }
 }

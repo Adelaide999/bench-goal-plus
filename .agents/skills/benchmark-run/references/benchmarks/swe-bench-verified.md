@@ -35,6 +35,14 @@ The Luna profile materializes a campaign-local Pi `models.json` containing only 
 socket bridge as Plain Codex; doctor must pass host Responses, task-container Responses, and Pi's
 exact `bench-openai/gpt-5.6-luna` model listing before launch.
 
+Both Luna Acceptance View ablation profiles run the same independent Codex ViewAgent on every
+persisted candidate iteration. OFF publishes only a candidate evidence description. ON additionally
+requires MainAgent to freeze 3–8 benchmark-adaptive, task-specific soft criteria and publishes their
+status, confidence, rationale, and supporting evidence in Global Evidence View. There is no soft
+aggregate score: official `resolved` remains the sole hard result. A missing ON rubric, incomplete
+ViewAgent task, criterion mismatch, or OFF assessment leakage makes Goal Plus evidence incomplete
+and therefore the campaign `partial`, while preserving a valid official raw metric.
+
 The archived Linux/amd64 `sympy__sympy-16886` smokes pass the complete `K=1,C=1`
 official-harness contract for
 [Plain Codex](../../../../../evidence/runs/2026-08-02-swe-bench-verified-plain-codex-sol/summary.json),
@@ -63,8 +71,12 @@ For `goal-plus-pi`, score completion additionally requires exported durable stat
 one terminal Goal Plus record and linked promoted Search run, a frozen spec with
 `budget.max_parallel=K`, `pi-rpc/parallel_loops`, the frozen worker/closeout budgets, one candidate,
 one bound Pi worker session, worker-origin verifier evidence, the registered visible-test wrapper,
-and no active Pi pool job. The controller exports `/testbed/.gp` before container disposal. Missing
-Goal Plus evidence downgrades the cell to `partial` while preserving any complete official raw score.
+and no active Pi pool job. When the profile enables the ViewAgent, every candidate iteration must
+have a completed Global Evidence description. Acceptance View ON additionally requires a frozen
+3–8 criterion contract and an exactly matching per-criterion assessment; OFF requires the contract
+and assessments to be absent. The controller exports `/testbed/.gp` before container disposal.
+Missing Goal Plus evidence downgrades the cell to `partial` while preserving any complete official
+raw score.
 
 ## Debug container retention
 

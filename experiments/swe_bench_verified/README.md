@@ -48,6 +48,20 @@ controller closes Pi pools, performs idempotent select/promote/apply closeout, e
 campaign, and only then disposes the Agent container. The separate official harness remains the sole
 owner of `resolved`.
 
+The Luna Goal Plus profiles also run an independent Codex ViewAgent for every persisted candidate
+iteration. It writes a concise evidence description into the Goal Plus Global Evidence View. In the
+Acceptance View ON profile, MainAgent must additionally freeze 3–8 task-specific soft criteria
+derived from the public issue and repository; ViewAgent reports each criterion as `covered`,
+`partial`, `missing`, `unknown`, or `not_applicable`, with confidence and evidence. These labels have
+no aggregate score and never affect the official binary `resolved` result. The OFF profile runs the
+same ViewAgent and records descriptions but freezes no Acceptance View, keeping the model, provider,
+prompt, budget, and annotation overhead matched apart from the mechanism switch.
+
+During controller closeout, any ViewAgent work already queued by verifier-settled Evidence is drained
+before `search_select`. This preserves the search-period feedback contract for the final iteration;
+annotation errors remain durable evidence failures rather than being converted to a soft score or a
+hard verifier result.
+
 ## Public lifecycle
 
 Use the registered presets through the unified entrypoint:
@@ -70,8 +84,12 @@ profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning
 For the Acceptance View mechanism ablation, run
 `swe-bench-verified-sympy-16886-acceptance-view-off-smoke` and
 `swe-bench-verified-sympy-16886-acceptance-view-on-smoke`. Both profiles freeze the same task,
-provider, model, reasoning, and `T/K/C/R`; only `GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED` differs. The
-official SWE-bench `resolved` result remains the sole hard score.
+provider, model, reasoning, ViewAgent, and `T/K/C/R`; only the Acceptance View policy differs. ON
+sets both `GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED=1` and
+`GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED=1`, so a missing or underspecified rubric cannot silently
+degrade into the OFF condition. The official SWE-bench `resolved` result remains the sole hard
+score. Reports preserve the frozen rubric, per-iteration Global Evidence entries, ViewAgent token
+usage, and the completion checks that prove the intended condition actually ran.
 
 Run `launch` only after reviewing and confirming the resolved `T/K/C/R` block. A terminal campaign
 is archived with `finish`, which consumes `campaign-summary.json` and exports `report.md` plus the

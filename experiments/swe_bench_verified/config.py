@@ -247,13 +247,56 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             raise SweBenchContractError(
                 f"{profile_id}: visible verifier timeout must be positive"
             )
-        if goal_plus["evidence_annotator"] != "disabled":
-            raise SweBenchContractError(
-                f"{profile_id}: initial Goal Plus path requires disabled evidence annotator"
-            )
+        annotator = goal_plus["evidence_annotator"]
+        if annotator != "disabled":
+            annotator_fields = {
+                "kind",
+                "model",
+                "reasoning_effort",
+                "timeout_seconds",
+            }
+            if not isinstance(annotator, dict) or set(annotator) != annotator_fields:
+                raise SweBenchContractError(
+                    f"{profile_id}: Goal Plus Evidence annotator contract is invalid"
+                )
+            if annotator["kind"] != "codex":
+                raise SweBenchContractError(
+                    f"{profile_id}: Goal Plus Evidence annotator kind must be codex"
+                )
+            if (
+                not isinstance(annotator["model"], str)
+                or not annotator["model"].strip()
+            ):
+                raise SweBenchContractError(
+                    f"{profile_id}: Goal Plus Evidence annotator model is required"
+                )
+            if (
+                not isinstance(annotator["reasoning_effort"], str)
+                or not annotator["reasoning_effort"].strip()
+            ):
+                raise SweBenchContractError(
+                    f"{profile_id}: Goal Plus Evidence annotator reasoning is required"
+                )
+            annotator_timeout = annotator["timeout_seconds"]
+            if (
+                not isinstance(annotator_timeout, int)
+                or isinstance(annotator_timeout, bool)
+                or not 1 <= annotator_timeout <= 600
+            ):
+                raise SweBenchContractError(
+                    f"{profile_id}: Goal Plus Evidence annotator timeout must be 1..600"
+                )
+            if provider_contract is None:
+                raise SweBenchContractError(
+                    f"{profile_id}: Codex Evidence annotator requires agent_provider"
+                )
         if not isinstance(goal_plus["acceptance_view_enabled"], bool):
             raise SweBenchContractError(
                 f"{profile_id}: goal_plus.acceptance_view_enabled must be boolean"
+            )
+        if goal_plus["acceptance_view_enabled"] and annotator == "disabled":
+            raise SweBenchContractError(
+                f"{profile_id}: Acceptance View requires the Evidence annotator"
             )
     elif profile.get("goal_plus") is not None:
         raise SweBenchContractError(

@@ -453,6 +453,8 @@ def _create_agent_container(
                 "goal_plus_controller",
                 "goal_plus_pip_cache",
             )
+            if runtime.get("goal_plus_evidence_annotator") is not None:
+                required_assets = (*required_assets, "goal_plus_codex_archive")
             missing = [
                 name
                 for name in required_assets
@@ -489,6 +491,19 @@ def _create_agent_container(
                     "dst=/opt/pip-cache",
                 ]
             )
+            if runtime.get("goal_plus_evidence_annotator") is not None:
+                command.extend(
+                    [
+                        "--tmpfs",
+                        CODEX_RUNTIME_TMPFS,
+                        "--tmpfs",
+                        "/opt/codex-home:rw,nosuid,nodev,size=32m",
+                        "--mount",
+                        "type=bind,"
+                        f"src={runtime['goal_plus_codex_archive']},"
+                        "dst=/opt/runtime/codex.tgz,readonly",
+                    ]
+                )
     if runtime is None:
         raise AssertionError("Agent runtime was not resolved")
     command.extend([profile["tasks"][0]["image"], "sleep", "infinity"])
@@ -564,6 +579,19 @@ def _initialize_agent_container(
             timeout=120,
         )
     elif profile["methods"][0] == "goal-plus-pi":
+        if runtime.get("goal_plus_evidence_annotator") is not None:
+            _docker_checked(
+                [
+                    "docker",
+                    "exec",
+                    container_id,
+                    "sh",
+                    "-lc",
+                    "mkdir -p /opt/codex && "
+                    "tar -xzf /opt/runtime/codex.tgz -C /opt/codex",
+                ],
+                timeout=120,
+            )
         environment = goal_plus_runtime_environment()
         install_command = ["docker", "exec"]
         for name, value in environment.items():
@@ -576,6 +604,13 @@ def _initialize_agent_container(
                 "sh",
                 "-lc",
                 goal_plus_install_script()
+                + (
+                    " && ln -sf "
+                    "/opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex "
+                    "/opt/goal-plus-bin/codex"
+                    if runtime.get("goal_plus_evidence_annotator") is not None
+                    else ""
+                )
                 + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
                 + " && pi --version",
             ]
@@ -629,6 +664,10 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
             "Agent task unexpectedly contains hidden fields: " + ", ".join(sorted(hidden))
         )
     goal_plus = profile["goal_plus"]
+    annotator = goal_plus["evidence_annotator"]
+    annotator_timeout = (
+        annotator["timeout_seconds"] if isinstance(annotator, dict) else 300
+    )
     return (
         "/goal-plus mode=autonomous Solve the public repository issue below in "
         "/testbed. Treat this as verifier-guided code repair and enter Search Mode. "
@@ -643,12 +682,25 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "Set strategy.worker_budget.max_runtime_seconds="
         f"{goal_plus['worker_runtime_seconds']} and "
         "strategy.config.closeout_reserve_seconds="
-        f"{goal_plus['closeout_reserve_seconds']}. Use one fixed initial candidate and "
+        f"{goal_plus['closeout_reserve_seconds']}. Use one fixed initial candidate. "
+        "Set strategy.evidence_annotator.host=codex and "
+        "strategy.evidence_annotator.timeout_seconds="
+        f"{annotator_timeout}; "
+        "leave its model and provider unset because the harness supplies the ViewAgent. "
         "continue the same bound Pi worker session; do not create replacement lanes.\n\n"
+        "At freeze, obey the runtime Acceptance View policy. When it is required, "
+        "derive 3 to 8 task-specific soft criteria from the public issue, repository "
+        "API, affected branches, and likely regression surface. Cover issue requirements, "
+        "boundary inputs, exception paths, branch behavior, regressions, and compatibility "
+        "only when each item is relevant to this task; do not copy a fixed generic rubric. "
+        "The Acceptance View is non-gating evidence for search decisions and never changes "
+        "the official binary result.\n\n"
         "Choose a focused visible test command using only the public issue and repository. "
-        "Both process and promotion ranking verifiers must invoke the materialized "
-        "artifact /testbed/.goal-plus-verifiers/visible_test_verifier.py with cwd=/testbed "
-        "and the candidate-relative command: "
+        "Freeze exactly one process_verifiers entry with role=ranking_signal and "
+        "one separate promotion_verifiers entry with role=promotion_gate. Never put "
+        "the promotion gate in process_verifiers. Both entries must invoke the "
+        "materialized artifact /testbed/.goal-plus-verifiers/visible_test_verifier.py "
+        "with cwd=/testbed and the candidate-relative command: "
         "python .goal-plus-verifiers/visible_test_verifier.py "
         f"--timeout-seconds {goal_plus['visible_verifier_timeout_seconds']} -- "
         "<your visible test command>. Include that wrapper path in verifier_artifacts. "
@@ -661,10 +713,49 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
 
 
 def _goal_plus_acceptance_view_environment(profile: dict[str, Any]) -> dict[str, str]:
+    enabled = bool(profile["goal_plus"]["acceptance_view_enabled"])
     return {
-        "GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": (
-            "1" if profile["goal_plus"]["acceptance_view_enabled"] else "0"
-        )
+        "GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "1" if enabled else "0",
+        "GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED": "1" if enabled else "0",
+    }
+
+
+def _goal_plus_evidence_annotator_environment(
+    profile: dict[str, Any], runtime: dict[str, Any]
+) -> dict[str, str]:
+    annotator = profile["goal_plus"]["evidence_annotator"]
+    if annotator == "disabled":
+        return {"GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED": "1"}
+    provider = profile["agent_provider"]
+    return {
+        "CODEX_HOME": "/opt/codex-home",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED": "0",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": str(annotator["model"]),
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": str(
+            annotator["reasoning_effort"]
+        ),
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL": str(
+            runtime["runtime_api_base_url"]
+        ),
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID": str(provider["id"]),
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME": str(provider["name"]),
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV": str(provider["api_key_env"]),
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API": str(provider["wire_api"]),
+    }
+
+
+def _goal_plus_evidence_annotator_public(profile: dict[str, Any]) -> Any:
+    annotator = profile["goal_plus"]["evidence_annotator"]
+    if annotator == "disabled":
+        return "disabled"
+    provider = profile["agent_provider"]
+    return {
+        "kind": "codex",
+        "model": annotator["model"],
+        "reasoning_effort": annotator["reasoning_effort"],
+        "timeout_seconds": annotator["timeout_seconds"],
+        "provider_id": provider["id"],
+        "wire_api": provider["wire_api"],
     }
 
 
@@ -732,13 +823,13 @@ def _agent_command(
         goal_plus_environment = {
             **goal_plus_runtime_environment(),
             **_goal_plus_acceptance_view_environment(profile),
+            **_goal_plus_evidence_annotator_environment(profile, runtime),
             "HOME": "/opt/pi-home",
             "PI_CODING_AGENT_DIR": "/opt/pi-home/.pi/agent",
             "GOAL_PLUS_ROOT": "/testbed/.gp",
             "GOAL_PLUS_SEARCH_ROOT": "/testbed/.gp",
             "GOAL_PLUS_SOURCE_PATH": "/opt/goal-plus",
             "GOAL_PLUS_PI_MODEL": profile["model"],
-            "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED": "1",
             "GOAL_PLUS_OUTER_DEADLINE_AT": str(runtime["outer_deadline_at"]),
             "PYTHONDONTWRITEBYTECODE": "1",
         }
@@ -882,22 +973,27 @@ def _goal_plus_closeout(
     profile: dict[str, Any],
     runtime: dict[str, Any],
 ) -> dict[str, Any]:
+    annotator = profile["goal_plus"]["evidence_annotator"]
+    annotator_timeout = (
+        int(annotator["timeout_seconds"]) if isinstance(annotator, dict) else 0
+    )
     environment = {
         **goal_plus_runtime_environment(),
         **_goal_plus_acceptance_view_environment(profile),
+        **_goal_plus_evidence_annotator_environment(profile, runtime),
         "HOME": "/opt/pi-home",
         "PI_CODING_AGENT_DIR": "/opt/pi-home/.pi/agent",
         "GOAL_PLUS_ROOT": "/testbed/.gp",
         "GOAL_PLUS_SEARCH_ROOT": "/testbed/.gp",
         "GOAL_PLUS_SOURCE_PATH": "/opt/goal-plus",
         "GOAL_PLUS_PI_MODEL": profile["model"],
-        "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED": "1",
         "GOAL_PLUS_OUTER_DEADLINE_AT": str(runtime["outer_deadline_at"]),
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     command = ["docker", "exec"]
     for name, value in environment.items():
         command.extend(["-e", f"{name}={value}"])
+    command.extend(["-e", str(runtime["credential_env"])])
     command.extend(
         [
             container_id,
@@ -915,6 +1011,7 @@ def _goal_plus_closeout(
         600,
         profile["goal_plus"]["closeout_reserve_seconds"]
         + profile["goal_plus"]["visible_verifier_timeout_seconds"]
+        + annotator_timeout
         + 120,
     )
     try:
@@ -990,6 +1087,12 @@ def _export_goal_plus_state(
         expected_visible_verifier_timeout_seconds=profile["goal_plus"][
             "visible_verifier_timeout_seconds"
         ],
+        expected_acceptance_view_enabled=profile["goal_plus"][
+            "acceptance_view_enabled"
+        ],
+        expected_evidence_annotator_enabled=isinstance(
+            profile["goal_plus"]["evidence_annotator"], dict
+        ),
     )
     record_completion_check(
         state,
@@ -1174,7 +1277,14 @@ def _run_agent(
                         ),
                         "controller": str(runtime["goal_plus_controller"]),
                         "pip_cache": str(runtime["goal_plus_pip_cache"]),
-                        "evidence_annotator": "disabled",
+                        "evidence_annotator": _goal_plus_evidence_annotator_public(
+                            profile
+                        ),
+                        "codex_archive": (
+                            str(runtime["goal_plus_codex_archive"])
+                            if runtime.get("goal_plus_evidence_annotator") is not None
+                            else None
+                        ),
                     }
                 )
         image_checkout = _initialize_agent_container(container_id, profile, runtime)
@@ -1254,10 +1364,13 @@ def _run_agent(
             )
             record_completion_check(
                 goal_plus_state,
-                "evidence_annotator_disabled",
-                expected="disabled",
+                "evidence_annotator_runtime",
+                expected=_goal_plus_evidence_annotator_public(profile),
                 actual=runtime_public.get("evidence_annotator"),
-                passed=runtime_public.get("evidence_annotator") == "disabled",
+                passed=(
+                    runtime_public.get("evidence_annotator")
+                    == _goal_plus_evidence_annotator_public(profile)
+                ),
             )
         _docker_checked(
             ["docker", "exec", container_id, "git", "-C", "/testbed", "add", "-N", "."]

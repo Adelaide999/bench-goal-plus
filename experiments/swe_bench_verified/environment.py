@@ -483,6 +483,10 @@ def goal_plus_runtime_environment() -> dict[str, str]:
 
 def resolve_goal_plus_runtime(profile: dict[str, Any]) -> dict[str, Any]:
     runtime = resolve_pi_runtime(profile)
+    annotator = profile["goal_plus"]["evidence_annotator"]
+    codex_runtime = (
+        resolve_codex_runtime(profile) if isinstance(annotator, dict) else None
+    )
     runtime.update(
         {
             "goal_plus_root": GOAL_PLUS_ROOT,
@@ -491,6 +495,15 @@ def resolve_goal_plus_runtime(profile: dict[str, Any]) -> dict[str, Any]:
             "goal_plus_controller": GOAL_PLUS_CONTROLLER,
             "goal_plus_pip_cache": ensure_temp_root(
                 "swe-bench-verified/goal-plus-pip-cache"
+            ),
+            "goal_plus_evidence_annotator": (
+                dict(annotator) if isinstance(annotator, dict) else None
+            ),
+            "goal_plus_codex_archive": (
+                codex_runtime["archive"] if codex_runtime is not None else None
+            ),
+            "goal_plus_codex_archive_present": bool(
+                codex_runtime is not None and codex_runtime["archive_present"]
             ),
         }
     )
@@ -719,6 +732,20 @@ def _goal_plus_container_probe(
         "--tmpfs",
         "/opt/goal-plus-runtime:rw,exec,nosuid,nodev,size=512m",
     ]
+    annotator_enabled = runtime.get("goal_plus_evidence_annotator") is not None
+    if annotator_enabled:
+        command.extend(
+            [
+                "--tmpfs",
+                CODEX_RUNTIME_TMPFS,
+                "--tmpfs",
+                "/opt/codex-home:rw,nosuid,nodev,size=32m",
+                "--mount",
+                "type=bind,"
+                f"src={runtime['goal_plus_codex_archive']},"
+                "dst=/opt/runtime/codex.tgz,readonly",
+            ]
+        )
     for name, value in goal_plus_runtime_environment().items():
         command.extend(["-e", f"{name}={value}"])
     for name in environment_names:
@@ -749,9 +776,20 @@ def _goal_plus_container_probe(
             "sh",
             image,
             "-lc",
-            goal_plus_install_script()
+            (
+                "mkdir -p /opt/codex && "
+                "tar -xzf /opt/runtime/codex.tgz -C /opt/codex && "
+                if annotator_enabled
+                else ""
+            )
+            + goal_plus_install_script()
             + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
             + " && pi --version"
+            + (
+                " && /opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex --version"
+                if annotator_enabled
+                else ""
+            )
             + " && python -m goal_plus.pi_tool --help >/dev/null"
             + " && python /opt/swebench-goal-plus-controller.py --help >/dev/null",
         ]
@@ -1146,6 +1184,10 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             ) and (
                 runtime["goal_plus_root"] / ".pi" / "extensions" / "goal-plus.ts"
             ).is_file()
+            annotator_assets_present = bool(
+                runtime.get("goal_plus_evidence_annotator") is None
+                or runtime.get("goal_plus_codex_archive_present")
+            )
             checkout_valid = bool(
                 runtime["goal_plus_root"].is_dir()
                 and goal_plus_branch == expected_goal_plus_branch
@@ -1167,10 +1209,20 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                     ),
                     _check(
                         "goal-plus:container-assets",
-                        goal_plus_assets_present,
+                        goal_plus_assets_present and annotator_assets_present,
                         dependency_lock=str(runtime["goal_plus_dependency_lock"]),
                         visible_verifier=str(runtime["goal_plus_visible_verifier"]),
                         controller=str(runtime["goal_plus_controller"]),
+                        evidence_annotator=(
+                            "codex"
+                            if runtime.get("goal_plus_evidence_annotator")
+                            else "disabled"
+                        ),
+                        codex_archive=(
+                            str(runtime.get("goal_plus_codex_archive") or "")
+                            if runtime.get("goal_plus_evidence_annotator")
+                            else None
+                        ),
                     ),
                 ]
             )
@@ -1178,6 +1230,7 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                 pi_model_ready
                 and checkout_valid
                 and goal_plus_assets_present
+                and annotator_assets_present
             ):
                 goal_plus_probe = _goal_plus_container_probe(image, runtime)
                 pip_cache_disabled = "cache has been disabled" in (
