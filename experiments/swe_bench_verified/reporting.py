@@ -45,6 +45,9 @@ def _revalidate_goal_plus_cell(
         refreshed = collect_goal_plus_state(
             state_root,
             expected_k=int(profile["concurrency"]),
+            expected_worker_host=(
+                "codex" if cell["method"] == "goal-plus-codex" else "pi-rpc"
+            ),
             expected_worker_runtime_seconds=int(
                 goal_plus_profile["worker_runtime_seconds"]
             ),

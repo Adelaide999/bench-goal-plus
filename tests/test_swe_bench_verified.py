@@ -336,6 +336,59 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "codex/parallel_loops",
         )
 
+    def test_finalize_revalidates_goal_plus_codex_with_codex_workers(self) -> None:
+        profile = self.profile(
+            "sympy-16886-goal-plus-codex-luna-high-acceptance-on-smoke"
+        )
+        with self.temporary_directory() as temporary:
+            campaign = Path(temporary)
+            state_root = campaign / "cells/goal-plus-codex/goal-plus-state"
+            self.write_goal_plus_state(
+                state_root,
+                acceptance_view=True,
+                evidence_annotations=True,
+                worker_host="codex",
+            )
+            patch_file = campaign / "cells/goal-plus-codex/model.patch"
+            patch_file.write_text("diff --git a/a b/a\n", encoding="utf-8")
+            manifest = {"profile_snapshot": profile}
+            cell = {
+                "method": "goal-plus-codex",
+                "state": "partial",
+                "task_file": "cells/goal-plus-codex/task.json",
+                "patch_file": "cells/goal-plus-codex/model.patch",
+                "agent": {
+                    "runtime": {
+                        "evidence_annotator": (
+                            runtime._goal_plus_evidence_annotator_public(profile)
+                        )
+                    },
+                    "goal_plus_closeout": {"completed": True},
+                    "goal_plus": {
+                        "completion": {"passed": False},
+                        "export": {"completed": True},
+                    },
+                    "container": {"cleanup": {"removed": True}},
+                },
+                "evaluation": {
+                    "state": "completed",
+                    "calls": 1,
+                    "resolved": True,
+                    "patch_applied": True,
+                },
+            }
+
+            changed = reporting._revalidate_goal_plus_cell(campaign, manifest, cell)
+
+        self.assertTrue(changed)
+        goal_plus = cell["agent"]["goal_plus"]
+        self.assertTrue(goal_plus["completion"]["passed"])
+        self.assertEqual(goal_plus["actual_subagent_count"], 1)
+        self.assertEqual(
+            goal_plus["completion"]["checks"]["worker_topology"]["actual"],
+            "codex/parallel_loops",
+        )
+
     def test_catalog_presets_freeze_methods_and_tkcr(self) -> None:
         agent = BenchmarkAgent(catalog=Catalog())
         codex = agent.resolve_spec(
