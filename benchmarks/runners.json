@@ -369,6 +369,56 @@
       }
     },
     {
+      "id": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke",
+      "description": "One-instance SWE-bench Verified Goal Plus + Codex Responses mechanism ablation with Acceptance View disabled.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "sympy-16886-goal-plus-codex-luna-high-acceptance-off-smoke",
+      "campaign_id_template": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-gpt-5-6-luna-high-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-codex"],
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "high",
+        "agent_provider": {
+          "id": "bench_proxy",
+          "name": "Benchmark OpenAI-compatible proxy",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "OPENAI_BASE_URL",
+          "api_key_env": "OPENAI_API_KEY",
+          "wire_api": "responses"
+        },
+        "acceptance_view_enabled": false,
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke",
+      "description": "One-instance SWE-bench Verified Goal Plus + Codex Responses mechanism ablation with Acceptance View enabled.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "sympy-16886-goal-plus-codex-luna-high-acceptance-on-smoke",
+      "campaign_id_template": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-gpt-5-6-luna-high-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-codex"],
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "high",
+        "agent_provider": {
+          "id": "bench_proxy",
+          "name": "Benchmark OpenAI-compatible proxy",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "OPENAI_BASE_URL",
+          "api_key_env": "OPENAI_API_KEY",
+          "wire_api": "responses"
+        },
+        "acceptance_view_enabled": true,
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
       "id": "swe-bench-verified-sympy-16886-pi-smoke",
       "description": "One-instance SWE-bench Verified Plain Pi official-harness smoke with T=1800, K=1, C=1, R=1.",
       "benchmarks": ["swe-bench-verified"],

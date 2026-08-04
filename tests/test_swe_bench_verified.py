@@ -79,6 +79,54 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertNotIn("agents.enabled", joined)
         self.assertEqual(command[-1], "-")
 
+    def test_goal_plus_codex_ablation_uses_the_frozen_responses_provider(
+        self,
+    ) -> None:
+        enabled = self.profile(
+            "sympy-16886-goal-plus-codex-luna-high-acceptance-on-smoke"
+        )
+        disabled = self.profile(
+            "sympy-16886-goal-plus-codex-luna-high-acceptance-off-smoke"
+        )
+        self.assertTrue(enabled["goal_plus"]["acceptance_view_enabled"])
+        self.assertFalse(disabled["goal_plus"]["acceptance_view_enabled"])
+
+        enabled_without_ablation = json.loads(json.dumps(enabled))
+        disabled_without_ablation = json.loads(json.dumps(disabled))
+        enabled_without_ablation["id"] = "ablation"
+        disabled_without_ablation["id"] = "ablation"
+        enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+        disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+        self.assertEqual(enabled_without_ablation, disabled_without_ablation)
+        self.assertEqual(
+            runtime.build_goal_plus_prompt(
+                {"problem_statement": "Public issue text"}, enabled
+            ),
+            runtime.build_goal_plus_prompt(
+                {"problem_statement": "Public issue text"}, disabled
+            ),
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "OPENAI_BASE_URL": "http://127.0.0.1:3788/v1",
+                "OPENAI_API_KEY": "openai-secret",
+            },
+            clear=False,
+        ):
+            resolved = environment.resolve_goal_plus_codex_runtime(enabled)
+        resolved["runtime_api_base_url"] = "http://192.0.2.10:45678/v1"
+        resolved["bridge_host"] = "192.0.2.10"
+        resolved["outer_deadline_at"] = "2026-08-04T12:00:00+00:00"
+        command = runtime._agent_command("container-id", enabled, resolved)
+        joined = " ".join(command)
+        self.assertIn("OPENAI_API_KEY", command)
+        self.assertIn('model_provider="bench_proxy"', command)
+        self.assertIn("http://192.0.2.10:45678/v1", joined)
+        self.assertNotIn("openai-secret", joined)
+        self.assertIsNone(resolved["auth_file"])
+
     def test_goal_plus_controller_drains_views_before_search_selection(self) -> None:
         controller = environment.GOAL_PLUS_CONTROLLER.read_text(encoding="utf-8")
         drain = controller.index(

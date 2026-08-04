@@ -186,6 +186,14 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         _validate_openai_provider(
             profile_id, profile.get("agent_provider"), label="Plain Codex"
         )
+    elif methods[0] == "goal-plus-codex" and profile.get(
+        "agent_provider"
+    ) is not None:
+        _validate_openai_provider(
+            profile_id,
+            profile["agent_provider"],
+            label="Goal Plus + Codex",
+        )
     elif (
         methods[0] not in {"plain-pi", "goal-plus-pi", "goal-plus-codex"}
         and profile.get("agent_provider") is not None

@@ -85,6 +85,11 @@ Use `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-smoke` for a five
 Codex host check. It uses the host Codex ChatGPT login and therefore requires outbound access to
 `chatgpt.com`; connectivity failure is a campaign partial, never a verifier result.
 
+Use the paired `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke` and
+`swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke` presets for the matched Codex
+mechanism ablation. Both use the profile-frozen OpenAI-compatible Responses provider; the profile
+pair differs only in the Acceptance View boolean.
+
 For the Acceptance View mechanism ablation, run
 `swe-bench-verified-sympy-16886-acceptance-view-off-smoke` and
 `swe-bench-verified-sympy-16886-acceptance-view-on-smoke`. Both profiles freeze the same task,

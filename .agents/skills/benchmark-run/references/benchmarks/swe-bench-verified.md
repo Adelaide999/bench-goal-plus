@@ -6,10 +6,10 @@
 - Runner: `swe-bench-native`
 - Initial task: `sympy__sympy-16886`
 - Raw metric: official `resolved` boolean, direction `maximize`
-- Methods: `plain-codex`, `plain-pi`, and `goal-plus-pi`
-- Topology: Plain methods use one isolated outer trajectory; Goal Plus + Pi uses one outer Goal
-  Plus main session with one bound internal Pi worker. Initial acceptance restricts every method to
-  `K=1,C=1,R=1`
+- Methods: `plain-codex`, `plain-pi`, `goal-plus-codex`, and `goal-plus-pi`
+- Topology: Plain methods use one isolated outer trajectory. Goal Plus uses one outer main session
+  with one bound internal worker on the selected Codex or Pi host. Initial acceptance restricts
+  every method to `K=1,C=1,R=1`
 - Final source JSON: `campaign-summary.json`
 
 The official harness owns final scoring in a separate container. The runner has no host-only score,
@@ -25,6 +25,8 @@ provision, detach, stop, resume, or cross-cell concurrency.
 | `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | profile-frozen `OPENAI_BASE_URL` + `OPENAI_API_KEY`, Responses |
 | `swe-bench-verified-sympy-16886-acceptance-view-off-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | Acceptance View disabled mechanism ablation |
 | `swe-bench-verified-sympy-16886-acceptance-view-on-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | Acceptance View enabled mechanism ablation |
+| `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, Acceptance View disabled |
+| `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, Acceptance View enabled |
 
 The Pi credential value is never serialized. Docker receives only the selected environment variable
 name. The complete dataset row is host-side evaluator input; the Agent receives only the public
@@ -42,6 +44,10 @@ status, confidence, rationale, and supporting evidence in Global Evidence View. 
 aggregate score: official `resolved` remains the sole hard result. A missing ON rubric, incomplete
 ViewAgent task, criterion mismatch, or OFF assessment leakage makes Goal Plus evidence incomplete
 and therefore the campaign `partial`, while preserving a valid official raw metric.
+
+The Goal Plus + Codex pair uses the same Responses endpoint and key contract as Plain Codex and
+does not mount OAuth. Its ON/OFF prompts, task, evaluator, model, reasoning, and T/K/C/R are
+byte-identical; only the frozen Acceptance View boolean differs.
 
 The archived Linux/amd64 `sympy__sympy-16886` smokes pass the complete `K=1,C=1`
 official-harness contract for
@@ -67,11 +73,12 @@ An unresolved result is a valid completed score. Missing patch, missing report, 
 container isolation, or a second evaluator attempt is `partial` or `failed`, not a zero-filled
 success.
 
-For `goal-plus-pi`, score completion additionally requires exported durable state proving exactly
+For Goal Plus methods, score completion additionally requires exported durable state proving exactly
 one terminal Goal Plus record and linked promoted Search run, a frozen spec with
-`budget.max_parallel=K`, `pi-rpc/parallel_loops`, the frozen worker/closeout budgets, one candidate,
-one bound Pi worker session, worker-origin verifier evidence, the registered visible-test wrapper,
-and no active Pi pool job. When the profile enables the ViewAgent, every candidate iteration must
+`budget.max_parallel=K`, the method's bound `codex` or `pi-rpc` worker topology, the frozen
+worker/closeout budgets, one candidate, one bound worker session, worker-origin verifier evidence,
+the registered visible-test wrapper, and no active Pi pool job. When the profile enables the
+ViewAgent, every candidate iteration must
 have a completed Global Evidence description. Acceptance View ON additionally requires a frozen
 3–8 criterion contract and an exactly matching per-criterion assessment; OFF requires the contract
 and assessments to be absent. The controller exports `/testbed/.gp` before container disposal.

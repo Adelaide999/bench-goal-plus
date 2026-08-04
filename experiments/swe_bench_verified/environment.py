@@ -519,29 +519,50 @@ def resolve_goal_plus_runtime(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def resolve_goal_plus_codex_runtime(profile: dict[str, Any]) -> dict[str, Any]:
-    archive = Path(os.environ.get("SWEBENCH_CODEX_RUNTIME_ARCHIVE", CODEX_ARCHIVE))
-    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
-    auth_file = codex_home / "auth.json"
+    if profile.get("agent_provider") is not None:
+        runtime = resolve_codex_runtime(profile)
+        runtime["auth_file"] = None
+    else:
+        archive = Path(
+            os.environ.get("SWEBENCH_CODEX_RUNTIME_ARCHIVE", CODEX_ARCHIVE)
+        )
+        codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+        auth_file = codex_home / "auth.json"
+        runtime = {
+            "archive": archive,
+            "archive_present": archive.is_file(),
+            "auth_file": auth_file,
+            "credential_present": auth_file.is_file(),
+            "auth_mode": "chatgpt",
+        }
     annotator = profile["goal_plus"]["evidence_annotator"]
-    return {
-        "archive": archive,
-        "archive_present": archive.is_file(),
-        "auth_file": auth_file,
-        "credential_present": auth_file.is_file(),
-        "auth_mode": "chatgpt",
-        "goal_plus_root": GOAL_PLUS_ROOT,
-        "goal_plus_dependency_lock": GOAL_PLUS_DEPENDENCY_LOCK,
-        "goal_plus_visible_verifier": GOAL_PLUS_VISIBLE_VERIFIER,
-        "goal_plus_controller": GOAL_PLUS_CONTROLLER,
-        "goal_plus_pip_cache": ensure_temp_root(
-            "swe-bench-verified/goal-plus-pip-cache"
-        ),
-        "goal_plus_evidence_annotator": (
-            dict(annotator) if isinstance(annotator, dict) else None
-        ),
-        "goal_plus_codex_archive": archive,
-        "goal_plus_codex_archive_present": archive.is_file(),
-    }
+    runtime.update(
+        {
+            "goal_plus_root": GOAL_PLUS_ROOT,
+            "goal_plus_dependency_lock": GOAL_PLUS_DEPENDENCY_LOCK,
+            "goal_plus_visible_verifier": GOAL_PLUS_VISIBLE_VERIFIER,
+            "goal_plus_controller": GOAL_PLUS_CONTROLLER,
+            "goal_plus_pip_cache": ensure_temp_root(
+                "swe-bench-verified/goal-plus-pip-cache"
+            ),
+            "goal_plus_evidence_annotator": (
+                dict(annotator) if isinstance(annotator, dict) else None
+            ),
+            "goal_plus_codex_archive": runtime["archive"],
+            "goal_plus_codex_archive_present": runtime["archive_present"],
+        }
+    )
+    return runtime
+
+
+@contextmanager
+def routed_goal_plus_codex_runtime(
+    profile: dict[str, Any], destination: Path
+) -> Iterator[dict[str, Any]]:
+    with routed_codex_runtime(profile, destination) as routed:
+        runtime = resolve_goal_plus_codex_runtime(profile)
+        runtime.update(routed)
+        yield runtime
 
 
 def _codex_container_probe(image: str, archive: Path) -> subprocess.CompletedProcess[str]:
@@ -791,7 +812,8 @@ def _goal_plus_container_probe(
             "--mount",
             f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
             "--mount",
-            f"type=bind,src={runtime['goal_plus_root']},dst=/opt/goal-plus,readonly",
+            "type=bind,"
+            f"src={runtime['goal_plus_root']},dst=/opt/goal-plus,readonly",
             "--mount",
             "type=bind,"
             f"src={runtime['goal_plus_dependency_lock']},"
@@ -825,6 +847,65 @@ def _goal_plus_container_probe(
                 else ""
             )
             + " && python -m goal_plus.pi_tool --help >/dev/null"
+            + " && python /opt/swebench-goal-plus-controller.py --help >/dev/null",
+        ]
+    )
+    return run_capture(command, timeout=600)
+
+
+def _goal_plus_codex_container_probe(
+    image: str, runtime: dict[str, Any]
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        "docker",
+        "run",
+        "--pull",
+        "never",
+        "--rm",
+        "--tmpfs",
+        "/opt/agent-tmp:rw,nosuid,nodev,size=256m",
+        "--tmpfs",
+        "/opt/goal-plus-runtime:rw,exec,nosuid,nodev,size=512m",
+        "--tmpfs",
+        CODEX_RUNTIME_TMPFS,
+        "--mount",
+        "type=bind,"
+        f"src={runtime['archive']},dst=/opt/runtime/codex.tgz,readonly",
+    ]
+    for name, value in goal_plus_runtime_environment().items():
+        command.extend(["-e", f"{name}={value}"])
+    if os.environ.get("PIP_INDEX_URL"):
+        command.extend(["-e", "PIP_INDEX_URL"])
+    command.extend(
+        [
+            "--mount",
+            f"type=bind,src={runtime['goal_plus_root']},dst=/opt/goal-plus,readonly",
+            "--mount",
+            "type=bind,"
+            f"src={runtime['goal_plus_dependency_lock']},"
+            "dst=/opt/goal-plus-runtime-requirements.lock,readonly",
+            "--mount",
+            "type=bind,"
+            f"src={runtime['goal_plus_visible_verifier']},"
+            "dst=/opt/swebench-visible-test-verifier.py,readonly",
+            "--mount",
+            "type=bind,"
+            f"src={runtime['goal_plus_controller']},"
+            "dst=/opt/swebench-goal-plus-controller.py,readonly",
+            "--mount",
+            f"type=bind,src={runtime['goal_plus_pip_cache']},dst=/opt/pip-cache",
+            "--entrypoint",
+            "sh",
+            image,
+            "-lc",
+            "mkdir -p /opt/codex && "
+            "tar -xzf /opt/runtime/codex.tgz -C /opt/codex && "
+            + goal_plus_install_script(include_pi=False)
+            + " && ln -sf "
+            "/opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex "
+            "/opt/goal-plus-bin/codex"
+            + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
+            + " && codex --version"
             + " && python /opt/swebench-goal-plus-controller.py --help >/dev/null",
         ]
     )
@@ -905,20 +986,122 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     runtime: dict[str, Any]
     if method == "goal-plus-codex":
         runtime = resolve_goal_plus_codex_runtime(profile)
-        checks.extend(
-            [
+        custom_provider = profile.get("agent_provider") is not None
+        checks.append(
+            _check(
+                "codex:runtime-archive",
+                runtime["archive_present"],
+                path=str(runtime["archive"]),
+            )
+        )
+        if custom_provider:
+            api_config_valid = bool(
+                runtime["auth_mode"] == "openai-compatible"
+                and runtime["wire_api"] == "responses"
+                and runtime["api_base_url"]
+                and runtime["credential_present"]
+            )
+            checks.append(
                 _check(
-                    "codex:runtime-archive",
-                    runtime["archive_present"],
-                    path=str(runtime["archive"]),
-                ),
+                    "codex:openai-compatible-config",
+                    api_config_valid,
+                    provider=runtime["provider_id"],
+                    auth_mode=runtime["auth_mode"],
+                    wire_api=runtime["wire_api"],
+                    base_url_env=runtime["base_url_env"],
+                    api_key_env=runtime["api_key_env"],
+                    base_url=runtime["api_base_url"],
+                )
+            )
+            host_probe = (
+                openai_responses_probe(
+                    str(runtime["api_base_url"]),
+                    api_key_env=str(runtime["api_key_env"]),
+                    model=str(profile["model"]),
+                )
+                if api_config_valid
+                else {
+                    "passed": False,
+                    "http_status": None,
+                    "error": "custom provider configuration is incomplete",
+                }
+            )
+            checks.append(
+                _check(
+                    "codex:host-responses",
+                    bool(host_probe["passed"]),
+                    **{
+                        key: value
+                        for key, value in host_probe.items()
+                        if key != "passed"
+                    },
+                )
+            )
+            route_recorded = False
+            container_recorded = False
+            try:
+                if not api_config_valid:
+                    raise SweBenchContractError(
+                        "Codex custom provider configuration is incomplete"
+                    )
+                with temporary_directory(
+                    prefix="goal-plus-codex-api-doctor-",
+                    namespace="swe-bench-verified",
+                ) as destination:
+                    with routed_goal_plus_codex_runtime(profile, destination) as routed:
+                        route_recorded = True
+                        checks.append(
+                            _check(
+                                "codex:container-api-route",
+                                True,
+                                loopback_bridge=routed["bridge"] is not None,
+                                bridge=(
+                                    {
+                                        key: value
+                                        for key, value in routed["bridge"].items()
+                                        if key != "pid"
+                                    }
+                                    if routed["bridge"]
+                                    else None
+                                ),
+                                runtime_base_url=routed["runtime_api_base_url"],
+                            )
+                        )
+                        container_probe = codex_container_responses_probe(
+                            image,
+                            routed,
+                            model=str(profile["model"]),
+                        )
+                        container_recorded = True
+                        checks.append(
+                            _check(
+                                "codex:container-responses",
+                                bool(container_probe["passed"]),
+                                **{
+                                    key: value
+                                    for key, value in container_probe.items()
+                                    if key != "passed"
+                                },
+                            )
+                        )
+            except Exception as error:
+                detail = f"{type(error).__name__}: {error}"
+                if not route_recorded:
+                    checks.append(
+                        _check("codex:container-api-route", False, error=detail)
+                    )
+                if not container_recorded:
+                    checks.append(
+                        _check("codex:container-responses", False, error=detail)
+                    )
+        else:
+            checks.append(
                 _check(
                     "codex:chatgpt-auth",
                     runtime["credential_present"],
                     auth_file=str(runtime["auth_file"]),
-                ),
-            ]
-        )
+                )
+            )
         if runtime["archive_present"]:
             probe = _codex_container_probe(image, runtime["archive"])
             checks.append(
@@ -981,6 +1164,23 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                 ),
             ]
         )
+        if runtime["archive_present"] and assets_present:
+            goal_plus_probe = _goal_plus_codex_container_probe(image, runtime)
+            pip_cache_disabled = "cache has been disabled" in (
+                goal_plus_probe.stderr.lower()
+            )
+            checks.append(
+                _check(
+                    "goal-plus:container-runtime",
+                    goal_plus_probe.returncode == 0 and not pip_cache_disabled,
+                    version_output=goal_plus_probe.stdout.strip()[-2000:],
+                    error=goal_plus_probe.stderr.strip()[-2000:],
+                    pip_cache_enabled=not pip_cache_disabled,
+                    pip_index_env=(
+                        "PIP_INDEX_URL" if os.environ.get("PIP_INDEX_URL") else None
+                    ),
+                )
+            )
     elif method == "plain-codex":
         runtime = resolve_codex_runtime(profile)
         api_config_valid = bool(

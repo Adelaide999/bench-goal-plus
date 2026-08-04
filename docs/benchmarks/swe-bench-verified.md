@@ -50,7 +50,7 @@ task image 始终保留：controller 固定使用官方 harness 的 `cache_level
 
 ## 实验怎么用
 
-当前提供四个冻结 preset：
+当前提供 Plain、Pi、Goal Plus + Pi，以及 Goal Plus + Codex 冻结 preset：
 
 | Preset | Method | Model | T/K/C/R |
 | --- | --- | --- | --- |
@@ -58,6 +58,8 @@ task image 始终保留：controller 固定使用官方 harness 的 `cache_level
 | `swe-bench-verified-sympy-16886-pi-smoke` | Plain Pi | `zai/glm-5.2`, medium | `1800/1/1/1` |
 | `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` | Goal Plus + Pi | `zai/glm-5.2`, medium | `1800/1/1/1` |
 | `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | Goal Plus + Pi | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` |
+| `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke` | Goal Plus + Codex，Acceptance View OFF | `gpt-5.6-luna`, high | `1800/1/1/1` |
+| `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke` | Goal Plus + Codex，Acceptance View ON | `gpt-5.6-luna`, high | `1800/1/1/1` |
 
 campaign 顺序运行。runner 暂不支持 provision、detach、stop、resume、`K>1` 或 `C>1`。
 真实 launch 前仍必须展示并确认解析后的 T/K/C/R。以下 `K=1,C=1` 路径均已通过归档的

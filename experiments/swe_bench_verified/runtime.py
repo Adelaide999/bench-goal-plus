@@ -37,6 +37,7 @@ from .environment import (
     resolve_goal_plus_runtime,
     resolve_pi_runtime,
     routed_codex_runtime,
+    routed_goal_plus_codex_runtime,
     routed_pi_runtime,
 )
 from .goal_plus_evidence import collect_goal_plus_state, record_completion_check
@@ -403,7 +404,7 @@ def _create_agent_container(
             not runtime["archive_present"]
             or not runtime["credential_present"]
             or (
-                method == "plain-codex"
+                runtime.get("auth_mode") == "openai-compatible"
                 and (
                     not runtime["api_base_url"]
                     or not runtime.get("runtime_api_base_url")
@@ -423,7 +424,7 @@ def _create_agent_container(
                 f"type=bind,src={runtime['archive']},dst=/opt/runtime/codex.tgz,readonly",
             ]
         )
-        if method == "goal-plus-codex":
+        if method == "goal-plus-codex" and runtime["auth_mode"] == "chatgpt":
             command.extend(
                 [
                     "--mount",
@@ -829,6 +830,7 @@ def _agent_command(
         "TEMP=/opt/agent-tmp",
     ]
     if profile["methods"][0] == "goal-plus-codex":
+        custom_provider = profile.get("agent_provider") is not None
         goal_plus_environment = {
             **goal_plus_runtime_environment(),
             **_goal_plus_acceptance_view_environment(profile),
@@ -844,6 +846,24 @@ def _agent_command(
         command = [*common]
         for name, value in goal_plus_environment.items():
             command.extend(["-e", f"{name}={value}"])
+        provider_args: list[str] = []
+        if custom_provider:
+            command.extend(["-e", str(runtime["api_key_env"])])
+            if runtime.get("bridge_host"):
+                command.extend(
+                    [
+                        "-e",
+                        f"NO_PROXY={runtime['bridge_host']}",
+                        "-e",
+                        f"no_proxy={runtime['bridge_host']}",
+                    ]
+                )
+            provider_args = codex_responses_provider_args(
+                str(runtime["runtime_api_base_url"]),
+                provider_id=str(runtime["provider_id"]),
+                provider_name=str(runtime["provider_name"]),
+                api_key_env=str(runtime["api_key_env"]),
+            )
         command.extend(
             [
                 container_id,
@@ -858,6 +878,7 @@ def _agent_command(
                 "never",
                 "--dangerously-bypass-approvals-and-sandbox",
                 "--dangerously-bypass-hook-trust",
+                *provider_args,
                 "--config",
                 f'model_reasoning_effort="{profile["reasoning_effort"]}"',
                 "--config",
@@ -1101,6 +1122,17 @@ def _goal_plus_closeout(
         command.extend(["-e", f"{name}={value}"])
     if is_pi:
         command.extend(["-e", str(runtime["credential_env"])])
+    elif profile.get("agent_provider") is not None:
+        command.extend(["-e", str(runtime["api_key_env"])])
+        if runtime.get("bridge_host"):
+            command.extend(
+                [
+                    "-e",
+                    f"NO_PROXY={runtime['bridge_host']}",
+                    "-e",
+                    f"no_proxy={runtime['bridge_host']}",
+                ]
+            )
     command.extend(
         [
             container_id,
@@ -1278,8 +1310,22 @@ def _run_agent(
                     "OpenAI-compatible Responses probe failed through the runtime route"
                 )
         elif method == "goal-plus-codex":
-            runtime = resolve_goal_plus_codex_runtime(profile)
-            host_probe = None
+            if profile.get("agent_provider") is not None:
+                runtime = resources.enter_context(
+                    routed_goal_plus_codex_runtime(profile, campaign)
+                )
+                host_probe = openai_responses_probe(
+                    str(runtime["runtime_api_base_url"]),
+                    api_key_env=str(runtime["api_key_env"]),
+                    model=str(profile["model"]),
+                )
+                if not host_probe["passed"]:
+                    raise SweBenchContractError(
+                        "Goal Plus Codex Responses probe failed through the runtime route"
+                    )
+            else:
+                runtime = resolve_goal_plus_codex_runtime(profile)
+                host_probe = None
         else:
             if profile.get("agent_provider") is not None:
                 runtime = resources.enter_context(
@@ -1342,7 +1388,11 @@ def _run_agent(
             }
         elif method == "goal-plus-codex":
             runtime_public = {
-                "kind": "goal-plus-codex-chatgpt",
+                "kind": (
+                    "goal-plus-codex-openai-compatible-responses"
+                    if profile.get("agent_provider") is not None
+                    else "goal-plus-codex-chatgpt"
+                ),
                 "archive": str(runtime["archive"]),
                 "auth_mode": runtime["auth_mode"],
                 "goal_plus_root": str(runtime["goal_plus_root"]),
@@ -1354,6 +1404,27 @@ def _run_agent(
                 "evidence_annotator": _goal_plus_evidence_annotator_public(profile),
                 "credentials_persisted": False,
             }
+            if profile.get("agent_provider") is not None:
+                runtime_public.update(
+                    {
+                        "provider": runtime["provider_id"],
+                        "wire_api": runtime["wire_api"],
+                        "base_url_env": runtime["base_url_env"],
+                        "api_key_env": runtime["api_key_env"],
+                        "api_base_url": runtime["api_base_url"],
+                        "runtime_api_base_url": runtime["runtime_api_base_url"],
+                        "bridge": (
+                            {
+                                key: value
+                                for key, value in runtime["bridge"].items()
+                                if key != "pid"
+                            }
+                            if runtime["bridge"]
+                            else None
+                        ),
+                        "host_responses_probe": host_probe,
+                    }
+                )
         else:
             runtime_public = {
                 "kind": (
@@ -1426,6 +1497,21 @@ def _run_agent(
             if not container_probe["passed"]:
                 raise SweBenchContractError(
                     "OpenAI-compatible Responses probe failed in the Agent container"
+                )
+        elif (
+            method == "goal-plus-codex"
+            and profile.get("agent_provider") is not None
+        ):
+            container_probe = codex_container_responses_probe(
+                container_id,
+                runtime,
+                model=str(profile["model"]),
+                existing_container=True,
+            )
+            runtime_public["container_responses_probe"] = container_probe
+            if not container_probe["passed"]:
+                raise SweBenchContractError(
+                    "Goal Plus Codex Responses probe failed in the Agent container"
                 )
         elif method != "goal-plus-codex" and runtime.get("custom_provider"):
             container_probe = codex_container_responses_probe(
