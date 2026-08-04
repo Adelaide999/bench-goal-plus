@@ -55,10 +55,12 @@ reasoning. Invoke them through `--benchmark swe-bench-verified --profile <profil
 profile IDs begin with `django-13406-goal-plus-codex-`.
 
 The visible-test wrapper is a benchmark-owned read-only bind mount inside `/testbed`. Freeze records
-its exact hash. The wrapper preserves bounded stdout/stderr diagnostics and returns nonzero when the
-selected public command fails, times out, or cannot start, so a zero visible score cannot pass the
-promotion gate. MainAgent must use the repository-native runner already present in the task image;
-missing pytest/plugins/dependencies are invalid verifier configuration, not candidate quality.
+its exact hash. The ranking verifier directly uses `--ranking-signal`, allowing a completed public
+test failure to become a valid zero baseline for freeze preflight. The separate promotion verifier
+must directly invoke the same wrapper without that flag, so a zero visible score exits nonzero and
+cannot pass the hard promotion gate. Outer shell/Python exit-code suppressors are rejected by the
+completion contract. MainAgent must use the repository-native runner already present in the task
+image; missing pytest/plugins/dependencies are invalid verifier configuration, not candidate quality.
 
 The archived Linux/amd64 `sympy__sympy-16886` smokes pass the complete `K=1,C=1`
 official-harness contract for

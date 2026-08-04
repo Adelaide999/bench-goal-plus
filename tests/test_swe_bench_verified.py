@@ -62,6 +62,23 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(payload["failure_kind"], "test_command_failed")
         self.assertIn("public failure", payload["stdout_tail"])
 
+        ranking = subprocess.run(
+            [
+                sys.executable,
+                str(environment.GOAL_PLUS_VISIBLE_VERIFIER),
+                "--ranking-signal",
+                "--",
+                sys.executable,
+                "-c",
+                "import sys; sys.exit(7)",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(ranking.returncode, 0)
+        self.assertEqual(json.loads(ranking.stdout)["visible_test_score"], 0.0)
+
         passing = subprocess.run(
             [
                 sys.executable,
@@ -238,6 +255,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "command": [
                         "python",
                         ".goal-plus-verifiers/visible_test_verifier.py",
+                        "--ranking-signal",
                         "--timeout-seconds",
                         "300",
                         "--",
@@ -1106,6 +1124,16 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("never changes the official binary result", prompt)
             self.assertIn("repository's native test instructions", prompt)
             self.assertIn("benchmark-owned and read-only", prompt)
+            self.assertIn(
+                ".goal-plus-verifiers/visible_test_verifier.py --ranking-signal",
+                prompt,
+            )
+            self.assertIn(
+                "promotion command must use the same candidate-relative command "
+                "without --ranking-signal",
+                prompt,
+            )
+            self.assertIn("other exit-code suppressor", prompt)
             self.assertIn("/opt/goal-plus/.pi/extensions/goal-plus.ts", command)
             self.assertIn("/opt/goal-plus/.pi/skills/goal-plus/SKILL.md", command)
             self.assertIn("GOAL_PLUS_ROOT=/testbed/.gp", command)
@@ -1319,6 +1347,39 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             frozen["verifier_hashes"][
                 ".goal-plus-verifiers/visible_test_verifier.py"
             ] = goal_plus_evidence.expected_visible_verifier_sha256()
+            write_json(frozen_path, frozen)
+
+            frozen["spec"]["promotion_verifiers"][0]["command"] = [
+                "python",
+                "-c",
+                "print('suppressed promotion')",
+                ".goal-plus-verifiers/visible_test_verifier.py",
+                "--timeout-seconds",
+                "300",
+            ]
+            write_json(frozen_path, frozen)
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_host="codex",
+            )
+            self.assertFalse(
+                state["completion"]["checks"]["visible_verifiers"]["passed"]
+            )
+
+            frozen["spec"]["promotion_verifiers"][0]["command"] = [
+                "python",
+                ".goal-plus-verifiers/visible_test_verifier.py",
+                "--timeout-seconds",
+                "300",
+                "--",
+                "python",
+                "-m",
+                "pytest",
+            ]
             write_json(frozen_path, frozen)
             candidate_path = root / "runs/run_test/candidates/c001/candidate.json"
             candidate = read_json(candidate_path)

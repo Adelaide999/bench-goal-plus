@@ -21,6 +21,14 @@ def _tail(value: str) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--metric", default="visible_test_score")
+    parser.add_argument(
+        "--ranking-signal",
+        action="store_true",
+        help=(
+            "Return success after a completed test command so freeze preflight can "
+            "observe a legitimate zero baseline. Timeouts and launch failures still fail."
+        ),
+    )
     parser.add_argument("--timeout-seconds", type=int, default=300)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser
@@ -65,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             "stdout_tail": _tail(completed.stdout),
             "stderr_tail": _tail(completed.stderr),
         }
-        returncode = 0 if completed.returncode == 0 else 1
+        returncode = 0 if completed.returncode == 0 or args.ranking_signal else 1
     except subprocess.TimeoutExpired as error:
         payload = {
             args.metric: 0.0,

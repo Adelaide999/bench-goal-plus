@@ -154,6 +154,12 @@ def _visible_verifier_contract(
         wrapper_present = any(
             argument.endswith(VISIBLE_VERIFIER_SUFFIX) for argument in arguments
         )
+        direct_wrapper = bool(
+            len(arguments) >= 2
+            and Path(arguments[0]).name in {"python", "python3"}
+            and arguments[1].endswith(VISIBLE_VERIFIER_SUFFIX)
+        )
+        ranking_signal = "--ranking-signal" in arguments
         timeout_value = None
         if "--timeout-seconds" in arguments:
             index = arguments.index("--timeout-seconds")
@@ -167,6 +173,8 @@ def _visible_verifier_contract(
                 "name": verifier.get("name"),
                 "role": verifier.get("role"),
                 "wrapper_present": wrapper_present,
+                "direct_wrapper": direct_wrapper,
+                "ranking_signal": ranking_signal,
                 "wrapper_timeout_seconds": timeout_value,
                 "command": arguments,
             }
@@ -174,6 +182,12 @@ def _visible_verifier_contract(
     passed = any(
         item["role"] == expected_role
         and item["wrapper_present"]
+        and item["direct_wrapper"]
+        and (
+            item["ranking_signal"]
+            if expected_role == "ranking_signal"
+            else not item["ranking_signal"]
+        )
         and item["wrapper_timeout_seconds"] == expected_timeout_seconds
         for item in normalized
     )
