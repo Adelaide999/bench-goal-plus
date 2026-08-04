@@ -99,10 +99,12 @@ ALLOWED_PROTOCOL_OVERRIDE_FIELDS = frozenset(
         "attempts_per_task",
         "backend",
         "cell_concurrency",
+        "evidence_annotator_model",
         "judge_concurrency",
         "model",
         "reasoning_effort",
         "timeout",
+        "worker_model",
     }
 )
 PROFILE_PROTOCOL_OVERRIDE_FIELDS = frozenset({"eval_interval", "internet"})
@@ -124,6 +126,23 @@ def validate_pi_provider_model(model_ref: Any) -> None:
     provider, separator, model_id = str(model_ref).partition("/")
     if not separator or not provider or not model_id:
         raise ValueError("Pi provider profiles must set model to PROVIDER/MODEL")
+
+
+def pi_provider_role_model_refs(
+    profile: dict[str, Any],
+    *,
+    main_model: str | None = None,
+) -> list[str]:
+    refs = [
+        str(main_model or profile["model"]),
+        str(profile.get("worker_model") or main_model or profile["model"]),
+        str(
+            profile.get("evidence_annotator_model")
+            or main_model
+            or profile["model"]
+        ),
+    ]
+    return list(dict.fromkeys(refs))
 
 
 def validate_claude_thinking_contract(
@@ -178,7 +197,21 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
         raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))
     api_protocol = api_protocol_for_methods(profile["methods"])
     if api_protocol == "pi-provider":
-        validate_pi_provider_model(profile["model"])
+        for model_ref in pi_provider_role_model_refs(profile):
+            validate_pi_provider_model(model_ref)
+    elif any(
+        key in profile
+        for key in (
+            "worker_model",
+            "worker_reasoning_effort",
+            "evidence_annotator_model",
+            "evidence_annotator_reasoning_effort",
+            "evidence_annotator_timeout_seconds",
+        )
+    ):
+        raise ValueError(
+            "role-specific Pi models require goal-plus-pi-provider"
+        )
     if api_protocol == "anthropic":
         validate_claude_thinking_contract(
             profile.get("thinking"), profile.get("reasoning_effort")
@@ -205,6 +238,20 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
         raise ValueError("wall_time_seconds and concurrency must be positive")
     if int(profile.get("cell_concurrency", 1)) < 1:
         raise ValueError("cell_concurrency must be positive")
+    for key in (
+        "worker_reasoning_effort",
+        "evidence_annotator_reasoning_effort",
+    ):
+        value = profile.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"{key} must be a non-empty string")
+    annotator_timeout = profile.get("evidence_annotator_timeout_seconds")
+    if annotator_timeout is not None and (
+        not isinstance(annotator_timeout, int)
+        or isinstance(annotator_timeout, bool)
+        or annotator_timeout < 1
+    ):
+        raise ValueError("evidence_annotator_timeout_seconds must be positive")
     worker_runtime = int(
         profile.get("worker_runtime_seconds", profile["wall_time_seconds"])
     )

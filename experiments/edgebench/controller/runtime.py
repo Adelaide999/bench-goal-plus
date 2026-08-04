@@ -28,10 +28,16 @@ from .environment import (
     judge_server_environment,
     loopback_api_target,
     resolve_agent_api_config,
+    resolve_pi_provider_bundle,
     start_socket_bridge,
     task_images,
 )
-from .profiles import GOAL_PLUS_METHODS, METHODS, api_protocol_for_methods
+from .profiles import (
+    GOAL_PLUS_METHODS,
+    METHODS,
+    api_protocol_for_methods,
+    pi_provider_role_model_refs,
+)
 
 
 EVIDENCE_ANNOTATOR_PROVIDER_ID = "edgebench-evidence"
@@ -123,6 +129,8 @@ def cell_environment(
     api_key: str | None = None,
     api_base_url: str | None = None,
     bridge_host: str | None = None,
+    pi_models_file: Path | None = None,
+    pi_provider_credentials: dict[str, str] | None = None,
 ) -> dict[str, str]:
     env = dict(os.environ)
     configure_temp_environment(env)
@@ -158,6 +166,10 @@ def cell_environment(
         env["SFORGE_AGENT_API_KEY"] = api_key
     if api_base_url:
         env["SFORGE_AGENT_API_BASE_URL"] = api_base_url
+    if pi_models_file is not None:
+        env["SFORGE_PI_MODELS_FILE"] = str(pi_models_file)
+    if pi_provider_credentials:
+        env.update(pi_provider_credentials)
     if bridge_host:
         append_no_proxy(env, bridge_host)
     agent = str(cell.get("sforge_agent") or METHODS[cell["method"]]["agent"])
@@ -228,8 +240,12 @@ def cell_environment(
                 removals=thinking_controls,
             )
     if cell["method"] in GOAL_PLUS_METHODS:
-        annotator_model = str(cell["model"])
-        if cell["method"] == "goal-plus-pi-provider":
+        explicit_annotator_model = cell.get("evidence_annotator_model")
+        annotator_model = str(explicit_annotator_model or cell["model"])
+        if (
+            cell["method"] == "goal-plus-pi-provider"
+            and explicit_annotator_model is None
+        ):
             annotator_model = annotator_model.partition("/")[2]
         env["SFORGE_GOAL_PLUS_SOURCE_DIR"] = str(current_paths().goal_plus_root)
         extra_env = {
@@ -242,7 +258,8 @@ def cell_environment(
             ),
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": annotator_model,
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": str(
-                cell["reasoning_effort"]
+                cell.get("evidence_annotator_reasoning_effort")
+                or cell["reasoning_effort"]
             ),
         }
         if cell["method"] in {"goal-plus-pi", "goal-plus-pi-provider"}:
@@ -259,6 +276,39 @@ def cell_environment(
                     ),
                 }
             )
+        role_split = cell["method"] == "goal-plus-pi-provider" and any(
+            key in cell
+            for key in (
+                "worker_model",
+                "worker_reasoning_effort",
+                "evidence_annotator_model",
+                "evidence_annotator_reasoning_effort",
+                "evidence_annotator_timeout_seconds",
+            )
+        )
+        if role_split:
+            worker_model = str(cell.get("worker_model") or cell["model"])
+            extra_env.update(
+                {
+                    "SFORGE_GOAL_PLUS_WORKER_MODEL": worker_model,
+                    "SFORGE_GOAL_PLUS_WORKER_REASONING_EFFORT": str(
+                        cell.get("worker_reasoning_effort")
+                        or cell["reasoning_effort"]
+                    ),
+                    "SFORGE_GOAL_PLUS_EVIDENCE_ANNOTATOR_TIMEOUT_SECONDS": str(
+                        cell.get("evidence_annotator_timeout_seconds", 1800)
+                    ),
+                }
+            )
+            auxiliary_models = list(
+                dict.fromkeys(
+                    model_ref
+                    for model_ref in (worker_model, annotator_model)
+                    if model_ref != str(cell["model"])
+                )
+            )
+            if auxiliary_models:
+                extra_env["SFORGE_PI_AUX_MODELS"] = " ".join(auxiliary_models)
         if api_base_url:
             extra_env.update(
                 {
@@ -408,6 +458,8 @@ def start_campaign_cell(
     api_key: str | None,
     runtime_api_base_url: str | None,
     bridge_host: str | None,
+    pi_models_file: Path | None = None,
+    pi_provider_credentials: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     cell_id = str(cell_summary["cell_id"])
     cell_path = destination / "cells" / cell_id
@@ -423,9 +475,11 @@ def start_campaign_cell(
             "command": io.portable_command(command),
             "environment_policy": {
                 "credentials": (
-                    "host API environment mapped to SForge; values are never persisted"
+                    "host Pi provider credentials mapped to SForge; values are never persisted"
+                    if pi_provider_credentials
+                    else "host API environment mapped to SForge; values are never persisted"
                     if api_key
-                    else "host Codex OAuth; auth contents are never persisted"
+                    else "host login; auth contents are never persisted"
                 ),
                 "api_key_source": api_config["api_key_source"],
                 "api_base_url_source": api_config["api_base_url_source"],
@@ -434,6 +488,14 @@ def start_campaign_cell(
                     "third_party/goal-plus"
                     if cell["method"] in GOAL_PLUS_METHODS
                     else None
+                ),
+                "pi_models_file": (
+                    io.portable_path(pi_models_file)
+                    if pi_models_file is not None
+                    else None
+                ),
+                "pi_provider_credential_envs": sorted(
+                    (pi_provider_credentials or {}).keys()
                 ),
             },
         },
@@ -448,6 +510,8 @@ def start_campaign_cell(
                 api_key=api_key,
                 api_base_url=runtime_api_base_url,
                 bridge_host=bridge_host,
+                pi_models_file=pi_models_file,
+                pi_provider_credentials=pi_provider_credentials,
             ),
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -510,6 +574,8 @@ def execute_cell_queue(
     runtime_api_base_url: str | None,
     bridge_host: str | None,
     stop_requested: Any,
+    pi_models_file: Path | None = None,
+    pi_provider_credentials: dict[str, str] | None = None,
 ) -> int:
     controller_path = destination / "controller.json"
     pending = deque(campaign["cells"])
@@ -543,6 +609,8 @@ def execute_cell_queue(
                     api_key=api_key,
                     runtime_api_base_url=runtime_api_base_url,
                     bridge_host=bridge_host,
+                    pi_models_file=pi_models_file,
+                    pi_provider_credentials=pi_provider_credentials,
                 )
             except Exception as exc:
                 cell_file = destination / "cells" / cell_id / "cell.json"
@@ -606,6 +674,8 @@ class RuntimeResources:
         self.api_key: str | None = None
         self.runtime_api_base_url: str | None = None
         self.bridge_host: str | None = None
+        self.pi_models_file: Path | None = None
+        self.pi_provider_credentials: dict[str, str] = {}
         self.judge_container_url = ""
 
     def close(self) -> None:
@@ -622,6 +692,100 @@ class RuntimeResources:
                 process_alive(process.pid) for process in self.bridge_processes
             ],
         }
+
+
+def prepare_pi_provider_runtime(
+    resources: RuntimeResources,
+    destination: Path,
+    profile: dict[str, Any],
+    controller: dict[str, Any],
+) -> None:
+    model_refs = pi_provider_role_model_refs(profile)
+    bundle = resolve_pi_provider_bundle(model_refs)
+    if not bundle["valid"]:
+        raise RuntimeError(f"Pi provider role resolution failed: {bundle['error']}")
+
+    credentials = {
+        name: os.environ[name]
+        for name in bundle["credential_envs"]
+        if os.environ.get(name)
+    }
+    missing_credentials = set(bundle["credential_envs"]) - set(credentials)
+    if missing_credentials:
+        raise RuntimeError(
+            "Pi provider credentials disappeared during launch: "
+            + ", ".join(sorted(missing_credentials))
+        )
+    resources.pi_provider_credentials = credentials
+    registry = bundle["registry"]
+    providers = registry.get("providers", {})
+    if providers:
+        resources.bridge_host = default_route_ipv4()
+        probe_image = task_images(str(profile["task_ids"][0]))[0]
+        for provider, provider_config in providers.items():
+            base_url = provider_config.get("baseUrl")
+            if not isinstance(base_url, str) or not base_url:
+                raise RuntimeError(
+                    f"custom Pi provider {provider!r} requires baseUrl"
+                )
+            target = loopback_api_target(base_url)
+            if target is not None:
+                target_host, target_port = target
+                process, metadata, closer = start_socket_bridge(
+                    destination,
+                    name=f"pi-provider-{io.sanitize_id(str(provider))}",
+                    listen_host=resources.bridge_host,
+                    target_host=target_host,
+                    target_port=target_port,
+                )
+                resources.bridge_processes.append(process)
+                resources.bridge_closers.append(closer)
+                controller.setdefault("bridges", []).append(metadata)
+                base_url = bridged_base_url(
+                    base_url,
+                    resources.bridge_host,
+                    int(metadata["listen_port"]),
+                )
+                provider_config["baseUrl"] = base_url
+        for model_status in bundle["models"]:
+            if model_status.get("models_path") is None:
+                continue
+            provider = str(model_status["provider"])
+            provider_config = providers[provider]
+            probe = docker_http_probe(
+                probe_image,
+                str(provider_config["baseUrl"]),
+                api_key=credentials.get(
+                    str(model_status.get("credential_env") or "")
+                ),
+                protocol=(
+                    "anthropic"
+                    if provider_config.get("api") == "anthropic-messages"
+                    else "openai"
+                ),
+                model=str(model_status["model"]),
+            )
+            if not probe["passed"]:
+                raise RuntimeError(
+                    f"Pi provider model {provider}/{model_status['model']} "
+                    "is not reachable from an "
+                    "EdgeBench Work container "
+                    f"(HTTP {probe.get('status')}; "
+                    f"{probe.get('stderr') or 'no stderr'})"
+                )
+        runtime_dir = destination / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        resources.pi_models_file = runtime_dir / "pi-models.json"
+        io.write_json(resources.pi_models_file, registry)
+        resources.pi_models_file.chmod(0o600)
+    controller["pi_provider_roles"] = {
+        "main": str(profile["model"]),
+        "worker": str(profile.get("worker_model") or profile["model"]),
+        "evidence_annotator": str(
+            profile.get("evidence_annotator_model") or profile["model"]
+        ),
+        "credential_envs": list(bundle["credential_envs"]),
+    }
 
 
 def prepare_runtime_resources(
@@ -647,6 +811,10 @@ def prepare_runtime_resources(
         ):
             raise RuntimeError(
                 "Claude Code campaigns require an API key and Anthropic base URL"
+            )
+        if api_protocol == "pi-provider":
+            prepare_pi_provider_runtime(
+                resources, destination, profile, controller
             )
         if resources.runtime_api_base_url and loopback_api_target(
             resources.runtime_api_base_url
@@ -735,7 +903,13 @@ def prepare_runtime_resources(
                 )
         controller.update(
             {
-                "agent_auth_mode": "api_key" if resources.api_key else "oauth",
+                "agent_auth_mode": (
+                    "pi-provider"
+                    if api_protocol == "pi-provider"
+                    else "api_key"
+                    if resources.api_key
+                    else "oauth"
+                ),
                 "agent_api_protocol": api_protocol,
                 "agent_api_key_source": resources.api_config["api_key_source"],
                 "agent_api_base_url_source": resources.api_config[
@@ -821,6 +995,8 @@ def execute_campaign(destination: Path) -> int:
         runtime_api_base_url=resources.runtime_api_base_url,
         bridge_host=resources.bridge_host,
         stop_requested=lambda: stop_requested,
+        pi_models_file=resources.pi_models_file,
+        pi_provider_credentials=resources.pi_provider_credentials,
     )
     campaign = io.read_json(destination / "campaign.json")
     states = {cell["state"] for cell in campaign["cells"]}
