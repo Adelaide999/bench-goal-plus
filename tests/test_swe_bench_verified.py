@@ -130,11 +130,14 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_controller_drains_views_before_search_selection(self) -> None:
         controller = environment.GOAL_PLUS_CONTROLLER.read_text(encoding="utf-8")
         drain = controller.index(
-            "annotated_in_closeout = drain_evidence_annotations(root, run_id)"
+            "annotated_in_closeout = drain_evidence_annotations("
         )
         selection = controller.index("selection = tools.search_select(run_id)")
+        existing_promotion = controller.index("if existing_promotion is not None:")
 
         self.assertLess(drain, selection)
+        self.assertLess(drain, existing_promotion)
+        self.assertIn("wait_for_retries=True", controller[drain:selection])
 
     def write_goal_plus_state(
         self,
