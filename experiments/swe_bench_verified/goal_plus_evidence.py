@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,13 @@ from typing import Any
 
 ACTIVE_POOL_STATES = {"starting", "running"}
 VISIBLE_VERIFIER_SUFFIX = ".goal-plus-verifiers/visible_test_verifier.py"
+VISIBLE_VERIFIER_PATH = (
+    Path(__file__).resolve().parent / "verifiers" / "visible_test_verifier.py"
+)
+
+
+def expected_visible_verifier_sha256() -> str:
+    return hashlib.sha256(VISIBLE_VERIFIER_PATH.read_bytes()).hexdigest()
 
 
 def _read_object(path: Path) -> dict[str, Any]:
@@ -172,6 +180,62 @@ def _visible_verifier_contract(
     return {"passed": passed, "verifiers": normalized}
 
 
+def _visible_verifier_integrity(frozen: dict[str, Any]) -> dict[str, Any]:
+    verifier_hashes = (
+        frozen.get("verifier_hashes")
+        if isinstance(frozen.get("verifier_hashes"), dict)
+        else {}
+    )
+    matching = {
+        str(path): str(digest)
+        for path, digest in verifier_hashes.items()
+        if str(path).endswith(VISIBLE_VERIFIER_SUFFIX)
+    }
+    expected = expected_visible_verifier_sha256()
+    return {
+        "expected_sha256": expected,
+        "frozen_hashes": matching,
+        "passed": len(matching) == 1 and next(iter(matching.values())) == expected,
+    }
+
+
+def _promotion_visible_test(
+    candidate_records: list[dict[str, Any]], selected_candidate_id: Any
+) -> dict[str, Any]:
+    candidate = next(
+        (
+            item
+            for item in candidate_records
+            if item.get("candidate_id") == selected_candidate_id
+        ),
+        {},
+    )
+    report = (
+        candidate.get("promotion_report")
+        if isinstance(candidate.get("promotion_report"), dict)
+        else {}
+    )
+    visible_scores: list[float] = []
+    for result in report.get("verifier_results") or []:
+        if not isinstance(result, dict):
+            continue
+        metrics = (
+            result.get("metrics")
+            if isinstance(result.get("metrics"), dict)
+            else {}
+        )
+        score = metrics.get("visible_test_score")
+        if isinstance(score, (int, float)) and not isinstance(score, bool):
+            visible_scores.append(float(score))
+    passed = report.get("promotion_passed") is True and visible_scores == [1.0]
+    return {
+        "promotion_passed": report.get("promotion_passed"),
+        "aggregate_score": report.get("aggregate_score"),
+        "visible_test_scores": visible_scores,
+        "passed": passed,
+    }
+
+
 def collect_goal_plus_state(
     root: Path,
     *,
@@ -285,6 +349,10 @@ def collect_goal_plus_state(
         all_bound_sessions.extend(bound_sessions)
 
         selected_candidate_id = payload.get("selected_candidate_id")
+        verifier_integrity = _visible_verifier_integrity(frozen)
+        promotion_visible_test = _promotion_visible_test(
+            candidate_records, selected_candidate_id
+        )
         promotion = (
             path.parent / "promotion" / f"{selected_candidate_id}.patch"
             if isinstance(selected_candidate_id, str) and selected_candidate_id
@@ -306,6 +374,8 @@ def collect_goal_plus_state(
                 "evidence_annotations": annotations,
                 "process_visible_verifiers": process_verifiers,
                 "promotion_visible_verifiers": promotion_verifiers,
+                "visible_verifier_integrity": verifier_integrity,
+                "promotion_visible_test": promotion_visible_test,
                 "candidate_count": len(candidates),
                 "agent_session_count": len(sessions),
                 "bound_session_count": len(bound_sessions),
@@ -486,6 +556,26 @@ def collect_goal_plus_state(
                 selected_run
                 and selected_run.get("process_visible_verifiers", {}).get("passed")
                 and selected_run.get("promotion_visible_verifiers", {}).get("passed")
+            ),
+        ),
+        "visible_verifier_integrity": _check(
+            expected_visible_verifier_sha256(),
+            (
+                selected_run.get("visible_verifier_integrity")
+                if selected_run
+                else None
+            ),
+            bool(
+                selected_run
+                and selected_run.get("visible_verifier_integrity", {}).get("passed")
+            ),
+        ),
+        "promotion_visible_test": _check(
+            "promotion gate visible_test_score=1.0",
+            selected_run.get("promotion_visible_test") if selected_run else None,
+            bool(
+                selected_run
+                and selected_run.get("promotion_visible_test", {}).get("passed")
             ),
         ),
         "acceptance_view_contract": _check(

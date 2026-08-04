@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,6 +39,44 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
     def profile(self, profile_id: str) -> dict:
         return load_profile(profile_id)[1]
+
+    def test_visible_verifier_propagates_test_failure_with_diagnostics(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(environment.GOAL_PLUS_VISIBLE_VERIFIER),
+                "--",
+                sys.executable,
+                "-c",
+                "import sys; print('public failure'); sys.exit(7)",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(completed.stdout)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(payload["visible_test_score"], 0.0)
+        self.assertEqual(payload["test_returncode"], 7)
+        self.assertEqual(payload["failure_kind"], "test_command_failed")
+        self.assertIn("public failure", payload["stdout_tail"])
+
+        passing = subprocess.run(
+            [
+                sys.executable,
+                str(environment.GOAL_PLUS_VISIBLE_VERIFIER),
+                "--",
+                sys.executable,
+                "-c",
+                "print('public pass')",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(passing.returncode, 0)
+        self.assertEqual(json.loads(passing.stdout)["visible_test_score"], 1.0)
 
     def test_goal_plus_installer_uses_the_bind_cache_owner(self) -> None:
         script = environment.goal_plus_install_script()
@@ -258,10 +297,30 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "tie_policy": "retain_latest",
                 "affects_final_result": False,
             }
-        write_json(root / "specs/spec_test/frozen_spec.json", {"spec": spec})
+        write_json(
+            root / "specs/spec_test/frozen_spec.json",
+            {
+                "spec": spec,
+                "verifier_hashes": {
+                    ".goal-plus-verifiers/visible_test_verifier.py": (
+                        goal_plus_evidence.expected_visible_verifier_sha256()
+                    )
+                },
+            },
+        )
         write_json(
             root / f"runs/{run_id}/candidates/{candidate_id}/candidate.json",
-            {"candidate_id": candidate_id, "iterations": [{"score": 1.0}]},
+            {
+                "candidate_id": candidate_id,
+                "iterations": [{"score": 1.0}],
+                "promotion_report": {
+                    "promotion_passed": True,
+                    "aggregate_score": 1.0,
+                    "verifier_results": [
+                        {"metrics": {"visible_test_score": 1.0}}
+                    ],
+                },
+            },
         )
         if evidence_annotations:
             assessment = (
@@ -598,6 +657,41 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         with self.assertRaisesRegex(SweBenchContractError, "must be boolean"):
             validate_profile(str(invalid["id"]), invalid)
 
+    def test_django_profiles_match_plain_models_and_use_medium_view_agent(self) -> None:
+        pairs = (
+            (
+                "django-13406-goal-plus-codex-luna-high-acceptance-on-smoke",
+                "django-13406-goal-plus-codex-luna-high-acceptance-off-smoke",
+                "gpt-5.6-luna",
+                "high",
+            ),
+            (
+                "django-13406-goal-plus-codex-sol-medium-acceptance-on-smoke",
+                "django-13406-goal-plus-codex-sol-medium-acceptance-off-smoke",
+                "gpt-5.6-sol",
+                "medium",
+            ),
+        )
+        for enabled_id, disabled_id, model, reasoning in pairs:
+            enabled = self.profile(enabled_id)
+            disabled = self.profile(disabled_id)
+            self.assertEqual(enabled["task_ids"], ["django__django-13406"])
+            self.assertEqual(enabled["model"], model)
+            self.assertEqual(enabled["reasoning_effort"], reasoning)
+            self.assertEqual(
+                enabled["goal_plus"]["evidence_annotator"]["reasoning_effort"],
+                "medium",
+            )
+            self.assertTrue(enabled["goal_plus"]["acceptance_view_enabled"])
+            self.assertFalse(disabled["goal_plus"]["acceptance_view_enabled"])
+            enabled_without_ablation = json.loads(json.dumps(enabled))
+            disabled_without_ablation = json.loads(json.dumps(disabled))
+            enabled_without_ablation["id"] = "paired"
+            disabled_without_ablation["id"] = "paired"
+            enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+            disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+            self.assertEqual(enabled_without_ablation, disabled_without_ablation)
+
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
         self.assertEqual(
             managed_upstream_branch("goal_plus"),
@@ -715,6 +809,53 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertRaisesRegex(SweBenchContractError, "checkout tree"),
         ):
             runtime._initialize_agent_container("container-id", profile, {})
+
+    def test_goal_plus_initialization_preserves_read_only_verifier_mount(self) -> None:
+        profile = self.profile(
+            "django-13406-goal-plus-codex-sol-medium-acceptance-on-smoke"
+        )
+        base_commit = profile["tasks"][0]["base_commit"]
+        docker_commands: list[list[str]] = []
+
+        def docker_checked(command: list[str], *, timeout: int = 120) -> str:
+            del timeout
+            docker_commands.append(command)
+            if command[-2:] == ["rev-parse", "HEAD"]:
+                return base_commit
+            if command[-2:] in (
+                ["rev-parse", f"{base_commit}^{{tree}}"],
+                ["rev-parse", "HEAD^{tree}"],
+            ):
+                return "1" * 40
+            if "sha256sum" in command:
+                return (
+                    goal_plus_evidence.expected_visible_verifier_sha256()
+                    + "  /testbed/.goal-plus-verifiers/visible_test_verifier.py"
+                )
+            return ""
+
+        with mock.patch.object(runtime, "_docker_checked", side_effect=docker_checked):
+            runtime._initialize_agent_container(
+                "container-id",
+                profile,
+                {
+                    "goal_plus_visible_verifier": (
+                        environment.GOAL_PLUS_VISIBLE_VERIFIER
+                    )
+                },
+            )
+
+        clean = next(command for command in docker_commands if "clean" in command)
+        self.assertEqual(clean[-2:], ["-e", ".goal-plus-verifiers/"])
+        joined = " ".join(
+            argument for command in docker_commands for argument in command
+        )
+        self.assertIn("sha256sum", joined)
+        self.assertNotIn("cp /opt/swebench-visible-test-verifier.py", joined)
+        self.assertNotIn(
+            "chmod 0555 /testbed/.goal-plus-verifiers/visible_test_verifier.py",
+            joined,
+        )
 
     def test_goal_plus_codex_resolves_and_unqualified_pi_model_fails(self) -> None:
         agent = BenchmarkAgent(catalog=Catalog())
@@ -934,6 +1075,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("dst=/opt/node,readonly", joined)
             self.assertIn("dst=/opt/pip-cache", joined)
             self.assertNotIn("dst=/opt/pip-cache,readonly", joined)
+            self.assertIn("dst=/testbed/.goal-plus-verifiers,readonly", joined)
+            self.assertNotIn("dst=/opt/swebench-visible-test-verifier.py", joined)
             self.assertIn(
                 "/opt/goal-plus-runtime:rw,exec,nosuid,nodev,size=512m", create
             )
@@ -961,6 +1104,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("derive 3 to 8 task-specific soft criteria", prompt)
             self.assertIn("strategy.evidence_annotator.host=codex", prompt)
             self.assertIn("never changes the official binary result", prompt)
+            self.assertIn("repository's native test instructions", prompt)
+            self.assertIn("benchmark-owned and read-only", prompt)
             self.assertIn("/opt/goal-plus/.pi/extensions/goal-plus.ts", command)
             self.assertIn("/opt/goal-plus/.pi/skills/goal-plus/SKILL.md", command)
             self.assertIn("GOAL_PLUS_ROOT=/testbed/.gp", command)
@@ -1143,6 +1288,57 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_evidence_annotator_enabled=True,
             )
             self.assertTrue(off_state["completion"]["passed"])
+
+    def test_goal_plus_completion_rejects_tampered_or_failing_visible_verifier(
+        self,
+    ) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary)
+            self.write_goal_plus_state(root, worker_host="codex")
+            frozen_path = root / "specs/spec_test/frozen_spec.json"
+            frozen = read_json(frozen_path)
+            frozen["verifier_hashes"][
+                ".goal-plus-verifiers/visible_test_verifier.py"
+            ] = "0" * 64
+            write_json(frozen_path, frozen)
+
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_host="codex",
+            )
+            self.assertFalse(
+                state["completion"]["checks"]["visible_verifier_integrity"][
+                    "passed"
+                ]
+            )
+
+            frozen["verifier_hashes"][
+                ".goal-plus-verifiers/visible_test_verifier.py"
+            ] = goal_plus_evidence.expected_visible_verifier_sha256()
+            write_json(frozen_path, frozen)
+            candidate_path = root / "runs/run_test/candidates/c001/candidate.json"
+            candidate = read_json(candidate_path)
+            candidate["promotion_report"]["aggregate_score"] = 0.0
+            candidate["promotion_report"]["verifier_results"][0]["metrics"][
+                "visible_test_score"
+            ] = 0.0
+            write_json(candidate_path, candidate)
+
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_host="codex",
+            )
+            self.assertFalse(
+                state["completion"]["checks"]["promotion_visible_test"]["passed"]
+            )
 
     def test_codex_runtime_probe_and_agent_use_the_same_bounded_tmpfs(self) -> None:
         profile = self.profile("sympy-16886-codex-smoke")

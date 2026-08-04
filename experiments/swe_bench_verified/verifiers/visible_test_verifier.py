@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import subprocess
+import time
 from typing import Any
 
 
@@ -43,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
             f"{pytest_options} -p no:cacheprovider".strip()
         )
     payload: dict[str, Any]
+    returncode = 1
+    started = time.monotonic()
     try:
         completed = subprocess.run(
             command,
@@ -56,19 +59,34 @@ def main(argv: list[str] | None = None) -> int:
             args.metric: 1.0 if completed.returncode == 0 else 0.0,
             "test_returncode": completed.returncode,
             "timed_out": False,
+            "failure_kind": (
+                None if completed.returncode == 0 else "test_command_failed"
+            ),
             "stdout_tail": _tail(completed.stdout),
             "stderr_tail": _tail(completed.stderr),
         }
+        returncode = 0 if completed.returncode == 0 else 1
     except subprocess.TimeoutExpired as error:
         payload = {
             args.metric: 0.0,
             "test_returncode": None,
             "timed_out": True,
+            "failure_kind": "timeout",
             "stdout_tail": _tail(error.stdout or ""),
             "stderr_tail": _tail(error.stderr or ""),
         }
+    except OSError as error:
+        payload = {
+            args.metric: 0.0,
+            "test_returncode": None,
+            "timed_out": False,
+            "failure_kind": "command_unavailable",
+            "stdout_tail": "",
+            "stderr_tail": _tail(f"{type(error).__name__}: {error}"),
+        }
+    payload["test_elapsed_seconds"] = time.monotonic() - started
     print(json.dumps(payload, sort_keys=True))
-    return 0
+    return returncode
 
 
 if __name__ == "__main__":

@@ -502,8 +502,8 @@ def _create_agent_container(
                 "dst=/opt/goal-plus-runtime-requirements.lock,readonly",
                 "--mount",
                 "type=bind,"
-                f"src={runtime['goal_plus_visible_verifier']},"
-                "dst=/opt/swebench-visible-test-verifier.py,readonly",
+                f"src={runtime['goal_plus_visible_verifier'].parent},"
+                "dst=/testbed/.goal-plus-verifiers,readonly",
                 "--mount",
                 "type=bind,"
                 f"src={runtime['goal_plus_controller']},"
@@ -577,7 +577,18 @@ def _initialize_agent_container(
         ["docker", "exec", container_id, "git", "-C", "/testbed", "reset", "--hard", base_commit]
     )
     _docker_checked(
-        ["docker", "exec", container_id, "git", "-C", "/testbed", "clean", "-fdx"]
+        [
+            "docker",
+            "exec",
+            container_id,
+            "git",
+            "-C",
+            "/testbed",
+            "clean",
+            "-fdx",
+            "-e",
+            ".goal-plus-verifiers/",
+        ]
     )
     if isinstance(runtime.get("models_file"), Path):
         _docker_checked(
@@ -662,15 +673,26 @@ def _initialize_agent_container(
                 "sh",
                 "-lc",
                 asset_copy
-                + "mkdir -p /testbed/.goal-plus-verifiers && "
-                "printf '\\n.gp/\\n.codex/\\n.goal-plus-verifiers/\\n' "
-                ">> /testbed/.git/info/exclude && "
-                "cp /opt/swebench-visible-test-verifier.py "
-                "/testbed/.goal-plus-verifiers/visible_test_verifier.py && "
-                "chmod 0555 "
-                "/testbed/.goal-plus-verifiers/visible_test_verifier.py",
+                + "printf '\\n.gp/\\n.codex/\\n.goal-plus-verifiers/\\n' "
+                ">> /testbed/.git/info/exclude",
             ]
         )
+        observed_verifier = _docker_checked(
+            [
+                "docker",
+                "exec",
+                container_id,
+                "sha256sum",
+                "/testbed/.goal-plus-verifiers/visible_test_verifier.py",
+            ]
+        ).split()
+        expected_verifier = hashlib.sha256(
+            runtime["goal_plus_visible_verifier"].read_bytes()
+        ).hexdigest()
+        if not observed_verifier or observed_verifier[0] != expected_verifier:
+            raise SweBenchContractError(
+                "read-only visible verifier mount does not match the controller asset"
+            )
     return {
         "observed_head": observed,
         "base_commit": base_commit,
@@ -743,11 +765,17 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "The Acceptance View is non-gating evidence for search decisions and never changes "
         "the official binary result.\n\n"
         "Choose a focused visible test command using only the public issue and repository. "
+        "Before freeze, inspect the repository's native test instructions and confirm the "
+        "chosen runner and imports exist in the task image. A command that fails because "
+        "pytest, a plugin, or another dependency is unavailable is an invalid verifier; "
+        "use the repository-native runner or a focused Python assertion that works in the "
+        "existing environment. Do not install packages or access the network. "
         "Freeze exactly one process_verifiers entry with role=ranking_signal and "
         "one separate promotion_verifiers entry with role=promotion_gate. Never put "
         "the promotion gate in process_verifiers. Both entries must invoke the "
         "materialized artifact /testbed/.goal-plus-verifiers/visible_test_verifier.py "
-        "with cwd=/testbed and the candidate-relative command: "
+        "which is benchmark-owned and read-only; never create, copy, replace, chmod, "
+        "or otherwise modify it. Set cwd=/testbed and use the candidate-relative command: "
         "python .goal-plus-verifiers/visible_test_verifier.py "
         f"--timeout-seconds {goal_plus['visible_verifier_timeout_seconds']} -- "
         "<your visible test command>. Include that wrapper path in verifier_artifacts. "

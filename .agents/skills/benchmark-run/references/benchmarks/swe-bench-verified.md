@@ -49,6 +49,17 @@ The Goal Plus + Codex pair uses the same Responses endpoint and key contract as 
 does not mount OAuth. Its ON/OFF prompts, task, evaluator, model, reasoning, and T/K/C/R are
 byte-identical; only the frozen Acceptance View boolean differs.
 
+The `django__django-13406` direct-comparison profiles cover Luna/high and Sol/medium, each with
+Acceptance View ON/OFF at `T=1800,K=1,C=1,R=1`. Their independent Codex ViewAgent uses medium
+reasoning. Invoke them through `--benchmark swe-bench-verified --profile <profile-id>`; the four
+profile IDs begin with `django-13406-goal-plus-codex-`.
+
+The visible-test wrapper is a benchmark-owned read-only bind mount inside `/testbed`. Freeze records
+its exact hash. The wrapper preserves bounded stdout/stderr diagnostics and returns nonzero when the
+selected public command fails, times out, or cannot start, so a zero visible score cannot pass the
+promotion gate. MainAgent must use the repository-native runner already present in the task image;
+missing pytest/plugins/dependencies are invalid verifier configuration, not candidate quality.
+
 The archived Linux/amd64 `sympy__sympy-16886` smokes pass the complete `K=1,C=1`
 official-harness contract for
 [Plain Codex](../../../../../evidence/runs/2026-08-02-swe-bench-verified-plain-codex-sol/summary.json),
@@ -77,7 +88,8 @@ For Goal Plus methods, score completion additionally requires exported durable s
 one terminal Goal Plus record and linked promoted Search run, a frozen spec with
 `budget.max_parallel=K`, the method's bound `codex` or `pi-rpc` worker topology, the frozen
 worker/closeout budgets, one candidate, one bound worker session, worker-origin verifier evidence,
-the registered visible-test wrapper, and no active Pi pool job. When the profile enables the
+the registered visible-test wrapper with the benchmark-owned frozen hash, a passing promotion
+`visible_test_score=1.0`, and no active Pi pool job. When the profile enables the
 ViewAgent, every candidate iteration must
 have a completed Global Evidence description. Acceptance View ON additionally requires a frozen
 3–8 criterion contract and an exactly matching per-criterion assessment; OFF requires the contract

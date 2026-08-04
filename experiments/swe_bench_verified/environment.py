@@ -42,7 +42,11 @@ GOAL_PLUS_DEPENDENCY_LOCK = (
     ROOT / "environment" / "swe-bench-goal-plus-requirements.lock"
 )
 GOAL_PLUS_VISIBLE_VERIFIER = (
-    ROOT / "experiments" / "swe_bench_verified" / "visible_test_verifier.py"
+    ROOT
+    / "experiments"
+    / "swe_bench_verified"
+    / "verifiers"
+    / "visible_test_verifier.py"
 )
 GOAL_PLUS_CONTROLLER = (
     ROOT / "experiments" / "swe_bench_verified" / "goal_plus_controller.py"
