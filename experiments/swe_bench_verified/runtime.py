@@ -27,6 +27,7 @@ from .config import (
     write_json,
 )
 from .environment import (
+    CODEX_HOME_TMPFS,
     CODEX_RUNTIME_TMPFS,
     codex_container_responses_probe,
     goal_plus_install_script,
@@ -417,7 +418,7 @@ def _create_agent_container(
         command.extend(
             [
                 "--tmpfs",
-                "/opt/codex-home:rw,nosuid,nodev,size=32m",
+                CODEX_HOME_TMPFS,
                 "--tmpfs",
                 CODEX_RUNTIME_TMPFS,
                 "--mount",
@@ -522,7 +523,7 @@ def _create_agent_container(
                     "--tmpfs",
                     CODEX_RUNTIME_TMPFS,
                     "--tmpfs",
-                    "/opt/codex-home:rw,nosuid,nodev,size=32m",
+                    CODEX_HOME_TMPFS,
                     "--mount",
                     "type=bind,"
                     f"src={runtime['goal_plus_codex_archive']},"

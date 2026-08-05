@@ -39,6 +39,7 @@ from .config import (
 
 CODEX_ARCHIVE = Path.home() / ".cache/sforge/codex/codex-0.144.1-linux-x64.tgz"
 CODEX_RUNTIME_TMPFS = "/opt/codex:rw,exec,nosuid,nodev,size=512m"
+CODEX_HOME_TMPFS = "/opt/codex-home:rw,nosuid,nodev,size=256m"
 GOAL_PLUS_DEPENDENCY_LOCK = (
     ROOT / "environment" / "swe-bench-goal-plus-requirements.lock"
 )
@@ -823,7 +824,7 @@ def _goal_plus_container_probe(
                 "--tmpfs",
                 CODEX_RUNTIME_TMPFS,
                 "--tmpfs",
-                "/opt/codex-home:rw,nosuid,nodev,size=32m",
+                CODEX_HOME_TMPFS,
                 "--mount",
                 "type=bind,"
                 f"src={runtime['goal_plus_codex_archive']},"

@@ -1405,7 +1405,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         create = docker_commands[0]
         joined = " ".join(create)
         self.assertIn("/opt/codex:rw,exec,nosuid,nodev,size=512m", create)
-        self.assertIn("/opt/codex-home:rw,nosuid,nodev,size=32m", create)
+        self.assertIn("/opt/codex-home:rw,nosuid,nodev,size=256m", create)
         self.assertIn("dst=/opt/runtime/codex.tgz,readonly", joined)
         closeout_command = capture.call_args.args[0]
         self.assertTrue(closeout["completed"])
