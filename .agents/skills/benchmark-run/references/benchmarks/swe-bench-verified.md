@@ -177,10 +177,15 @@ checkout branch, image tag, image ID, or evaluator implementation.
   custom-provider outage. Do not fall back to OAuth or substitute `SFORGE_AGENT_*` when both
   protocol configurations exist.
 - Codex runtime extraction must fit the same bounded tmpfs in doctor and run. A pre-Agent
-  `No space left on device` result has no model/evaluator call; finish that failed campaign, fix and
+`No space left on device` result has no model/evaluator call; finish that failed campaign, fix and
   test the tmpfs contract, then create a fresh planned campaign rather than retrying it in place.
   The runtime mount also needs explicit `exec` because the pinned binary runs from `/opt/codex`;
   retain `nosuid,nodev` and verify the exact mount through full doctor.
+- The official Astropy 4.3 image applies the upstream SWE-bench `pre_install` setuptools pin before
+  creating its synthetic `SWE-bench` commit. The Astropy profiles freeze that commit HEAD, tree,
+  changed-file list, and complete patch SHA-256. Full doctor accepts it only when all four values
+  match exactly and the dataset base is its ancestor; the disposable Agent checkout is then reset
+  to the dataset base. Any extra source change remains a blocking image mismatch.
 
 The full installation and mirror procedure is in the
 [benchmark setup matrix](../../../benchmark-setup/references/benchmark-matrix.md#swe-bench-verified-on-a-shared-linux-host).

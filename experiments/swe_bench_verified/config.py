@@ -23,6 +23,7 @@ SUPPORTED_METHODS = {
 }
 SAFE_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
+SHA256 = re.compile(r"[0-9a-f]{64}")
 PROVIDER_ID = re.compile(r"[a-z][a-z0-9_-]*")
 ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
@@ -149,6 +150,51 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         raise SweBenchContractError(
             f"{profile_id}: task.base_commit must be a full commit SHA"
         )
+    image_setup = task.get("image_setup")
+    if image_setup is not None:
+        image_setup_fields = {
+            "head",
+            "tree",
+            "patch_sha256",
+            "files",
+            "provenance",
+        }
+        if not isinstance(image_setup, dict) or set(image_setup) != image_setup_fields:
+            raise SweBenchContractError(
+                f"{profile_id}: task.image_setup contract is invalid"
+            )
+        for field in ("head", "tree"):
+            if FULL_SHA.fullmatch(str(image_setup[field])) is None:
+                raise SweBenchContractError(
+                    f"{profile_id}: task.image_setup.{field} must be a full SHA"
+                )
+        if SHA256.fullmatch(str(image_setup["patch_sha256"])) is None:
+            raise SweBenchContractError(
+                f"{profile_id}: task.image_setup.patch_sha256 must be SHA-256"
+            )
+        files = image_setup["files"]
+        if (
+            not isinstance(files, list)
+            or not files
+            or any(
+                not isinstance(path, str)
+                or not path
+                or path.startswith("/")
+                or ".." in Path(path).parts
+                for path in files
+            )
+            or len(set(files)) != len(files)
+        ):
+            raise SweBenchContractError(
+                f"{profile_id}: task.image_setup.files must be unique relative paths"
+            )
+        if (
+            not isinstance(image_setup["provenance"], str)
+            or not image_setup["provenance"].strip()
+        ):
+            raise SweBenchContractError(
+                f"{profile_id}: task.image_setup.provenance is required"
+            )
     if not task["image"].endswith(":latest"):
         raise SweBenchContractError(
             f"{profile_id}: task.image must be an exact tagged reference"

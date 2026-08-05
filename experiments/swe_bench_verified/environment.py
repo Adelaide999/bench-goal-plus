@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -709,6 +710,30 @@ def _image_checkout_probe(
     )
 
 
+def _image_setup_probe(
+    image: str, base_commit: str
+) -> tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str]]:
+    prefix = [
+        "docker",
+        "run",
+        "--pull",
+        "never",
+        "--rm",
+        "--entrypoint",
+        "git",
+        image,
+        "-C",
+        "/testbed",
+    ]
+    patch = run_capture(
+        [*prefix, "diff", "--binary", f"{base_commit}..HEAD"], timeout=120
+    )
+    files = run_capture(
+        [*prefix, "diff", "--name-only", f"{base_commit}..HEAD"], timeout=120
+    )
+    return patch, files
+
+
 def _pi_container_probe(
     image: str, runtime: dict[str, Any]
 ) -> subprocess.CompletedProcess[str]:
@@ -967,8 +992,9 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         )
 
     method = profile["methods"][0]
-    image = profile["tasks"][0]["image"]
-    base_commit = profile["tasks"][0]["base_commit"]
+    task = profile["tasks"][0]
+    image = task["image"]
+    base_commit = task["base_commit"]
     checkout_probe = _image_checkout_probe(image, base_commit)
     checkout_values = checkout_probe.stdout.splitlines()
     checkout_valid = (
@@ -976,6 +1002,39 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         and len(checkout_values) == 3
         and checkout_values[1] == checkout_values[2]
     )
+    image_setup_evidence = None
+    if (
+        checkout_probe.returncode == 0
+        and len(checkout_values) == 3
+        and not checkout_valid
+        and isinstance(task.get("image_setup"), dict)
+    ):
+        setup_patch, setup_files = _image_setup_probe(image, base_commit)
+        setup_contract = task["image_setup"]
+        canonical_patch = (
+            setup_patch.stdout.rstrip("\n") + "\n" if setup_patch.stdout else ""
+        )
+        setup_patch_sha256 = hashlib.sha256(
+            canonical_patch.encode("utf-8")
+        ).hexdigest()
+        observed_setup_files = setup_files.stdout.splitlines()
+        setup_valid = bool(
+            setup_patch.returncode == 0
+            and setup_files.returncode == 0
+            and checkout_values[0] == setup_contract.get("head")
+            and checkout_values[2] == setup_contract.get("tree")
+            and setup_patch_sha256 == setup_contract.get("patch_sha256")
+            and observed_setup_files == setup_contract.get("files")
+        )
+        checkout_valid = setup_valid
+        image_setup_evidence = {
+            "passed": setup_valid,
+            "head": checkout_values[0],
+            "tree": checkout_values[2],
+            "patch_sha256": setup_patch_sha256,
+            "files": observed_setup_files,
+            "provenance": setup_contract.get("provenance"),
+        }
     checks.append(
         _check(
             "image:dataset-base-tree",
@@ -984,6 +1043,7 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             observed_head=checkout_values[0] if checkout_values else None,
             base_tree=(checkout_values[1] if len(checkout_values) > 1 else None),
             observed_tree=(checkout_values[2] if len(checkout_values) > 2 else None),
+            image_setup=image_setup_evidence,
             error=checkout_probe.stderr.strip()[-2000:],
         )
     )

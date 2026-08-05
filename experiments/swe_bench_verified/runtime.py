@@ -540,7 +540,8 @@ def _create_agent_container(
 def _initialize_agent_container(
     container_id: str, profile: dict[str, Any], runtime: dict[str, Any]
 ) -> dict[str, Any]:
-    base_commit = profile["tasks"][0]["base_commit"]
+    task = profile["tasks"][0]
+    base_commit = task["base_commit"]
     observed = _docker_checked(
         ["docker", "exec", container_id, "git", "-C", "/testbed", "rev-parse", "HEAD"]
     )
@@ -568,11 +569,72 @@ def _initialize_agent_container(
             "HEAD^{tree}",
         ]
     )
+    image_setup_verification = None
     if observed_tree != base_tree:
-        raise SweBenchContractError(
-            "Agent image checkout tree does not match the dataset base commit: "
-            f"HEAD {observed} ({observed_tree}) vs {base_commit} ({base_tree})"
+        image_setup = task.get("image_setup")
+        setup_patch = _docker_checked(
+            [
+                "docker",
+                "exec",
+                container_id,
+                "git",
+                "-C",
+                "/testbed",
+                "diff",
+                "--binary",
+                f"{base_commit}..HEAD",
+            ]
         )
+        setup_files = _docker_checked(
+            [
+                "docker",
+                "exec",
+                container_id,
+                "git",
+                "-C",
+                "/testbed",
+                "diff",
+                "--name-only",
+                f"{base_commit}..HEAD",
+            ]
+        ).splitlines()
+        canonical_patch = setup_patch.rstrip("\n") + "\n" if setup_patch else ""
+        patch_sha256 = hashlib.sha256(canonical_patch.encode("utf-8")).hexdigest()
+        setup_valid = bool(
+            isinstance(image_setup, dict)
+            and observed == image_setup.get("head")
+            and observed_tree == image_setup.get("tree")
+            and patch_sha256 == image_setup.get("patch_sha256")
+            and setup_files == image_setup.get("files")
+        )
+        if not setup_valid:
+            raise SweBenchContractError(
+                "Agent image checkout tree does not match the dataset base commit or "
+                "the profile-frozen official image setup: "
+                f"HEAD {observed} ({observed_tree}) vs {base_commit} ({base_tree})"
+            )
+        _docker_checked(
+            [
+                "docker",
+                "exec",
+                container_id,
+                "git",
+                "-C",
+                "/testbed",
+                "merge-base",
+                "--is-ancestor",
+                base_commit,
+                "HEAD",
+            ]
+        )
+        image_setup_verification = {
+            "head": observed,
+            "tree": observed_tree,
+            "patch_sha256": patch_sha256,
+            "files": setup_files,
+            "provenance": image_setup["provenance"],
+            "passed": True,
+        }
     _docker_checked(
         ["docker", "exec", container_id, "git", "-C", "/testbed", "reset", "--hard", base_commit]
     )
@@ -699,6 +761,7 @@ def _initialize_agent_container(
         "base_tree": base_tree,
         "observed_tree": observed_tree,
         "synthetic_head": observed != base_commit,
+        "image_setup": image_setup_verification,
         "goal_plus_initialized": profile["methods"][0]
         in {"goal-plus-codex", "goal-plus-pi"},
     }

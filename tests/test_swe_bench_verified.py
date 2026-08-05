@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -965,6 +966,58 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         with (
             mock.patch.object(runtime, "_docker_checked", side_effect=mismatched_tree),
             self.assertRaisesRegex(SweBenchContractError, "checkout tree"),
+        ):
+            runtime._initialize_agent_container("container-id", profile, {})
+
+    def test_astropy_official_image_setup_patch_must_match_profile(self) -> None:
+        profile = self.profile(
+            "astropy-13033-goal-plus-codex-luna-high-acceptance-off-smoke"
+        )
+        profile["methods"] = ["plain-codex"]
+        task = profile["tasks"][0]
+        setup = task["image_setup"]
+        patch = (
+            "diff --git a/pyproject.toml b/pyproject.toml\n"
+            "--- a/pyproject.toml\n"
+            "+++ b/pyproject.toml\n"
+            "@@ -1 +1 @@\n"
+            "-setuptools\n"
+            "+setuptools==68.0.0"
+        )
+        setup["patch_sha256"] = hashlib.sha256(
+            (patch + "\n").encode("utf-8")
+        ).hexdigest()
+
+        def docker_checked(command: list[str], *, timeout: int = 120) -> str:
+            del timeout
+            if command[-2:] == ["rev-parse", "HEAD"]:
+                return setup["head"]
+            if command[-2:] == ["rev-parse", f"{task['base_commit']}^{{tree}}"]:
+                return "6" * 40
+            if command[-2:] == ["rev-parse", "HEAD^{tree}"]:
+                return setup["tree"]
+            if "--binary" in command:
+                return patch
+            if "--name-only" in command:
+                return "pyproject.toml"
+            return ""
+
+        with mock.patch.object(runtime, "_docker_checked", side_effect=docker_checked):
+            checkout = runtime._initialize_agent_container(
+                "container-id", profile, {}
+            )
+        self.assertTrue(checkout["image_setup"]["passed"])
+        self.assertEqual(checkout["image_setup"]["files"], ["pyproject.toml"])
+
+        def tampered_patch(command: list[str], *, timeout: int = 120) -> str:
+            value = docker_checked(command, timeout=timeout)
+            return value + "\nextra" if "--binary" in command else value
+
+        with (
+            mock.patch.object(
+                runtime, "_docker_checked", side_effect=tampered_patch
+            ),
+            self.assertRaisesRegex(SweBenchContractError, "official image setup"),
         ):
             runtime._initialize_agent_container("container-id", profile, {})
 
