@@ -523,6 +523,56 @@
         "concurrency": 1,
         "cell_concurrency": 1
       }
+    },
+    {
+      "id": "swe-bench-verified-django-13406-goal-plus-pi-deepseek-v4-flash-on",
+      "description": "Django 13406 Goal Plus + Pi run using DeepSeek V4 Flash over Responses with Acceptance View enabled and T=1800, K=1, C=1, R=1.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "django-13406-goal-plus-pi-deepseek-v4-flash-acceptance-on-smoke",
+      "campaign_id_template": "swe-bench-verified-django-13406-goal-plus-pi-deepseek-v4-flash-on-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi"],
+        "model": "deepseek-responses/deepseek-v4-flash",
+        "reasoning_effort": "medium",
+        "agent_provider": {
+          "id": "deepseek-responses",
+          "name": "DeepSeek Responses API",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "DEEPSEEK_BASE_URL",
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "wire_api": "responses"
+        },
+        "acceptance_view_enabled": true,
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "swe-bench-verified-astropy-13033-goal-plus-pi-deepseek-v4-flash-on",
+      "description": "Astropy 13033 Goal Plus + Pi run using DeepSeek V4 Flash over Responses with Acceptance View enabled and T=1800, K=1, C=1, R=1.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "astropy-13033-goal-plus-pi-deepseek-v4-flash-acceptance-on-smoke",
+      "campaign_id_template": "swe-bench-verified-astropy-13033-goal-plus-pi-deepseek-v4-flash-on-30m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi"],
+        "model": "deepseek-responses/deepseek-v4-flash",
+        "reasoning_effort": "medium",
+        "agent_provider": {
+          "id": "deepseek-responses",
+          "name": "DeepSeek Responses API",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "DEEPSEEK_BASE_URL",
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "wire_api": "responses"
+        },
+        "acceptance_view_enabled": true,
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
     }
   ]
 }

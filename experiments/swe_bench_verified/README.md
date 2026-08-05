@@ -81,6 +81,12 @@ Use `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` for the Goal Plus + Pi p
 Use `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` for the same topology with the
 profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning.
 
+The Django 13406 and Astropy 13033 DeepSeek presets run Goal Plus + Pi with
+`deepseek-responses/deepseek-v4-flash`, medium reasoning, and Acceptance View enabled. Both the Pi
+search path and independent Codex ViewAgent use the profile-frozen DeepSeek Responses endpoint;
+credentials remain inherited through `DEEPSEEK_API_KEY`, and the non-secret base URL comes from
+`DEEPSEEK_BASE_URL`.
+
 Use `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-smoke` for a five-minute native
 Codex host check. It uses the host Codex ChatGPT login and therefore requires outbound access to
 `chatgpt.com`; connectivity failure is a campaign partial, never a verifier result.

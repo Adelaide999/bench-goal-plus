@@ -571,6 +571,18 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         acceptance_on = agent.resolve_spec(
             preset_id="swe-bench-verified-sympy-16886-acceptance-view-on-smoke"
         )
+        django_deepseek = agent.resolve_spec(
+            preset_id=(
+                "swe-bench-verified-django-13406-goal-plus-pi-"
+                "deepseek-v4-flash-on"
+            )
+        )
+        astropy_deepseek = agent.resolve_spec(
+            preset_id=(
+                "swe-bench-verified-astropy-13033-goal-plus-pi-"
+                "deepseek-v4-flash-on"
+            )
+        )
 
         self.assertEqual(codex.runner.runner_id, "swe-bench-native")
         self.assertEqual(codex.methods, ("plain-codex",))
@@ -597,6 +609,15 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             acceptance_off.concurrency(),
             acceptance_on.concurrency(),
         )
+        for deepseek in (django_deepseek, astropy_deepseek):
+            self.assertEqual(deepseek.methods, ("goal-plus-pi",))
+            self.assertEqual(
+                deepseek.model, "deepseek-responses/deepseek-v4-flash"
+            )
+            self.assertEqual(deepseek.reasoning_effort, "medium")
+            self.assertEqual(
+                deepseek.concurrency(), {"T": 1800, "K": 1, "C": 1, "R": 1}
+            )
         self.assertTrue(codex.runner.capabilities.official_evaluator)
         self.assertTrue(codex.runner.capabilities.retain_containers)
         self.assertFalse(codex.runner.capabilities.detach)
@@ -910,6 +931,79 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(
             provider["models"][0]["thinkingLevelMap"], {"high": "high"}
         )
+        self.assertNotIn(secret, raw)
+
+    def test_deepseek_pi_profiles_use_responses_for_worker_and_view_agent(self) -> None:
+        for profile_id, task_id in (
+            (
+                "django-13406-goal-plus-pi-deepseek-v4-flash-acceptance-on-smoke",
+                "django__django-13406",
+            ),
+            (
+                "astropy-13033-goal-plus-pi-deepseek-v4-flash-acceptance-on-smoke",
+                "astropy__astropy-13033",
+            ),
+        ):
+            profile = self.profile(profile_id)
+            self.assertEqual(profile["task_ids"], [task_id])
+            self.assertEqual(profile["methods"], ["goal-plus-pi"])
+            self.assertEqual(
+                profile["model"], "deepseek-responses/deepseek-v4-flash"
+            )
+            self.assertEqual(profile["reasoning_effort"], "medium")
+            self.assertEqual(
+                profile["agent_provider"],
+                {
+                    "id": "deepseek-responses",
+                    "name": "DeepSeek Responses API",
+                    "auth_mode": "openai-compatible",
+                    "base_url_env": "DEEPSEEK_BASE_URL",
+                    "api_key_env": "DEEPSEEK_API_KEY",
+                    "wire_api": "responses",
+                },
+            )
+            self.assertTrue(profile["goal_plus"]["acceptance_view_enabled"])
+            self.assertEqual(
+                profile["goal_plus"]["evidence_annotator"]["model"],
+                "deepseek-v4-flash",
+            )
+
+    def test_deepseek_pi_registry_uses_provider_compatibility(self) -> None:
+        profile = self.profile(
+            "django-13406-goal-plus-pi-deepseek-v4-flash-acceptance-on-smoke"
+        )
+        secret = "not-for-provider-config"
+        values = {
+            "DEEPSEEK_BASE_URL": "https://api.deepseek.com/v1",
+            "DEEPSEEK_API_KEY": secret,
+        }
+        with mock.patch.dict(os.environ, values, clear=False):
+            runtime_info = environment.resolve_pi_runtime(profile)
+
+        runtime_info["runtime_api_base_url"] = values["DEEPSEEK_BASE_URL"]
+        with self.temporary_directory() as temporary:
+            models_file = Path(temporary) / "provider-runtime/models.json"
+            environment.write_pi_models_config(
+                models_file,
+                runtime_info,
+                reasoning_effort=profile["reasoning_effort"],
+            )
+            raw = models_file.read_text(encoding="utf-8")
+            provider = json.loads(raw)["providers"]["deepseek-responses"]
+
+        self.assertEqual(provider["api"], "openai-responses")
+        self.assertEqual(provider["apiKey"], "$DEEPSEEK_API_KEY")
+        self.assertEqual(
+            provider["compat"],
+            {
+                "supportsDeveloperRole": False,
+                "supportsReasoningEffort": True,
+                "supportsStore": False,
+            },
+        )
+        self.assertEqual(provider["models"][0]["contextWindow"], 1_000_000)
+        self.assertEqual(provider["models"][0]["maxTokens"], 384_000)
+        self.assertNotIn("compat", provider["models"][0])
         self.assertNotIn(secret, raw)
 
     def test_loopback_bridge_preserves_the_responses_base_path(self) -> None:

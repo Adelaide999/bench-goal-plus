@@ -60,6 +60,18 @@ PI_API_KEYS = {
     "anthropic": ("ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"),
 }
 
+PI_RESPONSES_PROVIDER_COMPAT = {
+    "deepseek-responses": {
+        "provider": {
+            "supportsDeveloperRole": False,
+            "supportsReasoningEffort": True,
+            "supportsStore": False,
+        },
+        "context_window": 1_000_000,
+        "max_tokens": 384_000,
+    }
+}
+
 
 def run_capture(
     command: list[str],
@@ -365,37 +377,46 @@ def write_pi_models_config(
     path: Path, runtime: dict[str, Any], *, reasoning_effort: str
 ) -> None:
     credential_env = str(runtime["credential_env"])
+    provider_compat = PI_RESPONSES_PROVIDER_COMPAT.get(
+        str(runtime["provider"]), {}
+    )
+    context_window = int(provider_compat.get("context_window", 272_000))
+    max_tokens = int(provider_compat.get("max_tokens", 32_000))
+    provider_payload: dict[str, Any] = {
+        "baseUrl": str(runtime["runtime_api_base_url"]),
+        "api": "openai-responses",
+        "apiKey": f"${credential_env}",
+        "authHeader": True,
+        "models": [
+            {
+                "id": str(runtime["model_id"]),
+                "name": f"{runtime['model_id']} benchmark proxy",
+                "reasoning": True,
+                "thinkingLevelMap": {
+                    reasoning_effort: reasoning_effort,
+                },
+                "input": ["text"],
+                "contextWindow": context_window,
+                "maxTokens": max_tokens,
+                "cost": {
+                    "input": 0,
+                    "output": 0,
+                    "cacheRead": 0,
+                    "cacheWrite": 0,
+                },
+                "compat": {
+                    "supportsDeveloperRole": True,
+                    "supportsReasoningEffort": True,
+                },
+            }
+        ],
+    }
+    if "provider" in provider_compat:
+        provider_payload["compat"] = dict(provider_compat["provider"])
+        provider_payload["models"][0].pop("compat")
     payload = {
         "providers": {
-            str(runtime["provider"]): {
-                "baseUrl": str(runtime["runtime_api_base_url"]),
-                "api": "openai-responses",
-                "apiKey": f"${credential_env}",
-                "authHeader": True,
-                "models": [
-                    {
-                        "id": str(runtime["model_id"]),
-                        "name": f"{runtime['model_id']} benchmark proxy",
-                        "reasoning": True,
-                        "thinkingLevelMap": {
-                            reasoning_effort: reasoning_effort,
-                        },
-                        "input": ["text"],
-                        "contextWindow": 272000,
-                        "maxTokens": 32000,
-                        "cost": {
-                            "input": 0,
-                            "output": 0,
-                            "cacheRead": 0,
-                            "cacheWrite": 0,
-                        },
-                        "compat": {
-                            "supportsDeveloperRole": True,
-                            "supportsReasoningEffort": True,
-                        },
-                    }
-                ],
-            }
+            str(runtime["provider"]): provider_payload
         }
     }
     write_json(path, payload)
