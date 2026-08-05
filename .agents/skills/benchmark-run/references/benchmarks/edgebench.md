@@ -19,6 +19,7 @@ EdgeBench 保留 native SForge lifecycle。控制面负责选择 profile/preset�
 | `goal-plus-codex` | `codex-goal-plus` | 一个 outer run 内 `K` 个 Goal Plus workers |
 | `plain-claude` | `claude-code` | `K` 个独立 outer replicas |
 | `plain-pi` | `pi` | `K` 个独立 outer replicas |
+| `plain-pi-provider` | `pi-provider` | `K` 个使用显式 `PROVIDER/MODEL` 的独立 outer replicas |
 | `goal-plus-pi` | `pi-goal-plus` | 一个 outer run 内 `K` 个 Goal Plus workers |
 | `goal-plus-pi-provider` | `pi-goal-plus-provider` | 与上一行拓扑相同，但 outer/worker 都使用显式 `PROVIDER/MODEL` API 路径 |
 

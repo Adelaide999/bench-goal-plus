@@ -11,10 +11,14 @@
         "goal-plus-codex",
         "plain-claude",
         "plain-pi",
+        "plain-pi-provider",
         "goal-plus-pi",
         "goal-plus-pi-provider"
       ],
       "method_contracts": {
+        "plain-pi-provider": {
+          "model_format": "provider/model"
+        },
         "goal-plus-pi-provider": {
           "model_format": "provider/model"
         }

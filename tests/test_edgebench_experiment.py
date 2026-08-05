@@ -366,6 +366,12 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
 
         self.assertEqual(EDGE.METHODS["plain-pi"]["agent"], "pi")
+        self.assertEqual(
+            EDGE.METHODS["plain-pi-provider"]["agent"], "pi-provider"
+        )
+        self.assertEqual(
+            EDGE.METHODS["plain-pi-provider"]["api_protocol"], "pi-provider"
+        )
         self.assertEqual(EDGE.METHODS["goal-plus-pi"]["agent"], "pi-goal-plus")
         self.assertEqual(
             EDGE.METHODS["goal-plus-pi-provider"]["agent"],
@@ -1628,6 +1634,21 @@ class EdgeBenchExperimentTest(unittest.TestCase):
 
         self.assertTrue(status["valid"])
         self.assertEqual(status["credential_env"], "DEEPSEEK_API_KEY")
+        self.assertEqual(status["api_base_url"], "https://api.deepseek.com")
+        self.assertNotIn("secret-value", json.dumps(status))
+
+    def test_pi_provider_uses_builtin_zai_endpoint_for_offline_allowlist(self) -> None:
+        status = EDGE.resolve_pi_provider(
+            "zai/glm-5.2",
+            {"ZAI_API_KEY": "secret-value"},
+        )
+
+        self.assertTrue(status["valid"])
+        self.assertEqual(status["credential_env"], "ZAI_API_KEY")
+        self.assertEqual(
+            status["api_base_url"],
+            "https://api.z.ai/api/coding/paas/v4",
+        )
         self.assertNotIn("secret-value", json.dumps(status))
 
     def test_pi_provider_prefers_anthropic_oauth_environment(self) -> None:
@@ -1877,6 +1898,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(
             resources.pi_provider_credentials,
             {"MAIN_API_KEY": "main-secret", "WORKER_API_KEY": "worker-secret"},
+        )
+        self.assertEqual(
+            resources.runtime_api_base_url,
+            "http://192.0.2.10:28080/v1",
         )
         self.assertEqual(
             controller["pi_provider_roles"],
