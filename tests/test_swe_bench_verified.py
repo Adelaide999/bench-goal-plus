@@ -205,6 +205,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         acceptance_view: bool = False,
         evidence_annotations: bool = False,
         worker_host: str = "pi-rpc",
+        worker_min_runtime_seconds: int | None = None,
+        worker_min_verifier_runs: int | None = None,
     ) -> None:
         run_id = "run_test"
         candidate_id = "c001"
@@ -231,7 +233,17 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "strategy": {
                 "worker_host": worker_host,
                 "orchestration_mode": "parallel_loops",
-                "worker_budget": {"max_runtime_seconds": 1500},
+                "worker_budget": {
+                    "max_runtime_seconds": 1500,
+                    **(
+                        {
+                            "min_runtime_seconds": worker_min_runtime_seconds,
+                            "min_verifier_runs": worker_min_verifier_runs,
+                        }
+                        if worker_min_runtime_seconds is not None
+                        else {}
+                    ),
+                },
                 "config": {"closeout_reserve_seconds": 300},
                 **(
                     {
@@ -377,9 +389,11 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 },
             )
         for index in range(session_count):
+            agent_session_id = f"agent_{index}"
             write_json(
-                root / f"runs/{run_id}/agent_sessions/agent_{index}.json",
+                root / f"runs/{run_id}/agent_sessions/{agent_session_id}.json",
                 {
+                    "agent_session_id": agent_session_id,
                     "host": worker_host,
                     "candidate_id": candidate_id,
                     "host_handle": {
@@ -393,6 +407,21 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "counters": {"verifier_runs": verifier_runs},
                 },
             )
+            if worker_min_runtime_seconds is not None:
+                write_json(
+                    root
+                    / "host-logs"
+                    / "codex-autoresearch-leases"
+                    / f"{agent_session_id}.json",
+                    {
+                        "status": "released",
+                        "release_reason": "lease_satisfied",
+                        "elapsed_seconds": worker_min_runtime_seconds,
+                        "min_runtime_seconds": worker_min_runtime_seconds,
+                        "min_verifier_runs": worker_min_verifier_runs,
+                        "verifier_runs": verifier_runs,
+                    },
+                )
         promotion = root / f"runs/{run_id}/promotion/{candidate_id}.patch"
         promotion.parent.mkdir(parents=True, exist_ok=True)
         promotion.write_text("diff --git a/a b/a\n", encoding="utf-8")
@@ -415,6 +444,56 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             state["completion"]["checks"]["worker_topology"]["actual"],
             "codex/parallel_loops",
         )
+
+    def test_goal_plus_codex_completion_enforces_worker_minimums(self) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary)
+            self.write_goal_plus_state(
+                root,
+                worker_host="codex",
+                verifier_runs=2,
+                worker_min_runtime_seconds=600,
+                worker_min_verifier_runs=2,
+            )
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_worker_host="codex",
+            )
+
+            self.assertTrue(state["completion"]["passed"])
+            self.assertTrue(
+                state["completion"]["checks"]["worker_minimum_observed"][
+                    "passed"
+                ]
+            )
+
+            lease_path = (
+                root
+                / "host-logs"
+                / "codex-autoresearch-leases"
+                / "agent_0.json"
+            )
+            lease = read_json(lease_path)
+            lease["verifier_runs"] = 1
+            write_json(lease_path, lease)
+            failed = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_worker_host="codex",
+            )
+            self.assertFalse(failed["completion"]["passed"])
+            self.assertIn("worker_minimum_observed", failed["completion"]["reason"])
 
     def test_finalize_revalidates_goal_plus_codex_with_codex_workers(self) -> None:
         profile = self.profile(
@@ -709,6 +788,67 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
             disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
             self.assertEqual(enabled_without_ablation, disabled_without_ablation)
+
+    def test_astropy_profiles_freeze_worker_minimums_and_matched_ablations(
+        self,
+    ) -> None:
+        pairs = (
+            (
+                "astropy-13033-goal-plus-codex-luna-high-acceptance-on-smoke",
+                "astropy-13033-goal-plus-codex-luna-high-acceptance-off-smoke",
+                "gpt-5.6-luna",
+                "high",
+            ),
+            (
+                "astropy-13033-goal-plus-codex-sol-medium-acceptance-on-smoke",
+                "astropy-13033-goal-plus-codex-sol-medium-acceptance-off-smoke",
+                "gpt-5.6-sol",
+                "medium",
+            ),
+        )
+        for enabled_id, disabled_id, model, reasoning in pairs:
+            enabled = self.profile(enabled_id)
+            disabled = self.profile(disabled_id)
+            self.assertEqual(enabled["task_ids"], ["astropy__astropy-13033"])
+            self.assertEqual(enabled["model"], model)
+            self.assertEqual(enabled["reasoning_effort"], reasoning)
+            self.assertEqual(enabled["wall_time_seconds"], 1800)
+            self.assertEqual(enabled["concurrency"], 1)
+            self.assertEqual(enabled["cell_concurrency"], 1)
+            self.assertEqual(enabled["goal_plus"]["worker_runtime_seconds"], 1500)
+            self.assertEqual(
+                enabled["goal_plus"]["worker_min_runtime_seconds"], 600
+            )
+            self.assertEqual(enabled["goal_plus"]["worker_min_verifier_runs"], 2)
+            self.assertEqual(
+                enabled["goal_plus"]["evidence_annotator"]["reasoning_effort"],
+                "medium",
+            )
+            self.assertTrue(enabled["goal_plus"]["acceptance_view_enabled"])
+            self.assertFalse(disabled["goal_plus"]["acceptance_view_enabled"])
+            enabled_without_ablation = json.loads(json.dumps(enabled))
+            disabled_without_ablation = json.loads(json.dumps(disabled))
+            enabled_without_ablation["id"] = "paired"
+            disabled_without_ablation["id"] = "paired"
+            enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+            disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+            self.assertEqual(enabled_without_ablation, disabled_without_ablation)
+
+            prompt = runtime.build_goal_plus_prompt(
+                {"problem_statement": "Public issue text"}, enabled
+            )
+            self.assertIn("strategy.worker_budget.min_runtime_seconds=600", prompt)
+            self.assertIn("strategy.worker_budget.min_verifier_runs=2", prompt)
+
+        invalid = json.loads(json.dumps(enabled))
+        invalid["goal_plus"].pop("worker_min_verifier_runs")
+        with self.assertRaisesRegex(SweBenchContractError, "configured together"):
+            validate_profile(str(invalid["id"]), invalid)
+
+        invalid = json.loads(json.dumps(enabled))
+        invalid["goal_plus"]["worker_min_runtime_seconds"] = 1500
+        with self.assertRaisesRegex(SweBenchContractError, "less than"):
+            validate_profile(str(invalid["id"]), invalid)
 
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
         self.assertEqual(

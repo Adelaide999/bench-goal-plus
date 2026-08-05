@@ -57,6 +57,12 @@ def _revalidate_goal_plus_cell(
             expected_visible_verifier_timeout_seconds=int(
                 goal_plus_profile["visible_verifier_timeout_seconds"]
             ),
+            expected_worker_min_runtime_seconds=goal_plus_profile.get(
+                "worker_min_runtime_seconds"
+            ),
+            expected_worker_min_verifier_runs=goal_plus_profile.get(
+                "worker_min_verifier_runs"
+            ),
             expected_acceptance_view_enabled=bool(
                 goal_plus_profile["acceptance_view_enabled"]
             ),

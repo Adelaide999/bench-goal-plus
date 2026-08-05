@@ -257,6 +257,8 @@ def collect_goal_plus_state(
     expected_worker_runtime_seconds: int,
     expected_closeout_reserve_seconds: int,
     expected_visible_verifier_timeout_seconds: int,
+    expected_worker_min_runtime_seconds: int | None = None,
+    expected_worker_min_verifier_runs: int | None = None,
     expected_acceptance_view_enabled: bool = False,
     expected_evidence_annotator_enabled: bool = False,
     expected_worker_host: str = "pi-rpc",
@@ -338,6 +340,7 @@ def collect_goal_plus_state(
             for session_path in sorted(path.parent.glob("agent_sessions/agent_*.json"))
         ]
         bound_sessions: list[dict[str, Any]] = []
+        autoresearch_leases: list[dict[str, Any]] = []
         bound_counts: dict[str, int] = {}
         verifier_candidate_ids: set[str] = set()
         for session in sessions:
@@ -360,6 +363,14 @@ def collect_goal_plus_state(
                 counters = session.get("counters") or {}
                 if isinstance(counters, dict) and int(counters.get("verifier_runs") or 0) > 0:
                     verifier_candidate_ids.add(candidate_id)
+                lease = _read_object(
+                    root
+                    / "host-logs"
+                    / "codex-autoresearch-leases"
+                    / f"{session.get('agent_session_id')}.json"
+                )
+                if lease:
+                    autoresearch_leases.append(lease)
         all_bound_sessions.extend(bound_sessions)
 
         selected_candidate_id = payload.get("selected_candidate_id")
@@ -395,6 +406,11 @@ def collect_goal_plus_state(
                 "bound_session_count": len(bound_sessions),
                 "bound_candidate_ids": sorted(bound_counts),
                 "bound_session_counts_by_candidate": dict(sorted(bound_counts.items())),
+                "bound_session_verifier_runs": [
+                    int((session.get("counters") or {}).get("verifier_runs") or 0)
+                    for session in bound_sessions
+                ],
+                "autoresearch_leases": autoresearch_leases,
                 "verifier_candidate_ids": sorted(verifier_candidate_ids),
                 "selected_candidate_id": selected_candidate_id,
                 "promotion_artifact": (
@@ -537,6 +553,79 @@ def collect_goal_plus_state(
                     "max_runtime_seconds"
                 )
                 == expected_worker_runtime_seconds
+            ),
+        ),
+        "worker_minimum_budget": _check(
+            {
+                "min_runtime_seconds": expected_worker_min_runtime_seconds,
+                "min_verifier_runs": expected_worker_min_verifier_runs,
+            },
+            (
+                {
+                    "min_runtime_seconds": selected_run.get(
+                        "worker_budget", {}
+                    ).get("min_runtime_seconds"),
+                    "min_verifier_runs": selected_run.get(
+                        "worker_budget", {}
+                    ).get("min_verifier_runs"),
+                }
+                if selected_run
+                else None
+            ),
+            bool(
+                selected_run
+                and selected_run.get("worker_budget", {}).get(
+                    "min_runtime_seconds"
+                )
+                == expected_worker_min_runtime_seconds
+                and selected_run.get("worker_budget", {}).get(
+                    "min_verifier_runs"
+                )
+                == expected_worker_min_verifier_runs
+            ),
+        ),
+        "worker_minimum_observed": _check(
+            (
+                {
+                    "min_runtime_seconds": expected_worker_min_runtime_seconds,
+                    "min_verifier_runs": expected_worker_min_verifier_runs,
+                    "release_reason": "lease_satisfied",
+                }
+                if expected_worker_min_runtime_seconds is not None
+                else "not configured"
+            ),
+            (
+                {
+                    "verifier_runs": selected_run.get(
+                        "bound_session_verifier_runs", []
+                    ),
+                    "leases": selected_run.get("autoresearch_leases", []),
+                }
+                if selected_run and expected_worker_min_runtime_seconds is not None
+                else "not configured"
+            ),
+            bool(
+                expected_worker_min_runtime_seconds is None
+                or (
+                    selected_run
+                    and len(selected_run.get("autoresearch_leases", []))
+                    == expected_k
+                    and all(
+                        int(value) >= int(expected_worker_min_verifier_runs or 0)
+                        for value in selected_run.get(
+                            "bound_session_verifier_runs", []
+                        )
+                    )
+                    and all(
+                        lease.get("status") == "released"
+                        and lease.get("release_reason") == "lease_satisfied"
+                        and float(lease.get("elapsed_seconds") or 0)
+                        >= expected_worker_min_runtime_seconds
+                        and int(lease.get("verifier_runs") or 0)
+                        >= int(expected_worker_min_verifier_runs or 0)
+                        for lease in selected_run.get("autoresearch_leases", [])
+                    )
+                )
             ),
         ),
         "closeout_reserve": _check(

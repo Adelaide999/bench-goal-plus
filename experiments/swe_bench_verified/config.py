@@ -226,7 +226,15 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             "evidence_annotator",
             "acceptance_view_enabled",
         }
-        if not isinstance(goal_plus, dict) or set(goal_plus) != required_fields:
+        optional_fields = {
+            "worker_min_runtime_seconds",
+            "worker_min_verifier_runs",
+        }
+        if (
+            not isinstance(goal_plus, dict)
+            or not required_fields.issubset(goal_plus)
+            or not set(goal_plus).issubset(required_fields | optional_fields)
+        ):
             raise SweBenchContractError(
                 f"{profile_id}: Goal Plus requires an exact goal_plus contract"
             )
@@ -253,6 +261,32 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             raise SweBenchContractError(
                 f"{profile_id}: Goal Plus worker runtime and closeout reserve must fit T"
             )
+        minimum_fields_present = optional_fields.intersection(goal_plus)
+        if minimum_fields_present and minimum_fields_present != optional_fields:
+            raise SweBenchContractError(
+                f"{profile_id}: Goal Plus worker minimum fields must be configured together"
+            )
+        if minimum_fields_present:
+            minimum_runtime = goal_plus["worker_min_runtime_seconds"]
+            minimum_verifier_runs = goal_plus["worker_min_verifier_runs"]
+            if (
+                not isinstance(minimum_runtime, int)
+                or isinstance(minimum_runtime, bool)
+                or minimum_runtime < 1
+                or minimum_runtime >= worker_runtime
+            ):
+                raise SweBenchContractError(
+                    f"{profile_id}: goal_plus.worker_min_runtime_seconds must be "
+                    "positive and less than worker_runtime_seconds"
+                )
+            if (
+                not isinstance(minimum_verifier_runs, int)
+                or isinstance(minimum_verifier_runs, bool)
+                or minimum_verifier_runs < 1
+            ):
+                raise SweBenchContractError(
+                    f"{profile_id}: goal_plus.worker_min_verifier_runs must be positive"
+                )
         if (
             not isinstance(verifier_timeout, int)
             or isinstance(verifier_timeout, bool)

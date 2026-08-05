@@ -737,6 +737,15 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         if codex_host
         else "Continue the same bound Pi worker session; do not create replacement lanes."
     )
+    minimum_budget_instruction = ""
+    if "worker_min_runtime_seconds" in goal_plus:
+        minimum_budget_instruction = (
+            "Set strategy.worker_budget.min_runtime_seconds="
+            f"{goal_plus['worker_min_runtime_seconds']} and "
+            "strategy.worker_budget.min_verifier_runs="
+            f"{goal_plus['worker_min_verifier_runs']}. These are lower-bound search "
+            "gates: keep the same worker active until both are satisfied. "
+        )
     return (
         "/goal-plus mode=autonomous Solve the public repository issue below in "
         "/testbed. Treat this as verifier-guided code repair and enter Search Mode. "
@@ -749,7 +758,9 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "strategy.orchestration_mode=parallel_loops. Set budget.max_parallel="
         f"{profile['concurrency']} and do not set the deprecated max_candidates field. "
         "Set strategy.worker_budget.max_runtime_seconds="
-        f"{goal_plus['worker_runtime_seconds']} and "
+        f"{goal_plus['worker_runtime_seconds']}. "
+        f"{minimum_budget_instruction}"
+        "Set "
         "strategy.config.closeout_reserve_seconds="
         f"{goal_plus['closeout_reserve_seconds']}. Use one fixed initial candidate. "
         "Set strategy.evidence_annotator.host=codex and "
@@ -1261,6 +1272,12 @@ def _export_goal_plus_state(
         expected_visible_verifier_timeout_seconds=profile["goal_plus"][
             "visible_verifier_timeout_seconds"
         ],
+        expected_worker_min_runtime_seconds=profile["goal_plus"].get(
+            "worker_min_runtime_seconds"
+        ),
+        expected_worker_min_verifier_runs=profile["goal_plus"].get(
+            "worker_min_verifier_runs"
+        ),
         expected_acceptance_view_enabled=profile["goal_plus"][
             "acceptance_view_enabled"
         ],

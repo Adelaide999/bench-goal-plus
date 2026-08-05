@@ -54,6 +54,15 @@ Acceptance View ON/OFF at `T=1800,K=1,C=1,R=1`. Their independent Codex ViewAgen
 reasoning. Invoke them through `--benchmark swe-bench-verified --profile <profile-id>`; the four
 profile IDs begin with `django-13406-goal-plus-codex-`.
 
+The `astropy__astropy-13033` direct-comparison profiles use the same four Luna/high and Sol/medium
+Acceptance View ON/OFF cells at `T=1800,K=1,C=1,R=1`, with a medium ViewAgent. In addition to the
+`1500` second worker maximum and `300` second outer closeout reserve, these profiles freeze a
+`600` second minimum worker runtime and at least `2` verifier iterations. Completion evidence must
+show the exact FrozenSpec lower bounds and a released Codex AutoResearch lease that satisfied both;
+an infrastructure bypass or an early/under-verified release makes Goal Plus evidence partial while
+preserving any official SWE-bench score. The four profile IDs begin with
+`astropy-13033-goal-plus-codex-`.
+
 The visible-test wrapper is a benchmark-owned read-only bind mount inside `/testbed`. Freeze records
 its exact hash. The ranking verifier directly uses `--ranking-signal`, allowing a completed public
 test failure to become a valid zero baseline for freeze preflight. The separate promotion verifier
@@ -90,6 +99,7 @@ For Goal Plus methods, score completion additionally requires exported durable s
 one terminal Goal Plus record and linked promoted Search run, a frozen spec with
 `budget.max_parallel=K`, the method's bound `codex` or `pi-rpc` worker topology, the frozen
 worker/closeout budgets, one candidate, one bound worker session, worker-origin verifier evidence,
+any profile-frozen minimum worker budget plus its satisfied runtime lease,
 the registered visible-test wrapper with the benchmark-owned frozen hash, a passing promotion
 `visible_test_score=1.0`, and no active Pi pool job. When the profile enables the
 ViewAgent, every candidate iteration must
