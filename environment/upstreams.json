@@ -14,7 +14,7 @@
     "goal_plus": {
       "repository": "https://github.com/Adelaide999/goal-plus.git",
       "checkout_dir": "goal-plus",
-      "tracking_branch": "codex/acceptance-view-ablation",
+      "tracking_branch": "codex/acceptance-view",
       "always": true,
       "editable": true
     },
