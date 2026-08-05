@@ -854,7 +854,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
         self.assertEqual(
             managed_upstream_branch("goal_plus"),
-            "codex/acceptance-view-ablation",
+            "codex/acceptance-view",
         )
 
     def test_luna_pi_runtime_writes_environment_reference_not_secret(self) -> None:
@@ -1316,6 +1316,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("strategy.evidence_annotator.host=codex", prompt)
             self.assertIn("never changes the official binary result", prompt)
             self.assertIn("repository's native test instructions", prompt)
+            self.assertIn("adjacent existing assertions", prompt)
+            self.assertIn("public issue leaves ambiguous", prompt)
+            self.assertIn("Do not edit public tests merely", prompt)
             self.assertIn("benchmark-owned and read-only", prompt)
             self.assertIn(
                 ".goal-plus-verifiers/visible_test_verifier.py --ranking-signal",
