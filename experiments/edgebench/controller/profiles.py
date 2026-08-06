@@ -30,6 +30,12 @@ METHODS = {
         "inner_search": False,
         "api_protocol": "openai",
     },
+    "plain-pi-provider": {
+        "agent": "pi-provider",
+        "outer_replicas": "concurrency",
+        "inner_search": False,
+        "api_protocol": "pi-provider",
+    },
     "goal-plus-pi": {
         "agent": "pi-goal-plus",
         "outer_replicas": 1,

@@ -832,7 +832,7 @@ def collect_doctor(
     for name, entry in chosen.items():
         branch = entry["tracking_branch"]
         state = git_state(paths[name], branch)
-        passed = bool(
+        checkout_matches = bool(
             state["is_git"]
             and state["branch"] == branch
             and state["upstream"] == f"origin/{branch}"
@@ -841,10 +841,13 @@ def collect_doctor(
             == normalize_repository(entry["repository"])
             and state["dirty"] is False
         )
+        required = only is None or name in set(only)
         checks.append(
             {
                 "name": f"checkout:{name}",
-                "passed": passed,
+                "passed": checkout_matches if required else True,
+                "required": required,
+                "checkout_matches": checkout_matches,
                 "expected_branch": branch,
                 "expected_repository": entry["repository"],
                 **state,

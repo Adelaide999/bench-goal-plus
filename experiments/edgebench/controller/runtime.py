@@ -778,6 +778,14 @@ def prepare_pi_provider_runtime(
         resources.pi_models_file = runtime_dir / "pi-models.json"
         io.write_json(resources.pi_models_file, registry)
         resources.pi_models_file.chmod(0o600)
+    main_status = bundle["models"][0]
+    if main_status.get("models_path") is None:
+        main_base_url = main_status.get("api_base_url")
+    else:
+        main_provider = str(main_status["provider"])
+        main_base_url = providers.get(main_provider, {}).get("baseUrl")
+    if isinstance(main_base_url, str) and main_base_url:
+        resources.runtime_api_base_url = main_base_url
     controller["pi_provider_roles"] = {
         "main": str(profile["model"]),
         "worker": str(profile.get("worker_model") or profile["model"]),
@@ -870,7 +878,9 @@ def prepare_runtime_resources(
                 )
         judge_env = judge_server_environment(
             api_key=str(resources.api_key) if resources.api_key else None,
-            api_base_url=resources.runtime_api_base_url,
+            api_base_url=(
+                resources.runtime_api_base_url if resources.api_key else None
+            ),
             bridge_host=resources.bridge_host,
         )
         resources.judge_process, resources.close_judge = start_or_reuse_judge(

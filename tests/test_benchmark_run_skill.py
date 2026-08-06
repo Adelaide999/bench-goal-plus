@@ -81,13 +81,17 @@ class BenchmarkAgentContractTest(unittest.TestCase):
                 "goal-plus-codex",
                 "plain-claude",
                 "plain-pi",
+                "plain-pi-provider",
                 "goal-plus-pi",
                 "goal-plus-pi-provider",
             ),
         )
         self.assertEqual(
             self.catalog.runners["edgebench-native"].method_contracts,
-            {"goal-plus-pi-provider": {"model_format": "provider/model"}},
+            {
+                "plain-pi-provider": {"model_format": "provider/model"},
+                "goal-plus-pi-provider": {"model_format": "provider/model"},
+            },
         )
 
     def test_runner_rejects_unknown_method_before_prepare(self) -> None:
@@ -157,6 +161,22 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             doctor[-4:],
             ["--model", "zai/glm-5.2", "--method", "goal-plus-pi-provider"],
         )
+
+    def test_plain_pi_provider_uses_the_same_qualified_model_contract(self) -> None:
+        arguments = {
+            "target_ids": ("edgebench",),
+            "profile": "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1",
+            "methods": ("plain-pi-provider",),
+            "reasoning_effort": "high",
+            "wall_time_seconds": 3600,
+            "live_search_concurrency": 1,
+            "cell_concurrency": 1,
+        }
+        with self.assertRaisesRegex(ContractError, "PROVIDER/MODEL"):
+            self.agent.resolve_spec(model="glm-5.2", **arguments)
+
+        spec = self.agent.resolve_spec(model="zai/glm-5.2", **arguments)
+        self.assertEqual(spec.methods, ("plain-pi-provider",))
 
     def test_profiled_check_routes_to_read_only_native_inventory(self) -> None:
         args = build_parser().parse_args(

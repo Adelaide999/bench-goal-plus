@@ -26,6 +26,7 @@ from bench_goal_plus.loopback_bridge import (
 from . import io
 from .context import current_paths
 from .profiles import (
+    GOAL_PLUS_METHODS,
     METHODS,
     api_protocol_for_methods,
     load_official_codex_protocol,
@@ -68,6 +69,12 @@ PI_BUILTIN_PROVIDER_API_KEYS: dict[str, tuple[str, ...]] = {
     "xiaomi-token-plan-cn": ("XIAOMI_TOKEN_PLAN_CN_API_KEY",),
     "xiaomi-token-plan-ams": ("XIAOMI_TOKEN_PLAN_AMS_API_KEY",),
     "xiaomi-token-plan-sgp": ("XIAOMI_TOKEN_PLAN_SGP_API_KEY",),
+}
+
+PI_BUILTIN_PROVIDER_API_BASE_URLS: dict[str, str] = {
+    "deepseek": "https://api.deepseek.com",
+    "zai": "https://api.z.ai/api/coding/paas/v4",
+    "zai-coding-cn": "https://open.bigmodel.cn/api/coding/paas/v4",
 }
 
 
@@ -161,6 +168,7 @@ def resolve_pi_provider(
         "model_registered": False,
         "credential_mode": None,
         "credential_env": None,
+        "api_base_url": None,
         "valid": False,
         "error": None,
     }
@@ -177,6 +185,7 @@ def resolve_pi_provider(
                 "credential_mode": "environment",
                 "credential_env": key_name or builtin_keys[0],
                 "credential_env_candidates": list(builtin_keys),
+                "api_base_url": PI_BUILTIN_PROVIDER_API_BASE_URLS.get(provider),
                 "valid": key_name is not None,
                 "error": None if key_name else f"missing {expected}",
             }
@@ -202,6 +211,9 @@ def resolve_pi_provider(
     if not isinstance(provider_config, dict):
         result["error"] = f"provider {provider!r} is not registered"
         return result
+    base_url = provider_config.get("baseUrl")
+    if isinstance(base_url, str) and base_url:
+        result["api_base_url"] = base_url
     registered_ids = {
         entry.get("id")
         for entry in provider_config.get("models", [])
@@ -996,7 +1008,9 @@ def _check_protocol(
         return None
 
 
-def _check_checkouts_and_runtime(report: DoctorReport) -> None:
+def _check_checkouts_and_runtime(
+    report: DoctorReport, profile: dict[str, Any]
+) -> None:
     paths = current_paths()
     expected_edge = io.upstream_entry("edgebench")["tracking_branch"]
     expected_goal = io.upstream_entry("goal_plus")["tracking_branch"]
@@ -1012,14 +1026,15 @@ def _check_checkouts_and_runtime(report: DoctorReport) -> None:
         actual_commit=io.git_head(paths.edge_root),
         dirty=edge_dirty,
     )
-    report.add(
-        "checkout:goal-plus",
-        goal_branch == expected_goal and goal_dirty is False,
-        expected_branch=expected_goal,
-        actual_branch=goal_branch,
-        actual_commit=io.git_head(paths.goal_plus_root),
-        dirty=goal_dirty,
-    )
+    if set(profile["methods"]) & GOAL_PLUS_METHODS:
+        report.add(
+            "checkout:goal-plus",
+            goal_branch == expected_goal and goal_dirty is False,
+            expected_branch=expected_goal,
+            actual_branch=goal_branch,
+            actual_commit=io.git_head(paths.goal_plus_root),
+            dirty=goal_dirty,
+        )
     report.add(
         "entrypoint:sforge",
         paths.sforge.is_file(),
@@ -1338,7 +1353,7 @@ def _check_tasks_and_resources(
 def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     report = DoctorReport(str(profile["id"]))
     official_protocol = _check_protocol(report, profile)
-    _check_checkouts_and_runtime(report)
+    _check_checkouts_and_runtime(report, profile)
     _check_auth(report, profile)
     docker_details = _docker_details(report)
     _check_tasks_and_resources(report, profile, official_protocol, docker_details)
