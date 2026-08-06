@@ -384,6 +384,31 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                         },
                     },
                     "counters": {"verifier_runs": verifier_runs},
+                    "global_evidence_reads": (
+                        [
+                            {
+                                "read_at": "2026-08-06T12:01:00Z",
+                                "evidence_count": 1,
+                                "completed_view_count": 1,
+                                "completed_supplemental_evaluation_count": (
+                                    1 if supplemental_evaluation else 0
+                                ),
+                                "completed_views": [
+                                    {
+                                        "candidate_id": candidate_id,
+                                        "iteration": 1,
+                                        "commit": "a" * 40,
+                                        "view_created_at": "2026-08-06T12:00:00Z",
+                                        "supplemental_evaluation_present": (
+                                            supplemental_evaluation
+                                        ),
+                                    }
+                                ],
+                            }
+                        ]
+                        if evidence_annotations
+                        else []
+                    ),
                 },
             )
             if worker_min_runtime_seconds is not None:
@@ -1392,7 +1417,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("or the official binary result", prompt)
             self.assertIn("repository's native test instructions", prompt)
             self.assertIn("adjacent existing assertions", prompt)
+            self.assertIn("public behavior inventory", prompt)
+            self.assertIn("single substring", prompt)
+            self.assertIn("every runnable item", prompt)
             self.assertIn("public issue leaves ambiguous", prompt)
+            self.assertIn("relevant existing test files in edit_surface", prompt)
+            self.assertIn("must not redefine or weaken the frozen verifier", prompt)
             self.assertIn("Do not edit public tests merely", prompt)
             self.assertIn("benchmark-owned and read-only", prompt)
             self.assertIn(
@@ -1561,6 +1591,17 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertTrue(
                 state["completion"]["checks"]["global_evidence_view"]["passed"]
             )
+            reads = state["completion"]["checks"][
+                "global_evidence_read_receipts"
+            ]
+            self.assertTrue(reads["passed"])
+            self.assertEqual(reads["actual"]["read_count"], 1)
+            self.assertEqual(
+                reads["actual"][
+                    "reads_with_completed_supplemental_evaluations"
+                ],
+                1,
+            )
             self.assertEqual(state["evidence_annotator_usage"]["input_tokens"], 40)
 
             missing = Path(temporary) / "acceptance-missing"
@@ -1595,6 +1636,56 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_evidence_annotator_enabled=True,
             )
             self.assertTrue(off_state["completion"]["passed"])
+
+    def test_global_evidence_receipt_precedes_next_verifier(self) -> None:
+        receipts = goal_plus_evidence._global_evidence_read_receipts(
+            [
+                {
+                    "agent_session_id": "agent_test",
+                    "global_evidence_reads": [
+                        {
+                            "read_at": "2026-08-06T12:01:00Z",
+                            "evidence_count": 1,
+                            "completed_view_count": 1,
+                            "completed_supplemental_evaluation_count": 1,
+                            "completed_views": [
+                                {
+                                    "candidate_id": "c001",
+                                    "iteration": 1,
+                                    "commit": "a" * 40,
+                                    "view_created_at": "2026-08-06T12:00:30Z",
+                                    "supplemental_evaluation_present": True,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+            [
+                {
+                    "candidate_id": "c001",
+                    "iterations": [
+                        {
+                            "iteration": 1,
+                            "agent_session_id": "agent_test",
+                            "created_at": "2026-08-06T12:00:00Z",
+                        },
+                        {
+                            "iteration": 2,
+                            "agent_session_id": "agent_test",
+                            "created_at": "2026-08-06T12:02:00Z",
+                        },
+                    ],
+                }
+            ],
+        )
+
+        self.assertTrue(receipts["schema_valid"])
+        self.assertEqual(receipts["reads_before_subsequent_verifier"], 1)
+        self.assertEqual(
+            receipts["influence_windows"][0]["next_verifier"]["iteration"],
+            2,
+        )
 
     def test_goal_plus_completion_rejects_tampered_or_failing_visible_verifier(
         self,

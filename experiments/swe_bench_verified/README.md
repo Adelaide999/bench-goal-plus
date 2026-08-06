@@ -105,7 +105,12 @@ both `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED=1` and
 `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1`, so a missing post-settlement evaluation cannot
 silently degrade into OFF. The official SWE-bench `resolved` result remains the sole hard score.
 Reports preserve per-iteration Global Evidence, immutable comparison bases, ViewAgent token usage,
-and completion checks proving that FrozenSpec contained no legacy soft rubric.
+and completion checks proving that FrozenSpec contained no legacy soft rubric. Goal Plus also
+persists every Global Evidence read with the completed View commit references visible at that time;
+the report distinguishes a supplemental evaluation read before a later verifier from one published
+only during closeout. Before freezing the hard verifier, the MainAgent builds a public behavior
+inventory from the issue, implementation, and existing tests, and keeps relevant regression tests in
+the candidate edit surface without allowing them to redefine the frozen verifier.
 
 Run `launch` only after reviewing and confirming the resolved `T/K/C/R` block. A terminal campaign
 is archived with `finish`, which consumes `campaign-summary.json` and exports `report.md` plus the

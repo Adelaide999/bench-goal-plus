@@ -149,6 +149,154 @@ def _evidence_annotations(run_dir: Path, expected_iterations: int) -> dict[str, 
     }
 
 
+def _global_evidence_read_receipts(
+    sessions: list[dict[str, Any]],
+    candidate_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    verifier_iterations: list[dict[str, Any]] = []
+    for candidate in candidate_records:
+        candidate_id = candidate.get("candidate_id")
+        for iteration in candidate.get("iterations") or []:
+            if not isinstance(iteration, dict):
+                continue
+            verifier_iterations.append(
+                {
+                    "candidate_id": candidate_id,
+                    "iteration": iteration.get("iteration"),
+                    "agent_session_id": iteration.get("agent_session_id"),
+                    "created_at": iteration.get("created_at"),
+                }
+            )
+
+    normalized_reads: list[dict[str, Any]] = []
+    sessions_with_reads = 0
+    schema_valid = True
+    for session in sessions:
+        session_id = session.get("agent_session_id")
+        reads = session.get("global_evidence_reads")
+        if not isinstance(reads, list):
+            schema_valid = False
+            continue
+        if reads:
+            sessions_with_reads += 1
+        for read in reads:
+            if not isinstance(read, dict):
+                schema_valid = False
+                continue
+            completed_views = read.get("completed_views")
+            valid = (
+                isinstance(read.get("read_at"), str)
+                and bool(read["read_at"])
+                and isinstance(read.get("evidence_count"), int)
+                and not isinstance(read.get("evidence_count"), bool)
+                and read["evidence_count"] >= 0
+                and isinstance(read.get("completed_view_count"), int)
+                and not isinstance(read.get("completed_view_count"), bool)
+                and read["completed_view_count"] >= 0
+                and isinstance(
+                    read.get("completed_supplemental_evaluation_count"), int
+                )
+                and not isinstance(
+                    read.get("completed_supplemental_evaluation_count"), bool
+                )
+                and read["completed_supplemental_evaluation_count"] >= 0
+                and isinstance(completed_views, list)
+            )
+            references = []
+            if isinstance(completed_views, list):
+                for reference in completed_views:
+                    reference_valid = (
+                        isinstance(reference, dict)
+                        and isinstance(reference.get("candidate_id"), str)
+                        and bool(reference["candidate_id"])
+                        and isinstance(reference.get("iteration"), int)
+                        and not isinstance(reference.get("iteration"), bool)
+                        and reference["iteration"] >= 1
+                        and isinstance(reference.get("commit"), str)
+                        and bool(reference["commit"])
+                        and isinstance(reference.get("view_created_at"), str)
+                        and bool(reference["view_created_at"])
+                        and isinstance(
+                            reference.get("supplemental_evaluation_present"), bool
+                        )
+                    )
+                    valid = valid and reference_valid
+                    if reference_valid:
+                        references.append(reference)
+            supplemental_count = sum(
+                bool(item.get("supplemental_evaluation_present"))
+                for item in references
+            )
+            valid = bool(
+                valid
+                and read["completed_view_count"] == len(references)
+                and read["completed_supplemental_evaluation_count"]
+                == supplemental_count
+                and read["completed_view_count"] <= read["evidence_count"]
+            )
+            schema_valid = schema_valid and valid
+            normalized_reads.append(
+                {
+                    "agent_session_id": session_id,
+                    "read_at": read.get("read_at"),
+                    "evidence_count": read.get("evidence_count"),
+                    "completed_view_count": read.get("completed_view_count"),
+                    "completed_supplemental_evaluation_count": read.get(
+                        "completed_supplemental_evaluation_count"
+                    ),
+                    "completed_views": references,
+                    "valid": valid,
+                }
+            )
+
+    influence_windows = []
+    for read in normalized_reads:
+        if not read["valid"] or not any(
+            item["supplemental_evaluation_present"]
+            for item in read["completed_views"]
+        ):
+            continue
+        subsequent = sorted(
+            (
+                iteration
+                for iteration in verifier_iterations
+                if iteration["agent_session_id"] == read["agent_session_id"]
+                and isinstance(iteration["created_at"], str)
+                and iteration["created_at"] > read["read_at"]
+            ),
+            key=lambda item: item["created_at"],
+        )
+        if subsequent:
+            influence_windows.append(
+                {
+                    "agent_session_id": read["agent_session_id"],
+                    "read_at": read["read_at"],
+                    "completed_views": read["completed_views"],
+                    "next_verifier": subsequent[0],
+                }
+            )
+
+    return {
+        "session_count": len(sessions),
+        "sessions_with_reads": sessions_with_reads,
+        "read_count": len(normalized_reads),
+        "valid_read_count": sum(item["valid"] for item in normalized_reads),
+        "reads_with_completed_views": sum(
+            bool(item["completed_views"]) for item in normalized_reads
+        ),
+        "reads_with_completed_supplemental_evaluations": sum(
+            any(
+                reference["supplemental_evaluation_present"]
+                for reference in item["completed_views"]
+            )
+            for item in normalized_reads
+        ),
+        "reads_before_subsequent_verifier": len(influence_windows),
+        "influence_windows": influence_windows,
+        "schema_valid": schema_valid,
+    }
+
+
 def _visible_verifier_contract(
     verifiers: Any,
     *,
@@ -382,6 +530,10 @@ def collect_goal_plus_state(
                 )
                 if lease:
                     autoresearch_leases.append(lease)
+        global_evidence_reads = _global_evidence_read_receipts(
+            bound_sessions,
+            candidate_records,
+        )
         all_bound_sessions.extend(bound_sessions)
 
         selected_candidate_id = payload.get("selected_candidate_id")
@@ -408,6 +560,7 @@ def collect_goal_plus_state(
                 "legacy_acceptance_view_contract": legacy_acceptance_contract,
                 "evidence_annotator_spec": evidence_annotator_spec,
                 "evidence_annotations": annotations,
+                "global_evidence_read_receipts": global_evidence_reads,
                 "process_visible_verifiers": process_verifiers,
                 "promotion_visible_verifiers": promotion_verifiers,
                 "visible_verifier_integrity": verifier_integrity,
@@ -802,6 +955,36 @@ def collect_goal_plus_state(
             ),
             annotations,
             annotations_passed,
+        ),
+        "global_evidence_read_receipts": _check(
+            (
+                "at least one valid persisted read per bound worker session"
+                if expected_evidence_annotator_enabled
+                else "not required"
+            ),
+            (
+                selected_run.get("global_evidence_read_receipts")
+                if selected_run
+                else None
+            ),
+            bool(
+                not expected_evidence_annotator_enabled
+                or (
+                    selected_run
+                    and selected_run.get("bound_session_count") == expected_k
+                    and selected_run.get(
+                        "global_evidence_read_receipts", {}
+                    ).get("schema_valid")
+                    and selected_run.get(
+                        "global_evidence_read_receipts", {}
+                    ).get("sessions_with_reads")
+                    == selected_run.get("bound_session_count")
+                    and selected_run.get(
+                        "global_evidence_read_receipts", {}
+                    ).get("read_count", 0)
+                    >= selected_run.get("bound_session_count", 0)
+                )
+            ),
         ),
         "view_agent_contract": _check(
             (
