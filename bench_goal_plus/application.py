@@ -800,9 +800,11 @@ class BenchmarkAgent:
         }
         if "agent_provider" in preset.expected_profile:
             observed["agent_provider"] = profile.get("agent_provider")
-        if "acceptance_view_enabled" in preset.expected_profile:
-            observed["acceptance_view_enabled"] = (
-                (profile.get("goal_plus") or {}).get("acceptance_view_enabled")
+        if "supplemental_evaluation_enabled" in preset.expected_profile:
+            observed["supplemental_evaluation_enabled"] = (
+                (profile.get("goal_plus") or {}).get(
+                    "supplemental_evaluation_enabled"
+                )
             )
         if observed != preset.expected_profile:
             raise ContractError(

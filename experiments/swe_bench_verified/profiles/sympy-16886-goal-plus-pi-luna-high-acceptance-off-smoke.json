@@ -42,6 +42,6 @@
       "reasoning_effort": "high",
       "timeout_seconds": 300
     },
-    "acceptance_view_enabled": false
+    "supplemental_evaluation_enabled": false
   }
 }

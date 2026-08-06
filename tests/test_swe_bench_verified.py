@@ -130,7 +130,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         )
         joined = " ".join(command)
         self.assertIn("strategy.worker_host=codex", prompt)
-        self.assertIn("GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED=1", command)
+        self.assertIn(
+            "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1", command
+        )
         self.assertIn("gpt-5.6-sol", command)
         self.assertNotIn("OPENAI_API_KEY", joined)
         self.assertNotIn("agents.enabled", joined)
@@ -145,15 +147,15 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         disabled = self.profile(
             "sympy-16886-goal-plus-codex-luna-high-acceptance-off-smoke"
         )
-        self.assertTrue(enabled["goal_plus"]["acceptance_view_enabled"])
-        self.assertFalse(disabled["goal_plus"]["acceptance_view_enabled"])
+        self.assertTrue(enabled["goal_plus"]["supplemental_evaluation_enabled"])
+        self.assertFalse(disabled["goal_plus"]["supplemental_evaluation_enabled"])
 
         enabled_without_ablation = json.loads(json.dumps(enabled))
         disabled_without_ablation = json.loads(json.dumps(disabled))
         enabled_without_ablation["id"] = "ablation"
         disabled_without_ablation["id"] = "ablation"
-        enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
-        disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+        enabled_without_ablation["goal_plus"].pop("supplemental_evaluation_enabled")
+        disabled_without_ablation["goal_plus"].pop("supplemental_evaluation_enabled")
         self.assertEqual(enabled_without_ablation, disabled_without_ablation)
         self.assertEqual(
             runtime.build_goal_plus_prompt(
@@ -203,7 +205,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         max_parallel: int = 1,
         session_count: int = 1,
         verifier_runs: int = 1,
-        acceptance_view: bool = False,
+        supplemental_evaluation: bool = False,
         evidence_annotations: bool = False,
         worker_host: str = "pi-rpc",
         worker_min_runtime_seconds: int | None = None,
@@ -295,39 +297,6 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 }
             ],
         }
-        acceptance_criteria = [
-            {
-                "id": "issue_requirements",
-                "category": "issue_coverage",
-                "description": "Cover every requirement stated in the issue.",
-                "importance": "high",
-                "evidence_hints": ["patch", "visible verifier result"],
-            },
-            {
-                "id": "boundary_inputs",
-                "category": "edge_cases",
-                "description": "Handle relevant boundary inputs.",
-                "importance": "medium",
-                "evidence_hints": ["tests", "changed branches"],
-            },
-            {
-                "id": "regression_risk",
-                "category": "regression",
-                "description": "Avoid regressions and incompatible behavior.",
-                "importance": "high",
-                "evidence_hints": ["diff", "regression tests"],
-            },
-        ]
-        if acceptance_view:
-            spec["acceptance_view"] = {
-                "rubric_name": "SWE-bench task-specific quality",
-                "benchmark_context": (
-                    "The official verifier remains the sole hard PASS/FAIL result."
-                ),
-                "criteria": acceptance_criteria,
-                "tie_policy": "retain_latest",
-                "affects_final_result": False,
-            }
         write_json(
             root / "specs/spec_test/frozen_spec.json",
             {
@@ -354,21 +323,21 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             },
         )
         if evidence_annotations:
-            assessment = (
+            evaluation = (
                 {
-                    "criteria": [
+                    "summary": "The implementation changes the requested behavior.",
+                    "dimensions": [
                         {
-                            "criterion_id": item["id"],
-                            "status": "covered",
+                            "name": "Behavioral implementation",
+                            "finding": "The cumulative diff changes the target behavior.",
                             "confidence": "high",
                             "evidence": ["Persisted test evidence."],
-                            "rationale": "The candidate evidence covers this criterion.",
                         }
-                        for item in acceptance_criteria
                     ],
-                    "summary": "All frozen soft criteria are covered.",
+                    "comparisons": [],
+                    "limitations": ["No hidden test evidence is available."],
                 }
-                if acceptance_view
+                if supplemental_evaluation
                 else None
             )
             write_json(
@@ -382,10 +351,19 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "iteration": 1,
                     "state": "completed",
                     "profile": {"host": "codex"},
+                    "task_context_source": "goal_plus_raw_goal",
+                    "task_context_ref": "goal_plus:gp_test:revision:1",
+                    "task_context_sha256": hashlib.sha256(
+                        b"Public issue text"
+                    ).hexdigest(),
+                    "supplemental_evaluation_enabled": supplemental_evaluation,
+                    "comparison_basis": [],
                     "usage": {"input_tokens": 40, "output_tokens": 10},
                     "view": {
                         "description": "Independent description of candidate evidence.",
-                        "acceptance_view": assessment,
+                        "supplemental_evaluation": evaluation,
+                        "comparison_basis": [],
+                        "acceptance_view": None,
                     },
                 },
             )
@@ -505,7 +483,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             state_root = campaign / "cells/goal-plus-codex/goal-plus-state"
             self.write_goal_plus_state(
                 state_root,
-                acceptance_view=True,
+                supplemental_evaluation=True,
                 evidence_annotations=True,
                 worker_host="codex",
             )
@@ -656,7 +634,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "closeout_reserve_seconds": 300,
                 "visible_verifier_timeout_seconds": 300,
                 "evidence_annotator": "disabled",
-                "acceptance_view_enabled": False,
+                "supplemental_evaluation_enabled": False,
             },
         )
 
@@ -735,20 +713,20 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         with self.assertRaisesRegex(SweBenchContractError, "must match"):
             validate_profile(str(invalid["id"]), invalid)
 
-    def test_acceptance_view_ablation_profiles_only_switch_the_boolean(self) -> None:
+    def test_supplemental_evaluation_profiles_only_switch_the_boolean(self) -> None:
         enabled = self.profile("sympy-16886-goal-plus-pi-luna-high-smoke")
         disabled = self.profile(
             "sympy-16886-goal-plus-pi-luna-high-acceptance-off-smoke"
         )
 
-        self.assertTrue(enabled["goal_plus"]["acceptance_view_enabled"])
-        self.assertFalse(disabled["goal_plus"]["acceptance_view_enabled"])
+        self.assertTrue(enabled["goal_plus"]["supplemental_evaluation_enabled"])
+        self.assertFalse(disabled["goal_plus"]["supplemental_evaluation_enabled"])
         enabled_without_ablation = json.loads(json.dumps(enabled))
         disabled_without_ablation = json.loads(json.dumps(disabled))
         enabled_without_ablation["id"] = "ablation"
         disabled_without_ablation["id"] = "ablation"
-        enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
-        disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+        enabled_without_ablation["goal_plus"].pop("supplemental_evaluation_enabled")
+        disabled_without_ablation["goal_plus"].pop("supplemental_evaluation_enabled")
         self.assertEqual(enabled_without_ablation, disabled_without_ablation)
         task = {"problem_statement": "Public issue text"}
         self.assertEqual(
@@ -757,22 +735,22 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            runtime._goal_plus_acceptance_view_environment(enabled),
+            runtime._goal_plus_supplemental_evaluation_environment(enabled),
             {
-                "GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "1",
-                "GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED": "1",
+                "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED": "1",
+                "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED": "1",
             },
         )
         self.assertEqual(
-            runtime._goal_plus_acceptance_view_environment(disabled),
+            runtime._goal_plus_supplemental_evaluation_environment(disabled),
             {
-                "GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "0",
-                "GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED": "0",
+                "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED": "0",
+                "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED": "0",
             },
         )
 
         invalid = json.loads(json.dumps(enabled))
-        invalid["goal_plus"]["acceptance_view_enabled"] = "yes"
+        invalid["goal_plus"]["supplemental_evaluation_enabled"] = "yes"
         with self.assertRaisesRegex(SweBenchContractError, "must be boolean"):
             validate_profile(str(invalid["id"]), invalid)
 
@@ -801,14 +779,14 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 enabled["goal_plus"]["evidence_annotator"]["reasoning_effort"],
                 "medium",
             )
-            self.assertTrue(enabled["goal_plus"]["acceptance_view_enabled"])
-            self.assertFalse(disabled["goal_plus"]["acceptance_view_enabled"])
+            self.assertTrue(enabled["goal_plus"]["supplemental_evaluation_enabled"])
+            self.assertFalse(disabled["goal_plus"]["supplemental_evaluation_enabled"])
             enabled_without_ablation = json.loads(json.dumps(enabled))
             disabled_without_ablation = json.loads(json.dumps(disabled))
             enabled_without_ablation["id"] = "paired"
             disabled_without_ablation["id"] = "paired"
-            enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
-            disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+            enabled_without_ablation["goal_plus"].pop("supplemental_evaluation_enabled")
+            disabled_without_ablation["goal_plus"].pop("supplemental_evaluation_enabled")
             self.assertEqual(enabled_without_ablation, disabled_without_ablation)
 
     def test_astropy_profiles_freeze_worker_minimums_and_matched_ablations(
@@ -846,14 +824,14 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 enabled["goal_plus"]["evidence_annotator"]["reasoning_effort"],
                 "medium",
             )
-            self.assertTrue(enabled["goal_plus"]["acceptance_view_enabled"])
-            self.assertFalse(disabled["goal_plus"]["acceptance_view_enabled"])
+            self.assertTrue(enabled["goal_plus"]["supplemental_evaluation_enabled"])
+            self.assertFalse(disabled["goal_plus"]["supplemental_evaluation_enabled"])
             enabled_without_ablation = json.loads(json.dumps(enabled))
             disabled_without_ablation = json.loads(json.dumps(disabled))
             enabled_without_ablation["id"] = "paired"
             disabled_without_ablation["id"] = "paired"
-            enabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
-            disabled_without_ablation["goal_plus"].pop("acceptance_view_enabled")
+            enabled_without_ablation["goal_plus"].pop("supplemental_evaluation_enabled")
+            disabled_without_ablation["goal_plus"].pop("supplemental_evaluation_enabled")
             self.assertEqual(enabled_without_ablation, disabled_without_ablation)
 
             prompt = runtime.build_goal_plus_prompt(
@@ -962,7 +940,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "wire_api": "responses",
                 },
             )
-            self.assertTrue(profile["goal_plus"]["acceptance_view_enabled"])
+            self.assertTrue(profile["goal_plus"]["supplemental_evaluation_enabled"])
             self.assertEqual(
                 profile["goal_plus"]["evidence_annotator"]["model"],
                 "deepseek-v4-flash",
@@ -1406,9 +1384,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("budget.max_parallel=1", prompt)
             self.assertIn("do not set the deprecated max_candidates", prompt)
             self.assertIn("Public issue text", prompt)
-            self.assertIn("derive 3 to 8 task-specific soft criteria", prompt)
+            self.assertIn("Do not add acceptance_view", prompt)
+            self.assertIn("open-ended, task-specific observations", prompt)
+            self.assertIn("do not choose a winner", prompt)
             self.assertIn("strategy.evidence_annotator.host=codex", prompt)
-            self.assertIn("never changes the official binary result", prompt)
+            self.assertIn("never change candidate settlement", prompt)
+            self.assertIn("or the official binary result", prompt)
             self.assertIn("repository's native test instructions", prompt)
             self.assertIn("adjacent existing assertions", prompt)
             self.assertIn("public issue leaves ambiguous", prompt)
@@ -1428,7 +1409,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("/opt/goal-plus/.pi/skills/goal-plus/SKILL.md", command)
             self.assertIn("GOAL_PLUS_ROOT=/testbed/.gp", command)
             self.assertIn("GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED=1", command)
-            self.assertIn("GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED=0", command)
+            self.assertIn(
+                "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=0", command
+            )
             self.assertIn(
                 'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH; exec "$@"',
                 command,
@@ -1504,7 +1487,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         closeout_command = capture.call_args.args[0]
         self.assertTrue(closeout["completed"])
         self.assertIn("OPENAI_API_KEY", closeout_command)
-        self.assertIn("GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED=1", closeout_command)
+        self.assertIn(
+            "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1",
+            closeout_command,
+        )
         self.assertIn(
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL=gpt-5.6-luna",
             closeout_command,
@@ -1550,11 +1536,11 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "bound_pi_worker_sessions", mismatch["completion"]["reason"]
             )
 
-    def test_goal_plus_durable_evidence_enforces_global_acceptance_view(self) -> None:
+    def test_goal_plus_durable_evidence_enforces_supplemental_evaluation(self) -> None:
         with self.temporary_directory() as temporary:
             root = Path(temporary) / "acceptance-on"
             self.write_goal_plus_state(
-                root, acceptance_view=True, evidence_annotations=True
+                root, supplemental_evaluation=True, evidence_annotations=True
             )
             state = goal_plus_evidence.collect_goal_plus_state(
                 root,
@@ -1562,13 +1548,15 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_runtime_seconds=1500,
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
-                expected_acceptance_view_enabled=True,
+                expected_supplemental_evaluation_enabled=True,
                 expected_evidence_annotator_enabled=True,
             )
 
             self.assertTrue(state["completion"]["passed"])
             self.assertTrue(
-                state["completion"]["checks"]["acceptance_view_contract"]["passed"]
+                state["completion"]["checks"][
+                    "supplemental_evaluation_contract"
+                ]["passed"]
             )
             self.assertTrue(
                 state["completion"]["checks"]["global_evidence_view"]["passed"]
@@ -1583,12 +1571,13 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_runtime_seconds=1500,
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
-                expected_acceptance_view_enabled=True,
+                expected_supplemental_evaluation_enabled=True,
                 expected_evidence_annotator_enabled=True,
             )
             self.assertFalse(missing_state["completion"]["passed"])
             self.assertIn(
-                "acceptance_view_contract", missing_state["completion"]["reason"]
+                "supplemental_evaluation_contract",
+                missing_state["completion"]["reason"],
             )
             self.assertIn(
                 "global_evidence_view", missing_state["completion"]["reason"]
@@ -1602,7 +1591,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_runtime_seconds=1500,
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
-                expected_acceptance_view_enabled=False,
+                expected_supplemental_evaluation_enabled=False,
                 expected_evidence_annotator_enabled=True,
             )
             self.assertTrue(off_state["completion"]["passed"])
@@ -2276,7 +2265,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             campaign = Path(temporary)
             state_root = campaign / "cells/goal-plus-pi/goal-plus-state"
             self.write_goal_plus_state(
-                state_root, acceptance_view=True, evidence_annotations=True
+                state_root,
+                supplemental_evaluation=True,
+                evidence_annotations=True,
             )
             patch_file = campaign / "cells/goal-plus-pi/model.patch"
             patch_file.write_text("diff --git a/a b/a\n", encoding="utf-8")
@@ -2361,9 +2352,13 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "passed"
                 ]
             )
+            goal_plus_run = summary["records"][0]["protocol"]["goal_plus"][
+                "runs"
+            ][0]
+            self.assertIsNone(goal_plus_run["legacy_acceptance_view_contract"])
             self.assertIsNotNone(
-                summary["records"][0]["protocol"]["goal_plus"]["runs"][0][
-                    "acceptance_view_contract"
+                goal_plus_run["evidence_annotations"]["entries"][0]["view"][
+                    "supplemental_evaluation"
                 ]
             )
             self.assertEqual(

@@ -186,8 +186,8 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
         "model": profile["model"],
         "reasoning_effort": profile["reasoning_effort"],
         "agent_provider": provider_contract,
-        "acceptance_view_enabled": (
-            profile["goal_plus"]["acceptance_view_enabled"]
+        "supplemental_evaluation_enabled": (
+            profile["goal_plus"]["supplemental_evaluation_enabled"]
             if profile["methods"][0] in {"goal-plus-codex", "goal-plus-pi"}
             else None
         ),
@@ -832,13 +832,12 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         f"{annotator_timeout}; "
         "leave its model and provider unset because the harness supplies the ViewAgent. "
         f"{worker_instruction}\n\n"
-        "At freeze, obey the runtime Acceptance View policy. When it is required, "
-        "derive 3 to 8 task-specific soft criteria from the public issue, repository "
-        "API, affected branches, and likely regression surface. Cover issue requirements, "
-        "boundary inputs, exception paths, branch behavior, regressions, and compatibility "
-        "only when each item is relevant to this task; do not copy a fixed generic rubric. "
-        "The Acceptance View is non-gating evidence for search decisions and never changes "
-        "the official binary result.\n\n"
+        "Do not add acceptance_view, a soft rubric, or predefined evaluation dimensions "
+        "to SearchSpec. The harness may enable an independent ViewAgent after each "
+        "verifier-settled Evidence commit; it derives open-ended, task-specific observations "
+        "from the actual cumulative diff and an immutable snapshot of other candidates' "
+        "settled hard-score incumbents. Those observations are non-gating, do not choose a "
+        "winner, and never change candidate settlement or the official binary result.\n\n"
         "Choose a focused visible test command using only the public issue and repository. "
         "Before freeze, inspect the repository's native test instructions and confirm the "
         "chosen runner and imports exist in the task image. A command that fails because "
@@ -876,11 +875,13 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
     )
 
 
-def _goal_plus_acceptance_view_environment(profile: dict[str, Any]) -> dict[str, str]:
-    enabled = bool(profile["goal_plus"]["acceptance_view_enabled"])
+def _goal_plus_supplemental_evaluation_environment(
+    profile: dict[str, Any],
+) -> dict[str, str]:
+    enabled = bool(profile["goal_plus"]["supplemental_evaluation_enabled"])
     return {
-        "GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED": "1" if enabled else "0",
-        "GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED": "1" if enabled else "0",
+        "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED": "1" if enabled else "0",
+        "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED": "1" if enabled else "0",
     }
 
 
@@ -950,7 +951,7 @@ def _agent_command(
         custom_provider = profile.get("agent_provider") is not None
         goal_plus_environment = {
             **goal_plus_runtime_environment(),
-            **_goal_plus_acceptance_view_environment(profile),
+            **_goal_plus_supplemental_evaluation_environment(profile),
             **_goal_plus_evidence_annotator_environment(profile, runtime),
             "HOME": "/opt/codex-home",
             "CODEX_HOME": "/opt/codex-home",
@@ -1063,7 +1064,7 @@ def _agent_command(
     if profile["methods"][0] == "goal-plus-pi":
         goal_plus_environment = {
             **goal_plus_runtime_environment(),
-            **_goal_plus_acceptance_view_environment(profile),
+            **_goal_plus_supplemental_evaluation_environment(profile),
             **_goal_plus_evidence_annotator_environment(profile, runtime),
             "HOME": "/opt/pi-home",
             "PI_CODING_AGENT_DIR": "/opt/pi-home/.pi/agent",
@@ -1221,7 +1222,7 @@ def _goal_plus_closeout(
     )
     environment = {
         **goal_plus_runtime_environment(),
-        **_goal_plus_acceptance_view_environment(profile),
+        **_goal_plus_supplemental_evaluation_environment(profile),
         **_goal_plus_evidence_annotator_environment(profile, runtime),
         "HOME": "/opt/pi-home" if is_pi else "/opt/codex-home",
         "PATH": "/opt/goal-plus-bin:/opt/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -1349,8 +1350,8 @@ def _export_goal_plus_state(
         expected_worker_min_verifier_runs=profile["goal_plus"].get(
             "worker_min_verifier_runs"
         ),
-        expected_acceptance_view_enabled=profile["goal_plus"][
-            "acceptance_view_enabled"
+        expected_supplemental_evaluation_enabled=profile["goal_plus"][
+            "supplemental_evaluation_enabled"
         ],
         expected_evidence_annotator_enabled=isinstance(
             profile["goal_plus"]["evidence_annotator"], dict

@@ -48,14 +48,14 @@ controller closes Pi pools, performs idempotent select/promote/apply closeout, e
 campaign, and only then disposes the Agent container. The separate official harness remains the sole
 owner of `resolved`.
 
-The Luna Goal Plus profiles also run an independent Codex ViewAgent for every persisted candidate
-iteration. It writes a concise evidence description into the Goal Plus Global Evidence View. In the
-Acceptance View ON profile, MainAgent must additionally freeze 3–8 task-specific soft criteria
-derived from the public issue and repository; ViewAgent reports each criterion as `covered`,
-`partial`, `missing`, `unknown`, or `not_applicable`, with confidence and evidence. These labels have
-no aggregate score and never affect the official binary `resolved` result. The OFF profile runs the
-same ViewAgent and records descriptions but freezes no Acceptance View, keeping the model, provider,
-prompt, budget, and annotation overhead matched apart from the mechanism switch.
+The Luna Goal Plus profiles also run an independent Codex ViewAgent for every verifier-settled
+candidate iteration. It always writes a concise evidence description into Global Evidence View.
+The supplemental-evaluation ON condition additionally gives ViewAgent the immutable public task
+context, current cumulative diff, verifier evidence, and at most one hard-score incumbent snapshot
+per peer candidate. ViewAgent derives fresh open-ended dimensions for that commit and records only
+non-directional peer relationships; FrozenSpec contains no soft rubric. OFF runs the same ViewAgent
+and records descriptions, keeping the model, provider, prompt, budget, and call count matched apart
+from the supplemental output and its extra tokens.
 
 During controller closeout, any ViewAgent work already queued by verifier-settled Evidence is drained
 before `search_select`. This preserves the search-period feedback contract for the final iteration;
@@ -82,7 +82,7 @@ Use `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` for the same t
 profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning.
 
 The Django 13406 and Astropy 13033 DeepSeek presets run Goal Plus + Pi with
-`deepseek-responses/deepseek-v4-flash`, medium reasoning, and Acceptance View enabled. Both the Pi
+`deepseek-responses/deepseek-v4-flash`, medium reasoning, and supplemental evaluation enabled. Both the Pi
 search path and independent Codex ViewAgent use the profile-frozen DeepSeek Responses endpoint;
 credentials remain inherited through `DEEPSEEK_API_KEY`, and the non-secret base URL comes from
 `DEEPSEEK_BASE_URL`.
@@ -94,17 +94,18 @@ Codex host check. It uses the host Codex ChatGPT login and therefore requires ou
 Use the paired `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke` and
 `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke` presets for the matched Codex
 mechanism ablation. Both use the profile-frozen OpenAI-compatible Responses provider; the profile
-pair differs only in the Acceptance View boolean.
+pair differs only in the supplemental-evaluation boolean. The `acceptance-*` profile names are
+retained as legacy campaign identifiers; they no longer freeze an Acceptance View.
 
-For the Acceptance View mechanism ablation, run
+For the open supplemental-evaluation mechanism ablation, run the legacy-named presets
 `swe-bench-verified-sympy-16886-acceptance-view-off-smoke` and
 `swe-bench-verified-sympy-16886-acceptance-view-on-smoke`. Both profiles freeze the same task,
-provider, model, reasoning, ViewAgent, and `T/K/C/R`; only the Acceptance View policy differs. ON
-sets both `GOAL_PLUS_ACCEPTANCE_VIEW_ENABLED=1` and
-`GOAL_PLUS_ACCEPTANCE_VIEW_REQUIRED=1`, so a missing or underspecified rubric cannot silently
-degrade into the OFF condition. The official SWE-bench `resolved` result remains the sole hard
-score. Reports preserve the frozen rubric, per-iteration Global Evidence entries, ViewAgent token
-usage, and the completion checks that prove the intended condition actually ran.
+provider, model, reasoning, ViewAgent, and `T/K/C/R`; only supplemental evaluation differs. ON sets
+both `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED=1` and
+`GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1`, so a missing post-settlement evaluation cannot
+silently degrade into OFF. The official SWE-bench `resolved` result remains the sole hard score.
+Reports preserve per-iteration Global Evidence, immutable comparison bases, ViewAgent token usage,
+and completion checks proving that FrozenSpec contained no legacy soft rubric.
 
 Run `launch` only after reviewing and confirming the resolved `T/K/C/R` block. A terminal campaign
 is archived with `finish`, which consumes `campaign-summary.json` and exports `report.md` plus the

@@ -270,7 +270,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             "closeout_reserve_seconds",
             "visible_verifier_timeout_seconds",
             "evidence_annotator",
-            "acceptance_view_enabled",
+            "supplemental_evaluation_enabled",
         }
         optional_fields = {
             "worker_min_runtime_seconds",
@@ -384,13 +384,13 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 raise SweBenchContractError(
                     f"{profile_id}: Codex Evidence annotator requires agent_provider"
                 )
-        if not isinstance(goal_plus["acceptance_view_enabled"], bool):
+        if not isinstance(goal_plus["supplemental_evaluation_enabled"], bool):
             raise SweBenchContractError(
-                f"{profile_id}: goal_plus.acceptance_view_enabled must be boolean"
+                f"{profile_id}: goal_plus.supplemental_evaluation_enabled must be boolean"
             )
-        if goal_plus["acceptance_view_enabled"] and annotator == "disabled":
+        if goal_plus["supplemental_evaluation_enabled"] and annotator == "disabled":
             raise SweBenchContractError(
-                f"{profile_id}: Acceptance View requires the Evidence annotator"
+                f"{profile_id}: supplemental evaluation requires the Evidence annotator"
             )
     elif profile.get("goal_plus") is not None:
         raise SweBenchContractError(

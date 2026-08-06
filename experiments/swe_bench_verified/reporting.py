@@ -63,8 +63,8 @@ def _revalidate_goal_plus_cell(
             expected_worker_min_verifier_runs=goal_plus_profile.get(
                 "worker_min_verifier_runs"
             ),
-            expected_acceptance_view_enabled=bool(
-                goal_plus_profile["acceptance_view_enabled"]
+            expected_supplemental_evaluation_enabled=bool(
+                goal_plus_profile["supplemental_evaluation_enabled"]
             ),
             expected_evidence_annotator_enabled=isinstance(
                 goal_plus_profile["evidence_annotator"], dict
@@ -204,7 +204,7 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
             "official_evaluator_once": evaluation.get("calls") == 1,
             "goal_plus": {
                 "required": cell["method"] in {"goal-plus-codex", "goal-plus-pi"},
-                "acceptance_view_enabled": cell.get("acceptance_view_enabled"),
+                "supplemental_evaluation_enabled": cell.get("supplemental_evaluation_enabled"),
                 "completion": goal_plus_completion or None,
                 "actual_subagent_count": goal_plus.get("actual_subagent_count"),
                 "runs": goal_plus.get("runs") or [],

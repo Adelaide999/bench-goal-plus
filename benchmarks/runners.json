@@ -353,7 +353,7 @@
     },
     {
       "id": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-smoke",
-      "description": "One-instance SWE-bench Verified Goal Plus + Codex Acceptance View smoke with T=300, K=1, C=1, R=1.",
+      "description": "One-instance SWE-bench Verified Goal Plus + Codex open supplemental-evaluation smoke with T=300, K=1, C=1, R=1.",
       "benchmarks": ["swe-bench-verified"],
       "profile": "sympy-16886-goal-plus-codex-acceptance-smoke",
       "campaign_id_template": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-5m-k1-c1-r1-{timestamp}",
@@ -362,7 +362,7 @@
         "methods": ["goal-plus-codex"],
         "model": "gpt-5.6-sol",
         "reasoning_effort": "low",
-        "acceptance_view_enabled": true,
+        "supplemental_evaluation_enabled": true,
         "wall_time_seconds": 300,
         "concurrency": 1,
         "cell_concurrency": 1
@@ -370,7 +370,7 @@
     },
     {
       "id": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke",
-      "description": "One-instance SWE-bench Verified Goal Plus + Codex Responses mechanism ablation with Acceptance View disabled.",
+      "description": "One-instance SWE-bench Verified Goal Plus + Codex Responses mechanism ablation with open supplemental evaluation disabled (legacy preset ID).",
       "benchmarks": ["swe-bench-verified"],
       "profile": "sympy-16886-goal-plus-codex-luna-high-acceptance-off-smoke",
       "campaign_id_template": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-gpt-5-6-luna-high-30m-k1-c1-r1-{timestamp}",
@@ -387,7 +387,7 @@
           "api_key_env": "OPENAI_API_KEY",
           "wire_api": "responses"
         },
-        "acceptance_view_enabled": false,
+        "supplemental_evaluation_enabled": false,
         "wall_time_seconds": 1800,
         "concurrency": 1,
         "cell_concurrency": 1
@@ -395,7 +395,7 @@
     },
     {
       "id": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke",
-      "description": "One-instance SWE-bench Verified Goal Plus + Codex Responses mechanism ablation with Acceptance View enabled.",
+      "description": "One-instance SWE-bench Verified Goal Plus + Codex Responses mechanism ablation with open supplemental evaluation enabled (legacy preset ID).",
       "benchmarks": ["swe-bench-verified"],
       "profile": "sympy-16886-goal-plus-codex-luna-high-acceptance-on-smoke",
       "campaign_id_template": "swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-gpt-5-6-luna-high-30m-k1-c1-r1-{timestamp}",
@@ -412,7 +412,7 @@
           "api_key_env": "OPENAI_API_KEY",
           "wire_api": "responses"
         },
-        "acceptance_view_enabled": true,
+        "supplemental_evaluation_enabled": true,
         "wall_time_seconds": 1800,
         "concurrency": 1,
         "cell_concurrency": 1
@@ -476,7 +476,7 @@
     },
     {
       "id": "swe-bench-verified-sympy-16886-acceptance-view-off-smoke",
-      "description": "One-instance SWE-bench Verified Goal Plus + Pi mechanism ablation with Acceptance View disabled.",
+      "description": "One-instance SWE-bench Verified Goal Plus + Pi mechanism ablation with open supplemental evaluation disabled (legacy preset ID).",
       "benchmarks": ["swe-bench-verified"],
       "profile": "sympy-16886-goal-plus-pi-luna-high-acceptance-off-smoke",
       "campaign_id_template": "swe-bench-verified-sympy-16886-acceptance-view-off-gpt-5-6-luna-high-30m-k1-c1-r1-{timestamp}",
@@ -493,7 +493,7 @@
           "api_key_env": "OPENAI_API_KEY",
           "wire_api": "responses"
         },
-        "acceptance_view_enabled": false,
+        "supplemental_evaluation_enabled": false,
         "wall_time_seconds": 1800,
         "concurrency": 1,
         "cell_concurrency": 1
@@ -501,7 +501,7 @@
     },
     {
       "id": "swe-bench-verified-sympy-16886-acceptance-view-on-smoke",
-      "description": "One-instance SWE-bench Verified Goal Plus + Pi mechanism ablation with Acceptance View enabled.",
+      "description": "One-instance SWE-bench Verified Goal Plus + Pi mechanism ablation with open supplemental evaluation enabled (legacy preset ID).",
       "benchmarks": ["swe-bench-verified"],
       "profile": "sympy-16886-goal-plus-pi-luna-high-smoke",
       "campaign_id_template": "swe-bench-verified-sympy-16886-acceptance-view-on-gpt-5-6-luna-high-30m-k1-c1-r1-{timestamp}",
@@ -518,7 +518,7 @@
           "api_key_env": "OPENAI_API_KEY",
           "wire_api": "responses"
         },
-        "acceptance_view_enabled": true,
+        "supplemental_evaluation_enabled": true,
         "wall_time_seconds": 1800,
         "concurrency": 1,
         "cell_concurrency": 1
@@ -526,7 +526,7 @@
     },
     {
       "id": "swe-bench-verified-django-13406-goal-plus-pi-deepseek-v4-flash-on",
-      "description": "Django 13406 Goal Plus + Pi run using DeepSeek V4 Flash over Responses with Acceptance View enabled and T=1800, K=1, C=1, R=1.",
+      "description": "Django 13406 Goal Plus + Pi run using DeepSeek V4 Flash over Responses with open supplemental evaluation enabled and T=1800, K=1, C=1, R=1.",
       "benchmarks": ["swe-bench-verified"],
       "profile": "django-13406-goal-plus-pi-deepseek-v4-flash-acceptance-on-smoke",
       "campaign_id_template": "swe-bench-verified-django-13406-goal-plus-pi-deepseek-v4-flash-on-30m-k1-c1-r1-{timestamp}",
@@ -543,7 +543,7 @@
           "api_key_env": "DEEPSEEK_API_KEY",
           "wire_api": "responses"
         },
-        "acceptance_view_enabled": true,
+        "supplemental_evaluation_enabled": true,
         "wall_time_seconds": 1800,
         "concurrency": 1,
         "cell_concurrency": 1
@@ -551,7 +551,7 @@
     },
     {
       "id": "swe-bench-verified-astropy-13033-goal-plus-pi-deepseek-v4-flash-on",
-      "description": "Astropy 13033 Goal Plus + Pi run using DeepSeek V4 Flash over Responses with Acceptance View enabled and T=1800, K=1, C=1, R=1.",
+      "description": "Astropy 13033 Goal Plus + Pi run using DeepSeek V4 Flash over Responses with open supplemental evaluation enabled and T=1800, K=1, C=1, R=1.",
       "benchmarks": ["swe-bench-verified"],
       "profile": "astropy-13033-goal-plus-pi-deepseek-v4-flash-acceptance-on-smoke",
       "campaign_id_template": "swe-bench-verified-astropy-13033-goal-plus-pi-deepseek-v4-flash-on-30m-k1-c1-r1-{timestamp}",
@@ -568,7 +568,7 @@
           "api_key_env": "DEEPSEEK_API_KEY",
           "wire_api": "responses"
         },
-        "acceptance_view_enabled": true,
+        "supplemental_evaluation_enabled": true,
         "wall_time_seconds": 1800,
         "concurrency": 1,
         "cell_concurrency": 1

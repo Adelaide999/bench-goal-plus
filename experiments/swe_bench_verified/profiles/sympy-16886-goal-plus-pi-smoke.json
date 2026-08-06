@@ -29,6 +29,6 @@
     "closeout_reserve_seconds": 300,
     "visible_verifier_timeout_seconds": 300,
     "evidence_annotator": "disabled",
-    "acceptance_view_enabled": false
+    "supplemental_evaluation_enabled": false
   }
 }

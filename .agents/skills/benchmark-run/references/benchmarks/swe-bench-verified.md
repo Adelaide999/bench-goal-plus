@@ -25,10 +25,10 @@ provision, detach, stop, resume, or cross-cell concurrency.
 | `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | profile-frozen `OPENAI_BASE_URL` + `OPENAI_API_KEY`, Responses |
 | `swe-bench-verified-django-13406-goal-plus-pi-deepseek-v4-flash-on` | `deepseek-responses/deepseek-v4-flash`, medium | `1800/1/1/1` | profile-frozen `DEEPSEEK_BASE_URL` + `DEEPSEEK_API_KEY`, Responses |
 | `swe-bench-verified-astropy-13033-goal-plus-pi-deepseek-v4-flash-on` | `deepseek-responses/deepseek-v4-flash`, medium | `1800/1/1/1` | profile-frozen `DEEPSEEK_BASE_URL` + `DEEPSEEK_API_KEY`, Responses |
-| `swe-bench-verified-sympy-16886-acceptance-view-off-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | Acceptance View disabled mechanism ablation |
-| `swe-bench-verified-sympy-16886-acceptance-view-on-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | Acceptance View enabled mechanism ablation |
-| `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, Acceptance View disabled |
-| `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, Acceptance View enabled |
+| `swe-bench-verified-sympy-16886-acceptance-view-off-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | Legacy ID: open supplemental evaluation disabled |
+| `swe-bench-verified-sympy-16886-acceptance-view-on-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | Legacy ID: open supplemental evaluation enabled |
+| `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, supplemental evaluation disabled |
+| `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, supplemental evaluation enabled |
 
 The Pi credential value is never serialized. Docker receives only the selected environment variable
 name. The complete dataset row is host-side evaluator input; the Agent receives only the public
@@ -39,25 +39,25 @@ The Luna profile materializes a campaign-local Pi `models.json` containing only 
 socket bridge as Plain Codex; doctor must pass host Responses, task-container Responses, and Pi's
 exact `bench-openai/gpt-5.6-luna` model listing before launch.
 
-Both Luna Acceptance View ablation profiles run the same independent Codex ViewAgent on every
-persisted candidate iteration. OFF publishes only a candidate evidence description. ON additionally
-requires MainAgent to freeze 3–8 benchmark-adaptive, task-specific soft criteria and publishes their
-status, confidence, rationale, and supporting evidence in Global Evidence View. There is no soft
-aggregate score: official `resolved` remains the sole hard result. A missing ON rubric, incomplete
-ViewAgent task, criterion mismatch, or OFF assessment leakage makes Goal Plus evidence incomplete
-and therefore the campaign `partial`, while preserving a valid official raw metric.
+Both legacy-named ablation profiles run the same independent Codex ViewAgent on every verifier-settled
+candidate iteration. OFF publishes only a candidate evidence description. ON additionally publishes
+fresh open-ended dimensions from the immutable public task context and current cumulative diff, plus
+non-directional comparisons to other candidates' hard-score incumbents. FrozenSpec never contains a
+soft rubric, and official `resolved` remains the sole hard result. A missing or malformed ON output,
+OFF output leakage, or incomplete ViewAgent task makes Goal Plus evidence incomplete and therefore
+the campaign `partial`, while preserving a valid official raw metric.
 
 The Goal Plus + Codex pair uses the same Responses endpoint and key contract as Plain Codex and
 does not mount OAuth. Its ON/OFF prompts, task, evaluator, model, reasoning, and T/K/C/R are
-byte-identical; only the frozen Acceptance View boolean differs.
+byte-identical; only the supplemental-evaluation environment boolean differs.
 
 The `django__django-13406` direct-comparison profiles cover Luna/high and Sol/medium, each with
-Acceptance View ON/OFF at `T=1800,K=1,C=1,R=1`. Their independent Codex ViewAgent uses medium
+supplemental evaluation ON/OFF at `T=1800,K=1,C=1,R=1`. Their independent Codex ViewAgent uses medium
 reasoning. Invoke them through `--benchmark swe-bench-verified --profile <profile-id>`; the four
 profile IDs begin with `django-13406-goal-plus-codex-`.
 
 The `astropy__astropy-13033` direct-comparison profiles use the same four Luna/high and Sol/medium
-Acceptance View ON/OFF cells at `T=1800,K=1,C=1,R=1`, with a medium ViewAgent. In addition to the
+supplemental evaluation ON/OFF cells at `T=1800,K=1,C=1,R=1`, with a medium ViewAgent. In addition to the
 `1500` second worker maximum and `300` second outer closeout reserve, these profiles freeze a
 `600` second minimum worker runtime and at least `2` verifier iterations. Completion evidence must
 show the exact FrozenSpec lower bounds and a released Codex AutoResearch lease that satisfied both;
@@ -105,9 +105,10 @@ any profile-frozen minimum worker budget plus its satisfied runtime lease,
 the registered visible-test wrapper with the benchmark-owned frozen hash, a passing promotion
 `visible_test_score=1.0`, and no active Pi pool job. When the profile enables the
 ViewAgent, every candidate iteration must
-have a completed Global Evidence description. Acceptance View ON additionally requires a frozen
-3–8 criterion contract and an exactly matching per-criterion assessment; OFF requires the contract
-and assessments to be absent. The controller exports `/testbed/.gp` before container disposal.
+have a completed Global Evidence description and an immutable original-task context snapshot. ON
+additionally requires 1–8 open dimensions and peer comparisons exactly matching the task snapshot;
+OFF requires supplemental output to be absent. Both require FrozenSpec to contain no legacy soft
+rubric. The controller exports `/testbed/.gp` before container disposal.
 Missing Goal Plus evidence downgrades the cell to `partial` while preserving any complete official
 raw score.
 

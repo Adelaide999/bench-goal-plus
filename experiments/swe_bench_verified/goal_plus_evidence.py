@@ -109,6 +109,17 @@ def _evidence_annotations(run_dir: Path, expected_iterations: int) -> dict[str, 
                 "iteration": task.get("iteration"),
                 "state": state,
                 "annotator_host": profile.get("host"),
+                "task_context_source": task.get("task_context_source"),
+                "task_context_ref": task.get("task_context_ref"),
+                "task_context_sha256": task.get("task_context_sha256"),
+                "supplemental_evaluation_enabled": task.get(
+                    "supplemental_evaluation_enabled"
+                ),
+                "comparison_basis": (
+                    task.get("comparison_basis")
+                    if isinstance(task.get("comparison_basis"), list)
+                    else None
+                ),
                 "view": view,
                 "last_error": task.get("last_error"),
             }
@@ -259,7 +270,7 @@ def collect_goal_plus_state(
     expected_visible_verifier_timeout_seconds: int,
     expected_worker_min_runtime_seconds: int | None = None,
     expected_worker_min_verifier_runs: int | None = None,
-    expected_acceptance_view_enabled: bool = False,
+    expected_supplemental_evaluation_enabled: bool = False,
     expected_evidence_annotator_enabled: bool = False,
     expected_worker_host: str = "pi-rpc",
 ) -> dict[str, Any]:
@@ -322,7 +333,7 @@ def collect_goal_plus_state(
             for candidate in candidate_records
             if isinstance(candidate.get("iterations"), list)
         )
-        acceptance_contract = (
+        legacy_acceptance_contract = (
             spec.get("acceptance_view")
             if isinstance(spec.get("acceptance_view"), dict)
             else None
@@ -394,7 +405,7 @@ def collect_goal_plus_state(
                 "orchestration_mode": strategy.get("orchestration_mode"),
                 "worker_budget": worker_budget,
                 "strategy_config": strategy_config,
-                "acceptance_view_contract": acceptance_contract,
+                "legacy_acceptance_view_contract": legacy_acceptance_contract,
                 "evidence_annotator_spec": evidence_annotator_spec,
                 "evidence_annotations": annotations,
                 "process_visible_verifiers": process_verifiers,
@@ -443,28 +454,10 @@ def collect_goal_plus_state(
     exact_one_session_per_candidate = bool(
         len(counts) == expected_k and all(value == 1 for value in counts.values())
     )
-    acceptance_contract = (
-        selected_run.get("acceptance_view_contract") if selected_run else None
-    )
-    acceptance_criteria = (
-        acceptance_contract.get("criteria")
-        if isinstance(acceptance_contract, dict)
-        and isinstance(acceptance_contract.get("criteria"), list)
-        else []
-    )
-    expected_criterion_ids = [
-        str(item.get("id"))
-        for item in acceptance_criteria
-        if isinstance(item, dict) and item.get("id")
-    ]
-    acceptance_contract_passed = bool(
-        (
-            expected_acceptance_view_enabled
-            and 3 <= len(acceptance_criteria) <= 8
-            and len(expected_criterion_ids) == len(acceptance_criteria)
-            and len(set(expected_criterion_ids)) == len(expected_criterion_ids)
-        )
-        or (not expected_acceptance_view_enabled and acceptance_contract is None)
+    legacy_acceptance_contract = (
+        selected_run.get("legacy_acceptance_view_contract")
+        if selected_run
+        else None
     )
     annotations = (
         selected_run.get("evidence_annotations", {}) if selected_run else {}
@@ -473,23 +466,115 @@ def collect_goal_plus_state(
         annotations.get("entries", []) if isinstance(annotations, dict) else []
     )
 
-    def acceptance_ids(entry: dict[str, Any]) -> list[str] | None:
-        view = entry.get("view") if isinstance(entry.get("view"), dict) else {}
-        assessment = (
-            view.get("acceptance_view")
-            if isinstance(view.get("acceptance_view"), dict)
-            else None
-        )
-        if assessment is None:
+    allowed_relations = {
+        "similar",
+        "different",
+        "tradeoff",
+        "complementary",
+        "unknown",
+    }
+
+    def reference_tuple(value: Any) -> tuple[str, int, str] | None:
+        if not isinstance(value, dict):
             return None
-        criteria = assessment.get("criteria")
-        if not isinstance(criteria, list):
-            return []
-        return [
-            str(item.get("criterion_id"))
-            for item in criteria
-            if isinstance(item, dict) and item.get("criterion_id")
-        ]
+        candidate_id = value.get("candidate_id")
+        iteration = value.get("iteration")
+        commit = value.get("commit")
+        if (
+            not isinstance(candidate_id, str)
+            or not candidate_id
+            or not isinstance(iteration, int)
+            or isinstance(iteration, bool)
+            or iteration < 1
+            or not isinstance(commit, str)
+            or not commit
+        ):
+            return None
+        return candidate_id, iteration, commit
+
+    def supplemental_entry_valid(entry: dict[str, Any]) -> bool:
+        def evidence_list_valid(value: Any) -> bool:
+            return (
+                isinstance(value, list)
+                and len(value) <= 8
+                and all(isinstance(item, str) and item.strip() for item in value)
+            )
+
+        view = entry.get("view") if isinstance(entry.get("view"), dict) else {}
+        basis = entry.get("comparison_basis")
+        if not isinstance(basis, list) or len(basis) > 8:
+            return False
+        basis_refs = [reference_tuple(item) for item in basis]
+        if any(item is None for item in basis_refs):
+            return False
+        candidate_ids = [item[0] for item in basis_refs if item is not None]
+        if (
+            len(candidate_ids) != len(set(candidate_ids))
+            or entry.get("candidate_id") in candidate_ids
+            or view.get("acceptance_view") is not None
+            or view.get("comparison_basis") != basis
+        ):
+            return False
+        evaluation = view.get("supplemental_evaluation")
+        if not expected_supplemental_evaluation_enabled:
+            return (
+                entry.get("supplemental_evaluation_enabled") is False
+                and basis == []
+                and evaluation is None
+            )
+        if (
+            entry.get("supplemental_evaluation_enabled") is not True
+            or not isinstance(evaluation, dict)
+            or set(evaluation)
+            != {"summary", "dimensions", "comparisons", "limitations"}
+            or not isinstance(evaluation.get("summary"), str)
+            or not evaluation["summary"].strip()
+        ):
+            return False
+        dimensions = evaluation.get("dimensions")
+        if (
+            not isinstance(dimensions, list)
+            or not 1 <= len(dimensions) <= 8
+            or any(
+                not isinstance(item, dict)
+                or set(item) != {"name", "finding", "confidence", "evidence"}
+                or not isinstance(item.get("name"), str)
+                or not item["name"].strip()
+                or not isinstance(item.get("finding"), str)
+                or not item["finding"].strip()
+                or item.get("confidence") not in {"high", "medium", "low"}
+                or not evidence_list_valid(item.get("evidence"))
+                for item in dimensions
+            )
+        ):
+            return False
+        comparisons = evaluation.get("comparisons")
+        if (
+            not isinstance(comparisons, list)
+            or [reference_tuple(item) for item in comparisons] != basis_refs
+            or any(
+                not isinstance(item, dict)
+                or set(item)
+                != {
+                    "candidate_id",
+                    "iteration",
+                    "commit",
+                    "relation",
+                    "rationale",
+                    "evidence",
+                }
+                or item.get("relation") not in allowed_relations
+                or not isinstance(item.get("rationale"), str)
+                or not item["rationale"].strip()
+                or not evidence_list_valid(item.get("evidence"))
+                for item in comparisons
+            )
+        ):
+            return False
+        limitations = evaluation.get("limitations")
+        return isinstance(limitations, list) and all(
+            isinstance(item, str) and item.strip() for item in limitations
+        )
 
     annotations_passed = bool(
         not expected_evidence_annotator_enabled
@@ -501,9 +586,19 @@ def collect_goal_plus_state(
                 for entry in annotation_entries
             )
             and all(
-                acceptance_ids(entry) == expected_criterion_ids
-                if expected_acceptance_view_enabled
-                else acceptance_ids(entry) is None
+                entry.get("task_context_source") == "goal_plus_raw_goal"
+                and isinstance(entry.get("task_context_ref"), str)
+                and entry["task_context_ref"].startswith("goal_plus:")
+                and isinstance(entry.get("task_context_sha256"), str)
+                and len(entry["task_context_sha256"]) == 64
+                and all(
+                    character in "0123456789abcdef"
+                    for character in entry["task_context_sha256"]
+                )
+                for entry in annotation_entries
+            )
+            and all(
+                supplemental_entry_valid(entry)
                 for entry in annotation_entries
             )
         )
@@ -681,19 +776,24 @@ def collect_goal_plus_state(
                 and selected_run.get("promotion_visible_test", {}).get("passed")
             ),
         ),
-        "acceptance_view_contract": _check(
+        "frozen_soft_rubric_absent": _check(
+            None,
+            legacy_acceptance_contract,
+            legacy_acceptance_contract is None,
+        ),
+        "supplemental_evaluation_contract": _check(
             (
-                "3..8 frozen task-specific criteria"
-                if expected_acceptance_view_enabled
+                "open post-settlement evaluation"
+                if expected_supplemental_evaluation_enabled
                 else "disabled"
             ),
-            acceptance_contract,
-            acceptance_contract_passed,
+            annotations,
+            annotations_passed,
         ),
         "global_evidence_view": _check(
             (
-                "completed descriptions plus Acceptance View"
-                if expected_acceptance_view_enabled
+                "completed descriptions plus open supplemental evaluation"
+                if expected_supplemental_evaluation_enabled
                 else (
                     "completed descriptions"
                     if expected_evidence_annotator_enabled
