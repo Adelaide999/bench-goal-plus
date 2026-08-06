@@ -27,6 +27,7 @@ SHA256 = re.compile(r"[0-9a-f]{64}")
 PROVIDER_ID = re.compile(r"[a-z][a-z0-9_-]*")
 ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
+AGENT_NETWORK_POLICIES = {"default", "public-egress-blocked"}
 
 
 class SweBenchContractError(ValueError):
@@ -227,6 +228,17 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
     if not isinstance(profile.get("retain_containers"), bool):
         raise SweBenchContractError(
             f"{profile_id}: retain_containers must be boolean"
+        )
+    network_policy = profile.get("agent_network_policy", "default")
+    if network_policy not in AGENT_NETWORK_POLICIES:
+        raise SweBenchContractError(
+            f"{profile_id}: unsupported agent_network_policy"
+        )
+    if network_policy == "public-egress-blocked" and profile.get(
+        "agent_provider"
+    ) is None:
+        raise SweBenchContractError(
+            f"{profile_id}: public-egress-blocked requires an agent_provider bridge"
         )
     if methods[0] == "plain-codex":
         _validate_openai_provider(

@@ -40,6 +40,13 @@ used by the repository's other direct-API Codex paths. On Linux, a loopback base
 the task container through the shared `systemd-socket-proxyd` bridge; setup verifies both host and
 container `POST /responses` before a campaign can start.
 
+Profiles with `agent_network_policy=public-egress-blocked` run the Agent on a campaign-specific
+Docker `--internal` bridge. The provider socket bridge listens on that bridge's gateway, so model
+traffic remains available without a public route. Before the trajectory starts, the controller
+requires Docker inspect to show the exact internal network and requires a direct public-IP probe to
+fail; the verification and network cleanup disposition are persisted in the final evidence. The
+current Astropy 13033 Codex ON/OFF profiles freeze this policy.
+
 Goal Plus + Pi starts one outer Pi JSON session through the project extension, then requires one
 candidate-bound `pi-rpc` worker in the shared Search state. Its frozen SearchSpec uses only an
 Agent-selected visible test command wrapped by the repository-owned numeric verifier. The wrapper

@@ -7,7 +7,7 @@ import json
 import os
 import subprocess
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -280,6 +280,165 @@ def _container_name(campaign_id: str, method: str) -> str:
     return f"bgp-swe-agent-{digest}"
 
 
+def _network_name(campaign_id: str) -> str:
+    digest = hashlib.sha256(campaign_id.encode()).hexdigest()[:16]
+    return f"bgp-swe-net-{digest}"
+
+
+@contextmanager
+def _agent_network(
+    campaign_id: str, profile: dict[str, Any]
+) -> Iterable[dict[str, Any]]:
+    policy = profile.get("agent_network_policy", "default")
+    if policy == "default":
+        yield {
+            "policy": "default",
+            "enforced": False,
+            "docker_internal": False,
+            "cleanup": {"attempted": False, "removed": None, "error": None},
+        }
+        return
+
+    name = _network_name(campaign_id)
+    network_id: str | None = None
+    metadata: dict[str, Any] = {
+        "policy": policy,
+        "enforced": False,
+        "name": name,
+        "id": None,
+        "docker_internal": None,
+        "gateway": None,
+        "cleanup": {"attempted": False, "removed": False, "error": None},
+    }
+    try:
+        network_id = _docker_checked(
+            [
+                "docker",
+                "network",
+                "create",
+                "--driver",
+                "bridge",
+                "--internal",
+                "--label",
+                "bench-goal-plus.owner=swe-bench-native",
+                "--label",
+                f"bench-goal-plus.campaign={campaign_id}",
+                name,
+            ]
+        )
+        inspected = json.loads(
+            _docker_checked(["docker", "network", "inspect", network_id])
+        )
+        network = inspected[0] if isinstance(inspected, list) and inspected else None
+        ipam = network.get("IPAM") if isinstance(network, dict) else None
+        configs = ipam.get("Config") if isinstance(ipam, dict) else None
+        gateway = (
+            configs[0].get("Gateway")
+            if isinstance(configs, list)
+            and configs
+            and isinstance(configs[0], dict)
+            else None
+        )
+        internal = network.get("Internal") if isinstance(network, dict) else None
+        if internal is not True or not isinstance(gateway, str) or not gateway:
+            raise SweBenchContractError(
+                "Docker did not create the required internal Agent network"
+            )
+        metadata.update(
+            {
+                "enforced": True,
+                "id": network_id,
+                "docker_internal": True,
+                "gateway": gateway,
+            }
+        )
+        yield metadata
+    finally:
+        if network_id is not None and profile["retain_containers"]:
+            metadata["cleanup"] = {
+                "attempted": False,
+                "removed": False,
+                "retained_with_agent_container": True,
+                "error": None,
+            }
+        elif network_id is not None:
+            try:
+                result = _run(["docker", "network", "rm", network_id], timeout=120)
+                removed = result.returncode == 0
+                metadata["cleanup"] = {
+                    "attempted": True,
+                    "removed": removed,
+                    "error": (
+                        result.stderr.strip()
+                        or result.stdout.strip()
+                        or "docker network rm failed"
+                    )
+                    if not removed
+                    else None,
+                }
+            except (OSError, subprocess.TimeoutExpired) as error:
+                metadata["cleanup"] = {
+                    "attempted": True,
+                    "removed": False,
+                    "error": f"{type(error).__name__}: {error}",
+                }
+
+
+_PUBLIC_EGRESS_PROBE = """
+import socket
+
+try:
+    connection = socket.create_connection(("1.1.1.1", 443), timeout=3)
+except OSError as error:
+    print("PUBLIC_EGRESS_BLOCKED", type(error).__name__)
+else:
+    connection.close()
+    raise SystemExit("PUBLIC_EGRESS_AVAILABLE")
+"""
+
+
+def _verify_agent_network(
+    container_id: str, network: dict[str, Any]
+) -> dict[str, Any]:
+    if network["policy"] == "default":
+        return {
+            "passed": True,
+            "policy": "default",
+            "docker_network_mode": None,
+            "public_egress_probe": "not_required",
+        }
+    inspected = json.loads(_docker_checked(["docker", "inspect", container_id]))
+    container = inspected[0] if isinstance(inspected, list) and inspected else None
+    host_config = container.get("HostConfig") if isinstance(container, dict) else None
+    network_mode = (
+        host_config.get("NetworkMode") if isinstance(host_config, dict) else None
+    )
+    probe = _run(
+        ["docker", "exec", container_id, "python", "-c", _PUBLIC_EGRESS_PROBE],
+        timeout=15,
+    )
+    probe_passed = (
+        probe.returncode == 0 and "PUBLIC_EGRESS_BLOCKED" in probe.stdout
+    )
+    passed = network_mode == network["name"] and probe_passed
+    result = {
+        "passed": passed,
+        "policy": network["policy"],
+        "docker_network_mode": network_mode,
+        "expected_network_mode": network["name"],
+        "public_egress_probe": "blocked" if probe_passed else "available_or_failed",
+        "probe_returncode": probe.returncode,
+        "probe_stdout": probe.stdout.strip(),
+        "probe_stderr": probe.stderr.strip(),
+    }
+    if not passed:
+        raise SweBenchContractError(
+            "Agent public-egress isolation probe failed: "
+            + json.dumps(result, sort_keys=True)
+        )
+    return result
+
+
 def _dispose_agent_container(container_id: str, *, retain: bool) -> dict[str, Any]:
     if retain:
         stop_error = None
@@ -376,6 +535,8 @@ def _create_agent_container(
     campaign_id: str,
     profile: dict[str, Any],
     runtime: dict[str, Any] | None = None,
+    *,
+    network_name: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     method = profile["methods"][0]
     name = _container_name(campaign_id, method)
@@ -395,6 +556,8 @@ def _create_agent_container(
         "--tmpfs",
         "/opt/agent-tmp:rw,nosuid,nodev,size=256m",
     ]
+    if network_name is not None:
+        command.extend(["--network", network_name])
     if method in {"plain-codex", "goal-plus-codex"}:
         runtime = runtime or (
             resolve_goal_plus_codex_runtime(profile)
@@ -1431,9 +1594,19 @@ def _run_agent(
     agent_error: str | None = None
     resources = ExitStack()
     try:
+        network = resources.enter_context(
+            _agent_network(manifest["campaign_id"], profile)
+        )
+        bridge_listen_host = (
+            str(network["gateway"]) if network.get("enforced") else None
+        )
         if method == "plain-codex":
             runtime = resources.enter_context(
-                routed_codex_runtime(profile, campaign)
+                routed_codex_runtime(
+                    profile,
+                    campaign,
+                    bridge_listen_host=bridge_listen_host,
+                )
             )
             host_probe = openai_responses_probe(
                 str(runtime["runtime_api_base_url"]),
@@ -1447,7 +1620,11 @@ def _run_agent(
         elif method == "goal-plus-codex":
             if profile.get("agent_provider") is not None:
                 runtime = resources.enter_context(
-                    routed_goal_plus_codex_runtime(profile, campaign)
+                    routed_goal_plus_codex_runtime(
+                        profile,
+                        campaign,
+                        bridge_listen_host=bridge_listen_host,
+                    )
                 )
                 host_probe = openai_responses_probe(
                     str(runtime["runtime_api_base_url"]),
@@ -1468,6 +1645,7 @@ def _run_agent(
                         profile,
                         campaign,
                         goal_plus=method == "goal-plus-pi",
+                        bridge_listen_host=bridge_listen_host,
                     )
                 )
                 host_probe = openai_responses_probe(
@@ -1486,8 +1664,18 @@ def _run_agent(
                     else resolve_pi_runtime(profile)
                 )
                 host_probe = None
+        if network.get("enforced") and runtime.get("bridge") is None:
+            raise SweBenchContractError(
+                "public-egress-blocked requires a loopback provider endpoint "
+                "routed through the internal-network gateway"
+            )
         container_id, runtime = _create_agent_container(
-            manifest["campaign_id"], profile, runtime
+            manifest["campaign_id"],
+            profile,
+            runtime,
+            network_name=(
+                str(network["name"]) if network.get("enforced") else None
+            ),
         )
         cell["agent"] = {
             "state": "running",
@@ -1620,6 +1808,8 @@ def _run_agent(
                         ),
                     }
                 )
+        network["verification"] = _verify_agent_network(container_id, network)
+        runtime_public["agent_network"] = network
         image_checkout = _initialize_agent_container(container_id, profile, runtime)
         if method == "plain-codex":
             container_probe = codex_container_responses_probe(

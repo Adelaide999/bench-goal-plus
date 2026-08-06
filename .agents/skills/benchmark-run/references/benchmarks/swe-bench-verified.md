@@ -65,6 +65,14 @@ an infrastructure bypass or an early/under-verified release makes Goal Plus evid
 preserving any official SWE-bench score. The four profile IDs begin with
 `astropy-13033-goal-plus-codex-`.
 
+Those four Astropy profiles also freeze `agent_network_policy=public-egress-blocked`. The runner
+creates a campaign-owned Docker `--internal` bridge, binds the fixed loopback provider proxy to its
+gateway, and attaches the Agent container to that network. Launch fails closed unless Docker inspect
+reports the exact network and a direct public-IP connection probe is blocked; the model Responses
+probe must still pass through the gateway bridge. Preserve the network verification and cleanup
+disposition in final evidence. This prevents public web lookup without hiding the configured model
+endpoint or changing the official evaluator network.
+
 The visible-test wrapper is a benchmark-owned read-only bind mount inside `/testbed`. Freeze records
 its exact hash. The ranking verifier directly uses `--ranking-signal`, allowing a completed public
 test failure to become a valid zero baseline for freeze preflight. The separate promotion verifier

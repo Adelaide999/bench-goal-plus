@@ -38,6 +38,7 @@
   "concurrency": 1,
   "cell_concurrency": 1,
   "retain_containers": false,
+  "agent_network_policy": "public-egress-blocked",
   "evaluator_timeout_seconds": 1800,
   "goal_plus": {
     "worker_runtime_seconds": 1500,

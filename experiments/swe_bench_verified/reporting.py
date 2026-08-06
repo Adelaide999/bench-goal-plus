@@ -22,6 +22,30 @@ def _container_isolated(agent: dict[str, Any]) -> bool:
     )
 
 
+def _agent_network_verified(
+    agent: dict[str, Any], profile: dict[str, Any]
+) -> bool:
+    policy = profile.get("agent_network_policy", "default")
+    if policy == "default":
+        return True
+    network = (agent.get("runtime") or {}).get("agent_network") or {}
+    verification = network.get("verification") or {}
+    cleanup = network.get("cleanup") or {}
+    container_cleanup = (agent.get("container") or {}).get("cleanup") or {}
+    network_closed = cleanup.get("removed") is True or (
+        cleanup.get("retained_with_agent_container") is True
+        and container_cleanup.get("stopped") is True
+    )
+    return bool(
+        network.get("policy") == policy
+        and network.get("enforced") is True
+        and network.get("docker_internal") is True
+        and verification.get("passed") is True
+        and verification.get("public_egress_probe") == "blocked"
+        and network_closed
+    )
+
+
 def _revalidate_goal_plus_cell(
     campaign: Path,
     manifest: dict[str, Any],
@@ -124,6 +148,8 @@ def _revalidate_goal_plus_cell(
         failures.append("Agent did not produce a non-empty patch")
     if not _container_isolated(agent):
         failures.append("Agent container isolation is incomplete")
+    if not _agent_network_verified(agent, profile):
+        failures.append("Agent public-egress isolation evidence is incomplete")
     if evaluation.get("state") != "completed":
         failures.append("official evaluator did not produce a valid report")
     if evaluation.get("calls") != 1:
@@ -172,6 +198,7 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
     goal_plus = agent.get("goal_plus") or {}
     goal_plus_completion = goal_plus.get("completion") or {}
     resolved = evaluation.get("resolved")
+    profile = manifest.get("profile_snapshot") or {}
     final_metric = int(resolved) if isinstance(resolved, bool) else None
     return {
         "benchmark_id": "swe-bench-verified",
@@ -200,6 +227,9 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
             "image": cell["image"],
             "base_commit": cell["base_commit"],
             "agent_provider": cell.get("agent_provider"),
+            "agent_network_policy": profile.get(
+                "agent_network_policy", "default"
+            ),
             "official_evaluator": True,
             "official_evaluator_once": evaluation.get("calls") == 1,
             "goal_plus": {
@@ -244,6 +274,7 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
             },
             "goal_plus_closeout": agent.get("goal_plus_closeout"),
             "agent_container": agent.get("container"),
+            "agent_network": (agent.get("runtime") or {}).get("agent_network"),
         },
         "patch": {
             "exists": agent.get("patch_exists"),

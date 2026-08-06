@@ -840,6 +840,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(enabled["wall_time_seconds"], 1800)
             self.assertEqual(enabled["concurrency"], 1)
             self.assertEqual(enabled["cell_concurrency"], 1)
+            self.assertEqual(
+                enabled["agent_network_policy"], "public-egress-blocked"
+            )
+            self.assertEqual(
+                disabled["agent_network_policy"], "public-egress-blocked"
+            )
             self.assertEqual(enabled["goal_plus"]["worker_runtime_seconds"], 1500)
             self.assertEqual(
                 enabled["goal_plus"]["worker_min_runtime_seconds"], 600
@@ -873,6 +879,18 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         invalid = json.loads(json.dumps(enabled))
         invalid["goal_plus"]["worker_min_runtime_seconds"] = 1500
         with self.assertRaisesRegex(SweBenchContractError, "less than"):
+            validate_profile(str(invalid["id"]), invalid)
+
+        invalid = json.loads(json.dumps(enabled))
+        invalid["agent_network_policy"] = "unknown"
+        with self.assertRaisesRegex(SweBenchContractError, "network_policy"):
+            validate_profile(str(invalid["id"]), invalid)
+
+        invalid = json.loads(json.dumps(enabled))
+        invalid.pop("agent_provider")
+        with self.assertRaisesRegex(
+            SweBenchContractError, "requires an agent_provider"
+        ):
             validate_profile(str(invalid["id"]), invalid)
 
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
@@ -1771,6 +1789,86 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 state["completion"]["checks"]["promotion_visible_test"]["passed"]
             )
 
+    def test_public_egress_network_is_internal_verified_and_removed(self) -> None:
+        profile = self.profile(
+            "astropy-13033-goal-plus-codex-sol-medium-acceptance-on-smoke"
+        )
+        network_id = "a" * 64
+        inspected_network = json.dumps(
+            [
+                {
+                    "Internal": True,
+                    "IPAM": {"Config": [{"Gateway": "192.0.2.1"}]},
+                }
+            ]
+        )
+        docker_commands: list[list[str]] = []
+
+        def docker_checked(command: list[str], *, timeout: int = 120) -> str:
+            del timeout
+            docker_commands.append(command)
+            if command[:3] == ["docker", "network", "create"]:
+                return network_id
+            return inspected_network
+
+        cleanup = subprocess.CompletedProcess(
+            ["docker", "network", "rm", network_id], 0, network_id, ""
+        )
+        with (
+            mock.patch.object(runtime, "_docker_checked", side_effect=docker_checked),
+            mock.patch.object(runtime, "_run", return_value=cleanup) as run_command,
+        ):
+            with runtime._agent_network("campaign", profile) as network:
+                self.assertTrue(network["enforced"])
+                self.assertTrue(network["docker_internal"])
+                self.assertEqual(network["gateway"], "192.0.2.1")
+
+        create = docker_commands[0]
+        self.assertIn("--internal", create)
+        self.assertEqual(network["cleanup"]["removed"], True)
+        self.assertEqual(
+            run_command.call_args.args[0],
+            ["docker", "network", "rm", network_id],
+        )
+
+        inspected_container = json.dumps(
+            [{"HostConfig": {"NetworkMode": network["name"]}}]
+        )
+        blocked = subprocess.CompletedProcess(
+            ["docker", "exec"], 0, "PUBLIC_EGRESS_BLOCKED TimeoutError\n", ""
+        )
+        with (
+            mock.patch.object(
+                runtime, "_docker_checked", return_value=inspected_container
+            ),
+            mock.patch.object(runtime, "_run", return_value=blocked),
+        ):
+            verification = runtime._verify_agent_network("container-id", network)
+
+        self.assertTrue(verification["passed"])
+        self.assertEqual(verification["public_egress_probe"], "blocked")
+        network["verification"] = verification
+        agent = {
+            "runtime": {"agent_network": network},
+            "container": {"cleanup": {"removed": True}},
+        }
+        self.assertTrue(reporting._agent_network_verified(agent, profile))
+
+        available = subprocess.CompletedProcess(
+            ["docker", "exec"], 1, "", "PUBLIC_EGRESS_AVAILABLE\n"
+        )
+        with (
+            mock.patch.object(
+                runtime, "_docker_checked", return_value=inspected_container
+            ),
+            mock.patch.object(runtime, "_run", return_value=available),
+            self.assertRaisesRegex(SweBenchContractError, "isolation probe failed"),
+        ):
+            runtime._verify_agent_network("container-id", network)
+
+        network["verification"] = {"passed": False}
+        self.assertFalse(reporting._agent_network_verified(agent, profile))
+
     def test_codex_runtime_probe_and_agent_use_the_same_bounded_tmpfs(self) -> None:
         profile = self.profile("sympy-16886-codex-smoke")
         runtime_info = {
@@ -1806,7 +1904,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             mock.patch.object(runtime, "resolve_codex_runtime", return_value=runtime_info),
             mock.patch.object(runtime, "_docker_checked", side_effect=docker_checked),
         ):
-            runtime._create_agent_container("campaign", profile)
+            runtime._create_agent_container(
+                "campaign", profile, network_name="bgp-swe-net-test"
+            )
         create = docker_commands[0]
 
         self.assertIn(environment.CODEX_RUNTIME_TMPFS, probe)
@@ -1814,6 +1914,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn(":rw,exec,nosuid,nodev,", environment.CODEX_RUNTIME_TMPFS)
         self.assertEqual(environment.CODEX_RUNTIME_TMPFS.rsplit("=", 1)[1], "512m")
         self.assertNotIn("/opt/host-auth", " ".join(create))
+        self.assertIn("--network", create)
+        self.assertIn("bgp-swe-net-test", create)
 
         secret = "not-for-command-lines"
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": secret}, clear=False):

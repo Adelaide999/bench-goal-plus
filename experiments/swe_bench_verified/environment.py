@@ -289,7 +289,10 @@ def openai_responses_probe(
 
 @contextmanager
 def routed_codex_runtime(
-    profile: dict[str, Any], destination: Path
+    profile: dict[str, Any],
+    destination: Path,
+    *,
+    bridge_listen_host: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     runtime = resolve_codex_runtime(profile)
     if not runtime["api_base_url"] or not runtime["credential_present"]:
@@ -302,8 +305,12 @@ def routed_codex_runtime(
     closer = None
     try:
         target = loopback_target(str(runtime["api_base_url"]))
+        if bridge_listen_host is not None and target is None:
+            raise SweBenchContractError(
+                "an isolated Agent network requires a loopback provider endpoint"
+            )
         if target is not None:
-            bridge_host = default_route_ipv4(root=ROOT)
+            bridge_host = bridge_listen_host or default_route_ipv4(root=ROOT)
             _, metadata, closer = start_socket_bridge(
                 destination,
                 name="agent-api",
@@ -424,7 +431,11 @@ def write_pi_models_config(
 
 @contextmanager
 def routed_pi_runtime(
-    profile: dict[str, Any], destination: Path, *, goal_plus: bool = False
+    profile: dict[str, Any],
+    destination: Path,
+    *,
+    goal_plus: bool = False,
+    bridge_listen_host: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     runtime = (
         resolve_goal_plus_runtime(profile) if goal_plus else resolve_pi_runtime(profile)
@@ -442,8 +453,12 @@ def routed_pi_runtime(
     closer = None
     try:
         target = loopback_target(str(runtime["api_base_url"]))
+        if bridge_listen_host is not None and target is None:
+            raise SweBenchContractError(
+                "an isolated Agent network requires a loopback provider endpoint"
+            )
         if target is not None:
-            bridge_host = default_route_ipv4(root=ROOT)
+            bridge_host = bridge_listen_host or default_route_ipv4(root=ROOT)
             _, metadata, closer = start_socket_bridge(
                 destination,
                 name="pi-agent-api",
@@ -584,9 +599,16 @@ def resolve_goal_plus_codex_runtime(profile: dict[str, Any]) -> dict[str, Any]:
 
 @contextmanager
 def routed_goal_plus_codex_runtime(
-    profile: dict[str, Any], destination: Path
+    profile: dict[str, Any],
+    destination: Path,
+    *,
+    bridge_listen_host: str | None = None,
 ) -> Iterator[dict[str, Any]]:
-    with routed_codex_runtime(profile, destination) as routed:
+    with routed_codex_runtime(
+        profile,
+        destination,
+        bridge_listen_host=bridge_listen_host,
+    ) as routed:
         runtime = resolve_goal_plus_codex_runtime(profile)
         runtime.update(routed)
         yield runtime

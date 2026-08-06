@@ -78,6 +78,12 @@ Codex preset 另外冻结 `auth_mode=openai-compatible`、`OPENAI_BASE_URL`、
 相同的 `systemd-socket-proxyd` bridge；doctor 会分别验证 host 和实际 task container 的
 `POST /responses`。该路径不读取 OAuth auth file；日志里出现 `chatgpt.com` 应视为路由错误。
 
+Astropy 13033 的四个 Codex ON/OFF profile 还冻结
+`agent_network_policy=public-egress-blocked`。controller 为每个 campaign 创建独立 Docker
+internal network，把模型 API bridge 绑定到该 network 的 host gateway，并在 Agent 启动前
+同时验证 Docker network mode 和公网 IP 连接失败。模型调用仍可用，但 Agent 没有公网路由，
+不能通过网页搜索题目；验证与 network 清理状态进入最终报告。
+
 Luna Goal Plus + Pi preset 复用同一组 OpenAI-compatible Responses 环境变量，但通过
 campaign-local Pi provider registry 选择 `bench-openai/gpt-5.6-luna`。该 registry 只保存
 环境变量引用；loopback endpoint 同样经过 Linux bridge，doctor 会验证 host、task container
