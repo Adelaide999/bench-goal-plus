@@ -58,6 +58,7 @@ METHODS = {
 GOAL_PLUS_METHODS = frozenset(
     {"goal-plus-codex", "goal-plus-pi", "goal-plus-pi-provider"}
 )
+GLOBAL_EVIDENCE_MODES = frozenset({"manual", "auto", "independent"})
 CLAUDE_REASONING_EFFORTS = frozenset(
     {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
@@ -201,6 +202,15 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
     unknown = set(profile["methods"]) - set(METHODS)
     if unknown:
         raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))
+    goal_plus_methods = set(profile["methods"]) & GOAL_PLUS_METHODS
+    if goal_plus_methods:
+        global_evidence_mode = profile.get("global_evidence_mode", "manual")
+        if global_evidence_mode not in GLOBAL_EVIDENCE_MODES:
+            allowed = ", ".join(sorted(GLOBAL_EVIDENCE_MODES))
+            raise ValueError(f"global_evidence_mode must be one of {allowed}")
+        profile["global_evidence_mode"] = global_evidence_mode
+    elif "global_evidence_mode" in profile:
+        raise ValueError("global_evidence_mode requires a Goal Plus method")
     api_protocol = api_protocol_for_methods(profile["methods"])
     if api_protocol == "pi-provider":
         for model_ref in pi_provider_role_model_refs(profile):

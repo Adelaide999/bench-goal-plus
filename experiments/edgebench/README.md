@@ -40,6 +40,12 @@ EdgeBench 特例加入通用 dispatcher。
 两者固定同一 task definition、hidden judge、model、reasoning effort 和 wall budget
 `T`。它们不强行匹配 evaluator calls 或 round；这些是运行后报告的行为量。
 
+Goal Plus profile 可用 `global_evidence_mode` 固定 candidate 间的 Evidence 策略：
+`manual`（默认，共享且由 candidate 主动读取）、`auto`（共享并在 verifier 后注入）
+或 `independent`（仅可读取本 candidate Evidence，不注入）。解析后的值会写入
+profile、campaign 和 cell manifest，并作为 `GOAL_PLUS_GLOBAL_EVIDENCE_MODE`
+传入 Goal Plus 冻结 spec。
+
 ## 从新机器开始
 
 ```bash

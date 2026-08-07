@@ -256,6 +256,9 @@ def cell_environment(
             "SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS": str(
                 cell.get("goal_plus_finalization_grace_seconds", 300)
             ),
+            "GOAL_PLUS_GLOBAL_EVIDENCE_MODE": str(
+                cell.get("global_evidence_mode", "manual")
+            ),
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": annotator_model,
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": str(
                 cell.get("evidence_annotator_reasoning_effort")
