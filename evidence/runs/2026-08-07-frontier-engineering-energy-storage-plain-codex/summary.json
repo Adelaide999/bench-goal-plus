@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "kind": "frontier_engineering_native_plain_codex_smoke",
+  "run_date": "2026-08-07",
+  "status": "completed",
+  "campaign_id": "frontier-engineering-energy-storage-codex-gpt-5-6-sol-medium-5m-k1-c1-20260807-1414",
+  "task": {
+    "benchmark": "frontier-engineering",
+    "suite": "v1-lite",
+    "task_id": "EnergyStorage/BatteryFastChargingSPMe",
+    "metric": "combined_score",
+    "direction": "maximize",
+    "upstream_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+    "evaluator_sha256": "4803bf3457c65317a1456b4a7650e9b65a1a44779fa665c9edf8ea5fda1aa42e"
+  },
+  "method": {
+    "id": "plain-codex",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "runner_version": "codex-cli 0.146.0"
+  },
+  "budget": {
+    "T": 300,
+    "K": 1,
+    "C": 1,
+    "R": 1,
+    "soft_closeout_seconds": 60,
+    "hard_kill_grace_seconds": 30
+  },
+  "source": {
+    "bench_goal_plus_commit": "78739807272a9818767d25ea40d376ecabb5ff3f",
+    "bench_goal_plus_dirty_at_prepare": true,
+    "dirty_at_prepare_explanation": "The native Frontier-Engineering integration was exercised from the current adaptation worktree; the evidence records the exact upstream and evaluator revisions and does not rewrite that provenance.",
+    "frontier_engineering_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+    "goal_plus_commit": "daa22c130854b1916fe4506d7cc60097b498b5a1"
+  },
+  "environment": {
+    "platform": "linux/amd64",
+    "docker_requirement": "not_required",
+    "inventory_check": "pass",
+    "full_doctor": "pass",
+    "runtime": "frontier-eval-driver"
+  },
+  "execution": {
+    "duration_seconds": 300.20044307992794,
+    "deadline_reached": true,
+    "returncode": 0,
+    "selected_lane": "lane-00",
+    "evaluator_calls": {
+      "total_claimed": 21,
+      "setup_claimed_before_t": 1
+    },
+    "usage": {
+      "coverage": "missing: no persisted model usage"
+    }
+  },
+  "result": {
+    "valid": true,
+    "seed_score": 66.16356426696784,
+    "final_score": 121.2063096578825,
+    "directional_gain": 55.04274539091466,
+    "relative_gain": 0.831919289728996,
+    "charge_time_s": 688.0,
+    "max_temp_c": 36.178411340297004,
+    "max_voltage_v": 4.249875014330178,
+    "best_score_trace": [
+      {"elapsed_seconds": 0.0, "best_score": 66.16356426696784},
+      {"elapsed_seconds": 35.581599, "best_score": 114.49668104376947},
+      {"elapsed_seconds": 108.702756, "best_score": 116.1213788999397},
+      {"elapsed_seconds": 172.135754, "best_score": 118.43719547394053},
+      {"elapsed_seconds": 260.994901, "best_score": 118.80725915459868},
+      {"elapsed_seconds": 282.783779, "best_score": 120.47715503458566},
+      {"elapsed_seconds": 298.592586, "best_score": 121.2063096578825}
+    ]
+  },
+  "artifacts": {
+    "candidate": "evidence/runs/2026-08-07-frontier-engineering-energy-storage-plain-codex/candidate.py",
+    "official_report": "evidence/runs/2026-08-07-frontier-engineering-energy-storage-plain-codex/official-report.json",
+    "full_run_directory": "runs/frontier-engineering/frontier-engineering-energy-storage-codex-gpt-5-6-sol-medium-5m-k1-c1-20260807-1414",
+    "full_run_directory_policy": "ignored and preserved locally",
+    "sha256": {
+      "raw_campaign_summary": "c2cc3cb30f2be9dfafa43bb8fc905cc1c119e38ec584e7131d3c3e479a6f178d",
+      "raw_final_evaluation": "7af49b961e2d8e5c7f6c9fc9c247efe985b6a8633a055156ac31ee38f4ecd3ee",
+      "candidate": "207553b6f2e0d9748179cda9aec497d9acf81cc2cb24d12c9acb0421b06cd9ed"
+    }
+  },
+  "reproduction": {
+    "check": "python3 scripts/bench.py check --preset frontier-engineering-energy-storage-codex-smoke",
+    "setup": "python3 scripts/bench.py setup --preset frontier-engineering-energy-storage-codex-smoke",
+    "plan": "python3 scripts/bench.py plan --preset frontier-engineering-energy-storage-codex-smoke --campaign-id <new-campaign-id>",
+    "launch": "python3 scripts/bench.py launch --preset frontier-engineering-energy-storage-codex-smoke --campaign-id <new-campaign-id>",
+    "status": "python3 scripts/bench.py status --campaign runs/frontier-engineering/<new-campaign-id>",
+    "finish": "python3 scripts/bench.py finish --campaign runs/frontier-engineering/<new-campaign-id>"
+  },
+  "limitations": [
+    "This smoke proves the registered Plain Codex K=1, C=1 path for one v1-lite task, not the full 10-task suite.",
+    "Goal Plus methods, K>1, matched-method comparisons, and full campaign readiness remain unproven.",
+    "Model token usage was not persisted and remains explicitly missing."
+  ],
+  "secret_scan": {
+    "scope": "committed evidence projection",
+    "result": "clean",
+    "credential_values_persisted": false
+  }
+}

@@ -47,11 +47,7 @@
     "frontier_engineering": {
       "repository": "https://github.com/ck0123/Frontier-Engineering.git",
       "checkout_dir": "frontier-engineering",
-      "tracking_branch": "main",
-      "sparse_paths": [
-        "/frontier_eval/tasks/malloclab/",
-        "/benchmarks/ComputerSystems/MallocLab/"
-      ]
+      "tracking_branch": "main"
     },
     "autolab": {
       "repository": "https://github.com/ck0123/autolab.git",

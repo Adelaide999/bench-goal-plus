@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-07T04:45:22Z",
+  "benchmark": "frontier-engineering",
+  "suite": "v1-lite",
+  "profile": "v1-lite-codex-1h",
+  "status": "pass",
+  "platform": "linux-x86_64",
+  "docker_requirement": "not_required",
+  "commands": [
+    "python3 scripts/bench.py check --benchmark frontier-engineering --profile v1-lite-codex-1h",
+    "python3 scripts/bench.py setup --benchmark frontier-engineering --profile v1-lite-codex-1h",
+    ".bench-env/venv/bin/python experiments/frontier_engineering/experiment.py doctor --profile v1-lite-codex-1h --output .tmp/frontier-engineering-v1-lite-doctor-20260807.json"
+  ],
+  "source": {
+    "frontier_engineering_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+    "frontier_engineering_branch": "main",
+    "goal_plus_commit": "daa22c130854b1916fe4506d7cc60097b498b5a1",
+    "goal_plus_branch": "main",
+    "raw_local_capture_sha256": "1af92e86e888a6ea64d2a191d7e78be53a7b965350ac5846bcf7d0121e2c4148"
+  },
+  "runtime": {
+    "codex_version": "codex-cli 0.146.0",
+    "environments": [
+      "frontier-eval-driver",
+      "frontier-v1-main",
+      "frontier-v1-summit"
+    ],
+    "imports_passed": true
+  },
+  "coverage": {
+    "expected_tasks": 10,
+    "evaluated_tasks": 10,
+    "valid_tasks": 10,
+    "timed_out_tasks": 0,
+    "metric": "combined_score",
+    "direction": "maximize",
+    "evaluator": "upstream Frontier-Engineering UnifiedTask evaluator"
+  },
+  "task_results": [
+    {
+      "task_id": "ComputerSystems/MallocLab",
+      "combined_score": 28.0,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    },
+    {
+      "task_id": "QuantumComputing/task_01_routing_qftentangled",
+      "combined_score": 0.20898716119828828,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    },
+    {
+      "task_id": "JobShop/abz",
+      "combined_score": 80.50421052827963,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    },
+    {
+      "task_id": "InventoryOptimization/disruption_eoqd",
+      "combined_score": 0.36423022249600223,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    },
+    {
+      "task_id": "EnergyStorage/BatteryFastChargingSPMe",
+      "combined_score": 66.16356426696784,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    },
+    {
+      "task_id": "Robotics/RobotArmCycleTimeOptimization",
+      "combined_score": 0.2921925682511491,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    },
+    {
+      "task_id": "Optics/holographic_multiplane_focusing",
+      "combined_score": 0.33017054376354393,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    },
+    {
+      "task_id": "WirelessChannelSimulation/HighReliableSimulation",
+      "combined_score": 81.69359599242024,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    },
+    {
+      "task_id": "ReactionOptimisation/snar_multiobjective",
+      "combined_score": 57.523363292468865,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    },
+    {
+      "task_id": "StructuralOptimization/TopologyOptimization",
+      "combined_score": -195.9152621065792,
+      "valid": true,
+      "timeout": false,
+      "returncode": 0
+    }
+  ],
+  "sanitization": {
+    "credentials_present": false,
+    "absolute_paths_removed": true,
+    "raw_logs_committed": false
+  }
+}

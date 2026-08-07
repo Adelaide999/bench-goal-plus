@@ -48,8 +48,9 @@
 完成定义：
 
 - [x] sparse checkout `ComputerSystems/MallocLab`，在 Mac 原生运行官方 verifier；确认 v1-lite 本身不要求 Docker，并记录 raw 28/100、6/11 cases。
-- [ ] 冻结 raw score parser；不先做跨任务归一化。
-- [ ] plain Codex 与 Goal Plus + Codex 都通过同一个只读 verifier。
+- [x] 增加 `frontier-engineering-native`、官方 `v1_lite.yaml` task contract 和三个受管 uv runtime；GPU Linux 主机 shipped baseline doctor 10/10 有效，默认 profile 排除 CUDA-backed RobotArm，仅选择 9 个 CPU task。
+- [x] 保留每题官方 `combined_score`、完整 raw metric 与 maximize direction；不先做跨任务归一化。
+- [ ] plain Codex 与 Goal Plus + Codex 都通过同一个 native read-only verifier；当前 EnergyStorage Plain Codex native E2E 已通过，Goal Plus + Codex 尚待验收，旧 MallocLab common runner 另有两条历史 E2E。
 - [ ] 20–30 evaluator calls 做策略筛选；只让前两名进入官方 100 calls × 3 seeds。
 
 ### P4：AutoLab CPU subset

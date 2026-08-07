@@ -396,6 +396,34 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
             f"checkout {path} cannot fast-forward to {expected_upstream}: "
             f"{merged.stderr.strip() or merged.stdout.strip()}"
         )
+    sparse_paths = entry.get("sparse_paths") or []
+    if sparse_paths:
+        run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "sparse-checkout",
+                "set",
+                "--no-cone",
+                *sparse_paths,
+            ]
+        )
+    else:
+        sparse = run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "config",
+                "--bool",
+                "--get",
+                "core.sparseCheckout",
+            ],
+            check=False,
+        )
+        if sparse.returncode == 0 and sparse.stdout.strip() == "true":
+            run(["git", "-C", str(path), "sparse-checkout", "disable"])
     state = git_state(path, branch)
     if state["head"] != state["remote_head"]:
         raise RuntimeError(

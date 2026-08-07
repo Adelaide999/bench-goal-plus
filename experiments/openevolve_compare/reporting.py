@@ -134,6 +134,7 @@ def evidence_paths(
             else None
         )
     )
+    artifact_name = task.get("artifact_name")
     candidates = {
         "run_dir": run_dir,
         "manifest": run_dir / "experiment.json",
@@ -143,7 +144,11 @@ def evidence_paths(
         ),
         "seed": seed_path,
         "final": run_dir / "final-eval.json",
-        "candidate": run_dir / "final-candidate.py",
+        "candidate": (
+            run_dir / artifact_name
+            if isinstance(artifact_name, str) and artifact_name
+            else run_dir / "final-candidate.py"
+        ),
         "events": run_dir / "events.jsonl",
         "stdout": run_dir / "stdout.log",
         "lanes": run_dir / "lanes",

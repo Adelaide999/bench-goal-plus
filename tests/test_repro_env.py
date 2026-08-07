@@ -202,6 +202,76 @@ class ReproEnvironmentTest(unittest.TestCase):
             self.assertEqual(second["head"], expected)
             self.assertNotEqual(first["head"], second["head"])
 
+    def test_checkout_expands_when_registry_removes_sparse_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "source"
+            remote = temp / "remote.git"
+            checkout = temp / "checkout"
+            subprocess.run(["git", "init", "-q", "-b", "main", source], check=True)
+            subprocess.run(
+                ["git", "-C", source, "config", "user.name", "Test Controller"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    source,
+                    "config",
+                    "user.email",
+                    "test@example.invalid",
+                ],
+                check=True,
+            )
+            (source / "README.md").write_text("visible\n")
+            (source / "nested").mkdir()
+            (source / "nested/data.txt").write_text("expand me\n")
+            subprocess.run(["git", "-C", source, "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", source, "commit", "-q", "-m", "initial"],
+                check=True,
+            )
+            subprocess.run(["git", "init", "-q", "--bare", remote], check=True)
+            subprocess.run(
+                ["git", "-C", source, "remote", "add", "origin", str(remote)],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", source, "push", "-q", "-u", "origin", "main"],
+                check=True,
+            )
+            sparse_entry = {
+                "repository": str(remote),
+                "tracking_branch": "main",
+                "sparse_paths": ["/README.md"],
+            }
+            repro_env.ensure_checkout(checkout, sparse_entry)
+            self.assertTrue((checkout / "README.md").is_file())
+            self.assertFalse((checkout / "nested/data.txt").exists())
+
+            repro_env.ensure_checkout(
+                checkout,
+                {"repository": str(remote), "tracking_branch": "main"},
+            )
+
+            self.assertEqual((checkout / "nested/data.txt").read_text(), "expand me\n")
+            sparse = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    checkout,
+                    "config",
+                    "--bool",
+                    "--get",
+                    "core.sparseCheckout",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(sparse.stdout.strip(), "true")
+
     def test_lock_and_manifests_do_not_contain_local_identity_or_keys(self) -> None:
         text = "\n".join(
             path.read_text()

@@ -9,6 +9,7 @@
 | --- | --- | --- |
 | `edgebench-native` | EdgeBench 的 SForge、Work/Judge container、native campaign | [EdgeBench](benchmarks/edgebench.md) |
 | `swe-bench-native` | SWE-bench Verified task image、patch 导出与官方 harness | [SWE-bench Verified](benchmarks/swe-bench-verified.md) |
+| `frontier-engineering-native` | Frontier-Engineering v1-lite UnifiedTask evaluator；默认 9 题 CPU subset，完整 10 题需显式 CUDA opt-in | [Frontier-Engineering](benchmarks/frontier-engineering.md) |
 | `common-matrix` | 单 artifact + evaluator 的普通 benchmark adapter | [Common matrix](benchmarks/common-matrix.md) |
 | `openevolve-batch` | OpenEvolve `cpu_portable` task set 和原生 OpenEvolve 对比 | [OpenEvolve](benchmarks/openevolve.md) |
 

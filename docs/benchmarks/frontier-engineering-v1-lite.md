@@ -7,16 +7,66 @@ Frontier-Engineering 面向真实工程优化：候选通常是源码、设计�
 | 项目 | 内容 |
 |---|---|
 | 完整 benchmark | v1 共 47 题、5 类工程方向 |
-| 本项目范围 | 官方 v1-lite 10 题 |
+| 本项目范围 | 默认 v1-lite CPU subset 9 题；完整 10 题显式 NVIDIA CUDA opt-in |
 | 候选 artifact | 代码或 task-specific 工程 artifact |
 | 指标 | 每题 raw score + Medal Score；本项目优先 raw score |
-| Docker | 当前 MallocLab **不需要**；本机 C 编译器 + `make` 即可 |
-| Docker 空间 | 当前 MallocLab 路径为 `0 GB`；其余 9 题尚未冻结统一镜像口径 |
-| 无 Docker 环境 | 可以跑 MallocLab；其余 9 题仍需逐题确认 runtime，不据此宣称全套可跑 |
-| 当前门禁 | MallocLab host evaluator 与 Plain/Goal Plus runner 已接；其余 9 题 runtime 未冻结 |
+| Docker | 当前路径均 **不需要**；由仓库内受管 uv runtime 执行。CUDA 是独立的宿主机要求 |
+| Docker 空间 | `0 GB`；2026-08-07 Linux host checkout + 3 个 uv runtime 实测约 12 GiB |
+| 无 Docker 环境 | 默认只选择 9 个 CPU task；不执行 `nvidia-smi`、CUDA probe 或 RobotArm evaluator |
+| 当前门禁 | CPU 默认 9 题；10/10 shipped baseline 曾在 8×V100 主机通过；EnergyStorage Plain Codex native smoke 已通过 |
 | 跟踪源码 | `ck0123/Frontier-Engineering@main`；run manifest 记录实际 commit |
 
-v1-lite 涵盖 MallocLab、量子路由、JobShop、库存优化、电池快充、机械臂周期、全息聚焦、无线仿真、反应优化和拓扑优化。
+v1-lite 涵盖 MallocLab、量子路由、JobShop、库存优化、电池快充、机械臂周期、全息聚焦、无线仿真、反应优化和拓扑优化。官方环境矩阵把
+`Robotics/RobotArmCycleTimeOptimization` 放进 GPU batch，因此默认 CPU profile
+排除这一题。
+
+## 当前 native 接入
+
+统一 target 是 `frontier-engineering`，runner 是
+`frontier-engineering-native`。旧的 `frontier-engineering-malloclab` 仍保留为
+common runner 的单题回归 smoke，不能代表完整 v1-lite。
+
+当前 native runner 支持 `plain-codex`、`goal-plus-codex` 和
+`goal-plus-pi`。冻结 profile 包括：
+
+- `energy-storage-codex-smoke`：电池快充单题，`T=300, K=1, C=1, R=1`，
+  作为首选接入验收；
+- `jobshop-codex-smoke`：JobShop 单题，`T=300, K=1, C=1, R=1`；
+- `v1-lite-cpu-codex-1h`：默认 9 个 CPU task，每题
+  `T=3600, K=1, C=1, R=1`；
+- `v1-lite-codex-1h`：完整 10 题，显式 `nvidia-cuda-opt-in`，额外包含
+  RobotArm。
+
+每个 profile 必须声明 `accelerator_policy`。`cpu-only` 在加载 profile 时直接拒绝
+`KernelEngineering/*`、`Aerodynamics/CarAerodynamicsSensing`、RobotArm 和
+Quadruped；不会等到 evaluator 才报 CUDA 错误。带 CUDA task 的 profile 只能显式使用
+`nvidia-cuda-opt-in`。只读 `check` 只展示 task 选择与 GPU probe 将在 doctor 执行；完整
+`setup/doctor` 必须先通过 `nvidia-smi`，再用对应受管 runtime 验证
+`torch.version.cuda`、`torch.cuda.is_available()` 和非零 device count。任何检查失败都
+阻止 seed evaluator，controller 不会安装或修改 NVIDIA driver/CUDA。
+
+环境由三个受管 runtime 组成：`frontier-eval-driver`、`frontier-v1-main` 和
+`frontier-v1-summit`。2026-08-07 的 Linux doctor 在 upstream commit
+`e3fa29c193356af2ce1ec8b3d23ab1a2e2410071` 上对 10 题逐题执行 shipped
+baseline，全部返回 `valid=1`、`timeout=0` 和官方 `combined_score`。该验收主机有
+8 张 Tesla V100，RobotArm 的 NVIDIA driver 和 PyTorch CUDA runtime 可用。这证明完整
+10 题路径在该主机已通，但不改变后续 campaign 默认只选择 9 个 CPU task 的策略。
+
+2026-08-07 的首个真实 native Agent smoke 使用
+`EnergyStorage/BatteryFastChargingSPMe`、`plain-codex`、`gpt-5.6-sol/medium` 和
+`T=300, K=1, C=1, R=1`。官方 evaluator 将 seed `66.163564` 提高到
+`121.206310`，directional gain 为 `55.042745`；整条 trajectory 声明 21 次
+evaluator 调用，最终改进出现在 `298.593s`。这证明 Plain Codex 单题路径，不能
+替代 Goal Plus、`K>1` 或完整 10 题 campaign 的验收。
+
+```bash
+python3 scripts/bench.py check \
+  --benchmark frontier-engineering --profile v1-lite-cpu-codex-1h
+python3 scripts/bench.py setup \
+  --benchmark frontier-engineering --profile v1-lite-cpu-codex-1h
+python3 scripts/bench.py plan \
+  --preset frontier-engineering-energy-storage-codex-smoke
+```
 
 ---
 
@@ -83,7 +133,7 @@ Verifier 先 `make clean && make`，再运行 `./mdriver -V`，解析：
 - Kops throughput；
 - 最终 `score / 100`。
 
-本机 baseline 结果是 `28/100`，通过 `6/11` traces。通用 Plain Codex smoke 在 `gpt-5.6-sol/high`、`T=300s`、`K=2` 下达到 `90/100` 并通过 `11/11` traces；Goal Plus 的 `T=420s`、`K=2` smoke 创建 2 个已绑定且均提交 verifier 的 lineage，最终 `89/100`、同样通过 `11/11`。预算不同，因此只证明两条 E2E 路径。这个低但非零的连续分数非常适合测试 Goal Plus 是否能沿着“先修合法性，再做性能”逐步搜索。
+本机 baseline 结果是 `28/100`，通过 `6/11` traces。旧 common runner 的 Plain Codex smoke 在 `gpt-5.6-sol/high`、`T=300s`、`K=2` 下达到 `90/100` 并通过 `11/11` traces；Goal Plus 的 `T=420s`、`K=2` smoke 创建 2 个已绑定且均提交 verifier 的 lineage，最终 `89/100`、同样通过 `11/11`。预算不同，因此这些历史结果只证明 MallocLab 单题的两条 E2E 路径，不能替代新 native runner 的验收。这个低但非零的连续分数非常适合测试 Goal Plus 是否能沿着“先修合法性，再做性能”逐步搜索。
 
 ---
 
@@ -91,12 +141,15 @@ Verifier 先 `make clean && make`，再运行 `./mdriver -V`，解析：
 
 先不要直接跑官方 `100 iterations × 10 tasks`。建议：
 
-1. MallocLab 上做 plain Codex 与 Goal Plus 各 10–20 evaluator calls；
-2. 冻结 raw-score parser、编译失败和 trace failure 分类；
-3. 补齐其余 9 题 runtime，做 `iterations=0` shipped-baseline validation；
-4. 单候选覆盖 10 题后，再选择进入 100-call campaign 的策略。
+1. EnergyStorage native Plain Codex 的 `plan -> launch -> status -> finish` 已完成；
+2. 下一步用同一 task 验收 Goal Plus 的实际 subagent 数量与 `K` 一致；
+3. 固定 task、evaluator、model、reasoning 和 `T/K/C/R` 后做 matched comparison；
+4. 再从默认 9 个 CPU task 扩到多 seed 或更长 wall-time campaign；只有明确需要时才
+   对完整 10 题 profile 做 CUDA opt-in。
 
-v1-lite 环境安装加单候选覆盖预计 3–8 小时；官方 100 iterations/题在本机串行约 40–120 小时。
+当前完整环境约 12 GiB。默认 `v1-lite-cpu-codex-1h` 在 `C=1` 下每种方法每个
+repeat 需要至少 9 agent-hours；显式 GPU profile `v1-lite-codex-1h` 需要至少
+10 agent-hours，另加最终 evaluator 和归档时间。
 
 ## 可复用对比数据
 
@@ -107,7 +160,10 @@ v1-lite 环境安装加单候选覆盖预计 3–8 小时；官方 100 iteration
 ## 代码与证据
 
 - 上游：[EinsiaLab/Frontier-Engineering](https://github.com/EinsiaLab/Frontier-Engineering)
-- Plain/Goal Plus 统一入口：[`experiments/benchmark_compare/`](../../experiments/benchmark_compare/)
+- Native controller：[`experiments/frontier_engineering/`](../../experiments/frontier_engineering/)
+- 默认 CPU doctor：[`evidence/environment/2026-08-07-frontier-engineering-cpu-default-doctor.json`](../../evidence/environment/2026-08-07-frontier-engineering-cpu-default-doctor.json)
+- Native Plain Codex smoke：[`evidence/runs/2026-08-07-frontier-engineering-energy-storage-plain-codex/summary.json`](../../evidence/runs/2026-08-07-frontier-engineering-energy-storage-plain-codex/summary.json)
+- 旧 MallocLab common runner：[`experiments/benchmark_compare/`](../../experiments/benchmark_compare/)
 - Standalone E2E 汇总：[`evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md`](../../evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md)
 - 本机结果：[`evidence/environment/2026-07-21-mac-representative-smokes.json`](../../evidence/environment/2026-07-21-mac-representative-smokes.json)
 

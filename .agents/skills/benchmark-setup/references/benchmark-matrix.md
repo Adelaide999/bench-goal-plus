@@ -10,7 +10,7 @@ benchmark 依赖和命令路由。macOS/Linux、OAuth/direct API、agent/provide
 | SWE-bench Verified | `swebench` | required | exact task image, repository-local Hugging Face cache, official harness |
 | ALE-Bench lite | `ale_bench` | required | 官方 lite C++/judge images |
 | HeuriGym | `heurigym` | not required | pinned Python + dataset bootstrap |
-| Frontier Engineering lite | `frontier_engineering` | not required | host C compiler + `make` for MallocLab |
+| Frontier Engineering v1-lite | `frontier_engineering` | not required | native controller; default 9-task CPU subset; full 10-task profile explicitly opts into NVIDIA CUDA for RobotArm; managed driver/main/summit uv runtimes |
 | AutoLab CPU | `autolab` | mixed | toy ISA needs host C compiler + `make`; paper path needs containers |
 | SwarmResearch | `swarmresearch`, `swarmresearch_tasks` | required | paper-compatible container path |
 | Frontier-CS | `frontier_cs` | required | eager adapter hook builds the pinned judge image and creates its preserved container |

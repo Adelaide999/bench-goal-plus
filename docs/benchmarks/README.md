@@ -28,7 +28,7 @@ Plain Codex / Goal Plus 入口，而不是“仓库能下载”或“代码看�
 | Benchmark | 当前可直接跑的 case | 环境 | Plain Codex | Goal Plus + Codex | 全集状态 |
 |---|---|---|---|---|---|
 | HeuriGym | `operator_scheduling` | pinned Python + 已 bootstrap 数据 | 已完成真实 E2E | 已完成真实 E2E | 其余 8 题待接 |
-| Frontier-Engineering v1-lite | `MallocLab` | C 编译器 + `make` | 已完成真实 E2E | 已完成真实 E2E | 其余 9 题 runtime 待冻结 |
+| Frontier-Engineering v1-lite | 默认 9 个 CPU task；完整 10 题需 CUDA opt-in | 3 个受管 uv runtime，约 12 GiB | 旧 MallocLab E2E 与 EnergyStorage Plain Codex native smoke 已完成 | Plain Codex 单题已验收；Goal Plus 待跑 | GPU 主机曾 10/10；默认不测 RobotArm |
 | AutoLab | `toy_isa_opt` host adapter | C 编译器 + `make` | 已完成真实 E2E | 已完成真实 E2E | 完整 CPU/Harbor 路径仍含 task containers |
 
 这三题是当前没有 Docker 时最稳妥的正式 benchmark 起点。统一入口和建议
@@ -79,7 +79,7 @@ EvoX 的 runtime。
 | Benchmark / substrate | Docker | Docker 空间 | 没有 Docker 时能否跑 |
 |---|---|---|---|
 | HeuriGym | 不需要 | `0 GB` | 当前 `operator_scheduling` 可完整评分 |
-| Frontier-Engineering | 当前 case 不需要 | MallocLab `0 GB` | 当前仅确认 MallocLab；其余 v1-lite runtime 逐题冻结 |
+| Frontier-Engineering | 不需要 | Docker `0 GB`；host checkout + uv runtime 约 `12 GiB` | 默认 9 题 CPU；完整 10 题 seed evaluator 曾在 GPU Linux 主机通过 |
 | AutoLab | 混合 | host case `0 GB`；已测 task image `0.277 GB` | `toy_isa_opt` 可 host 跑；完整 paper-compatible 路径使用容器 |
 | ALE-Bench Lite | **需要** | C++ 路径 `4.03 GB`；建议 `10 GB` | 可以 materialize/查看，不能走当前 official-lite 评分 |
 | SwarmResearch 15-task substrate | **需要** | 当前 `0.196/2.10 GB` 两种 Circle Packing 口径；完整集建议 `10–20 GB` | 可以分析轨迹，不能同口径正式评分 |
@@ -105,7 +105,7 @@ Docker 的机器只适用上表“不需要”路径。模型延迟、候选超�
 |---|---:|---|---:|---:|
 | ALE-Bench Lite | 10 | 环境、官方 verifier、plain Codex 已通 | 单候选/题约 3–5 小时；只扫 verifier 约 20–40 分钟 | 约 31 candidates/题时，串行约 60–100 小时 |
 | HeuriGym 全集 | 9 | 环境和 1 题已通；其余数据待下载 | 单候选/题约 1–2 小时 | 默认 3 iterations，约 3–6 小时 |
-| Frontier-Engineering v1-lite | 10 | MallocLab 已通；其余 9 题 runtime 待安装 | 环境安装加单候选/题约 3–8 小时 | 100 iterations/题，约 40–120 小时 |
+| Frontier-Engineering v1-lite | 默认 9 CPU；完整 10 | GPU 主机 10/10 baseline 已通；EnergyStorage Plain Codex native smoke 已通 | 默认 CPU seed evaluator 9 题；Plain Codex Agent 1/1 | `v1-lite-cpu-codex-1h` 每 method/repeat 至少 9 agent-hours |
 | AutoLab CPU subset | 25 | `toy_isa_opt` 已通；其余镜像待构建 | 10 分钟/题的 bounded coverage 约 6–10 小时 | 20 题 × 2h + 5 题 × 4h = 60 agent-hours；加 verifier 约 2.5–3 天 |
 | SwarmResearch 论文任务集 | 15：Math 5 + ADRS 5 + ALE 5 | Circle Packing 已通；ADRS/ALE worker 布局待修 | evaluator-only 约 2–6 小时 | 公开轨迹任务 wall span 串行合计约 76.9 小时 |
 | Frontier-CS Algorithmic | 当前固定版本 188 | problem-0 已通；其余 task 尚未 materialize | reference/verifier 全扫约 1–3 小时 | 单次 agent/题约 10–30 小时；20 calls/题可能 100–300 小时 |
@@ -147,7 +147,7 @@ SkyDiscover 是 runtime，EvoX/OpenEvolve 是搜索方法，因此不作为 benc
    EdgeBench VLIW，验证隔离评分链路。
 3. **HeuriGym 9 + ALE Lite 10**：补齐其余 adapter 后再形成 19 题 coverage；
    当前不能把单题 E2E 写成全集 ready。
-4. **Frontier-Engineering v1-lite 10**：补齐其余 9 题 runtime 后扩展 coverage。
+4. **Frontier-Engineering v1-lite**：EnergyStorage native Plain smoke 已完成；下一步按固定 `T/K/C/R` 验收 Goal Plus，并扩展默认 9 题 CPU campaign；完整 10 题只在显式 CUDA opt-in 时运行。
 5. **AutoLab 只选 6–10 个 CPU case**：先验证 persistence，不在 Mac 上消耗完整 60 小时。
 6. **SwarmResearch 15**：修好统一 evaluator/worker 后作为最终大实验 substrate。
 7. **Frontier-CS 选 10 题**：保留 188 题 track 作为题库，不在本地对所有方法全扫。

@@ -93,6 +93,16 @@ class LoadedAdapter:
             "verification_owner": "benchmark controller",
         }
 
+    def configure_task(self, task_id: str | None) -> None:
+        configure = getattr(self.module, "configure_task", None)
+        if task_id is None:
+            return
+        if not callable(configure):
+            raise AdapterContractError(
+                f"adapter {self.adapter_id} does not support task selection"
+            )
+        configure(task_id)
+
 
 def _load_payload(path: Path) -> dict[str, Any]:
     try:
@@ -173,6 +183,18 @@ def load_adapter(
             f"choose one of {', '.join(sorted(definitions))}"
         ) from error
     module = importlib.import_module(definition.module_name)
+    _validate_module(definition, module)
+    return LoadedAdapter(definition, module)
+
+
+def load_adapter_module(adapter_id: str, module_name: str) -> LoadedAdapter:
+    """Load a controller-owned adapter that is not a public common target."""
+    if SAFE_ID.fullmatch(adapter_id) is None:
+        raise AdapterContractError(f"unsafe adapter id {adapter_id!r}")
+    if SAFE_MODULE.fullmatch(module_name) is None:
+        raise AdapterContractError(f"unsafe adapter module {module_name!r}")
+    definition = AdapterDefinition(adapter_id, module_name)
+    module = importlib.import_module(module_name)
     _validate_module(definition, module)
     return LoadedAdapter(definition, module)
 

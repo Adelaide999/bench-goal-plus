@@ -14,7 +14,7 @@ Docker 当前总量是 33.83 GB images、9.61 GB build cache、1.50 GB stopped c
 |---|---|---:|---:|---|
 | ALE-Bench Lite | `ahc027`，C++ 路径 | 4.03 GB（C++ 2.73 + Rust judge 1.30） | 0.91 GB | public/private evaluator 已通 |
 | HeuriGym | `operator_scheduling` | 不用 Docker | 0.37 GB | `valid=true, cost=7` |
-| Frontier-Engineering v1-lite | `ComputerSystems/MallocLab` | v1-lite 不用 Docker | 0.034 GB sparse checkout | 官方 verifier 返回 28/100，6/11 cases |
+| Frontier-Engineering v1-lite | 官方 10 题 | 不用 Docker | Linux 完整 checkout + 3 个 uv runtime 约 12 GiB | 2026-08-07 官方 shipped baseline 10/10 有效；JobShop `80.5042` |
 | AutoLab | `toy_isa_opt` | 0.277 GB | 0.75 GB | `cycles=9220, verify=ok` |
 | SwarmResearch | `math/circle_packing` | 0.196 GB（host agent + evaluator-only）或 2.10 GB（论文式 agent CLI task image） | 1.25 GB | evaluator 成功，score 0.9597642169962064 |
 | SkyDiscover task pack | Math/ADRS 非 Torch 19 tags | 8.57 GB logical；共享层后 images 实际新增约 2.49 GB | 0.013 GB | 19/19 构建完成，`pip check` 全通过，0 个镜像含 Torch |
@@ -34,7 +34,7 @@ Frontier-CS 的参考程序得到部分优化分数，但上游把任何 `scoreR
 |---|---|---:|
 | ALE-Bench Lite 10 | 主要共享 3 个固定镜像；加 checkout 后约 7.3 GB | 10 GB |
 | HeuriGym 9 | 无 Docker；当前 venv + 已下载数据仅 0.37 GB，重任务可能再拉系统/数据依赖 | 5 GB |
-| Frontier-Engineering v1-lite 10 | 无统一 Docker；10 个 task 使用多个 Python runtime、task-local 依赖和外部资产 | 10–20 GB，跑 setup 后再冻结实测 |
+| Frontier-Engineering v1-lite 10 | 不用 Docker；Linux 实测完整 checkout 约 12 GiB，其中 uv runtime 约 0.8/7.0/3.7 GiB | **20 GB**；覆盖 runtime、uv cache 和 evaluator scratch |
 | AutoLab 36 | 36 个 Dockerfile，其中 11 个基于 CUDA 12.4/12.8；模型、编译链和数据层会主导空间 | 至少 50–100 GB；只选 6–10 题时逐题构建 |
 | SwarmResearch 15 | 论文式共享 base 已测 2.03 GB；各 evaluator 增量共享，但 ADRS/ALE worker 构建上下文目前不完整 | 10–20 GB；修复上游布局后生成精确 manifest |
 | SkyDiscover Math/ADRS 非 Torch pack | 15 个 Math + 4 个 ADRS evaluator tags；逻辑总和 8.57 GB，当前 Docker store 实际增量约 2.49 GB | **10 GB**；明确不含 `eplb`、`second_autocorr_ineq`、GPU Mode 和 KernelBench |
@@ -50,8 +50,10 @@ judge 的逻辑大小合计约 `9.84 GB`。由于 19 个 evaluator tags 共享 P
 
 ## 当前 Mac 的运行边界
 
-- ALE、HeuriGym、Frontier-Engineering、AutoLab CPU case、Swarm math、
+- ALE、HeuriGym、Frontier-Engineering MallocLab、AutoLab CPU case、Swarm math、
   SkyDiscover 非 Torch Math/ADRS evaluator 和 EdgeBench VLIW 可以串行跑。
+- Frontier-Engineering 完整 v1-lite 已在 Linux host 验证；不能据此推断三个 uv runtime
+  在历史 Mac 环境也通过。
 - Frontier-CS 已在 Docker VM 中用 `--privileged --shm-size=4g`、1 worker、1 go-judge parallelism 跑通；不要在 8.4 GB VM 上并发多个 judge。
 - AutoLab CUDA、Frontier-CS GPU/systems，以及多 seed × 多 method campaign 不应放在本机。
 - 本机只承担 materialize、agent 接线、official evaluator、evidence schema 和恢复机制 smoke；论文结果统一到 Linux 重跑。

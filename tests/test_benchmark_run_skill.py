@@ -73,7 +73,11 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertIn("skydiscover-cpu-evaluators", self.catalog.asset_packs)
         self.assertIn("openevolve-cpu-portable", self.catalog.targets)
         self.assertIn("swe-bench-verified", self.catalog.targets)
-        self.assertEqual(len(self.catalog.runners), 4)
+        self.assertEqual(len(self.catalog.runners), 5)
+        self.assertEqual(
+            self.catalog.targets["frontier-engineering"].runner_id,
+            "frontier-engineering-native",
+        )
         self.assertEqual(
             self.catalog.runners["edgebench-native"].supported_methods,
             (
@@ -300,6 +304,7 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             "sympy-16886-codex-smoke",
             "ahc027-cpp20-202301",
             "problem-0",
+            "v1-lite-cpu-codex-1h",
             "cpu-no-torch-19",
         ):
             self.assertTrue(
@@ -313,6 +318,7 @@ class BenchmarkAgentContractTest(unittest.TestCase):
                 "swe-bench-verified",
                 "ale-bench-lite",
                 "frontier-cs-problem-0",
+                "frontier-engineering",
                 "skydiscover-cpu-evaluators",
             ],
         )

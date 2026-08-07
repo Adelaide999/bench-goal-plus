@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "checked_at": "2026-08-03",
+  "checked_at": "2026-08-07",
   "status_values": ["pass", "partial", "todo", "blocked", "n/a"],
   "gate_sets": {
     "benchmark": [
@@ -123,7 +123,7 @@
       "id": "frontier-engineering-lite",
       "display_name": "Frontier-Engineering v1-lite",
       "kind": "benchmark",
-      "gate_set": "benchmark",
+      "gate_set": "benchmark_methods",
       "priority": 3,
       "repositories": [
         {
@@ -137,25 +137,45 @@
       "data_url": "https://github.com/EinsiaLab/Frontier-Engineering",
       "local_path": "third_party/frontier-engineering",
       "docker_requirement": "not_required",
-      "docker_scope": "The currently integrated MallocLab path is host-native and needs a C compiler plus make. Other v1-lite tasks retain task-specific runtime requirements.",
+      "docker_scope": "Frontier-Engineering uses repository-managed uv runtimes on Linux and no Docker. The default 9-task CPU subset excludes RobotArm; the full 10-task v1-lite profile is an explicit NVIDIA CUDA opt-in.",
       "stages": {
         "source_forked": "pass",
-        "environment": "partial",
+        "environment": "pass",
         "official_verifier": "pass",
-        "legacy_agent_smoke": "todo",
+        "native_baseline": "pass",
         "plain_codex": "pass",
-        "goal_plus_codex": "pass",
+        "goal_plus_codex": "partial",
+        "plain_pi": "n/a",
+        "goal_plus_pi": "partial",
         "matched_baseline": "todo",
-        "campaign_ready": "todo"
+        "campaign_ready": "partial"
       },
       "evidence": [
         "evidence/environment/2026-07-21-mac-representative-smokes.json",
+        "evidence/environment/2026-08-07-frontier-engineering-v1-lite-doctor.json",
+        "evidence/environment/2026-08-07-frontier-engineering-cpu-default-doctor.json",
+        "evidence/runs/2026-08-07-frontier-engineering-energy-storage-plain-codex/summary.json",
         "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.json",
         "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md"
       ],
-      "next_action": "Freeze one matched MallocLab T/K/model protocol, then validate shipped baselines and portable runtimes for the remaining nine v1-lite tasks.",
+      "stage_evidence": {
+        "official_verifier": [
+          "evidence/environment/2026-08-07-frontier-engineering-v1-lite-doctor.json",
+          "evidence/environment/2026-08-07-frontier-engineering-cpu-default-doctor.json"
+        ],
+        "native_baseline": [
+          "evidence/environment/2026-08-07-frontier-engineering-v1-lite-doctor.json",
+          "evidence/environment/2026-08-07-frontier-engineering-cpu-default-doctor.json"
+        ],
+        "plain_codex": [
+          "evidence/runs/2026-08-07-frontier-engineering-energy-storage-plain-codex/summary.json"
+        ]
+      },
+      "next_action": "Validate Goal Plus + Codex and Goal Plus + Pi on the CPU-only EnergyStorage task with actual subagent evidence, then test K>1 and matched methods before expanding the default 9-task CPU campaign.",
       "blockers": [
-        "Only MallocLab has been environment-tested; the remaining nine v1-lite tasks use task-local Python runtimes and assets that must be frozen on Linux."
+        "The native Plain Codex K=1 EnergyStorage path has real E2E evidence, but Goal Plus + Codex and Goal Plus + Pi still require separate real E2E evidence.",
+        "K>1 and matched-method comparisons remain unproven; current native profiles use K=1 and C=1.",
+        "The full 10-task v1-lite profile includes CUDA-backed RobotArm and remains explicit opt-in; default inventory and campaigns use the 9-task CPU subset."
       ]
     },
     {

@@ -64,6 +64,27 @@
       }
     },
     {
+      "id": "frontier-engineering-native",
+      "kind": "native-profile",
+      "controller": "experiments/frontier_engineering/experiment.py",
+      "evidence_filename": "campaign-summary.json",
+      "supported_methods": [
+        "plain-codex",
+        "goal-plus-codex",
+        "goal-plus-pi"
+      ],
+      "capabilities": {
+        "provision": true,
+        "detach": true,
+        "stop": true,
+        "resume": false,
+        "cell_concurrency": false,
+        "retain_containers": false,
+        "official_evaluator": true,
+        "resume_semantics": "stopped campaigns are finalized as partial; retry uses a new campaign"
+      }
+    },
+    {
       "id": "common-matrix",
       "kind": "common-matrix",
       "controller": "experiments/benchmark_campaign/experiment.py",
@@ -194,6 +215,20 @@
       }
     },
     {
+      "id": "frontier-engineering",
+      "runner": "frontier-engineering-native",
+      "adapter": null,
+      "bootstrap_targets": ["frontier_engineering", "goal_plus"],
+      "local_asset_inventory": true,
+      "default_inventory_profile": "v1-lite-cpu-codex-1h",
+      "docker": {
+        "requirement": "not_required",
+        "owner": "host",
+        "provision_mode": "none",
+        "scope": "Frontier-Engineering uses repository-owned uv runtimes on the Linux host and no Docker. The default inventory is the 9-task CPU subset; the full 10-task v1-lite profile explicitly opts into NVIDIA CUDA for RobotArm."
+      }
+    },
+    {
       "id": "heurigym",
       "runner": "common-matrix",
       "adapter": "heurigym",
@@ -234,6 +269,38 @@
     }
   ],
   "presets": [
+    {
+      "id": "frontier-engineering-energy-storage-codex-smoke",
+      "description": "One-task Frontier-Engineering v1-lite Plain Codex smoke on the fast BatteryFastChargingSPMe continuous evaluator.",
+      "benchmarks": ["frontier-engineering"],
+      "profile": "energy-storage-codex-smoke",
+      "campaign_id_template": "frontier-engineering-energy-storage-codex-gpt-5-6-sol-medium-5m-k1-c1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["plain-codex"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 300,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "frontier-engineering-jobshop-codex-smoke",
+      "description": "One-task Frontier-Engineering v1-lite Plain Codex smoke through the upstream UnifiedTask evaluator.",
+      "benchmarks": ["frontier-engineering"],
+      "profile": "jobshop-codex-smoke",
+      "campaign_id_template": "frontier-engineering-jobshop-codex-gpt-5-6-sol-medium-5m-k1-c1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["plain-codex"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 300,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
     {
       "id": "edgebench-vliw-codex-local-smoke",
       "description": "One-task local Plain Codex smoke using an explicit non-official open-network protocol override.",

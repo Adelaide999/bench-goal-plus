@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "benchmark": "frontier-engineering",
+  "suite": "v1-lite",
+  "task_id": "EnergyStorage/BatteryFastChargingSPMe",
+  "mode": "final",
+  "valid": true,
+  "primary_metric": {
+    "name": "combined_score",
+    "value": 121.2063096578825,
+    "direction": "maximize"
+  },
+  "raw_metrics": {
+    "combined_score": 121.2063096578825,
+    "valid": 1.0,
+    "timeout": 0.0,
+    "runtime_s": 0.1162571907043457,
+    "timeout_budget_s": 300.0,
+    "benchmark_returncode": 0.0,
+    "charge_time_s": 688.0,
+    "max_temp_c": 36.178411340297004,
+    "max_voltage_v": 4.249875014330178,
+    "min_plating_margin_v": 0.23996099182296018,
+    "plating_loss_ah": 0.0,
+    "aging_loss_ah": 1.5856548793145798e-06,
+    "time_score": 1.939635366505754,
+    "aging_score": 0.8949424704930011,
+    "plating_score": 1.0,
+    "thermal_score": 0.5887608391454582,
+    "voltage_score": 0.03597248438727284,
+    "soft_temp_violation": 0.0,
+    "soft_voltage_violation": 1.0,
+    "soft_plating_violation": 0.0,
+    "final_soc": 0.9005277777777617
+  },
+  "candidate": {
+    "currents_c": [5.0, 4.5, 4.05, 4.09, 4.15, 4.18, 4.1],
+    "switch_soc": [0.14, 0.18, 0.3, 0.4, 0.5, 0.85]
+  },
+  "evaluator_calls": {
+    "total_claimed": 21,
+    "public_claimed": 20,
+    "final_claimed": 1
+  },
+  "artifact_sha256": "207553b6f2e0d9748179cda9aec497d9acf81cc2cb24d12c9acb0421b06cd9ed",
+  "evaluated_at": "2026-08-07T06:27:37.612343+00:00"
+}

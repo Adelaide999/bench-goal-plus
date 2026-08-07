@@ -23,7 +23,11 @@ sys.path.insert(0, str(ROOT))
 from bench_artifacts import read_json as load_json  # noqa: E402
 from bench_artifacts import utc_now, write_json  # noqa: E402
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
-from adapters.registry import adapter_modules, load_adapter  # noqa: E402
+from adapters.registry import (  # noqa: E402
+    adapter_modules,
+    load_adapter,
+    load_adapter_module,
+)
 from experiments.backends import skydiscover as sky_backend  # noqa: E402
 from experiments.benchmark_compare.conditions import (  # noqa: E402
     CONDITIONS,
@@ -92,6 +96,8 @@ BENCHMARK_ADAPTERS = adapter_modules()
 class PrepareConfig:
     benchmark: str
     method: str
+    task_id: str | None = None
+    adapter_module: str | None = None
     condition: str | None = None
     coordination_variant: str | None = None
     model: str = DEFAULT_MODEL
@@ -160,8 +166,18 @@ def add_runtime_prepare_arguments(
     parser.add_argument("--venv", type=Path, default=DEFAULT_VENV)
 
 
-def configure_adapter(benchmark_id: str) -> None:
-    loaded = load_adapter(benchmark_id)
+def configure_adapter(
+    benchmark_id: str,
+    *,
+    task_id: str | None = None,
+    module_name: str | None = None,
+) -> None:
+    loaded = (
+        load_adapter_module(benchmark_id, module_name)
+        if module_name is not None
+        else load_adapter(benchmark_id)
+    )
+    loaded.configure_task(task_id)
     module = loaded.module
     global ADAPTER_CONTRACT
     global ARTIFACT_NAME, BENCHMARK_NAME, CASE_SET_DESCRIPTION
@@ -223,7 +239,11 @@ def checkout_dirty(path: Path) -> bool:
 
 
 def prepare(args: argparse.Namespace) -> int:
-    configure_adapter(args.benchmark)
+    configure_adapter(
+        args.benchmark,
+        task_id=getattr(args, "task_id", None),
+        module_name=getattr(args, "adapter_module", None),
+    )
     is_sky = sky_backend.is_method(args.method)
     condition = resolve_condition(
         method=args.method,
@@ -441,6 +461,8 @@ def prepare(args: argparse.Namespace) -> int:
         "method": args.method,
         "condition": condition.as_manifest() if condition else None,
         "benchmark_adapter": args.benchmark,
+        "benchmark_adapter_module": getattr(args, "adapter_module", None),
+        "benchmark_task_selector": getattr(args, "task_id", None),
         "benchmark_adapter_contract": ADAPTER_CONTRACT,
         "benchmark_name": BENCHMARK_NAME,
         "task_id": TASK_ID,
@@ -471,6 +493,21 @@ def prepare(args: argparse.Namespace) -> int:
             "case_set": CASE_SET_DESCRIPTION,
             "source_kind": source_kind,
             "official_benchmark_comparable": OFFICIAL_BENCHMARK_COMPARABLE,
+            **(
+                {
+                    key: value
+                    for key, value in load_json(workspaces[0] / "task.json").items()
+                    if key
+                    in {
+                        "evaluator",
+                        "evaluator_sha256",
+                        "source_revision",
+                        "suite",
+                    }
+                }
+                if workspaces and (workspaces[0] / "task.json").is_file()
+                else {}
+            ),
         },
         "environment": {
             "manifest": str(args.environment_manifest.absolute()),
@@ -1110,7 +1147,11 @@ def execute(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.expanduser().absolute()
     manifest_path = run_dir / "experiment.json"
     manifest = load_json(manifest_path)
-    configure_adapter(manifest.get("benchmark_adapter", "heurigym"))
+    configure_adapter(
+        manifest.get("benchmark_adapter", "heurigym"),
+        task_id=manifest.get("benchmark_task_selector"),
+        module_name=manifest.get("benchmark_adapter_module"),
+    )
     if manifest["status"] != "prepared":
         raise RuntimeError(f"run is not prepared: {manifest['status']}")
     if args.model != manifest["model"]:
@@ -1177,7 +1218,11 @@ def execute(args: argparse.Namespace) -> int:
 def seed_smoke(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.expanduser().absolute()
     manifest = load_json(run_dir / "experiment.json")
-    configure_adapter(manifest.get("benchmark_adapter", "heurigym"))
+    configure_adapter(
+        manifest.get("benchmark_adapter", "heurigym"),
+        task_id=manifest.get("benchmark_task_selector"),
+        module_name=manifest.get("benchmark_adapter_module"),
+    )
     results = []
     for workspace_text in manifest["workspaces"]:
         workspace = Path(workspace_text)
@@ -1204,7 +1249,11 @@ def repair_closeout(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.expanduser().absolute()
     manifest_path = run_dir / "experiment.json"
     manifest = load_json(manifest_path)
-    configure_adapter(manifest.get("benchmark_adapter", "heurigym"))
+    configure_adapter(
+        manifest.get("benchmark_adapter", "heurigym"),
+        task_id=manifest.get("benchmark_task_selector"),
+        module_name=manifest.get("benchmark_adapter_module"),
+    )
     if manifest["method"] not in {"goal-plus-codex", "goal-plus-pi"}:
         raise ValueError("closeout is only valid for Goal Plus runs")
     workspace = Path(manifest["workspace"])

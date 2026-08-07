@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "kind": "frontier_engineering_cpu_default_doctor",
+  "checked_at": "2026-08-07",
+  "status": "pass",
+  "benchmark": "frontier-engineering",
+  "suite": "v1-lite",
+  "profile": "v1-lite-cpu-codex-1h",
+  "accelerator_policy": {
+    "mode": "cpu-only",
+    "selected_cuda_tasks": [],
+    "gpu_probe_stage": "not-required",
+    "gpu_checks_executed": false,
+    "excluded_official_v1_lite_tasks": [
+      "Robotics/RobotArmCycleTimeOptimization"
+    ]
+  },
+  "source": {
+    "frontier_engineering_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+    "frontier_engineering_branch": "main",
+    "goal_plus_commit": "daa22c130854b1916fe4506d7cc60097b498b5a1",
+    "goal_plus_branch": "main"
+  },
+  "environment": {
+    "platform": "Linux-5.15.0-185-generic-x86_64-with-glibc2.35",
+    "docker_requirement": "not_required",
+    "runtimes": [
+      "frontier-eval-driver",
+      "frontier-v1-main",
+      "frontier-v1-summit"
+    ],
+    "inventory_passed": true,
+    "doctor_passed": true
+  },
+  "seed_evaluations": [
+    {
+      "task_id": "ComputerSystems/MallocLab",
+      "combined_score": 28.0,
+      "valid": 1.0,
+      "timeout": 0.0
+    },
+    {
+      "task_id": "QuantumComputing/task_01_routing_qftentangled",
+      "combined_score": 0.20898716119828828,
+      "valid": 1.0,
+      "timeout": 0.0
+    },
+    {
+      "task_id": "JobShop/abz",
+      "combined_score": 80.50421052827963,
+      "valid": 1.0,
+      "timeout": 0.0
+    },
+    {
+      "task_id": "InventoryOptimization/disruption_eoqd",
+      "combined_score": 0.36423022249600223,
+      "valid": 1.0,
+      "timeout": 0.0
+    },
+    {
+      "task_id": "EnergyStorage/BatteryFastChargingSPMe",
+      "combined_score": 66.16356426696784,
+      "valid": 1.0,
+      "timeout": 0.0
+    },
+    {
+      "task_id": "Optics/holographic_multiplane_focusing",
+      "combined_score": 0.33017054376354393,
+      "valid": 1.0,
+      "timeout": 0.0
+    },
+    {
+      "task_id": "WirelessChannelSimulation/HighReliableSimulation",
+      "combined_score": 83.36002184030316,
+      "valid": 1.0,
+      "timeout": 0.0
+    },
+    {
+      "task_id": "ReactionOptimisation/snar_multiobjective",
+      "combined_score": 57.523363292468865,
+      "valid": 1.0,
+      "timeout": 0.0
+    },
+    {
+      "task_id": "StructuralOptimization/TopologyOptimization",
+      "combined_score": -195.9152621065792,
+      "valid": 1.0,
+      "timeout": 0.0
+    }
+  ],
+  "commands": {
+    "inventory": "python3 scripts/bench.py check --benchmark frontier-engineering --profile v1-lite-cpu-codex-1h",
+    "doctor": "python3 scripts/bench.py setup --benchmark frontier-engineering --profile v1-lite-cpu-codex-1h --skip-provision"
+  },
+  "claim_boundary": "This evidence proves the default 9-task CPU-only inventory and shipped-baseline doctor. It does not claim that CUDA tasks run without an explicit nvidia-cuda-opt-in profile and passing GPU doctor probes.",
+  "secret_scan": {
+    "result": "clean",
+    "credential_values_persisted": false
+  }
+}
