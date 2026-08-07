@@ -52,6 +52,9 @@ The container temporarily joins Docker's default bridge only while the controlle
 profile-locked Goal Plus runtime, before any Agent or model process starts. The controller then
 disconnects that setup network and requires the internal network to be the sole remaining attachment
 before either the Responses probe or Agent invocation.
+The pre-Agent container Responses probe retries only transient transport outcomes (`408`, `425`,
+`429`, `5xx`, or no HTTP status) up to three attempts and records every attempt. Deterministic
+authentication, protocol, and model-selection failures remain fail-fast.
 During the timed process, ordinary HTTP and Git clients inherit a loopback refusal proxy while the
 model gateway is exempt through `NO_PROXY`; public lookups fail quickly and the internal network
 still blocks direct-socket bypasses. A campaign accepts one positive attempt seed and records the

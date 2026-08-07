@@ -213,6 +213,10 @@ checkout branch, image tag, image ID, or evaluator implementation.
   test the tmpfs contract, then create a fresh planned campaign rather than retrying it in place.
   The runtime mount also needs explicit `exec` because the pinned binary runs from `/opt/codex`;
   retain `nosuid,nodev` and verify the exact mount through full doctor.
+- The pre-Agent container Responses probe retries only transient transport outcomes (`408`, `425`,
+  `429`, `5xx`, or no HTTP status) up to three attempts, with every attempt retained in runtime
+  evidence. Authentication, protocol, and model-selection failures remain fail-fast. A retry must
+  not change `T`, `K`, `C`, `R`, the task, or the evaluator.
 - The official Astropy 4.3 image applies the upstream SWE-bench `pre_install` setuptools pin before
   creating its synthetic `SWE-bench` commit. The Astropy profiles freeze that commit HEAD, tree,
   changed-file list, and complete patch SHA-256. Full doctor accepts it only when all four values

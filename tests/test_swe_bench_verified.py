@@ -1606,6 +1606,41 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 {"problem_statement": "issue", "test_patch": "do not expose"}
             )
 
+    def test_prepare_persists_k2_profile_concurrency(self) -> None:
+        profile = self.profile(
+            "astropy-13033-goal-plus-codex-luna-high-acceptance-on-k2-peer-smoke"
+        )
+        instance = {
+            "instance_id": "astropy__astropy-13033",
+            "repo": "astropy/astropy",
+            "base_commit": profile["tasks"][0]["base_commit"],
+            "problem_statement": "Public issue text",
+            "version": "4.3",
+            "patch": "gold patch",
+            "test_patch": "hidden tests",
+            "FAIL_TO_PASS": ["hidden-fail"],
+            "PASS_TO_PASS": ["hidden-pass"],
+        }
+        with self.temporary_directory() as temporary:
+            campaign = Path(temporary) / "campaign"
+
+            def git_value(_path: Path, *args: str) -> str:
+                return "" if args[:2] == ("status", "--porcelain") else "a" * 40
+
+            with (
+                mock.patch.object(runtime, "campaign_dir", return_value=campaign),
+                mock.patch.object(runtime, "preserve_conflict", return_value=None),
+                mock.patch.object(runtime, "_load_pinned_instance", return_value=instance),
+                mock.patch.object(runtime, "_validate_instance_image"),
+                mock.patch.object(runtime, "_git_value", side_effect=git_value),
+            ):
+                runtime.prepare("k2-test-campaign", profile)
+
+            manifest = json.loads((campaign / "campaign.json").read_text())
+
+        self.assertEqual(manifest["budget"]["live_search_concurrency"], 2)
+        self.assertEqual(manifest["budget"]["cell_concurrency"], 1)
+
     def test_pi_commands_inherit_only_the_credential_variable_name(self) -> None:
         profile = self.profile("sympy-16886-pi-smoke")
         secret = "not-for-command-lines"
@@ -2371,6 +2406,49 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY", command)
         self.assertFalse(any(secret in argument for argument in command))
         self.assertNotIn(f"OPENAI_API_KEY={secret}", command)
+
+    def test_container_responses_probe_retries_transient_502(self) -> None:
+        failed = {"passed": False, "http_status": 502, "error": "bad gateway"}
+        passed = {"passed": True, "http_status": 200, "object": "response"}
+        with (
+            mock.patch.object(
+                runtime,
+                "codex_container_responses_probe",
+                side_effect=[failed, passed],
+            ) as probe,
+            mock.patch.object(runtime.time, "sleep") as sleep,
+        ):
+            result = runtime._container_responses_probe_with_retry(
+                "container-id", {}, model="gpt-5.6-luna"
+            )
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["attempt_count"], 2)
+        self.assertEqual(
+            [item["http_status"] for item in result["attempts"]],
+            [502, 200],
+        )
+        self.assertEqual(probe.call_count, 2)
+        sleep.assert_called_once_with(1.0)
+
+    def test_container_responses_probe_does_not_retry_auth_failure(self) -> None:
+        failed = {"passed": False, "http_status": 401, "error": "unauthorized"}
+        with (
+            mock.patch.object(
+                runtime,
+                "codex_container_responses_probe",
+                return_value=failed,
+            ) as probe,
+            mock.patch.object(runtime.time, "sleep") as sleep,
+        ):
+            result = runtime._container_responses_probe_with_retry(
+                "container-id", {}, model="gpt-5.6-luna"
+            )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["attempt_count"], 1)
+        probe.assert_called_once()
+        sleep.assert_not_called()
 
     def test_timeout_stops_container_before_exporting_patch(self) -> None:
         profile = self.profile("sympy-16886-pi-smoke")

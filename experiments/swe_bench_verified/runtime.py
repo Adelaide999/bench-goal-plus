@@ -214,8 +214,8 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
         "agent_provider": provider_contract,
         "budget": {
             "wall_time_seconds": profile["wall_time_seconds"],
-            "live_search_concurrency": 1,
-            "cell_concurrency": 1,
+            "live_search_concurrency": profile["concurrency"],
+            "cell_concurrency": profile["cell_concurrency"],
             "attempts": 1,
         },
         "container_retention": {
@@ -1629,6 +1629,41 @@ def _export_goal_plus_state(
     }
 
 
+def _container_responses_probe_with_retry(
+    container_id: str,
+    runtime: dict[str, Any],
+    *,
+    model: str,
+    max_attempts: int = 3,
+) -> dict[str, Any]:
+    attempts: list[dict[str, Any]] = []
+    result: dict[str, Any] = {"passed": False, "http_status": None}
+    for attempt in range(1, max_attempts + 1):
+        result = codex_container_responses_probe(
+            container_id,
+            runtime,
+            model=model,
+            existing_container=True,
+        )
+        attempts.append({"attempt": attempt, **result})
+        if result.get("passed") is True:
+            break
+        status = result.get("http_status")
+        retryable = (
+            status is None
+            or status in {408, 425, 429}
+            or (isinstance(status, int) and 500 <= status <= 599)
+        )
+        if not retryable or attempt == max_attempts:
+            break
+        time.sleep(float(attempt))
+    return {
+        **result,
+        "attempt_count": len(attempts),
+        "attempts": attempts,
+    }
+
+
 def _run_agent(
     campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1891,11 +1926,10 @@ def _run_agent(
             )
         network["verification"] = _verify_agent_network(container_id, network)
         if method == "plain-codex":
-            container_probe = codex_container_responses_probe(
+            container_probe = _container_responses_probe_with_retry(
                 container_id,
                 runtime,
                 model=str(profile["model"]),
-                existing_container=True,
             )
             runtime_public["container_responses_probe"] = container_probe
             if not container_probe["passed"]:
@@ -1906,11 +1940,10 @@ def _run_agent(
             method == "goal-plus-codex"
             and profile.get("agent_provider") is not None
         ):
-            container_probe = codex_container_responses_probe(
+            container_probe = _container_responses_probe_with_retry(
                 container_id,
                 runtime,
                 model=str(profile["model"]),
-                existing_container=True,
             )
             runtime_public["container_responses_probe"] = container_probe
             if not container_probe["passed"]:
@@ -1918,11 +1951,10 @@ def _run_agent(
                     "Goal Plus Codex Responses probe failed in the Agent container"
                 )
         elif method != "goal-plus-codex" and runtime.get("custom_provider"):
-            container_probe = codex_container_responses_probe(
+            container_probe = _container_responses_probe_with_retry(
                 container_id,
                 runtime,
                 model=str(runtime["model_id"]),
-                existing_container=True,
             )
             runtime_public["container_responses_probe"] = container_probe
             if not container_probe["passed"]:
