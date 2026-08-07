@@ -602,6 +602,31 @@
         "concurrency": 2,
         "cell_concurrency": 1
       }
+    },
+    {
+      "id": "swe-bench-verified-astropy-13033-goal-plus-codex-sol-medium-k2-peer-smoke",
+      "description": "Astropy 13033 Goal Plus + Codex dynamic peer-comparison mechanism experiment using Sol/medium with T=1800, K=2, C=1, R=1.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "astropy-13033-goal-plus-codex-sol-medium-acceptance-on-k2-peer-smoke",
+      "campaign_id_template": "swe-bench-verified-astropy-13033-goal-plus-codex-sol-medium-k2-peer-30m-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-codex"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "agent_provider": {
+          "id": "bench_proxy",
+          "name": "Benchmark OpenAI-compatible proxy",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "OPENAI_BASE_URL",
+          "api_key_env": "OPENAI_API_KEY",
+          "wire_api": "responses"
+        },
+        "supplemental_evaluation_enabled": true,
+        "wall_time_seconds": 1800,
+        "concurrency": 2,
+        "cell_concurrency": 1
+      }
     }
   ]
 }

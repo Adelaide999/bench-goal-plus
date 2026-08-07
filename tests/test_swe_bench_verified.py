@@ -845,10 +845,16 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "deepseek-v4-flash-on"
             )
         )
-        astropy_k2_peer = agent.resolve_spec(
+        astropy_luna_k2_peer = agent.resolve_spec(
             preset_id=(
                 "swe-bench-verified-astropy-13033-goal-plus-codex-"
                 "luna-high-k2-peer-smoke"
+            )
+        )
+        astropy_sol_k2_peer = agent.resolve_spec(
+            preset_id=(
+                "swe-bench-verified-astropy-13033-goal-plus-codex-"
+                "sol-medium-k2-peer-smoke"
             )
         )
 
@@ -886,13 +892,17 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(
                 deepseek.concurrency(), {"T": 1800, "K": 1, "C": 1, "R": 1}
             )
-        self.assertEqual(astropy_k2_peer.methods, ("goal-plus-codex",))
-        self.assertEqual(astropy_k2_peer.model, "gpt-5.6-luna")
-        self.assertEqual(astropy_k2_peer.reasoning_effort, "high")
-        self.assertEqual(
-            astropy_k2_peer.concurrency(),
-            {"T": 1800, "K": 2, "C": 1, "R": 1},
-        )
+        for astropy_k2_peer, model, reasoning in (
+            (astropy_luna_k2_peer, "gpt-5.6-luna", "high"),
+            (astropy_sol_k2_peer, "gpt-5.6-sol", "medium"),
+        ):
+            self.assertEqual(astropy_k2_peer.methods, ("goal-plus-codex",))
+            self.assertEqual(astropy_k2_peer.model, model)
+            self.assertEqual(astropy_k2_peer.reasoning_effort, reasoning)
+            self.assertEqual(
+                astropy_k2_peer.concurrency(),
+                {"T": 1800, "K": 2, "C": 1, "R": 1},
+            )
         with self.assertRaisesRegex(ContractError, "preset.*is frozen"):
             agent.resolve_spec(
                 preset_id=(

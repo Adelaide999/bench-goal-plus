@@ -31,6 +31,7 @@ provision, detach, stop, resume, or cross-cell concurrency.
 | `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, supplemental evaluation disabled |
 | `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, supplemental evaluation enabled |
 | `swe-bench-verified-astropy-13033-goal-plus-codex-luna-high-k2-peer-smoke` | `gpt-5.6-luna`, high | `1800/2/1/1` | Goal Plus + Codex Responses, mechanism-only dynamic peer comparison |
+| `swe-bench-verified-astropy-13033-goal-plus-codex-sol-medium-k2-peer-smoke` | `gpt-5.6-sol`, medium | `1800/2/1/1` | Goal Plus + Codex Responses, mechanism-only dynamic peer comparison |
 
 The Pi credential value is never serialized. Docker receives only the selected environment variable
 name. The complete dataset row is host-side evaluator input; the Agent receives only the public
@@ -67,8 +68,8 @@ an infrastructure bypass or an early/under-verified release makes Goal Plus evid
 preserving any official SWE-bench score. The four profile IDs begin with
 `astropy-13033-goal-plus-codex-`.
 
-The dedicated Astropy `K=2` preset keeps the Luna/high ON cell otherwise unchanged and is a
-mechanism experiment, not a matched `K=1` quality result. MainAgent must create exactly two distinct
+The dedicated Astropy `K=2` presets keep their Luna/high or Sol/medium ON cell otherwise unchanged
+and are mechanism experiments, not matched `K=1` quality results. MainAgent must create exactly two distinct
 initial candidates in one batch and bind one Codex worker to each. Completion additionally requires
 overlapping runtime lease intervals for both candidate-bound workers,
 at least one ViewAgent output whose comparison basis contains the other candidate's settled

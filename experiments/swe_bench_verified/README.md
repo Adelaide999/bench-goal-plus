@@ -82,11 +82,13 @@ before `search_select`. This preserves the search-period feedback contract for t
 annotation errors remain durable evidence failures rather than being converted to a soft score or a
 hard verifier result.
 
-The dedicated preset
-`swe-bench-verified-astropy-13033-goal-plus-codex-luna-high-k2-peer-smoke` keeps
-the Luna/high ON stack and `T=1800,C=1,R=1`, but starts exactly two distinct candidates together and
-binds one Codex worker to each candidate in the same Search run. It is not a matched comparison with
-the `K=1` quality result because it doubles live within-task search concurrency. Completion requires
+The dedicated presets
+`swe-bench-verified-astropy-13033-goal-plus-codex-luna-high-k2-peer-smoke` and
+`swe-bench-verified-astropy-13033-goal-plus-codex-sol-medium-k2-peer-smoke` keep
+their respective Luna/high or Sol/medium ON stack and `T=1800,C=1,R=1`, but start exactly two
+distinct candidates together and bind one Codex worker to each candidate in the same Search run.
+They are not matched comparisons with the `K=1` quality result because they double live within-task
+search concurrency. Completion requires
 more than `budget.max_parallel=2`: a completed ViewAgent evaluation must compare against the other
 candidate's real settled commit, both worker lease intervals must overlap, and a worker must persist
 a Global Evidence read of that peer View before a subsequent verifier attempt. Missing any proof
