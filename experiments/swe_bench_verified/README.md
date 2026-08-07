@@ -50,6 +50,10 @@ The container temporarily joins Docker's default bridge only while the controlle
 profile-locked Goal Plus runtime, before any Agent or model process starts. The controller then
 disconnects that setup network and requires the internal network to be the sole remaining attachment
 before either the Responses probe or Agent invocation.
+During the timed process, ordinary HTTP and Git clients inherit a loopback refusal proxy while the
+model gateway is exempt through `NO_PROXY`; public lookups fail quickly and the internal network
+still blocks direct-socket bypasses. A campaign accepts one positive attempt seed and records the
+same value in its Search strategy configuration, manifest, and report.
 
 Goal Plus + Pi starts one outer Pi JSON session through the project extension, then requires one
 candidate-bound `pi-rpc` worker in the shared Search state. Its frozen SearchSpec uses only an

@@ -189,6 +189,16 @@ class BenchmarkAgent:
 
         if runner_definition.kind == "native-profile" and not selected_profile:
             raise ContractError("native-profile campaigns require --profile or a preset")
+        if runner_definition.kind == "native-profile" and len(selected_seeds) != 1:
+            raise ContractError("native-profile campaigns support one attempt seed")
+        if (
+            runner_definition.kind == "native-profile"
+            and not runner_definition.capabilities.attempt_seed
+            and selected_seeds != (1,)
+        ):
+            raise ContractError(
+                f"runner {runner_definition.runner_id} does not support attempt seeds"
+            )
         if (
             cell_concurrency is not None
             and cell_concurrency > 1

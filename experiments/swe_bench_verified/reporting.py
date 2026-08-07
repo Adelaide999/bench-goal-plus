@@ -207,7 +207,7 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
         "method": cell["method"],
         "model": cell["model"],
         "reasoning_effort": cell["reasoning_effort"],
-        "seed": 1,
+        "seed": manifest.get("seed", profile.get("seed", 1)),
         "status": "succeeded" if cell["state"] == "completed" else cell["state"],
         "incomplete_reason": cell.get("incomplete_reason") or cell.get("error"),
         "budget": {

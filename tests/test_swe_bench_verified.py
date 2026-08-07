@@ -130,6 +130,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         )
         joined = " ".join(command)
         self.assertIn("strategy.worker_host=codex", prompt)
+        self.assertIn("strategy.config.seed=1", prompt)
         self.assertIn(
             "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1", command
         )
@@ -373,6 +374,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 root / f"runs/{run_id}/agent_sessions/{agent_session_id}.json",
                 {
                     "agent_session_id": agent_session_id,
+                    "created_at": "2026-08-06T12:00:00Z",
+                    "updated_at": "2026-08-06T12:10:00Z",
                     "host": worker_host,
                     "candidate_id": candidate_id,
                     "host_handle": {
@@ -477,6 +480,14 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 ]
             )
 
+            session_path = (
+                root
+                / "runs/run_test/agent_sessions/agent_0.json"
+            )
+            session = read_json(session_path)
+            session["updated_at"] = "2026-08-06T12:10:01Z"
+            write_json(session_path, session)
+
             lease_path = (
                 root
                 / "host-logs"
@@ -484,8 +495,41 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 / "agent_0.json"
             )
             lease = read_json(lease_path)
+            lease.update(
+                {
+                    "status": "active",
+                    "started_at": "2026-08-06T12:00:00Z",
+                    "elapsed_seconds": 544,
+                    "verifier_runs": 2,
+                }
+            )
+            lease.pop("release_reason")
+            write_json(lease_path, lease)
+            recovered = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_worker_host="codex",
+            )
+            observation = recovered["completion"]["checks"][
+                "worker_minimum_observed"
+            ]
+            self.assertTrue(observation["passed"])
+            self.assertEqual(
+                observation["actual"]["leases"][0]["minimum_observation"][
+                    "basis"
+                ],
+                "terminal_session_timestamps",
+            )
+
             lease["verifier_runs"] = 1
             write_json(lease_path, lease)
+            session["counters"]["verifier_runs"] = 1
+            write_json(session_path, session)
             failed = goal_plus_evidence.collect_goal_plus_state(
                 root,
                 expected_k=1,
@@ -1212,6 +1256,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         agent = BenchmarkAgent(catalog=Catalog())
         spec = agent.resolve_spec(
             preset_id="swe-bench-verified-sympy-16886-codex-smoke",
+            seeds=(2,),
             retain_containers=True,
         )
         runner = create_runner(spec.runner)
@@ -1226,6 +1271,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn("prepare", prepare[0])
         self.assertIn("--wall-time-seconds", prepare[0])
         self.assertIn("--retain-containers", prepare[0])
+        seed_index = prepare[0].index("--seed")
+        self.assertEqual(prepare[0][seed_index : seed_index + 2], ["--seed", "2"])
         self.assertTrue(spec.as_dict()["retain_containers"])
         self.assertEqual(run[-2:], ["--campaign", campaign.campaign_id])
         self.assertNotIn("--detach", run)
@@ -1240,6 +1287,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
     def test_prepare_separates_agent_task_from_hidden_evaluator_fields(self) -> None:
         profile = self.profile("sympy-16886-codex-smoke")
+        profile["seed"] = 2
         instance = {
             "instance_id": "sympy__sympy-16886",
             "repo": "sympy/sympy",
@@ -1279,6 +1327,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(evaluator_path.stat().st_mode), 0o600)
             self.assertFalse(manifest["container_retention"]["requested"])
             self.assertEqual(manifest["container_retention"]["scope"], "agent")
+            self.assertEqual(manifest["seed"], 2)
+            self.assertEqual(manifest["cells"][0]["seed"], 2)
 
             from swebench.harness.utils import load_swebench_dataset
 
@@ -1788,6 +1838,28 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertFalse(
                 state["completion"]["checks"]["promotion_visible_test"]["passed"]
             )
+
+    def test_public_egress_agent_command_fails_http_clients_fast(self) -> None:
+        profile = self.profile(
+            "astropy-13033-goal-plus-codex-sol-medium-acceptance-on-smoke"
+        )
+        command = runtime._agent_command(
+            "container-id",
+            profile,
+            {
+                "outer_deadline_at": "2026-08-07T12:00:00+00:00",
+                "api_key_env": "OPENAI_API_KEY",
+                "runtime_api_base_url": "http://192.0.2.1:45678/v1",
+                "provider_id": "bench_proxy",
+                "provider_name": "Benchmark proxy",
+                "bridge_host": "192.0.2.1",
+            },
+        )
+
+        self.assertIn("HTTPS_PROXY=http://127.0.0.1:9", command)
+        self.assertIn("https_proxy=http://127.0.0.1:9", command)
+        self.assertIn("ALL_PROXY=http://127.0.0.1:9", command)
+        self.assertIn("NO_PROXY=192.0.2.1", command)
 
     def test_public_egress_network_is_internal_verified_and_removed(self) -> None:
         profile = self.profile(

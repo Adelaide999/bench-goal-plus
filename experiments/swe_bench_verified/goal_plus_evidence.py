@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,61 @@ def _linked_run_id(goal: dict[str, Any]) -> str | None:
 
 def _check(expected: Any, actual: Any, passed: bool) -> dict[str, Any]:
     return {"expected": expected, "actual": actual, "passed": bool(passed)}
+
+
+def _timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _observed_autoresearch_lease(
+    lease: dict[str, Any], session: dict[str, Any], *, run_state: Any
+) -> dict[str, Any]:
+    minimum_runtime = int(lease.get("min_runtime_seconds") or 0)
+    minimum_verifiers = int(lease.get("min_verifier_runs") or 0)
+    session_verifiers = int((session.get("counters") or {}).get("verifier_runs") or 0)
+    observed_verifiers = max(
+        int(lease.get("verifier_runs") or 0), session_verifiers
+    )
+    observed_elapsed = float(lease.get("elapsed_seconds") or 0)
+    started_at = _timestamp(lease.get("started_at"))
+    session_updated_at = _timestamp(session.get("updated_at"))
+    if started_at is not None and session_updated_at is not None:
+        observed_elapsed = max(
+            observed_elapsed,
+            max(0.0, (session_updated_at - started_at).total_seconds()),
+        )
+
+    released = (
+        lease.get("status") == "released"
+        and lease.get("release_reason") == "lease_satisfied"
+    )
+    terminal_session = (
+        run_state == "promoted"
+        and observed_elapsed >= minimum_runtime
+        and observed_verifiers >= minimum_verifiers
+    )
+    basis = (
+        "released_lease"
+        if released
+        else "terminal_session_timestamps"
+        if terminal_session
+        else "insufficient"
+    )
+    return {
+        **lease,
+        "minimum_observation": {
+            "passed": released or terminal_session,
+            "basis": basis,
+            "run_state": run_state,
+            "observed_elapsed_seconds": round(observed_elapsed, 3),
+            "observed_verifier_runs": observed_verifiers,
+        },
+    }
 
 
 def record_completion_check(
@@ -529,7 +585,11 @@ def collect_goal_plus_state(
                     / f"{session.get('agent_session_id')}.json"
                 )
                 if lease:
-                    autoresearch_leases.append(lease)
+                    autoresearch_leases.append(
+                        _observed_autoresearch_lease(
+                            lease, session, run_state=payload.get("state")
+                        )
+                    )
         global_evidence_reads = _global_evidence_read_receipts(
             bound_sessions,
             candidate_records,
@@ -837,7 +897,9 @@ def collect_goal_plus_state(
                 {
                     "min_runtime_seconds": expected_worker_min_runtime_seconds,
                     "min_verifier_runs": expected_worker_min_verifier_runs,
-                    "release_reason": "lease_satisfied",
+                    "evidence": (
+                        "released lease or promoted-run terminal session timestamps"
+                    ),
                 }
                 if expected_worker_min_runtime_seconds is not None
                 else "not configured"
@@ -865,12 +927,8 @@ def collect_goal_plus_state(
                         )
                     )
                     and all(
-                        lease.get("status") == "released"
-                        and lease.get("release_reason") == "lease_satisfied"
-                        and float(lease.get("elapsed_seconds") or 0)
-                        >= expected_worker_min_runtime_seconds
-                        and int(lease.get("verifier_runs") or 0)
-                        >= int(expected_worker_min_verifier_runs or 0)
+                        (lease.get("minimum_observation") or {}).get("passed")
+                        is True
                         for lease in selected_run.get("autoresearch_leases", [])
                     )
                 )

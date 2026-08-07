@@ -229,6 +229,9 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         raise SweBenchContractError(
             f"{profile_id}: retain_containers must be boolean"
         )
+    seed = profile.get("seed", 1)
+    if not isinstance(seed, int) or isinstance(seed, bool) or seed < 1:
+        raise SweBenchContractError(f"{profile_id}: seed must be a positive integer")
     network_policy = profile.get("agent_network_policy", "default")
     if network_policy not in AGENT_NETWORK_POLICIES:
         raise SweBenchContractError(
@@ -419,6 +422,7 @@ def resolve_profile(
     wall_time_seconds: int | None = None,
     concurrency: int | None = None,
     cell_concurrency: int | None = None,
+    seed: int | None = None,
     retain_containers: bool | None = None,
 ) -> dict[str, Any]:
     resolved = dict(profile)
@@ -432,6 +436,7 @@ def resolve_profile(
     resolved["cell_concurrency"] = (
         cell_concurrency or profile["cell_concurrency"]
     )
+    resolved["seed"] = profile.get("seed", 1) if seed is None else seed
     resolved["retain_containers"] = (
         profile["retain_containers"]
         if retain_containers is None

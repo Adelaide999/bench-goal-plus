@@ -76,6 +76,10 @@ The profile-locked Goal Plus runtime may use a temporary default-bridge attachme
 controller-owned setup, before any Agent/model process starts. The runner must disconnect that
 attachment and prove the internal network is the container's sole remaining network before the
 Responses probe or Agent invocation; persist this setup-egress disposition with the isolation probe.
+The timed Agent process also receives a loopback refusal proxy, with the campaign gateway in
+`NO_PROXY`, so ordinary HTTP/Git lookup attempts fail promptly while the Docker internal network
+remains the fail-closed boundary. One native campaign accepts exactly one positive attempt seed;
+persist it in the profile snapshot, prompt strategy config, campaign manifest, and report.
 
 The visible-test wrapper is a benchmark-owned read-only bind mount inside `/testbed`. Freeze records
 its exact hash. The ranking verifier directly uses `--ranking-signal`, allowing a completed public

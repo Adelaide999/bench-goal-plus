@@ -86,6 +86,10 @@ internal network，把模型 API bridge 绑定到该 network 的 host gateway，
 固定 Goal Plus runtime 安装发生在 Agent/模型进程启动前；仅这个 setup 阶段临时连接 Docker
 默认 bridge。安装后 controller 必须先断开 setup bridge，并验证 internal network 是唯一剩余
 网络，才允许模型探针和 Agent 启动。
+计时 Agent 还会获得指向容器本地拒绝端口的 HTTP/HTTPS proxy，并将模型 gateway 放入
+`NO_PROXY`，让常见网页与 Git 查询快速失败；Docker internal network 仍是最终隔离边界。
+每个 native campaign 只接受一个正整数 attempt seed，并在 Search strategy、manifest 和报告中
+保持一致。
 
 Luna Goal Plus + Pi preset 复用同一组 OpenAI-compatible Responses 环境变量，但通过
 campaign-local Pi provider registry 选择 `bench-openai/gpt-5.6-luna`。该 registry 只保存

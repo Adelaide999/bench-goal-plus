@@ -185,6 +185,7 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
         "method": profile["methods"][0],
         "model": profile["model"],
         "reasoning_effort": profile["reasoning_effort"],
+        "seed": profile.get("seed", 1),
         "agent_provider": provider_contract,
         "supplemental_evaluation_enabled": (
             profile["goal_plus"]["supplemental_evaluation_enabled"]
@@ -209,6 +210,7 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
         "methods": profile["methods"],
         "model": profile["model"],
         "reasoning_effort": profile["reasoning_effort"],
+        "seed": profile.get("seed", 1),
         "agent_provider": provider_contract,
         "budget": {
             "wall_time_seconds": profile["wall_time_seconds"],
@@ -1029,7 +1031,8 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         f"{minimum_budget_instruction}"
         "Set "
         "strategy.config.closeout_reserve_seconds="
-        f"{goal_plus['closeout_reserve_seconds']}. Use one fixed initial candidate. "
+        f"{goal_plus['closeout_reserve_seconds']} and strategy.config.seed="
+        f"{profile.get('seed', 1)}. Use one fixed initial candidate. "
         "Set strategy.evidence_annotator.host=codex and "
         "strategy.evidence_annotator.timeout_seconds="
         f"{annotator_timeout}; "
@@ -1161,6 +1164,20 @@ def _agent_command(
         "-e",
         "TEMP=/opt/agent-tmp",
     ]
+    if profile.get("agent_network_policy") == "public-egress-blocked":
+        proxy = "http://127.0.0.1:9"
+        no_proxy = str(runtime.get("bridge_host") or "")
+        for name, value in (
+            ("HTTP_PROXY", proxy),
+            ("HTTPS_PROXY", proxy),
+            ("ALL_PROXY", proxy),
+            ("http_proxy", proxy),
+            ("https_proxy", proxy),
+            ("all_proxy", proxy),
+            ("NO_PROXY", no_proxy),
+            ("no_proxy", no_proxy),
+        ):
+            common.extend(["-e", f"{name}={value}"])
     if profile["methods"][0] == "goal-plus-codex":
         custom_provider = profile.get("agent_provider") is not None
         goal_plus_environment = {
