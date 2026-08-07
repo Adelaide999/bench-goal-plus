@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run standalone benchmarks with Plain Codex or Goal Plus + Codex."""
+"""Run standalone benchmarks with Plain or Goal Plus agent methods."""
 
 from __future__ import annotations
 
@@ -75,6 +75,7 @@ DEFAULT_HARD_KILL_GRACE_SECONDS = 30
 DEFAULT_WORKER_RUNTIME_SECONDS = 120
 METHODS = (
     "plain-codex",
+    "plain-pi",
     "goal-plus-codex",
     "goal-plus-pi",
     *sky_backend.METHODS,
@@ -311,7 +312,7 @@ def prepare(args: argparse.Namespace) -> int:
     workspace_commits: list[str] = []
     search_backend: dict[str, Any] | None = None
 
-    if args.method == "plain-codex":
+    if args.method in {"plain-codex", "plain-pi"}:
         for lane_index in range(args.concurrency):
             lane = f"lane-{lane_index:02d}"
             workspace = run_dir / "workspaces" / lane
@@ -326,7 +327,7 @@ def prepare(args: argparse.Namespace) -> int:
             task_text, args.wall_time_seconds, args.soft_closeout_seconds
         )
         prompt_contract = {
-            "mode": "plain_codex_common_prompt",
+            "mode": f"{args.method.replace('-', '_')}_common_prompt",
             "common_prompt_sha256": sha256_text(common_prompt),
             "transform": "identity",
         }
@@ -712,6 +713,7 @@ def execute_plain(
     environment: dict[str, str],
 ) -> dict[str, Any]:
     budget = manifest["budget"]
+    is_pi = manifest["method"] == "plain-pi"
     workspaces = [Path(path) for path in manifest["workspaces"]]
     lanes_root = run_dir / "lanes"
     lanes_root.mkdir()
@@ -732,24 +734,62 @@ def execute_plain(
             budget["soft_closeout_seconds"],
         )
         (lane_dir / "prompt.md").write_text(prompt)
-        command = codex_command(
-            codex_bin=args.codex_bin,
-            workspace=workspace,
-            output_last_message=lane_dir / "final-message.txt",
-            model=args.model,
-            reasoning_effort=manifest["reasoning_effort"],
-            api_base=args.api_base,
-            sandbox=CODEX_SANDBOX,
-            goal_plus=False,
-            ephemeral=True,
-        )
+        lane_environment = environment.copy()
+        if is_pi:
+            qualified_model = f"{PI_PROVIDER_ID}/{args.model}"
+            pi_home = lane_dir / "pi-home"
+            write_pi_models_config(
+                pi_home,
+                api_base=args.api_base,
+                model=args.model,
+                reasoning_effort=manifest["reasoning_effort"],
+            )
+            lane_environment["PI_CODING_AGENT_DIR"] = str(pi_home)
+            command = [
+                args.pi_bin,
+                "--mode",
+                "json",
+                "--provider",
+                PI_PROVIDER_ID,
+                "--model",
+                qualified_model,
+                "--thinking",
+                manifest["reasoning_effort"],
+                "--approve",
+                "--session-dir",
+                str(lane_dir / "pi-session"),
+                "--session-id",
+                f"bench-{run_dir.name}-{lane_name}",
+                "--no-extensions",
+                "--no-skills",
+                "--no-prompt-templates",
+                "--no-context-files",
+                prompt,
+            ]
+            stdin_text = None
+            recorded_command = [*command[:-1], "<task-prompt>"]
+        else:
+            command = codex_command(
+                codex_bin=args.codex_bin,
+                workspace=workspace,
+                output_last_message=lane_dir / "final-message.txt",
+                model=args.model,
+                reasoning_effort=manifest["reasoning_effort"],
+                api_base=args.api_base,
+                sandbox=CODEX_SANDBOX,
+                goal_plus=False,
+                ephemeral=True,
+            )
+            stdin_text = prompt
+            recorded_command = command_for_manifest(command, args.api_base)
         jobs.append(
             {
                 "name": lane_name,
                 "command": command,
-                "recorded_command": command_for_manifest(command, args.api_base),
+                "recorded_command": recorded_command,
                 "cwd": workspace,
-                "stdin_text": prompt,
+                "stdin_text": stdin_text,
+                "environment": lane_environment,
                 "stdout_path": lane_dir / "events.jsonl",
                 "stderr_path": lane_dir / "stderr.log",
             }
@@ -775,7 +815,11 @@ def execute_plain(
                 "workspace": str(workspace),
                 "candidate": str(candidate),
                 "evaluation": final,
-                "codex": parse_codex_events(lane_dir / "events.jsonl"),
+                ("pi" if is_pi else "codex"): (
+                    parse_pi_events(lane_dir / "events.jsonl")
+                    if is_pi
+                    else parse_codex_events(lane_dir / "events.jsonl")
+                ),
             }
         )
     valid_lane_results = [
@@ -791,10 +835,12 @@ def execute_plain(
     shutil.copy2(selected["candidate"], run_dir / ARTIFACT_NAME)
     control["selected_lane"] = selected["lane"]
     control["selected_score"] = primary_score(selected["evaluation"])
-    control["codex"] = {
+    agent_key = "pi" if is_pi else "codex"
+    control[agent_key] = {
         "lanes": [
-            {"lane": item["lane"], **item["codex"]} for item in lane_results
-        ]
+            {"lane": item["lane"], **item[agent_key]} for item in lane_results
+        ],
+        "coverage": f"top-level {'Pi' if is_pi else 'Codex'} usage for every independent lane",
     }
     control["evaluator_calls"] = {
         "lane_count": len(lane_results),
@@ -810,11 +856,11 @@ def execute_plain(
     ]
     if bad:
         control["result_incomplete_reason"] = (
-            "plain Codex lanes did not exit cleanly: " + ", ".join(bad)
+            f"{manifest['method']} lanes did not exit cleanly: " + ", ".join(bad)
         )
     if not valid_lane_results:
         control["result_incomplete_reason"] = (
-            "official final evaluator rejected every Plain Codex lane"
+            f"official final evaluator rejected every {manifest['method']} lane"
         )
     return control
 
@@ -1158,7 +1204,7 @@ def execute(args: argparse.Namespace) -> int:
         raise ValueError(f"model mismatch: prepared {manifest['model']}, got {args.model}")
     if (
         sky_backend.is_method(manifest["method"])
-        or manifest["method"] == "goal-plus-pi"
+        or manifest["method"] in {"plain-pi", "goal-plus-pi"}
     ) and not args.api_base:
         raise ValueError(f"--api-base is required for {manifest['method']}")
     if args.api_base and not os.environ.get("OPENAI_API_KEY"):
@@ -1169,7 +1215,7 @@ def execute(args: argparse.Namespace) -> int:
     manifest["status"] = "running"
     manifest["execution_started_at"] = utc_now()
     write_json(manifest_path, manifest)
-    if manifest["method"] == "plain-codex":
+    if manifest["method"] in {"plain-codex", "plain-pi"}:
         control = execute_plain(manifest, run_dir, args, environment)
     elif sky_backend.is_method(manifest["method"]):
         control = execute_skydiscover(manifest, run_dir, args, environment)
@@ -1202,7 +1248,7 @@ def execute(args: argparse.Namespace) -> int:
         [str(bin_dir / "skydiscover-run"), "--version"]
         if sky_backend.is_method(manifest["method"])
         else [args.pi_bin, "--version"]
-        if manifest["method"] == "goal-plus-pi"
+        if manifest["method"] in {"plain-pi", "goal-plus-pi"}
         else [args.codex_bin, "--version"]
     )
     version = subprocess.run(

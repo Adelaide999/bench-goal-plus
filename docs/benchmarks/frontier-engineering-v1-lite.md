@@ -26,12 +26,16 @@ v1-lite 涵盖 MallocLab、量子路由、JobShop、库存优化、电池快充�
 `frontier-engineering-native`。旧的 `frontier-engineering-malloclab` 仍保留为
 common runner 的单题回归 smoke，不能代表完整 v1-lite。
 
-当前 native runner 支持 `plain-codex`、`goal-plus-codex` 和
+当前 native runner 支持 `plain-codex`、`plain-pi`、`goal-plus-codex` 和
 `goal-plus-pi`。冻结 profile 包括：
 
 - `energy-storage-codex-smoke`：电池快充单题，`T=300, K=1, C=1, R=1`，
   作为首选接入验收；
 - `jobshop-codex-smoke`：JobShop 单题，`T=300, K=1, C=1, R=1`；
+- `energy-storage-pi-smoke`：电池快充 Plain Pi 单题，
+  `T=300, K=1, C=1, R=1`；
+- `energy-storage-goal-plus-pi-smoke`：同题 Goal Plus + Pi，
+  `T=600, K=1, C=1, R=1`，一个 outer Pi 主会话和一个内部 worker；
 - `v1-lite-cpu-codex-1h`：默认 9 个 CPU task，每题
   `T=3600, K=1, C=1, R=1`；
 - `v1-lite-codex-1h`：完整 10 题，显式 `nvidia-cuda-opt-in`，额外包含
@@ -66,6 +70,10 @@ python3 scripts/bench.py setup \
   --benchmark frontier-engineering --profile v1-lite-cpu-codex-1h
 python3 scripts/bench.py plan \
   --preset frontier-engineering-energy-storage-codex-smoke
+python3 scripts/bench.py plan \
+  --preset frontier-engineering-energy-storage-pi-smoke
+python3 scripts/bench.py plan \
+  --preset frontier-engineering-energy-storage-goal-plus-pi-smoke
 ```
 
 ---

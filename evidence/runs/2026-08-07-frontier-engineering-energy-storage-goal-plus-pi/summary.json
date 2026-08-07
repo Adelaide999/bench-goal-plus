@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "kind": "frontier_engineering_native_goal_plus_pi_smoke",
+  "run_date": "2026-08-07",
+  "status": "completed",
+  "campaign_id": "frontier-engineering-energy-storage-goal-plus-pi-gpt-5-6-sol-medium-10m-k1-c1-r1-20260807-revert-smoke",
+  "task": {
+    "benchmark": "frontier-engineering",
+    "suite": "v1-lite",
+    "task_id": "EnergyStorage/BatteryFastChargingSPMe",
+    "metric": "combined_score",
+    "direction": "maximize",
+    "upstream_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+    "evaluator_sha256": "4803bf3457c65317a1456b4a7650e9b65a1a44779fa665c9edf8ea5fda1aa42e"
+  },
+  "method": {
+    "id": "goal-plus-pi",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "provider_contract": "Pi run-local OpenAI-compatible provider",
+    "runner_version": "pi 0.83.0"
+  },
+  "budget": {
+    "T": 600,
+    "K": 1,
+    "C": 1,
+    "R": 1,
+    "soft_closeout_seconds": 60,
+    "hard_kill_grace_seconds": 30,
+    "worker_max_runtime_seconds": 120
+  },
+  "source": {
+    "bench_goal_plus_commit": "fd0f430703b165585cf66b8eb45c00f11ad264fd",
+    "bench_goal_plus_dirty_at_prepare": true,
+    "dirty_at_prepare_explanation": "The Frontier-Engineering Pi method adaptation was exercised from the current worktree; this evidence records the exact managed upstream, Goal Plus, evaluator, candidate, and raw run hashes.",
+    "frontier_engineering_commit": "e3fa29c193356af2ce1ec8b3d23ab1a2e2410071",
+    "goal_plus_commit": "a21deb8a8d93cb0001c4a252eb3c7d3b2d038dbf"
+  },
+  "environment": {
+    "platform": "linux/amd64",
+    "docker_requirement": "not_required",
+    "inventory_check": "pass",
+    "full_doctor": "pass",
+    "runtime": "frontier-eval-driver"
+  },
+  "execution": {
+    "duration_seconds": 541.221266784938,
+    "deadline_reached": false,
+    "hard_killed": false,
+    "returncode": 0,
+    "selected_candidate_id": "c001",
+    "selected_iteration": 5,
+    "selected_git_revision": "a8fef7a9f76aedc99e25029874a1a81791865121",
+    "source_patch_status": "already_applied",
+    "result_incomplete_reason": null,
+    "evaluator_calls": {
+      "total_claimed": 8,
+      "setup_claimed_before_t": 1,
+      "process_verifier_commands": 5,
+      "promotion_verifier_commands": 1,
+      "controller_final_claimed": 1
+    },
+    "usage": {
+      "input_tokens": 347105,
+      "cached_input_tokens": 4888320,
+      "output_tokens": 5760,
+      "cost_usd": 0.0,
+      "coverage": "top-level Pi usage plus persisted Goal Plus Evidence annotator turns"
+    }
+  },
+  "goal_plus": {
+    "goal_id": "gp_0001",
+    "run_id": "run_20260807_093055_87a69336",
+    "run_status": "promoted",
+    "candidate_count": 1,
+    "bound_agent_session_count": 1,
+    "bound_candidate_count": 1,
+    "worker_verified_candidate_count": 1,
+    "actual_subagent_count": 1,
+    "configured_K": 1,
+    "subagent_count_matches_K": true,
+    "process_verifier_command_count": 5,
+    "promotion_verifier_command_count": 1,
+    "selected_candidate_id": "c001",
+    "selected_iteration": 5,
+    "selected_score": 67.45497794179737,
+    "selected_git_revision": "a8fef7a9f76aedc99e25029874a1a81791865121",
+    "controller_closeout_reused_existing_promotion": true
+  },
+  "result": {
+    "valid": true,
+    "seed_score": 66.16356426696784,
+    "final_score": 67.45497794179737,
+    "directional_gain": 1.2914136748295277,
+    "relative_gain": 0.01951850220188736,
+    "charge_time_s": 1304.0,
+    "max_temp_c": 32.43885288388829,
+    "max_voltage_v": 4.18154067519019,
+    "best_score_trace": [
+      {"elapsed_seconds": 0.0, "best_score": 66.16356426696784},
+      {"elapsed_seconds": 437.165826, "best_score": 67.45497794179737}
+    ]
+  },
+  "artifacts": {
+    "candidate": "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi/candidate.py",
+    "official_report": "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi/official-report.json",
+    "full_run_directory": "runs/frontier-engineering/frontier-engineering-energy-storage-goal-plus-pi-gpt-5-6-sol-medium-10m-k1-c1-r1-20260807-revert-smoke",
+    "full_run_directory_policy": "ignored and preserved locally",
+    "sha256": {
+      "raw_campaign_summary": "599b70190c0141dfe25e67cf84f514e43530d0fe8fc1a1b4d44665ce1608aa6d",
+      "raw_final_evaluation": "4d81033a58ec2239c0ef723595311016c4ad38b3ef000ebef21586f052579923",
+      "raw_candidate_record": "ea190a87a5ec9f40c903833033fe3a4d00a4b616fd96c0165d0afb09c07e1e69",
+      "candidate": "e26a69c1f253883000c524f8b41f9162269dc74810d8e997a3af0cc858a62792"
+    }
+  },
+  "reproduction": {
+    "check": "python3 scripts/bench.py check --preset frontier-engineering-energy-storage-goal-plus-pi-smoke",
+    "setup": "python3 scripts/bench.py setup --preset frontier-engineering-energy-storage-goal-plus-pi-smoke",
+    "plan": "python3 scripts/bench.py plan --preset frontier-engineering-energy-storage-goal-plus-pi-smoke --campaign-id <new-campaign-id>",
+    "launch": "python3 scripts/bench.py launch --preset frontier-engineering-energy-storage-goal-plus-pi-smoke --campaign-id <new-campaign-id>",
+    "status": "python3 scripts/bench.py status --campaign runs/frontier-engineering/<new-campaign-id>",
+    "finish": "python3 scripts/bench.py finish --campaign runs/frontier-engineering/<new-campaign-id>"
+  },
+  "limitations": [
+    "This smoke proves the registered Goal Plus + Pi K=1, C=1 path for one CPU-only v1-lite task, not the default nine-task CPU suite.",
+    "Plain Pi, Goal Plus + Codex, K>1, and matched-method comparisons remain unproven.",
+    "The source control-plane worktree was dirty at prepare time; exact managed upstream, Goal Plus, evaluator, candidate, and raw run hashes are retained for review."
+  ],
+  "secret_scan": {
+    "scope": "committed evidence projection",
+    "result": "clean",
+    "credential_values_persisted": false
+  }
+}

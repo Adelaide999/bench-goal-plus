@@ -61,9 +61,13 @@ def collect_usage(execution: dict[str, Any]) -> dict[str, Any]:
         if isinstance(codex.get("top_level_usage"), dict):
             usages.append(codex["top_level_usage"])
     pi = execution.get("pi")
-    if isinstance(pi, dict) and isinstance(pi.get("usage"), dict):
-        usages.append(pi["usage"])
+    if isinstance(pi, dict):
         coverage = pi.get("coverage", coverage)
+        for lane in pi.get("lanes") or []:
+            if isinstance(lane, dict) and isinstance(lane.get("usage"), dict):
+                usages.append(lane["usage"])
+        if isinstance(pi.get("usage"), dict):
+            usages.append(pi["usage"])
     annotator = execution.get("evidence_annotator_usage")
     if isinstance(annotator, dict):
         usages.append(annotator)

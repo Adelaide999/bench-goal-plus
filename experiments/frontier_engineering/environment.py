@@ -36,16 +36,84 @@ REQUIRED_CONTROL_FILES = (
 )
 
 
-def command_output(command: list[str], *, cwd: Path | None = None) -> tuple[bool, str]:
+def command_output(
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    environment: dict[str, str] | None = None,
+) -> tuple[bool, str]:
     completed = subprocess.run(
         command,
         cwd=cwd,
+        env=environment,
         capture_output=True,
         text=True,
         check=False,
     )
     output = (completed.stdout or completed.stderr).strip()
     return completed.returncode == 0, output
+
+
+def _pi_agent_checks(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    from experiments.openevolve_compare.experiment import (
+        PI_PROVIDER_ID,
+        write_pi_models_config,
+    )
+
+    path = shutil.which("pi")
+    version_ok, version = command_output([path, "--version"]) if path else (False, "")
+    base_present = bool(os.environ.get("OPENAI_BASE_URL"))
+    key_present = bool(os.environ.get("OPENAI_API_KEY"))
+    qualified_model = f"{PI_PROVIDER_ID}/{profile['model']}"
+    model_visible = False
+    model_error = None
+    if path and version_ok and base_present and key_present:
+        pi_home = ROOT / ".tmp/frontier-engineering/pi-doctor" / profile["id"]
+        write_pi_models_config(
+            pi_home,
+            api_base=str(os.environ["OPENAI_BASE_URL"]),
+            model=str(profile["model"]),
+            reasoning_effort=str(profile["reasoning_effort"]),
+        )
+        probe_environment = configure_temp_environment(os.environ.copy())
+        probe_environment["PI_CODING_AGENT_DIR"] = str(pi_home)
+        visible_ok, output = command_output(
+            [path, "--offline", "--list-models", qualified_model],
+            environment=probe_environment,
+        )
+        model_visible = visible_ok and any(
+            columns[:2] == [PI_PROVIDER_ID, str(profile["model"])]
+            for line in output.splitlines()
+            for columns in [line.split()]
+            if len(columns) >= 2
+        )
+        if not model_visible:
+            model_error = "configured provider/model was not visible to Pi"
+    return [
+        {
+            "kind": "agent",
+            "name": "pi",
+            "path": path,
+            "version": version,
+            "passed": version_ok,
+        },
+        {
+            "kind": "agent-provider",
+            "name": "pi-openai-compatible",
+            "provider": PI_PROVIDER_ID,
+            "model": qualified_model,
+            "api_base_env": "OPENAI_BASE_URL",
+            "api_base_present": base_present,
+            "api_key_env": "OPENAI_API_KEY",
+            "api_key_present": key_present,
+            "model_visible": model_visible,
+            "error": model_error,
+            "passed": version_ok
+            and base_present
+            and key_present
+            and model_visible,
+        },
+    ]
 
 
 def git_value(root: Path, *args: str) -> str | None:
@@ -284,9 +352,14 @@ def _seed_probe(task_id: str) -> dict[str, Any]:
     ]
     if task.runtime_python_env:
         command.extend(["--runtime-python-env", task.runtime_python_env])
+    probe_environment = os.environ.copy()
+    probe_environment["FRONTIER_EVAL_EVALUATOR_TIMEOUT_S"] = str(
+        task.evaluator_timeout_seconds
+    )
     completed = subprocess.run(
         command,
         cwd=UPSTREAM_ROOT,
+        env=probe_environment,
         capture_output=True,
         text=True,
         timeout=task.evaluator_timeout_seconds,
@@ -343,11 +416,7 @@ def doctor(
             {"kind": "agent", "name": "codex", "path": path, "version": version, "passed": ok}
         )
     if any(method.endswith("-pi") for method in profile["methods"]):
-        path = shutil.which("pi")
-        ok, version = command_output([path, "--version"]) if path else (False, "")
-        checks.append(
-            {"kind": "agent", "name": "pi", "path": path, "version": version, "passed": ok}
-        )
+        checks.extend(_pi_agent_checks(profile))
     for name, root, expected_branch in (
         ("frontier_engineering", UPSTREAM_ROOT, "main"),
         ("goal_plus", GOAL_PLUS_ROOT, "main"),

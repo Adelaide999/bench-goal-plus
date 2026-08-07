@@ -65,7 +65,8 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                 self.assertFalse(result["source"]["commit_matches"])
                 self.assertFalse(result["ready"])
 
-    def test_generic_runner_keeps_goal_plus_pi_entrypoints(self) -> None:
+    def test_generic_runner_keeps_plain_and_goal_plus_pi_entrypoints(self) -> None:
+        self.assertIn("plain-pi", experiment.METHODS)
         self.assertIn("goal-plus-pi", experiment.METHODS)
         config = experiment.RunConfig(
             run_dir=Path("run"),
@@ -77,6 +78,75 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             ["run", "--run-dir", "run", "--pi-bin", "pi-test"]
         )
         self.assertEqual(args.pi_bin, "pi-test")
+
+    def test_plain_pi_runs_isolated_outer_lane_with_pi_json_evidence(self) -> None:
+        self.addCleanup(experiment.configure_adapter, "heurigym")
+        experiment.configure_adapter("local-vliw")
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = Path(temporary) / "run"
+            workspace = run_dir / "workspaces/lane-00"
+            workspace.mkdir(parents=True)
+            (workspace / "TASK.md").write_text("optimize\n", encoding="utf-8")
+            (workspace / experiment.ARTIFACT_NAME).write_text(
+                "# candidate\n", encoding="utf-8"
+            )
+            manifest = {
+                "method": "plain-pi",
+                "reasoning_effort": "medium",
+                "workspaces": [str(workspace)],
+                "budget": {
+                    "wall_time_seconds": 300,
+                    "soft_closeout_seconds": 60,
+                    "hard_kill_grace_seconds": 30,
+                    "concurrency": 1,
+                },
+            }
+            args = SimpleNamespace(
+                model="gpt-test",
+                pi_bin="pi-test",
+                codex_bin="codex-test",
+                api_base="http://proxy.example/v1",
+            )
+            evaluation = {
+                "valid": True,
+                "primary_metric": {"value": 2.0},
+                "budget": {"total_claimed": 1},
+            }
+            controlled = {
+                "lanes": [
+                    {"name": "lane-00", "returncode": 0, "hard_killed": False}
+                ]
+            }
+            with (
+                patch.object(experiment, "evaluate", return_value=evaluation),
+                patch.object(
+                    experiment,
+                    "evaluator_budget",
+                    return_value={"total_claimed": 1},
+                ),
+                patch.object(experiment, "write_pi_models_config") as write_models,
+                patch.object(
+                    experiment, "run_controlled_many", return_value=controlled
+                ) as run_many,
+                patch.object(
+                    experiment,
+                    "parse_pi_events",
+                    return_value={"usage": {"input": 3}, "coverage": "pi"},
+                ),
+            ):
+                result = experiment.execute_plain(manifest, run_dir, args, {})
+
+            job = run_many.call_args.args[0][0]
+            self.assertEqual(job["command"][0], "pi-test")
+            self.assertIn("bench-openai/gpt-test", job["command"])
+            self.assertIsNone(job["stdin_text"])
+            self.assertEqual(
+                job["environment"]["PI_CODING_AGENT_DIR"],
+                str(run_dir / "lanes/lane-00/pi-home"),
+            )
+            write_models.assert_called_once()
+            self.assertEqual(result["selected_lane"], "lane-00")
+            self.assertEqual(result["pi"]["lanes"][0]["usage"]["input"], 3)
 
     def test_legacy_heurigym_entrypoint_delegates_adapter_state(self) -> None:
         self.addCleanup(experiment.configure_adapter, "heurigym")

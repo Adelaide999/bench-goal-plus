@@ -145,8 +145,8 @@
         "native_baseline": "pass",
         "plain_codex": "pass",
         "goal_plus_codex": "partial",
-        "plain_pi": "n/a",
-        "goal_plus_pi": "partial",
+        "plain_pi": "partial",
+        "goal_plus_pi": "pass",
         "matched_baseline": "todo",
         "campaign_ready": "partial"
       },
@@ -155,6 +155,9 @@
         "evidence/environment/2026-08-07-frontier-engineering-v1-lite-doctor.json",
         "evidence/environment/2026-08-07-frontier-engineering-cpu-default-doctor.json",
         "evidence/runs/2026-08-07-frontier-engineering-energy-storage-plain-codex/summary.json",
+        "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi/summary.json",
+        "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi/candidate.py",
+        "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi/official-report.json",
         "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.json",
         "evidence/runs/2026-07-23-standalone-benchmark-codex-goal-plus.md"
       ],
@@ -169,11 +172,16 @@
         ],
         "plain_codex": [
           "evidence/runs/2026-08-07-frontier-engineering-energy-storage-plain-codex/summary.json"
+        ],
+        "goal_plus_pi": [
+          "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi/summary.json",
+          "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi/candidate.py",
+          "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi/official-report.json"
         ]
       },
-      "next_action": "Validate Goal Plus + Codex and Goal Plus + Pi on the CPU-only EnergyStorage task with actual subagent evidence, then test K>1 and matched methods before expanding the default 9-task CPU campaign.",
+      "next_action": "Validate Plain Pi and Goal Plus + Codex on the CPU-only EnergyStorage task, then validate K>1 before expanding the default 9-task CPU campaign.",
       "blockers": [
-        "The native Plain Codex K=1 EnergyStorage path has real E2E evidence, but Goal Plus + Codex and Goal Plus + Pi still require separate real E2E evidence.",
+        "The native Plain Codex and Goal Plus + Pi K=1 EnergyStorage paths have real E2E evidence, but Plain Pi and Goal Plus + Codex still require separate real E2E evidence.",
         "K>1 and matched-method comparisons remain unproven; current native profiles use K=1 and C=1.",
         "The full 10-task v1-lite profile includes CUDA-backed RobotArm and remains explicit opt-in; default inventory and campaigns use the 9-task CPU subset."
       ]

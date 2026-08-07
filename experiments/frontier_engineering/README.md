@@ -17,6 +17,11 @@ python3 scripts/bench.py status --campaign runs/frontier-engineering/<id>
 python3 scripts/bench.py finish --campaign runs/frontier-engineering/<id>
 ```
 
+The Plain Pi and Goal Plus + Pi acceptance presets use the same EnergyStorage
+task with `K=1, C=1, R=1`. Plain Pi uses `T=300` and starts one isolated outer
+lane. Goal Plus + Pi uses the exercised `T=600` budget and starts one outer Pi
+session whose one internal worker shares the Goal Plus Search state.
+
 The EnergyStorage preset is the primary acceptance smoke: its editable policy is
 small, its shipped candidate is feasible, and its official evaluator is fast
 enough for repeated feedback inside a five-minute Agent budget. The JobShop

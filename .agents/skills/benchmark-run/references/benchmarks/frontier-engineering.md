@@ -16,6 +16,10 @@ runtime's PyTorch CUDA probe before evaluating a seed. The legacy target
   event; `combined_score` is maximize.
 - Goal Plus cells additionally require actual worker/subagent evidence equal to
   `K`; missing evidence keeps the cell and campaign `partial`.
+- Plain Pi uses `K` isolated outer Pi lanes. Both Pi methods require the
+  profile model to be visible through the run-local OpenAI-compatible Pi
+  provider configured from `OPENAI_BASE_URL` and `OPENAI_API_KEY`; values are
+  inherited and never written to campaign manifests or reports.
 - Final source is `campaign-summary.json`; `finish` exports `report.md` and the
   campaign-named XLSX.
 
@@ -32,3 +36,5 @@ several v1-lite evaluators are timing- or GPU-sensitive. Do not map Hydra batch
 Before setup, run the profile inventory. Provision creates only the three uv
 runtimes used by v1-lite (`frontier-eval-driver`, `frontier-v1-main`, and
 `frontier-v1-summit`); it does not install host packages or unrelated v1 assets.
+The EnergyStorage acceptance profiles freeze `K=1, C=1, R=1`; Plain Pi uses
+`T=300`, while Goal Plus + Pi uses the exercised `T=600` closeout budget.

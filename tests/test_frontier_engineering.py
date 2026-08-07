@@ -23,6 +23,10 @@ PLAIN_CODEX_EVIDENCE = (
     ROOT
     / "evidence/runs/2026-08-07-frontier-engineering-energy-storage-plain-codex"
 )
+GOAL_PLUS_PI_EVIDENCE = (
+    ROOT
+    / "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi"
+)
 CPU_DEFAULT_EVIDENCE = (
     ROOT
     / "evidence/environment/2026-08-07-frontier-engineering-cpu-default-doctor.json"
@@ -123,6 +127,12 @@ class FrontierEngineeringTest(unittest.TestCase):
         ]
         self.assertEqual(reaction.runtime_env, "frontier-eval-driver")
         self.assertEqual(reaction.runtime_python_env, "frontier-v1-summit")
+        self.assertEqual(
+            config.V1_LITE_TASKS[
+                "EnergyStorage/BatteryFastChargingSPMe"
+            ].evaluator_timeout_seconds,
+            300,
+        )
         self.assertEqual(
             config.V1_LITE_TASKS[
                 "Robotics/RobotArmCycleTimeOptimization"
@@ -263,6 +273,55 @@ class FrontierEngineeringTest(unittest.TestCase):
         self.assertEqual(len(task["missing"]), len(set(task["missing"])))
         self.assertFalse(inventory["passed"])
 
+    def test_seed_probe_uses_the_registered_evaluator_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            upstream = Path(temporary) / "upstream"
+            make_upstream(
+                upstream,
+                "EnergyStorage/BatteryFastChargingSPMe",
+                "init.py",
+            )
+            observed: dict[str, object] = {}
+
+            def run_bridge(
+                command: list[str], **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
+                observed["environment"] = kwargs["env"]
+                observed["timeout"] = kwargs["timeout"]
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    json.dumps(
+                        {
+                            "metrics": {
+                                "valid": 1.0,
+                                "combined_score": 12.5,
+                                "timeout_budget_s": 300.0,
+                            }
+                        }
+                    ),
+                    "",
+                )
+
+            with (
+                mock.patch.object(environment, "UPSTREAM_ROOT", upstream),
+                mock.patch.object(
+                    environment.subprocess, "run", side_effect=run_bridge
+                ),
+            ):
+                result = environment._seed_probe(
+                    "EnergyStorage/BatteryFastChargingSPMe"
+                )
+
+        probe_environment = observed["environment"]
+        self.assertIsInstance(probe_environment, dict)
+        self.assertEqual(
+            probe_environment["FRONTIER_EVAL_EVALUATOR_TIMEOUT_S"], "300"
+        )
+        self.assertEqual(observed["timeout"], 300)
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["metrics"]["timeout_budget_s"], 300.0)
+
     def test_accelerator_doctor_probes_only_explicit_gpu_profile(self) -> None:
         _, cpu_profile = config.load_profile("v1-lite-cpu-codex-1h")
         _, gpu_profile = config.load_profile("v1-lite-codex-1h")
@@ -301,7 +360,7 @@ class FrontierEngineeringTest(unittest.TestCase):
         self.assertEqual(target.default_inventory_profile, "v1-lite-cpu-codex-1h")
         self.assertEqual(
             runner.supported_methods,
-            ("plain-codex", "goal-plus-codex", "goal-plus-pi"),
+            ("plain-codex", "plain-pi", "goal-plus-codex", "goal-plus-pi"),
         )
         energy_spec = agent.resolve_spec(
             preset_id="frontier-engineering-energy-storage-codex-smoke"
@@ -314,6 +373,28 @@ class FrontierEngineeringTest(unittest.TestCase):
         self.assertEqual(
             energy_profile["task_ids"], ["EnergyStorage/BatteryFastChargingSPMe"]
         )
+        for preset_id, method in (
+            ("frontier-engineering-energy-storage-pi-smoke", "plain-pi"),
+            (
+                "frontier-engineering-energy-storage-goal-plus-pi-smoke",
+                "goal-plus-pi",
+            ),
+        ):
+            pi_spec = agent.resolve_spec(preset_id=preset_id)
+            self.assertEqual(pi_spec.methods, (method,))
+            self.assertEqual(
+                pi_spec.concurrency(),
+                {
+                    "T": 600 if method == "goal-plus-pi" else 300,
+                    "K": 1,
+                    "C": 1,
+                    "R": 1,
+                },
+            )
+            _, pi_profile = config.load_profile(pi_spec.profile)
+            self.assertEqual(
+                pi_profile["task_ids"], ["EnergyStorage/BatteryFastChargingSPMe"]
+            )
         spec = agent.resolve_spec(
             preset_id="frontier-engineering-jobshop-codex-smoke"
         )
@@ -336,6 +417,44 @@ class FrontierEngineeringTest(unittest.TestCase):
                 live_search_concurrency=1,
                 cell_concurrency=2,
             )
+
+    def test_pi_doctor_checks_exact_model_without_persisting_credentials(self) -> None:
+        _, profile = config.load_profile("energy-storage-pi-smoke")
+        with (
+            mock.patch.dict(
+                environment.os.environ,
+                {
+                    "OPENAI_BASE_URL": "https://provider.example/v1",
+                    "OPENAI_API_KEY": "secret-value",
+                },
+            ),
+            mock.patch.object(environment.shutil, "which", return_value="/bin/pi"),
+            mock.patch.object(
+                environment,
+                "command_output",
+                side_effect=[
+                    (True, "0.83.0"),
+                    (
+                        True,
+                        "provider model context\n"
+                        "bench-openai gpt-5.6-sol 272K",
+                    ),
+                ],
+            ),
+            mock.patch(
+                "experiments.openevolve_compare.experiment.write_pi_models_config"
+            ) as write_models,
+        ):
+            checks = environment._pi_agent_checks(profile)
+
+        self.assertTrue(all(item["passed"] for item in checks))
+        provider = checks[1]
+        self.assertEqual(provider["model"], "bench-openai/gpt-5.6-sol")
+        self.assertEqual(provider["api_key_env"], "OPENAI_API_KEY")
+        serialized = json.dumps(checks)
+        self.assertNotIn("secret-value", serialized)
+        self.assertNotIn("https://provider.example/v1", serialized)
+        write_models.assert_called_once()
 
     def test_plain_codex_stage_is_backed_by_archived_native_evidence(self) -> None:
         registry = json.loads((ROOT / "benchmarks/registry.json").read_text())
@@ -368,6 +487,47 @@ class FrontierEngineeringTest(unittest.TestCase):
         self.assertEqual(official["primary_metric"]["direction"], "maximize")
         self.assertEqual(official["primary_metric"]["value"], 121.2063096578825)
         self.assertEqual(summary["result"]["final_score"], 121.2063096578825)
+        self.assertGreater(
+            summary["result"]["final_score"], summary["result"]["seed_score"]
+        )
+        self.assertTrue(candidate_path.is_file())
+
+    def test_goal_plus_pi_stage_is_backed_by_archived_native_evidence(self) -> None:
+        registry = json.loads((ROOT / "benchmarks/registry.json").read_text())
+        benchmark = next(
+            item
+            for item in registry["items"]
+            if item["id"] == "frontier-engineering-lite"
+        )
+        summary_path = GOAL_PLUS_PI_EVIDENCE / "summary.json"
+        official_path = GOAL_PLUS_PI_EVIDENCE / "official-report.json"
+        candidate_path = GOAL_PLUS_PI_EVIDENCE / "candidate.py"
+        summary = json.loads(summary_path.read_text())
+        official = json.loads(official_path.read_text())
+
+        self.assertEqual(benchmark["stages"]["goal_plus_pi"], "pass")
+        for path in (summary_path, official_path, candidate_path):
+            self.assertIn(
+                str(path.relative_to(ROOT)),
+                benchmark["stage_evidence"]["goal_plus_pi"],
+            )
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(
+            {key: summary["budget"][key] for key in ("T", "K", "C", "R")},
+            {"T": 600, "K": 1, "C": 1, "R": 1},
+        )
+        self.assertEqual(summary["goal_plus"]["actual_subagent_count"], 1)
+        self.assertTrue(summary["goal_plus"]["subagent_count_matches_K"])
+        self.assertEqual(summary["execution"]["selected_iteration"], 5)
+        self.assertEqual(
+            summary["execution"]["selected_git_revision"],
+            "a8fef7a9f76aedc99e25029874a1a81791865121",
+        )
+        self.assertTrue(official["valid"])
+        self.assertEqual(official["primary_metric"]["direction"], "maximize")
+        self.assertEqual(
+            official["primary_metric"]["value"], summary["result"]["final_score"]
+        )
         self.assertGreater(
             summary["result"]["final_score"], summary["result"]["seed_score"]
         )

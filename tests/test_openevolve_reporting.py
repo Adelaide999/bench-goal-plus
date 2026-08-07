@@ -201,6 +201,41 @@ class OpenEvolveReportingTest(unittest.TestCase):
             self.assertIsNone(record["execution"]["usage"].get("input_tokens"))
             self.assertIn("missing", record["execution"]["evaluator_calls"]["coverage"])
 
+    def test_collects_plain_pi_usage_across_isolated_lanes(self) -> None:
+        usage = reporting.collect_usage(
+            {
+                "pi": {
+                    "coverage": "top-level Pi usage for every independent lane",
+                    "lanes": [
+                        {
+                            "lane": "lane-00",
+                            "usage": {
+                                "input": 100,
+                                "output": 10,
+                                "cache_read": 1_000,
+                            },
+                        },
+                        {
+                            "lane": "lane-01",
+                            "usage": {
+                                "input": 200,
+                                "output": 20,
+                                "cache_read": 2_000,
+                            },
+                        },
+                    ],
+                }
+            }
+        )
+
+        self.assertEqual(usage["input_tokens"], 300)
+        self.assertEqual(usage["output_tokens"], 30)
+        self.assertEqual(usage["cached_input_tokens"], 3_000)
+        self.assertEqual(
+            usage["coverage"],
+            "top-level Pi usage for every independent lane",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1871,19 +1871,21 @@ def run_controlled_many(
     for job in jobs:
         stdout = Path(job["stdout_path"]).open("w")
         stderr = Path(job["stderr_path"]).open("w")
+        stdin_text = job.get("stdin_text")
         process = subprocess.Popen(
             job["command"],
             cwd=job["cwd"],
-            env=environment,
-            stdin=subprocess.PIPE,
+            env=job.get("environment", environment),
+            stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
             stdout=stdout,
             stderr=stderr,
             text=True,
             start_new_session=True,
         )
-        assert process.stdin is not None
-        process.stdin.write(job["stdin_text"])
-        process.stdin.close()
+        if stdin_text is not None:
+            assert process.stdin is not None
+            process.stdin.write(stdin_text)
+            process.stdin.close()
         running.append(
             {
                 **job,

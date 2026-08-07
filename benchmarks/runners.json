@@ -70,6 +70,7 @@
       "evidence_filename": "campaign-summary.json",
       "supported_methods": [
         "plain-codex",
+        "plain-pi",
         "goal-plus-codex",
         "goal-plus-pi"
       ],
@@ -297,6 +298,38 @@
         "model": "gpt-5.6-sol",
         "reasoning_effort": "medium",
         "wall_time_seconds": 300,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "frontier-engineering-energy-storage-pi-smoke",
+      "description": "One-task Frontier-Engineering v1-lite Plain Pi smoke on BatteryFastChargingSPMe.",
+      "benchmarks": ["frontier-engineering"],
+      "profile": "energy-storage-pi-smoke",
+      "campaign_id_template": "frontier-engineering-energy-storage-plain-pi-gpt-5-6-sol-medium-5m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["plain-pi"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 300,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "frontier-engineering-energy-storage-goal-plus-pi-smoke",
+      "description": "One-task Frontier-Engineering v1-lite Goal Plus + Pi smoke with one live search worker.",
+      "benchmarks": ["frontier-engineering"],
+      "profile": "energy-storage-goal-plus-pi-smoke",
+      "campaign_id_template": "frontier-engineering-energy-storage-goal-plus-pi-gpt-5-6-sol-medium-10m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 600,
         "concurrency": 1,
         "cell_concurrency": 1
       }
