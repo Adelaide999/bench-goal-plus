@@ -46,6 +46,10 @@ traffic remains available without a public route. Before the trajectory starts, 
 requires Docker inspect to show the exact internal network and requires a direct public-IP probe to
 fail; the verification and network cleanup disposition are persisted in the final evidence. The
 current Astropy 13033 Codex ON/OFF profiles freeze this policy.
+The container temporarily joins Docker's default bridge only while the controller installs the
+profile-locked Goal Plus runtime, before any Agent or model process starts. The controller then
+disconnects that setup network and requires the internal network to be the sole remaining attachment
+before either the Responses probe or Agent invocation.
 
 Goal Plus + Pi starts one outer Pi JSON session through the project extension, then requires one
 candidate-bound `pi-rpc` worker in the shared Search state. Its frozen SearchSpec uses only an

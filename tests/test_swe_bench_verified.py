@@ -1832,7 +1832,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         )
 
         inspected_container = json.dumps(
-            [{"HostConfig": {"NetworkMode": network["name"]}}]
+            [
+                {
+                    "HostConfig": {"NetworkMode": network["name"]},
+                    "NetworkSettings": {"Networks": {network["name"]: {}}},
+                }
+            ]
         )
         blocked = subprocess.CompletedProcess(
             ["docker", "exec"], 0, "PUBLIC_EGRESS_BLOCKED TimeoutError\n", ""
@@ -1847,6 +1852,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
         self.assertTrue(verification["passed"])
         self.assertEqual(verification["public_egress_probe"], "blocked")
+        self.assertEqual(verification["attached_networks"], [network["name"]])
         network["verification"] = verification
         agent = {
             "runtime": {"agent_network": network},
@@ -1866,8 +1872,71 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         ):
             runtime._verify_agent_network("container-id", network)
 
+        leaked_setup_network = json.dumps(
+            [
+                {
+                    "HostConfig": {"NetworkMode": network["name"]},
+                    "NetworkSettings": {
+                        "Networks": {network["name"]: {}, "bridge": {}}
+                    },
+                }
+            ]
+        )
+        with (
+            mock.patch.object(
+                runtime, "_docker_checked", return_value=leaked_setup_network
+            ),
+            mock.patch.object(runtime, "_run", return_value=blocked),
+            self.assertRaisesRegex(SweBenchContractError, "isolation probe failed"),
+        ):
+            runtime._verify_agent_network("container-id", network)
+
         network["verification"] = {"passed": False}
         self.assertFalse(reporting._agent_network_verified(agent, profile))
+
+    def test_setup_egress_is_disconnected_before_agent_network_probe(self) -> None:
+        network = {
+            "policy": "public-egress-blocked",
+            "name": "bgp-swe-net-test",
+        }
+        commands: list[list[str]] = []
+
+        def docker_checked(command: list[str], *, timeout: int = 120) -> str:
+            del timeout
+            commands.append(command)
+            return ""
+
+        with mock.patch.object(
+            runtime, "_docker_checked", side_effect=docker_checked
+        ):
+            with runtime._temporary_setup_egress("container-id", network):
+                self.assertTrue(network["setup_egress"]["connected"])
+                self.assertIsNone(
+                    network["setup_egress"]["disconnected_before_agent"]
+                )
+
+        self.assertEqual(
+            commands,
+            [
+                [
+                    "docker",
+                    "network",
+                    "connect",
+                    "bridge",
+                    "container-id",
+                ],
+                [
+                    "docker",
+                    "network",
+                    "disconnect",
+                    "bridge",
+                    "container-id",
+                ],
+            ],
+        )
+        self.assertTrue(
+            network["setup_egress"]["disconnected_before_agent"]
+        )
 
     def test_codex_runtime_probe_and_agent_use_the_same_bounded_tmpfs(self) -> None:
         profile = self.profile("sympy-16886-codex-smoke")

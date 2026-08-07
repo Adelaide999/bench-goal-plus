@@ -397,6 +397,32 @@ else:
 """
 
 
+@contextmanager
+def _temporary_setup_egress(
+    container_id: str, network: dict[str, Any]
+) -> Iterable[dict[str, Any]]:
+    setup_egress = {
+        "required": network["policy"] != "default",
+        "network": None,
+        "connected": False,
+        "disconnected_before_agent": None,
+    }
+    network["setup_egress"] = setup_egress
+    if not setup_egress["required"]:
+        yield setup_egress
+        return
+
+    _docker_checked(["docker", "network", "connect", "bridge", container_id])
+    setup_egress.update({"network": "bridge", "connected": True})
+    try:
+        yield setup_egress
+    finally:
+        _docker_checked(
+            ["docker", "network", "disconnect", "bridge", container_id]
+        )
+        setup_egress["disconnected_before_agent"] = True
+
+
 def _verify_agent_network(
     container_id: str, network: dict[str, Any]
 ) -> dict[str, Any]:
@@ -413,6 +439,15 @@ def _verify_agent_network(
     network_mode = (
         host_config.get("NetworkMode") if isinstance(host_config, dict) else None
     )
+    network_settings = (
+        container.get("NetworkSettings") if isinstance(container, dict) else None
+    )
+    attached = (
+        network_settings.get("Networks")
+        if isinstance(network_settings, dict)
+        else None
+    )
+    attached_networks = sorted(attached) if isinstance(attached, dict) else []
     probe = _run(
         ["docker", "exec", container_id, "python", "-c", _PUBLIC_EGRESS_PROBE],
         timeout=15,
@@ -420,12 +455,17 @@ def _verify_agent_network(
     probe_passed = (
         probe.returncode == 0 and "PUBLIC_EGRESS_BLOCKED" in probe.stdout
     )
-    passed = network_mode == network["name"] and probe_passed
+    passed = (
+        network_mode == network["name"]
+        and attached_networks == [network["name"]]
+        and probe_passed
+    )
     result = {
         "passed": passed,
         "policy": network["policy"],
         "docker_network_mode": network_mode,
         "expected_network_mode": network["name"],
+        "attached_networks": attached_networks,
         "public_egress_probe": "blocked" if probe_passed else "available_or_failed",
         "probe_returncode": probe.returncode,
         "probe_stdout": probe.stdout.strip(),
@@ -1808,9 +1848,12 @@ def _run_agent(
                         ),
                     }
                 )
-        network["verification"] = _verify_agent_network(container_id, network)
         runtime_public["agent_network"] = network
-        image_checkout = _initialize_agent_container(container_id, profile, runtime)
+        with _temporary_setup_egress(container_id, network):
+            image_checkout = _initialize_agent_container(
+                container_id, profile, runtime
+            )
+        network["verification"] = _verify_agent_network(container_id, network)
         if method == "plain-codex":
             container_probe = codex_container_responses_probe(
                 container_id,
@@ -1981,8 +2024,11 @@ def _run_agent(
             }
             if agent_error:
                 cell["agent"]["error"] = agent_error
-            _save_manifest(campaign, manifest)
         resources.close()
+        if container_id:
+            if runtime_public:
+                cell["agent"]["runtime"] = runtime_public
+            _save_manifest(campaign, manifest)
 
     (cell_dir / "agent-events.jsonl").write_text(stdout, encoding="utf-8")
     (cell_dir / "agent-stderr.txt").write_text(stderr, encoding="utf-8")

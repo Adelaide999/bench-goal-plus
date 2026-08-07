@@ -83,6 +83,9 @@ Astropy 13033 的四个 Codex ON/OFF profile 还冻结
 internal network，把模型 API bridge 绑定到该 network 的 host gateway，并在 Agent 启动前
 同时验证 Docker network mode 和公网 IP 连接失败。模型调用仍可用，但 Agent 没有公网路由，
 不能通过网页搜索题目；验证与 network 清理状态进入最终报告。
+固定 Goal Plus runtime 安装发生在 Agent/模型进程启动前；仅这个 setup 阶段临时连接 Docker
+默认 bridge。安装后 controller 必须先断开 setup bridge，并验证 internal network 是唯一剩余
+网络，才允许模型探针和 Agent 启动。
 
 Luna Goal Plus + Pi preset 复用同一组 OpenAI-compatible Responses 环境变量，但通过
 campaign-local Pi provider registry 选择 `bench-openai/gpt-5.6-luna`。该 registry 只保存

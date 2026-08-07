@@ -72,6 +72,10 @@ reports the exact network and a direct public-IP connection probe is blocked; th
 probe must still pass through the gateway bridge. Preserve the network verification and cleanup
 disposition in final evidence. This prevents public web lookup without hiding the configured model
 endpoint or changing the official evaluator network.
+The profile-locked Goal Plus runtime may use a temporary default-bridge attachment during
+controller-owned setup, before any Agent/model process starts. The runner must disconnect that
+attachment and prove the internal network is the container's sole remaining network before the
+Responses probe or Agent invocation; persist this setup-egress disposition with the isolation probe.
 
 The visible-test wrapper is a benchmark-owned read-only bind mount inside `/testbed`. Freeze records
 its exact hash. The ranking verifier directly uses `--ranking-signal`, allowing a completed public
