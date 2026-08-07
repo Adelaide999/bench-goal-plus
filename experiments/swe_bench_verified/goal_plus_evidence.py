@@ -54,6 +54,74 @@ def _timestamp(value: Any) -> datetime | None:
         return None
 
 
+def _timestamp_not_after(left: Any, right: Any) -> bool:
+    left_timestamp = _timestamp(left)
+    right_timestamp = _timestamp(right)
+    if left_timestamp is None or right_timestamp is None:
+        return False
+    try:
+        return left_timestamp <= right_timestamp
+    except TypeError:
+        return False
+
+
+def _worker_overlap(leases: list[dict[str, Any]], expected_k: int) -> dict[str, Any]:
+    intervals = []
+    parsed = []
+    for lease in leases:
+        interval = lease.get("observed_interval")
+        if not isinstance(interval, dict):
+            continue
+        started_at = _timestamp(interval.get("started_at"))
+        ended_at = _timestamp(interval.get("ended_at"))
+        candidate_id = lease.get("candidate_id")
+        if (
+            started_at is None
+            or ended_at is None
+            or not isinstance(candidate_id, str)
+            or not candidate_id
+        ):
+            continue
+        try:
+            valid_order = started_at < ended_at
+        except TypeError:
+            valid_order = False
+        if not valid_order:
+            continue
+        intervals.append(
+            {
+                "candidate_id": candidate_id,
+                "agent_session_id": lease.get("agent_session_id"),
+                **interval,
+            }
+        )
+        parsed.append((candidate_id, started_at, ended_at))
+
+    overlap_seconds = 0.0
+    if len(parsed) == expected_k:
+        try:
+            overlap_seconds = max(
+                0.0,
+                (
+                    min(item[2] for item in parsed)
+                    - max(item[1] for item in parsed)
+                ).total_seconds(),
+            )
+        except TypeError:
+            overlap_seconds = 0.0
+    candidate_ids = {item[0] for item in parsed}
+    return {
+        "expected_k": expected_k,
+        "intervals": intervals,
+        "overlap_seconds": round(overlap_seconds, 3),
+        "passed": bool(
+            len(parsed) == expected_k
+            and len(candidate_ids) == expected_k
+            and overlap_seconds > 0
+        ),
+    }
+
+
 def _observed_autoresearch_lease(
     lease: dict[str, Any], session: dict[str, Any], *, run_state: Any
 ) -> dict[str, Any]:
@@ -65,6 +133,7 @@ def _observed_autoresearch_lease(
     )
     observed_elapsed = float(lease.get("elapsed_seconds") or 0)
     started_at = _timestamp(lease.get("started_at"))
+    released_at = _timestamp(lease.get("released_at"))
     session_updated_at = _timestamp(session.get("updated_at"))
     if started_at is not None and session_updated_at is not None:
         observed_elapsed = max(
@@ -88,8 +157,25 @@ def _observed_autoresearch_lease(
         if terminal_session
         else "insufficient"
     )
+    interval_end = released_at or session_updated_at
+    observed_interval = (
+        {
+            "started_at": lease.get("started_at"),
+            "ended_at": (
+                lease.get("released_at")
+                if released_at is not None
+                else session.get("updated_at")
+            ),
+            "end_basis": (
+                "released_at" if released_at is not None else "session_updated_at"
+            ),
+        }
+        if started_at is not None and interval_end is not None
+        else None
+    )
     return {
         **lease,
+        "observed_interval": observed_interval,
         "minimum_observation": {
             "passed": released or terminal_session,
             "basis": basis,
@@ -229,6 +315,7 @@ def _global_evidence_read_receipts(
     schema_valid = True
     for session in sessions:
         session_id = session.get("agent_session_id")
+        session_candidate_id = session.get("candidate_id")
         reads = session.get("global_evidence_reads")
         if not isinstance(reads, list):
             schema_valid = False
@@ -240,9 +327,11 @@ def _global_evidence_read_receipts(
                 schema_valid = False
                 continue
             completed_views = read.get("completed_views")
+            read_timestamp = _timestamp(read.get("read_at"))
             valid = (
                 isinstance(read.get("read_at"), str)
                 and bool(read["read_at"])
+                and read_timestamp is not None
                 and isinstance(read.get("evidence_count"), int)
                 and not isinstance(read.get("evidence_count"), bool)
                 and read["evidence_count"] >= 0
@@ -275,6 +364,9 @@ def _global_evidence_read_receipts(
                         and isinstance(
                             reference.get("supplemental_evaluation_present"), bool
                         )
+                        and _timestamp_not_after(
+                            reference.get("view_created_at"), read.get("read_at")
+                        )
                     )
                     valid = valid and reference_valid
                     if reference_valid:
@@ -294,6 +386,7 @@ def _global_evidence_read_receipts(
             normalized_reads.append(
                 {
                     "agent_session_id": session_id,
+                    "candidate_id": session_candidate_id,
                     "read_at": read.get("read_at"),
                     "evidence_count": read.get("evidence_count"),
                     "completed_view_count": read.get("completed_view_count"),
@@ -306,6 +399,7 @@ def _global_evidence_read_receipts(
             )
 
     influence_windows = []
+    peer_influence_windows = []
     for read in normalized_reads:
         if not read["valid"] or not any(
             item["supplemental_evaluation_present"]
@@ -323,14 +417,19 @@ def _global_evidence_read_receipts(
             key=lambda item: item["created_at"],
         )
         if subsequent:
-            influence_windows.append(
-                {
-                    "agent_session_id": read["agent_session_id"],
-                    "read_at": read["read_at"],
-                    "completed_views": read["completed_views"],
-                    "next_verifier": subsequent[0],
-                }
-            )
+            window = {
+                "agent_session_id": read["agent_session_id"],
+                "candidate_id": read["candidate_id"],
+                "read_at": read["read_at"],
+                "completed_views": read["completed_views"],
+                "next_verifier": subsequent[0],
+            }
+            influence_windows.append(window)
+            if any(
+                reference["candidate_id"] != read["candidate_id"]
+                for reference in read["completed_views"]
+            ):
+                peer_influence_windows.append(window)
 
     return {
         "session_count": len(sessions),
@@ -349,6 +448,8 @@ def _global_evidence_read_receipts(
         ),
         "reads_before_subsequent_verifier": len(influence_windows),
         "influence_windows": influence_windows,
+        "peer_reads_before_subsequent_verifier": len(peer_influence_windows),
+        "peer_influence_windows": peer_influence_windows,
         "schema_valid": schema_valid,
     }
 
@@ -498,6 +599,7 @@ def collect_goal_plus_state(
     }
     runs: list[dict[str, Any]] = []
     all_bound_sessions: list[dict[str, Any]] = []
+    candidate_records_by_run: dict[str, list[dict[str, Any]]] = {}
     for path in sorted((root / "runs").glob("run_*/run.json")):
         payload = _read_object(path)
         run_id = str(payload.get("run_id") or path.parent.name)
@@ -532,6 +634,7 @@ def collect_goal_plus_state(
         )
         candidates = sorted(path.parent.glob("candidates/*/candidate.json"))
         candidate_records = [_read_object(candidate) for candidate in candidates]
+        candidate_records_by_run[run_id] = candidate_records
         expected_annotation_iterations = sum(
             len(candidate.get("iterations") or [])
             for candidate in candidate_records
@@ -678,6 +781,29 @@ def collect_goal_plus_state(
     annotation_entries = (
         annotations.get("entries", []) if isinstance(annotations, dict) else []
     )
+    selected_candidate_records = (
+        candidate_records_by_run.get(str(selected_run.get("run_id")), [])
+        if selected_run
+        else []
+    )
+    candidate_ids = {
+        candidate.get("candidate_id")
+        for candidate in selected_candidate_records
+        if isinstance(candidate.get("candidate_id"), str)
+        and candidate.get("candidate_id")
+    }
+    settled_refs = {
+        (
+            candidate.get("candidate_id"),
+            iteration.get("iteration"),
+            iteration.get("git_head"),
+        )
+        for candidate in selected_candidate_records
+        for iteration in candidate.get("iterations") or []
+        if isinstance(iteration, dict)
+        and isinstance(iteration.get("git_head"), str)
+        and iteration.get("git_head")
+    }
 
     allowed_relations = {
         "similar",
@@ -719,6 +845,8 @@ def collect_goal_plus_state(
             return False
         basis_refs = [reference_tuple(item) for item in basis]
         if any(item is None for item in basis_refs):
+            return False
+        if any(item not in settled_refs for item in basis_refs):
             return False
         candidate_ids = [item[0] for item in basis_refs if item is not None]
         if (
@@ -815,6 +943,56 @@ def collect_goal_plus_state(
                 for entry in annotation_entries
             )
         )
+    )
+    dynamic_peer_required = bool(
+        expected_k > 1 and expected_supplemental_evaluation_enabled
+    )
+    peer_comparison_entries = []
+    for entry in annotation_entries:
+        if entry.get("state") != "completed" or not supplemental_entry_valid(entry):
+            continue
+        basis_refs = [
+            reference_tuple(item) for item in entry.get("comparison_basis") or []
+        ]
+        expected_peer_ids = candidate_ids - {entry.get("candidate_id")}
+        actual_peer_ids = {
+            item[0] for item in basis_refs if item is not None
+        }
+        if expected_peer_ids and actual_peer_ids == expected_peer_ids:
+            peer_comparison_entries.append(
+                {
+                    "candidate_id": entry.get("candidate_id"),
+                    "iteration": entry.get("iteration"),
+                    "comparison_basis": entry.get("comparison_basis"),
+                }
+            )
+    read_receipts = (
+        selected_run.get("global_evidence_read_receipts", {})
+        if selected_run
+        else {}
+    )
+    completed_supplemental_view_refs = {
+        settled_ref
+        for entry in annotation_entries
+        if entry.get("state") == "completed"
+        and supplemental_entry_valid(entry)
+        and entry.get("supplemental_evaluation_enabled") is True
+        for settled_ref in settled_refs
+        if settled_ref[0] == entry.get("candidate_id")
+        and settled_ref[1] == entry.get("iteration")
+    }
+    valid_peer_influence_windows = [
+        window
+        for window in read_receipts.get("peer_influence_windows", [])
+        if any(
+            reference_tuple(reference) in completed_supplemental_view_refs
+            and reference.get("candidate_id") != window.get("candidate_id")
+            for reference in window.get("completed_views", [])
+        )
+    ]
+    worker_overlap = _worker_overlap(
+        selected_run.get("autoresearch_leases", []) if selected_run else [],
+        expected_k,
     )
     checks = {
         "durable_state": _check(True, root.is_dir(), root.is_dir()),
@@ -1043,6 +1221,36 @@ def collect_goal_plus_state(
                     >= selected_run.get("bound_session_count", 0)
                 )
             ),
+        ),
+        "dynamic_peer_comparison": _check(
+            (
+                "at least one complete comparison against every peer incumbent"
+                if dynamic_peer_required
+                else "not required"
+            ),
+            peer_comparison_entries,
+            bool(not dynamic_peer_required or peer_comparison_entries),
+        ),
+        "peer_view_influence": _check(
+            (
+                "a worker reads a completed peer View before its next verifier"
+                if dynamic_peer_required
+                else "not required"
+            ),
+            {
+                **read_receipts,
+                "valid_peer_influence_windows": valid_peer_influence_windows,
+            },
+            bool(not dynamic_peer_required or valid_peer_influence_windows),
+        ),
+        "live_worker_overlap": _check(
+            (
+                "all candidate-bound worker lease intervals overlap"
+                if expected_k > 1
+                else "not required"
+            ),
+            worker_overlap,
+            bool(expected_k == 1 or worker_overlap["passed"]),
         ),
         "view_agent_contract": _check(
             (

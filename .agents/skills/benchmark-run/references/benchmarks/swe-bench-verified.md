@@ -8,8 +8,9 @@
 - Raw metric: official `resolved` boolean, direction `maximize`
 - Methods: `plain-codex`, `plain-pi`, `goal-plus-codex`, and `goal-plus-pi`
 - Topology: Plain methods use one isolated outer trajectory. Goal Plus uses one outer main session
-  with one bound internal worker on the selected Codex or Pi host. Initial acceptance restricts
-  every method to `K=1,C=1,R=1`
+  with bound internal workers on the selected Codex or Pi host. Standard acceptance restricts
+  every method to `K=1,C=1,R=1`; one Astropy Goal Plus + Codex preset separately validates
+  dynamic peer comparison at `K=2,C=1,R=1`
 - Final source JSON: `campaign-summary.json`
 
 The official harness owns final scoring in a separate container. The runner has no host-only score,
@@ -29,6 +30,7 @@ provision, detach, stop, resume, or cross-cell concurrency.
 | `swe-bench-verified-sympy-16886-acceptance-view-on-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | Legacy ID: open supplemental evaluation enabled |
 | `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, supplemental evaluation disabled |
 | `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke` | `gpt-5.6-luna`, high | `1800/1/1/1` | Goal Plus + Codex Responses, supplemental evaluation enabled |
+| `swe-bench-verified-astropy-13033-goal-plus-codex-luna-high-k2-peer-smoke` | `gpt-5.6-luna`, high | `1800/2/1/1` | Goal Plus + Codex Responses, mechanism-only dynamic peer comparison |
 
 The Pi credential value is never serialized. Docker receives only the selected environment variable
 name. The complete dataset row is host-side evaluator input; the Agent receives only the public
@@ -65,7 +67,17 @@ an infrastructure bypass or an early/under-verified release makes Goal Plus evid
 preserving any official SWE-bench score. The four profile IDs begin with
 `astropy-13033-goal-plus-codex-`.
 
-Those four Astropy profiles also freeze `agent_network_policy=public-egress-blocked`. The runner
+The dedicated Astropy `K=2` preset keeps the Luna/high ON cell otherwise unchanged and is a
+mechanism experiment, not a matched `K=1` quality result. MainAgent must create exactly two distinct
+initial candidates in one batch and bind one Codex worker to each. Completion additionally requires
+overlapping runtime lease intervals for both candidate-bound workers,
+at least one ViewAgent output whose comparison basis contains the other candidate's settled
+incumbent, plus a persisted Global Evidence read showing a worker consumed a completed peer View
+before its next verifier attempt. Merely recording `budget.max_parallel=2` is incomplete evidence.
+Use the preset, not a direct profile invocation, so plan-time profile drift validation happens before
+the `T/K/C/R` confirmation gate.
+
+The Astropy Codex profiles also freeze `agent_network_policy=public-egress-blocked`. The runner
 creates a campaign-owned Docker `--internal` bridge, binds the fixed loopback provider proxy to its
 gateway, and attaches the Agent container to that network. Launch fails closed unless Docker inspect
 reports the exact network and a direct public-IP connection probe is blocked; the model Responses
@@ -116,7 +128,8 @@ success.
 For Goal Plus methods, score completion additionally requires exported durable state proving exactly
 one terminal Goal Plus record and linked promoted Search run, a frozen spec with
 `budget.max_parallel=K`, the method's bound `codex` or `pi-rpc` worker topology, the frozen
-worker/closeout budgets, one candidate, one bound worker session, worker-origin verifier evidence,
+worker/closeout budgets, exactly `K` candidates, one bound worker session per candidate,
+worker-origin verifier evidence for every candidate,
 any profile-frozen minimum worker budget plus its satisfied runtime lease,
 the registered visible-test wrapper with the benchmark-owned frozen hash, a passing promotion
 `visible_test_score=1.0`, and no active Pi pool job. When the profile enables the

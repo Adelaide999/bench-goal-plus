@@ -1001,11 +1001,19 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
     )
     codex_host = profile["methods"][0] == "goal-plus-codex"
     worker_host = "codex" if codex_host else "pi-rpc"
-    worker_instruction = (
-        "Use the bound Codex worker session; do not create replacement lanes."
-        if codex_host
-        else "Continue the same bound Pi worker session; do not create replacement lanes."
-    )
+    if codex_host and profile["concurrency"] > 1:
+        worker_instruction = (
+            "Keep each candidate on its existing bound Codex worker session; "
+            "do not create replacement lanes."
+        )
+    elif codex_host:
+        worker_instruction = (
+            "Use the bound Codex worker session; do not create replacement lanes."
+        )
+    else:
+        worker_instruction = (
+            "Continue the same bound Pi worker session; do not create replacement lanes."
+        )
     minimum_budget_instruction = ""
     if "worker_min_runtime_seconds" in goal_plus:
         minimum_budget_instruction = (
@@ -1014,6 +1022,17 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
             "strategy.worker_budget.min_verifier_runs="
             f"{goal_plus['worker_min_verifier_runs']}. These are lower-bound search "
             "gates: keep the same worker active until both are satisfied. "
+        )
+    if profile["concurrency"] == 1:
+        candidate_instruction = "Use one fixed initial candidate. "
+    else:
+        candidate_instruction = (
+            f"Use exactly {profile['concurrency']} fixed initial candidates with "
+            "distinct public-evidence-based hypotheses. Start them together in one "
+            "batch and bind exactly one worker session to each candidate; do not "
+            "serialize or create replacement lanes. After both candidates have "
+            "settled Evidence, keep searching so at least one worker reads a completed "
+            "peer supplemental View before its next verifier attempt. "
         )
     return (
         "/goal-plus mode=autonomous Solve the public repository issue below in "
@@ -1032,7 +1051,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "Set "
         "strategy.config.closeout_reserve_seconds="
         f"{goal_plus['closeout_reserve_seconds']} and strategy.config.seed="
-        f"{profile.get('seed', 1)}. Use one fixed initial candidate. "
+        f"{profile.get('seed', 1)}. {candidate_instruction}"
         "Set strategy.evidence_annotator.host=codex and "
         "strategy.evidence_annotator.timeout_seconds="
         f"{annotator_timeout}; "

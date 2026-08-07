@@ -20,8 +20,9 @@ Agent 只看到 issue problem statement、仓库名、base commit 和任务镜�
 ### Agent 要做什么
 
 Plain Codex 或 Plain Pi 在精确的 SWE-bench task image 内运行一条隔离 outer trajectory。
-Goal Plus + Pi 运行一个 outer Goal Plus 主会话，并由它启动一个共享 Search 状态的内部
-Pi worker。当前三种方法都固定 `K=1,C=1,R=1`。
+Goal Plus 运行一个 outer 主会话，并由它启动共享同一 Search 状态的内部 worker。标准对比
+固定 `K=1,C=1,R=1`；另有一个 Astropy Goal Plus + Codex 专用机制实验使用
+`K=2,C=1,R=1`，不与 `K=1` 合并为 matched 主结果。
 
 ### 期待输出是什么
 
@@ -60,8 +61,11 @@ task image 始终保留：controller 固定使用官方 harness 的 `cache_level
 | `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | Goal Plus + Pi | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` |
 | `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-off-smoke` | Goal Plus + Codex，开放补充评价 OFF（旧 ID） | `gpt-5.6-luna`, high | `1800/1/1/1` |
 | `swe-bench-verified-sympy-16886-goal-plus-codex-acceptance-on-smoke` | Goal Plus + Codex，开放补充评价 ON（旧 ID） | `gpt-5.6-luna`, high | `1800/1/1/1` |
+| `swe-bench-verified-astropy-13033-goal-plus-codex-luna-high-k2-peer-smoke` | Goal Plus + Codex，动态 peer comparison 机制实验 | `gpt-5.6-luna`, high | `1800/2/1/1` |
 
-campaign 顺序运行。runner 暂不支持 provision、detach、stop、resume、`K>1` 或 `C>1`。
+campaign 顺序运行。runner 暂不支持 provision、detach、stop、resume、通用 `K>1` 或 `C>1`；
+只有上表冻结 preset 接受 `K=2`；应使用 preset 启动，使 task/model/T/K/C 漂移在确认块生成前
+被拒绝，而不是直接调用底层 profile。
 真实 launch 前仍必须展示并确认解析后的 T/K/C/R。以下 `K=1,C=1` 路径均已通过归档的
 真实官方 harness smoke：
 
@@ -72,6 +76,13 @@ campaign 顺序运行。runner 暂不支持 provision、detach、stop、resume�
 这些 pass 不扩展到 `K>1`、其他实例或完整 500 题 split。两个 Plain development smoke
 保留了 prepare 时工作树非 clean、随后由 `904cae6` 收录实现的 provenance；不会把它改写成
 clean run，完整 campaign readiness 仍为 partial。
+
+专用 `K=2` profile 要求 MainAgent 同批创建两个不同的公开证据假设，每个候选绑定一个
+Codex worker。机制验收还要求 ViewAgent 的动态比较引用另一个候选真实已结算的 commit，且
+两个 candidate-bound worker 的运行 lease 有真实重叠，并由 Global Evidence 留下某个 worker
+在下一次 verifier 前读取该 peer View 的持久化记录。仅出现 `budget.max_parallel=2`、只有两个
+候选，或只在 closeout 生成比较，都不算动态 peer comparison 跑通。该 profile 改变了单题
+计算量，因此只报告为机制实验。
 
 Codex preset 另外冻结 `auth_mode=openai-compatible`、`OPENAI_BASE_URL`、
 `OPENAI_API_KEY` 和 Responses wire API。Linux 上的 loopback endpoint 使用与 EdgeBench

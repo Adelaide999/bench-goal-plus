@@ -216,9 +216,10 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         raise SweBenchContractError(f"{profile_id}: unsupported reasoning_effort")
     if not isinstance(profile.get("wall_time_seconds"), int) or profile["wall_time_seconds"] < 1:
         raise SweBenchContractError(f"{profile_id}: wall_time_seconds must be positive")
-    if profile.get("concurrency") != 1 or profile.get("cell_concurrency") != 1:
+    concurrency = profile.get("concurrency")
+    if concurrency not in {1, 2} or profile.get("cell_concurrency") != 1:
         raise SweBenchContractError(
-            f"{profile_id}: initial acceptance is restricted to K=1 and C=1"
+            f"{profile_id}: accepted concurrency is K=1..2 and C=1"
         )
     evaluator_timeout = profile.get("evaluator_timeout_seconds")
     if not isinstance(evaluator_timeout, int) or evaluator_timeout < 1:
@@ -407,6 +408,17 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             raise SweBenchContractError(
                 f"{profile_id}: supplemental evaluation requires the Evidence annotator"
             )
+        if concurrency == 2 and not (
+            methods == ["goal-plus-codex"]
+            and task_ids == ["astropy__astropy-13033"]
+            and goal_plus["supplemental_evaluation_enabled"] is True
+            and isinstance(annotator, dict)
+            and minimum_fields_present == optional_fields
+        ):
+            raise SweBenchContractError(
+                f"{profile_id}: K=2 is restricted to the Astropy Goal Plus + Codex "
+                "supplemental peer-comparison profile"
+            )
     elif profile.get("goal_plus") is not None:
         raise SweBenchContractError(
             f"{profile_id}: goal_plus configuration requires a Goal Plus method"
@@ -425,6 +437,11 @@ def resolve_profile(
     seed: int | None = None,
     retain_containers: bool | None = None,
 ) -> dict[str, Any]:
+    if concurrency is not None and concurrency != profile["concurrency"]:
+        raise SweBenchContractError(
+            f"{profile['id']}: concurrency is profile-frozen at K="
+            f"{profile['concurrency']}"
+        )
     resolved = dict(profile)
     resolved["methods"] = list(methods or profile["methods"])
     resolved["model"] = model or profile["model"]

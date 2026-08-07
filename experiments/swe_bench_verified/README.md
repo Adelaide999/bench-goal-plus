@@ -11,12 +11,14 @@ repository lifecycle through `python3 scripts/bench.py`.
 | Instance | `sympy__sympy-16886` |
 | Image | `swebench/sweb.eval.x86_64.sympy_1776_sympy-16886:latest` |
 | Methods | `plain-codex`, `plain-pi`, `goal-plus-codex`, `goal-plus-pi` |
-| Budget | `T=1800`, `K=1`, `C=1`, `R=1` |
+| Standard budget | `T=1800`, `K=1`, `C=1`, `R=1` |
 | Metric | official `resolved`, maximize |
 | Codex auth | `OPENAI_BASE_URL` + `OPENAI_API_KEY`, OpenAI-compatible Responses |
 
-Detached execution, stop/resume, `K>1`, `C>1`, and automatic image provisioning are not supported
-by this initial acceptance path. Plain Codex, Plain Pi, and Goal Plus + Pi at `K=1,C=1` passed
+Detached execution, stop/resume, generic `K>1`, `C>1`, and automatic image provisioning are not
+supported by this initial acceptance path. One dedicated Astropy Goal Plus + Codex profile permits
+`K=2,C=1` only for a dynamic peer-comparison mechanism experiment. Plain Codex, Plain Pi, and Goal
+Plus + Pi at `K=1,C=1` passed
 archived Linux/amd64 official-harness smokes under `evidence/runs/`; this does not extend the claim
 to other topologies or the full Verified split. The two Plain development smokes retain their
 dirty-at-prepare provenance and later acceptance commit explicitly.
@@ -76,6 +78,18 @@ During controller closeout, any ViewAgent work already queued by verifier-settle
 before `search_select`. This preserves the search-period feedback contract for the final iteration;
 annotation errors remain durable evidence failures rather than being converted to a soft score or a
 hard verifier result.
+
+The dedicated preset
+`swe-bench-verified-astropy-13033-goal-plus-codex-luna-high-k2-peer-smoke` keeps
+the Luna/high ON stack and `T=1800,C=1,R=1`, but starts exactly two distinct candidates together and
+binds one Codex worker to each candidate in the same Search run. It is not a matched comparison with
+the `K=1` quality result because it doubles live within-task search concurrency. Completion requires
+more than `budget.max_parallel=2`: a completed ViewAgent evaluation must compare against the other
+candidate's real settled commit, both worker lease intervals must overlap, and a worker must persist
+a Global Evidence read of that peer View before a subsequent verifier attempt. Missing any proof
+leaves the official raw score intact but marks Goal Plus mechanism evidence partial.
+Use this frozen preset rather than invoking its underlying profile directly; the control plane then
+rejects any task/model/T/K/C drift before displaying the launch confirmation block.
 
 ## Public lifecycle
 

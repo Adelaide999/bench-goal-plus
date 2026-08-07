@@ -28,6 +28,7 @@ from experiments.swe_bench_verified.config import (
     load_profile,
     managed_upstream_branch,
     read_json,
+    resolve_profile,
     validate_profile,
     write_json,
 )
@@ -211,9 +212,16 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         worker_host: str = "pi-rpc",
         worker_min_runtime_seconds: int | None = None,
         worker_min_verifier_runs: int | None = None,
+        candidate_count: int = 1,
+        peer_comparison: bool = False,
     ) -> None:
         run_id = "run_test"
-        candidate_id = "c001"
+        candidate_ids = [f"c{index + 1:03d}" for index in range(candidate_count)]
+        candidate_id = candidate_ids[0]
+        candidate_commits = {
+            candidate: chr(ord("a") + index) * 40
+            for index, candidate in enumerate(candidate_ids)
+        }
         write_json(
             root / "goal-plus/gp_test/goal.json",
             {
@@ -309,67 +317,137 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 },
             },
         )
-        write_json(
-            root / f"runs/{run_id}/candidates/{candidate_id}/candidate.json",
-            {
-                "candidate_id": candidate_id,
-                "iterations": [{"score": 1.0}],
-                "promotion_report": {
+        candidate_iterations: dict[str, list[dict]] = {}
+        for index, current_candidate_id in enumerate(candidate_ids):
+            iterations = [
+                {
+                    "iteration": 1,
+                    "score": 1.0,
+                    "agent_session_id": f"agent_{index}",
+                    "created_at": "2026-08-06T12:00:00Z",
+                    "git_head": candidate_commits[current_candidate_id],
+                }
+            ]
+            if peer_comparison and index == 0:
+                iterations.append(
+                    {
+                        "iteration": 2,
+                        "score": 1.0,
+                        "agent_session_id": "agent_0",
+                        "created_at": "2026-08-06T12:02:00Z",
+                        "git_head": "f" * 40,
+                    }
+                )
+            candidate_iterations[current_candidate_id] = iterations
+            payload = {
+                "candidate_id": current_candidate_id,
+                "iterations": iterations,
+            }
+            if current_candidate_id == candidate_id:
+                payload["promotion_report"] = {
                     "promotion_passed": True,
                     "aggregate_score": 1.0,
                     "verifier_results": [
                         {"metrics": {"visible_test_score": 1.0}}
                     ],
-                },
-            },
-        )
-        if evidence_annotations:
-            evaluation = (
-                {
-                    "summary": "The implementation changes the requested behavior.",
-                    "dimensions": [
-                        {
-                            "name": "Behavioral implementation",
-                            "finding": "The cumulative diff changes the target behavior.",
-                            "confidence": "high",
-                            "evidence": ["Persisted test evidence."],
-                        }
-                    ],
-                    "comparisons": [],
-                    "limitations": ["No hidden test evidence is available."],
                 }
-                if supplemental_evaluation
-                else None
-            )
             write_json(
                 root
-                / (
-                    f"runs/{run_id}/candidates/{candidate_id}/"
-                    "evidence-annotations/iteration-0001.json"
-                ),
-                {
-                    "candidate_id": candidate_id,
-                    "iteration": 1,
-                    "state": "completed",
-                    "profile": {"host": "codex"},
-                    "task_context_source": "goal_plus_raw_goal",
-                    "task_context_ref": "goal_plus:gp_test:revision:1",
-                    "task_context_sha256": hashlib.sha256(
-                        b"Public issue text"
-                    ).hexdigest(),
-                    "supplemental_evaluation_enabled": supplemental_evaluation,
-                    "comparison_basis": [],
-                    "usage": {"input_tokens": 40, "output_tokens": 10},
-                    "view": {
-                        "description": "Independent description of candidate evidence.",
-                        "supplemental_evaluation": evaluation,
-                        "comparison_basis": [],
-                        "acceptance_view": None,
-                    },
-                },
+                / f"runs/{run_id}/candidates/{current_candidate_id}/candidate.json",
+                payload,
             )
+
+        if evidence_annotations:
+            for current_candidate_id, iterations in candidate_iterations.items():
+                peer_ids = [
+                    peer for peer in candidate_ids if peer != current_candidate_id
+                ]
+                comparison_basis = (
+                    [
+                        {
+                            "candidate_id": peer,
+                            "iteration": 1,
+                            "commit": candidate_commits[peer],
+                        }
+                        for peer in peer_ids
+                    ]
+                    if peer_comparison
+                    else []
+                )
+                comparisons = [
+                    {
+                        **reference,
+                        "relation": "different",
+                        "rationale": "The candidates implement distinct public hypotheses.",
+                        "evidence": ["The cumulative diffs use different branches."],
+                    }
+                    for reference in comparison_basis
+                ]
+                evaluation = (
+                    {
+                        "summary": "The implementation changes the requested behavior.",
+                        "dimensions": [
+                            {
+                                "name": "Behavioral implementation",
+                                "finding": "The cumulative diff changes the target behavior.",
+                                "confidence": "high",
+                                "evidence": ["Persisted test evidence."],
+                            }
+                        ],
+                        "comparisons": comparisons,
+                        "limitations": ["No hidden test evidence is available."],
+                    }
+                    if supplemental_evaluation
+                    else None
+                )
+                for iteration in iterations:
+                    write_json(
+                        root
+                        / (
+                            f"runs/{run_id}/candidates/{current_candidate_id}/"
+                            "evidence-annotations/"
+                            f"iteration-{iteration['iteration']:04d}.json"
+                        ),
+                        {
+                            "candidate_id": current_candidate_id,
+                            "iteration": iteration["iteration"],
+                            "state": "completed",
+                            "profile": {"host": "codex"},
+                            "task_context_source": "goal_plus_raw_goal",
+                            "task_context_ref": "goal_plus:gp_test:revision:1",
+                            "task_context_sha256": hashlib.sha256(
+                                b"Public issue text"
+                            ).hexdigest(),
+                            "supplemental_evaluation_enabled": (
+                                supplemental_evaluation
+                            ),
+                            "comparison_basis": comparison_basis,
+                            "usage": {"input_tokens": 40, "output_tokens": 10},
+                            "view": {
+                                "description": (
+                                    "Independent description of candidate evidence."
+                                ),
+                                "supplemental_evaluation": evaluation,
+                                "comparison_basis": comparison_basis,
+                                "acceptance_view": None,
+                            },
+                        },
+                    )
         for index in range(session_count):
             agent_session_id = f"agent_{index}"
+            session_candidate_id = candidate_ids[index % len(candidate_ids)]
+            completed_views = [
+                {
+                    "candidate_id": current_candidate_id,
+                    "iteration": 1,
+                    "commit": candidate_commits[current_candidate_id],
+                    "view_created_at": "2026-08-06T12:00:30Z",
+                    "supplemental_evaluation_present": supplemental_evaluation,
+                }
+                for current_candidate_id in (
+                    candidate_ids if peer_comparison else [session_candidate_id]
+                )
+            ]
             write_json(
                 root / f"runs/{run_id}/agent_sessions/{agent_session_id}.json",
                 {
@@ -377,7 +455,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "created_at": "2026-08-06T12:00:00Z",
                     "updated_at": "2026-08-06T12:10:00Z",
                     "host": worker_host,
-                    "candidate_id": candidate_id,
+                    "candidate_id": session_candidate_id,
                     "host_handle": {
                         "external_id": f"agent_{index}",
                         "metadata": {
@@ -391,22 +469,14 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                         [
                             {
                                 "read_at": "2026-08-06T12:01:00Z",
-                                "evidence_count": 1,
-                                "completed_view_count": 1,
+                                "evidence_count": len(completed_views),
+                                "completed_view_count": len(completed_views),
                                 "completed_supplemental_evaluation_count": (
-                                    1 if supplemental_evaluation else 0
+                                    len(completed_views)
+                                    if supplemental_evaluation
+                                    else 0
                                 ),
-                                "completed_views": [
-                                    {
-                                        "candidate_id": candidate_id,
-                                        "iteration": 1,
-                                        "commit": "a" * 40,
-                                        "view_created_at": "2026-08-06T12:00:00Z",
-                                        "supplemental_evaluation_present": (
-                                            supplemental_evaluation
-                                        ),
-                                    }
-                                ],
+                                "completed_views": completed_views,
                             }
                         ]
                         if evidence_annotations
@@ -423,6 +493,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     {
                         "status": "released",
                         "release_reason": "lease_satisfied",
+                        "agent_session_id": agent_session_id,
+                        "candidate_id": session_candidate_id,
+                        "started_at": "2026-08-06T12:00:00Z",
+                        "released_at": "2026-08-06T12:10:00Z",
                         "elapsed_seconds": worker_min_runtime_seconds,
                         "min_runtime_seconds": worker_min_runtime_seconds,
                         "min_verifier_runs": worker_min_verifier_runs,
@@ -451,6 +525,147 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             state["completion"]["checks"]["worker_topology"]["actual"],
             "codex/parallel_loops",
         )
+
+    def test_goal_plus_k2_requires_peer_comparison_and_search_influence(self) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary) / "passing"
+            self.write_goal_plus_state(
+                root,
+                max_parallel=2,
+                session_count=2,
+                verifier_runs=2,
+                supplemental_evaluation=True,
+                evidence_annotations=True,
+                worker_host="codex",
+                worker_min_runtime_seconds=600,
+                worker_min_verifier_runs=2,
+                candidate_count=2,
+                peer_comparison=True,
+            )
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=2,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator_enabled=True,
+                expected_worker_host="codex",
+            )
+
+            self.assertTrue(state["completion"]["passed"])
+            self.assertEqual(state["actual_subagent_count"], 2)
+            self.assertTrue(
+                state["completion"]["checks"]["dynamic_peer_comparison"][
+                    "passed"
+                ]
+            )
+            influence = state["completion"]["checks"]["peer_view_influence"]
+            self.assertTrue(influence["passed"])
+            self.assertEqual(
+                influence["actual"]["peer_reads_before_subsequent_verifier"],
+                1,
+            )
+            overlap = state["completion"]["checks"]["live_worker_overlap"]
+            self.assertTrue(overlap["passed"])
+            self.assertEqual(overlap["actual"]["overlap_seconds"], 600.0)
+
+            second_lease_path = (
+                root
+                / "host-logs/codex-autoresearch-leases/agent_1.json"
+            )
+            second_lease = read_json(second_lease_path)
+            second_lease["started_at"] = "2026-08-06T12:11:00Z"
+            second_lease["released_at"] = "2026-08-06T12:21:00Z"
+            write_json(second_lease_path, second_lease)
+            serialized_state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=2,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator_enabled=True,
+                expected_worker_host="codex",
+            )
+            self.assertFalse(
+                serialized_state["completion"]["checks"]["live_worker_overlap"][
+                    "passed"
+                ]
+            )
+            second_lease["started_at"] = "2026-08-06T12:00:00Z"
+            second_lease["released_at"] = "2026-08-06T12:10:00Z"
+            write_json(second_lease_path, second_lease)
+            self.assertEqual(
+                len(influence["actual"]["valid_peer_influence_windows"]),
+                1,
+            )
+
+            session_path = root / "runs/run_test/agent_sessions/agent_0.json"
+            tampered_session = read_json(session_path)
+            tampered_session["global_evidence_reads"][0]["completed_views"][1][
+                "commit"
+            ] = "0" * 40
+            write_json(session_path, tampered_session)
+            tampered_state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=2,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator_enabled=True,
+                expected_worker_host="codex",
+            )
+            self.assertTrue(
+                tampered_state["completion"]["checks"][
+                    "dynamic_peer_comparison"
+                ]["passed"]
+            )
+            self.assertFalse(
+                tampered_state["completion"]["checks"]["peer_view_influence"][
+                    "passed"
+                ]
+            )
+
+            missing = Path(temporary) / "missing-peer"
+            self.write_goal_plus_state(
+                missing,
+                max_parallel=2,
+                session_count=2,
+                verifier_runs=2,
+                supplemental_evaluation=True,
+                evidence_annotations=True,
+                worker_host="codex",
+                worker_min_runtime_seconds=600,
+                worker_min_verifier_runs=2,
+                candidate_count=2,
+            )
+            missing_state = goal_plus_evidence.collect_goal_plus_state(
+                missing,
+                expected_k=2,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator_enabled=True,
+                expected_worker_host="codex",
+            )
+            self.assertFalse(missing_state["completion"]["passed"])
+            self.assertIn(
+                "dynamic_peer_comparison", missing_state["completion"]["reason"]
+            )
+            self.assertIn(
+                "peer_view_influence", missing_state["completion"]["reason"]
+            )
 
     def test_goal_plus_codex_completion_enforces_worker_minimums(self) -> None:
         with self.temporary_directory() as temporary:
@@ -630,6 +845,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "deepseek-v4-flash-on"
             )
         )
+        astropy_k2_peer = agent.resolve_spec(
+            preset_id=(
+                "swe-bench-verified-astropy-13033-goal-plus-codex-"
+                "luna-high-k2-peer-smoke"
+            )
+        )
 
         self.assertEqual(codex.runner.runner_id, "swe-bench-native")
         self.assertEqual(codex.methods, ("plain-codex",))
@@ -664,6 +885,21 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(deepseek.reasoning_effort, "medium")
             self.assertEqual(
                 deepseek.concurrency(), {"T": 1800, "K": 1, "C": 1, "R": 1}
+            )
+        self.assertEqual(astropy_k2_peer.methods, ("goal-plus-codex",))
+        self.assertEqual(astropy_k2_peer.model, "gpt-5.6-luna")
+        self.assertEqual(astropy_k2_peer.reasoning_effort, "high")
+        self.assertEqual(
+            astropy_k2_peer.concurrency(),
+            {"T": 1800, "K": 2, "C": 1, "R": 1},
+        )
+        with self.assertRaisesRegex(ContractError, "preset.*is frozen"):
+            agent.resolve_spec(
+                preset_id=(
+                    "swe-bench-verified-astropy-13033-goal-plus-codex-"
+                    "luna-high-k2-peer-smoke"
+                ),
+                live_search_concurrency=1,
             )
         self.assertTrue(codex.runner.capabilities.official_evaluator)
         self.assertTrue(codex.runner.capabilities.retain_containers)
@@ -935,6 +1171,34 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         with self.assertRaisesRegex(
             SweBenchContractError, "requires an agent_provider"
         ):
+            validate_profile(str(invalid["id"]), invalid)
+
+        k2 = self.profile(
+            "astropy-13033-goal-plus-codex-luna-high-acceptance-on-k2-peer-smoke"
+        )
+        self.assertEqual(k2["concurrency"], 2)
+        self.assertEqual(k2["cell_concurrency"], 1)
+        self.assertTrue(k2["goal_plus"]["supplemental_evaluation_enabled"])
+        k2_prompt = runtime.build_goal_plus_prompt(
+            {"problem_statement": "Public issue text"}, k2
+        )
+        self.assertIn("budget.max_parallel=2", k2_prompt)
+        self.assertIn("Use exactly 2 fixed initial candidates", k2_prompt)
+        self.assertIn("each candidate on its existing bound Codex worker", k2_prompt)
+        self.assertIn(
+            "reads a completed peer supplemental View before its next verifier",
+            k2_prompt,
+        )
+
+        k1 = self.profile(
+            "astropy-13033-goal-plus-codex-luna-high-acceptance-on-smoke"
+        )
+        with self.assertRaisesRegex(SweBenchContractError, "profile-frozen"):
+            resolve_profile(k1, concurrency=2)
+
+        invalid = json.loads(json.dumps(k2))
+        invalid["goal_plus"]["supplemental_evaluation_enabled"] = False
+        with self.assertRaisesRegex(SweBenchContractError, "K=2 is restricted"):
             validate_profile(str(invalid["id"]), invalid)
 
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
