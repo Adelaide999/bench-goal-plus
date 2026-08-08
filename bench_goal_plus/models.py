@@ -13,6 +13,7 @@ class RunnerCapabilities:
     detach: bool
     stop: bool
     resume: bool
+    repeat_seeds: bool
     cell_concurrency: bool
     retain_containers: bool
     official_evaluator: bool

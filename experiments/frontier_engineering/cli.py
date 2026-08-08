@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--profile", required=True)
     prepare_parser.add_argument("--campaign-id", required=True)
     prepare_parser.add_argument("--method", action="append", choices=sorted(SUPPORTED_METHODS))
+    prepare_parser.add_argument("--seeds", nargs="+", type=int)
     prepare_parser.add_argument("--model")
     prepare_parser.add_argument("--reasoning-effort")
     prepare_parser.add_argument("--wall-time-seconds", type=int)
@@ -66,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         resolved = resolve_profile(
             profile,
             methods=args.method,
+            seeds=(args.seeds if args.command == "prepare" else None),
             model=args.model,
             reasoning_effort=(args.reasoning_effort if args.command == "prepare" else None),
             wall_time_seconds=(args.wall_time_seconds if args.command == "prepare" else None),

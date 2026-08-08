@@ -165,6 +165,10 @@ class FrontierEngineeringTest(unittest.TestCase):
         _, profile = config.load_profile("jobshop-codex-smoke")
         with self.assertRaisesRegex(config.FrontierEngineeringContractError, "C=1"):
             config.resolve_profile(profile, cell_concurrency=2)
+        with self.assertRaisesRegex(
+            config.FrontierEngineeringContractError, "require K=1"
+        ):
+            config.resolve_profile(profile, concurrency=2)
         invalid = json.loads(json.dumps(profile))
         invalid["worker_min_runtime_seconds"] = invalid["worker_runtime_seconds"] + 1
         with self.assertRaisesRegex(
@@ -402,6 +406,7 @@ class FrontierEngineeringTest(unittest.TestCase):
         commands, campaign = create_runner(spec.runner).prepare_commands(spec)
         self.assertIn("experiments/frontier_engineering/experiment.py", commands[0])
         self.assertIn("--method", commands[0])
+        self.assertIn("--seeds", commands[0])
         self.assertEqual(
             campaign.path,
             ROOT / "runs/frontier-engineering" / spec.campaign_id,
@@ -417,6 +422,27 @@ class FrontierEngineeringTest(unittest.TestCase):
                 live_search_concurrency=1,
                 cell_concurrency=2,
             )
+
+    def test_native_runner_forwards_repeat_seeds_to_frontier_prepare(self) -> None:
+        spec = BenchmarkAgent(catalog=Catalog()).resolve_spec(
+            target_ids=("frontier-engineering",),
+            profile="v1-lite-cpu-codex-1h",
+            methods=("plain-pi",),
+            seeds=(1, 2, 3, 4),
+            model="gpt-5.6-sol",
+            reasoning_effort="medium",
+            wall_time_seconds=3600,
+            live_search_concurrency=1,
+            cell_concurrency=1,
+        )
+
+        command = create_runner(spec.runner).prepare_commands(spec)[0][0]
+
+        seed_flag = command.index("--seeds")
+        self.assertEqual(command[seed_flag + 1 : seed_flag + 5], ["1", "2", "3", "4"])
+        _, profile = config.load_profile(spec.profile)
+        resolved = config.resolve_profile(profile, seeds=list(spec.seeds))
+        self.assertEqual(resolved["seeds"], [1, 2, 3, 4])
 
     def test_pi_doctor_checks_exact_model_without_persisting_credentials(self) -> None:
         _, profile = config.load_profile("energy-storage-pi-smoke")

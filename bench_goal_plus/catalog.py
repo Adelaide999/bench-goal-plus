@@ -140,6 +140,7 @@ class Catalog:
                 "detach",
                 "stop",
                 "resume",
+                "repeat_seeds",
                 "cell_concurrency",
                 "retain_containers",
                 "official_evaluator",

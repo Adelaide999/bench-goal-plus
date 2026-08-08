@@ -11,7 +11,7 @@
 | `evidence_filename` | Native final JSON basename consumed by the unified `finish` path |
 | `supported_methods` | Canonical methods accepted during plan resolution; unknown methods fail before setup |
 | `method_contracts` | Optional per-method input constraints; `model_format: provider/model` requires an exact `PROVIDER/MODEL` value |
-| `capabilities` | `provision`, `detach`, `stop`, `resume`, `cell_concurrency`, `retain_containers`, official evaluator, and exact resume semantics |
+| `capabilities` | `provision`, `detach`, `stop`, `resume`, `repeat_seeds`, `cell_concurrency`, `retain_containers`, official evaluator, and exact resume semantics |
 
 Current kinds are `native-profile`, `common-matrix`, and `openevolve-batch`. If a new native
 lifecycle cannot implement this interface, add one runner implementation and tests; do not add

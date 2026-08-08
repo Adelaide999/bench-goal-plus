@@ -410,9 +410,9 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             model="test-model",
             reasoning_effort="medium",
             wall_time_seconds=60,
-            live_search_concurrency=2,
+            live_search_concurrency=1,
         )
-        self.assertEqual(spec.concurrency(), {"T": 60, "K": 2, "C": 1, "R": 1})
+        self.assertEqual(spec.concurrency(), {"T": 60, "K": 1, "C": 1, "R": 1})
         runner = create_runner(spec.runner)
         commands, campaign = runner.prepare_commands(spec)
         self.assertIn("--benchmarks", commands[0])
@@ -450,6 +450,28 @@ class BenchmarkAgentContractTest(unittest.TestCase):
                 cell_concurrency=2,
             )
 
+    def test_runner_without_repeat_seed_capability_rejects_r_greater_than_one(self) -> None:
+        with self.assertRaisesRegex(ContractError, "does not support R>1"):
+            self.agent.resolve_spec(
+                target_ids=("edgebench",),
+                profile="vliw-smoke",
+                methods=("plain-codex",),
+                seeds=(1, 2),
+            )
+
+    def test_non_goal_plus_methods_reject_k_greater_than_one(self) -> None:
+        with self.assertRaisesRegex(ContractError, "reserved for Goal Plus"):
+            self.agent.resolve_spec(
+                target_ids=("frontier-engineering",),
+                profile="v1-lite-cpu-codex-1h",
+                methods=("plain-pi",),
+                model="gpt-5.6-sol",
+                reasoning_effort="medium",
+                wall_time_seconds=3600,
+                live_search_concurrency=2,
+                cell_concurrency=1,
+            )
+
     def test_common_runner_rejects_method_outside_its_contract(self) -> None:
         with self.assertRaisesRegex(
             ContractError, "common-matrix does not support method.*plain-pi"
@@ -476,7 +498,7 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             model="test-model",
             reasoning_effort="medium",
             wall_time_seconds=60,
-            live_search_concurrency=2,
+            live_search_concurrency=1,
         )
         runner = create_runner(spec.runner)
         commands, campaign = runner.prepare_commands(spec)

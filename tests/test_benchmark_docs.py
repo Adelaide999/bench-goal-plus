@@ -62,7 +62,7 @@ class BenchmarkDocsTest(unittest.TestCase):
             "`benchmark-report`",
             "`benchmark-adapt`",
             "## T/K/C/R 契约",
-            "`K` 是同一个 task cell 内实际并行工作的 Agent 数量",
+            "`K` 只在 Goal Plus 方法中生效",
             "`C` 是一个 campaign 同时运行的不同 task cell 数量",
             "`budget.max_candidates` 已弃用",
             "实际 subagent 数量不等于 `K`",
@@ -151,8 +151,8 @@ class BenchmarkDocsTest(unittest.TestCase):
         for required in (
             "## K/C 启动确认门禁",
             "不得执行 `launch` 或 `e2e`",
-            "K=<每个 task cell 内的 Agent/subagent 数>",
-            "C=<同时运行的 task cell 数>",
+            "K=<数量>：仅 Goal Plus 生效",
+            "C=<数量>：campaign 同时运行的不同 task cell 数",
             "同时运行规模=<按该方法解释的 K × C>",
             "不能自动映射到配置",
         ):

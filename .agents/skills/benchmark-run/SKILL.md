@@ -64,22 +64,30 @@ benchmark 使用相同 lifecycle 或支持相同并发。
 自然语言里的“并发 2”“并行 2”“同时跑 2 个”不能自动映射到配置，因为它们既可能表示
 单个 task cell 内的 `K`，也可能表示跨 task cell 的 `C`。遇到这类说法必须分别询问：
 
-- `K` 是否表示同一个 task cell 内实际并行工作的 Agent/subagent 数；
+- `K` 是否表示 Goal Plus 同一个 task cell 内实际并行工作的 internal subagent 数；
 - `C` 是否表示同一个 campaign 同时运行的 task cell 数。
 
-执行真实 `launch` 或 `e2e` 前，必须向用户展示 `plan` 解析后的确认块，并得到明确确认：
+`K>1` 只允许 Goal Plus 方法。Plain Codex、Plain Claude、Plain Pi 和其他非 Goal Plus
+方法必须使用 `K=1`，每个 cell 只启动一条 outer trajectory；若要运行 independent-parallel
+baseline，必须使用单独登记的方法或参数，不能复用 `K`。
+
+执行真实 `launch` 或 `e2e` 前，必须向用户展示 `plan` 解析后的确认块，并得到明确确认。
+不能只列出 `T/K/C/R` 字母和值；每一项都必须同时用自然语言说明本次运行中的含义：
 
 ```text
-T=<每个 task 的墙钟预算>
-K=<每个 task cell 内的 Agent/subagent 数>
-C=<同时运行的 task cell 数>
-R=<独立重复次数>
+T=<秒数>：每条 task trajectory 或 search 的墙钟探索预算
+K=<数量>：仅 Goal Plus 生效的、同一个 task cell 内 internal subagent 数；非 Goal Plus 必须为 1
+C=<数量>：campaign 同时运行的不同 task cell 数
+R=<数量>：每个 task 的独立重复/seed 数
 method=<方法及其 K 拓扑>
+单个 cell 拓扑=<非 Goal Plus 的 1 条 outer trajectory，或 Goal Plus 的 1 个 outer session + K 个 internal subagents>
 同时运行规模=<按该方法解释的 K × C>
+总 cells=<task 数 × method 数 × R>
 ```
 
-即使 preset 已冻结 K/C，也必须展示其解析值。混合方法 campaign 要分别说明 Plain 方法的
-`K` 个 outer trajectories 与 Goal Plus 的 1 个 outer session + `K` 个 internal subagents。
+即使 preset 已冻结 K/C，也必须展示其解析值。混合方法 campaign 只能使用 `K=1`，并分别
+说明非 Goal Plus 方法的 1 条 outer trajectory 与 Goal Plus 的 1 个 outer session + 1 个
+internal subagent。
 用户只确认了其中一个维度、使用了未标注的“并发/并行”数字，或确认内容与 `plan` 不一致时，
 不得启动；先重新 `plan` 并再次确认。`resume` 已有 campaign 不重复询问，但不能借 resume
 修改原有 K/C。
@@ -91,7 +99,7 @@ method=<方法及其 K 拓扑>
 ## Gotchas
 
 - 只有 runner capability 中 `cell_concurrency=true` 且已有测试证据时才能接受 `C>1`。
-- Plain Codex 的 `K` 是独立 outer trajectories；Goal Plus 的 `K` 是共享状态 internal workers。
+- 非 Goal Plus 方法固定 `K=1`；Goal Plus 的 `K` 是共享状态 internal workers。
 - Completion evidence、stop/resume 语义和 report source 由选中的 benchmark reference
   定义；不得把 EdgeBench 的 SForge/Goal Plus 规则套到 common 或 OpenEvolve runner。
 - 不要启动多个 controller 来伪造 `C`；总并发必须由一个 campaign manifest 记录。

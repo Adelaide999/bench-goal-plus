@@ -16,7 +16,8 @@ runtime's PyTorch CUDA probe before evaluating a seed. The legacy target
   event; `combined_score` is maximize.
 - Goal Plus cells additionally require actual worker/subagent evidence equal to
   `K`; missing evidence keeps the cell and campaign `partial`.
-- Plain Pi uses `K` isolated outer Pi lanes. Both Pi methods require the
+- Plain Pi requires `K=1` and uses one outer Pi trajectory. Goal Plus + Pi
+  maps `K` to internal subagents. Both Pi methods require the
   profile model to be visible through the run-local OpenAI-compatible Pi
   provider configured from `OPENAI_BASE_URL` and `OPENAI_API_KEY`; values are
   inherited and never written to campaign manifests or reports.
@@ -29,7 +30,8 @@ The target supports native provision, detached execution, stop, and finalization
 It does not resume the same trajectory. A stopped campaign is finalized as
 `partial`; a retry uses a new campaign ID.
 
-`K` is task-internal Agent concurrency. `C` is currently fixed to one because
+`K` is Goal Plus task-internal subagent concurrency; non-Goal-Plus methods
+require `K=1`. `C` is currently fixed to one because
 several v1-lite evaluators are timing- or GPU-sensitive. Do not map Hydra batch
 `max_parallel` to `K`.
 

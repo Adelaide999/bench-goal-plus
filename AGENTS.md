@@ -72,25 +72,28 @@
 ## T/K/C/R 契约
 
 - `T` 是一条 task trajectory 或一次 Goal Plus search 的墙钟探索时间预算。
-- `K` 是同一个 task cell 内实际并行工作的 Agent 数量。配置中只有这一个并行数量，
-  不再引入另一套最大值、上限或策略参数。
+- `K` 只在 Goal Plus 方法中生效，是同一个 task cell 内实际并行工作的内部 subagent
+  数量。非 Goal Plus 方法必须固定 `K=1`，一个 cell 只启动一条 outer trajectory。
+  配置中不再引入另一套最大值、上限或策略参数。
 - Goal Plus adapter 把 `K` 映射为唯一的 `parallel-num`/`budget.max_parallel`。
   `budget.max_candidates` 已弃用，不得作为第二个可独立配置的数量。
 - `C` 是一个 campaign 同时运行的不同 task cell 数量。`C` 只控制 task 之间的并发，
   不能代替或改写每个 task 内部的 `K`。
 - `R` 是独立重复次数或 seed 数量，不能用 `C` 代替。
 
-不同方法必须按各自原生拓扑实现同一个 `K`：
+不同方法必须遵守以下拓扑：
 
-- Plain Codex、Plain Claude 和 Plain Pi：一个 task cell 启动 `K` 条相互隔离的
-  outer Agent trajectory。
+- Plain Codex、Plain Claude 和 Plain Pi：`K` 必须为 1，一个 task cell 启动一条
+  outer Agent trajectory。Independent-parallel baseline 必须使用单独的方法/参数契约，
+  不得复用 `K`。
 - Goal Plus + Codex 和 Goal Plus + Pi：一个 task cell 只启动一个 outer Goal Plus
   主会话，由这个主会话启动 `K` 个共享同一 Search 状态的内部 subagent。
-- `K=4,C=1` 表示一次只跑一个 task；Plain 方法运行 4 个 outer Agent，Goal Plus
-  方法运行 1 个 outer 主会话和 4 个内部 subagent。
+- `K=4,C=1` 只适用于 Goal Plus，表示一次只跑一个 task，由 1 个 outer 主会话运行
+  4 个内部 subagent。
 - `K=1,C=4` 表示同时跑 4 个 task cell；每个 cell 内仍只有 1 个 Agent 或 1 个
   Goal Plus subagent。
-- `K=4,C=4` 表示同时跑 4 个 task cell，并且每个 cell 都按其方法拓扑实现 `K=4`。
+- `K=4,C=4` 只适用于 Goal Plus，表示同时跑 4 个 task cell，每个 cell 内有 4 个
+  internal subagent。
 
 Goal Plus 结束后必须统计实际 subagent 数量并与 `K` 核对：
 

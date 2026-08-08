@@ -133,7 +133,8 @@ def render_catalog(agent: BenchmarkAgent, *, as_json: bool) -> int:
         print(
             f"runner {runner['id']}: {runner['kind']} "
             f"detach={capabilities['detach']} stop={capabilities['stop']} "
-            f"resume={capabilities['resume']} C={capabilities['cell_concurrency']} "
+            f"resume={capabilities['resume']} R={capabilities['repeat_seeds']} "
+            f"C={capabilities['cell_concurrency']} "
             f"retain={capabilities['retain_containers']} "
             f"methods={','.join(runner['supported_methods'])}"
         )

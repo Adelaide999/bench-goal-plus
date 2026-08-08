@@ -137,6 +137,10 @@ class BenchmarkAgent:
             raise ContractError("T, K, C, and seeds must be positive integers")
         if len(set(selected_seeds)) != len(selected_seeds):
             raise ContractError("seeds must be unique")
+        if len(selected_seeds) > 1 and not runner_definition.capabilities.repeat_seeds:
+            raise ContractError(
+                f"runner {runner_definition.runner_id} does not support R>1 seed matrices"
+            )
         if len(set(selected_conditions)) != len(selected_conditions):
             raise ContractError("conditions must be unique")
 
@@ -244,6 +248,26 @@ class BenchmarkAgent:
                 f"runner {runner_definition.runner_id} does not support method(s): "
                 f"{rejected}; supported: {supported}"
             )
+        if live_search_concurrency is not None and live_search_concurrency > 1:
+            non_goal_plus_methods = [
+                method
+                for method in selected_methods
+                if not method.startswith("goal-plus-")
+            ]
+            non_goal_plus_conditions = [
+                condition
+                for condition in selected_conditions
+                if condition not in {"B3", "B4"}
+            ]
+            if (
+                non_goal_plus_methods
+                or non_goal_plus_conditions
+                or not (selected_methods or selected_conditions)
+            ):
+                raise ContractError(
+                    "K>1 is reserved for Goal Plus internal subagents; "
+                    "non-Goal-Plus methods require K=1"
+                )
         for method in selected_methods:
             contract = runner_definition.method_contracts.get(method, {})
             if contract.get("model_format") == "provider/model":

@@ -90,6 +90,8 @@ class NativeProfileRunner(BenchmarkRunner):
                 command.extend([flag, str(value)])
         for method in spec.methods:
             command.extend(["--method", method])
+        if self.definition.capabilities.repeat_seeds:
+            command.extend(["--seeds", *(str(seed) for seed in spec.seeds)])
         if spec.retain_containers:
             command.append("--retain-containers")
         campaign = CampaignRef(

@@ -15,11 +15,11 @@ EdgeBench 保留 native SForge lifecycle。控制面负责选择 profile/preset�
 
 | Method | SForge agent | `K` 的含义 |
 | --- | --- | --- |
-| `plain-codex` | `codex` | `K` 个独立 outer replicas |
+| `plain-codex` | `codex` | 固定 `K=1`，一条 outer trajectory |
 | `goal-plus-codex` | `codex-goal-plus` | 一个 outer run 内 `K` 个 Goal Plus workers |
-| `plain-claude` | `claude-code` | `K` 个独立 outer replicas |
-| `plain-pi` | `pi` | `K` 个独立 outer replicas |
-| `plain-pi-provider` | `pi-provider` | `K` 个使用显式 `PROVIDER/MODEL` 的独立 outer replicas |
+| `plain-claude` | `claude-code` | 固定 `K=1`，一条 outer trajectory |
+| `plain-pi` | `pi` | 固定 `K=1`，一条 outer trajectory |
+| `plain-pi-provider` | `pi-provider` | 固定 `K=1`，一条使用显式 `PROVIDER/MODEL` 的 outer trajectory |
 | `goal-plus-pi` | `pi-goal-plus` | 一个 outer run 内 `K` 个 Goal Plus workers |
 | `goal-plus-pi-provider` | `pi-goal-plus-provider` | 与上一行拓扑相同，但 outer/worker 都使用显式 `PROVIDER/MODEL` API 路径 |
 

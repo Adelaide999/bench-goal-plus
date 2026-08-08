@@ -203,6 +203,12 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         value = profile.get(field)
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise FrontierEngineeringContractError(f"{profile_id}: {field} must be positive")
+    if profile["concurrency"] != 1 and any(
+        not method.startswith("goal-plus-") for method in methods
+    ):
+        raise FrontierEngineeringContractError(
+            f"{profile_id}: non-Goal-Plus methods require K=1"
+        )
     if profile["cell_concurrency"] != 1:
         raise FrontierEngineeringContractError(
             f"{profile_id}: Frontier-Engineering initially supports C=1"
@@ -243,6 +249,7 @@ def resolve_profile(
     profile: dict[str, Any],
     *,
     methods: list[str] | None = None,
+    seeds: list[int] | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
     wall_time_seconds: int | None = None,
@@ -252,6 +259,7 @@ def resolve_profile(
     resolved = json.loads(json.dumps(profile))
     for field, value in (
         ("methods", methods),
+        ("seeds", seeds),
         ("model", model),
         ("reasoning_effort", reasoning_effort),
         ("wall_time_seconds", wall_time_seconds),
