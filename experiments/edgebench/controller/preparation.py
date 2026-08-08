@@ -11,6 +11,7 @@ from .context import current_paths
 from .environment import task_config
 from .profiles import (
     ALLOWED_PROTOCOL_OVERRIDE_FIELDS,
+    GOAL_PLUS_METHODS,
     METHODS,
     OFFICIAL_SCHEDULED_RUNS,
     api_protocol_for_methods,
@@ -107,6 +108,12 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     worker_min_runtime = int(profile.get("worker_min_runtime_seconds", 0))
     worker_min_verifiers = int(profile.get("worker_min_verifier_runs", 0))
     closeout_reserve = int(profile.get("closeout_reserve_seconds", 0))
+    has_goal_plus = bool(set(methods) & GOAL_PLUS_METHODS)
+    global_evidence_config = (
+        {"global_evidence_mode": str(profile.get("global_evidence_mode", "manual"))}
+        if has_goal_plus
+        else {}
+    )
     role_fields = (
         "worker_model",
         "worker_reasoning_effort",
@@ -244,6 +251,11 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "model": model,
                 "reasoning_effort": reasoning,
                 **role_config,
+                **(
+                    global_evidence_config
+                    if method in GOAL_PLUS_METHODS
+                    else {}
+                ),
                 "thinking": thinking,
                 "claude_context_window_tokens": profile.get(
                     "claude_context_window_tokens"
@@ -333,6 +345,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "model": model,
         "reasoning_effort": reasoning,
         **role_config,
+        **global_evidence_config,
         "api_protocol": api_protocol,
         "thinking": thinking,
         "wall_time_seconds": wall_time,
@@ -375,6 +388,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "model": model,
             "reasoning_effort": reasoning,
             **role_config,
+            **global_evidence_config,
             "pi_package_version": profile.get("pi_package_version"),
             "api_protocol": api_protocol,
             "thinking": thinking,

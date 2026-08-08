@@ -382,6 +382,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(goal_plus["concurrency"], 2)
         self.assertEqual(goal_plus["worker_runtime_seconds"], 240)
         self.assertEqual(goal_plus["goal_plus_finalization_grace_seconds"], 120)
+        self.assertEqual(goal_plus["global_evidence_mode"], "manual")
         self.assertEqual(
             api_provider["methods"], ["goal-plus-pi-provider"]
         )
@@ -396,6 +397,22 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(zai_provider["wall_time_seconds"], 3600)
         self.assertEqual(zai_provider["concurrency"], 2)
         self.assertEqual(zai_provider["cell_concurrency"], 1)
+
+    def test_goal_plus_profile_validates_global_evidence_mode(self) -> None:
+        _, profile = EDGE.load_profile(
+            "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1"
+        )
+        profile["global_evidence_mode"] = "independent"
+        path = self.temp / "independent-evidence.json"
+        path.write_text(json.dumps(profile), encoding="utf-8")
+
+        _, loaded = EDGE.load_profile(path)
+
+        self.assertEqual(loaded["global_evidence_mode"], "independent")
+        profile["global_evidence_mode"] = "sometimes"
+        path.write_text(json.dumps(profile), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "global_evidence_mode"):
+            EDGE.load_profile(path)
 
     def test_pi_provider_profile_requires_qualified_role_models(self) -> None:
         _, profile = EDGE.load_profile(
@@ -963,6 +980,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "evidence_annotator_timeout_seconds": 900,
         }
         profile.update(role_config)
+        profile["global_evidence_mode"] = "independent"
         args = SimpleNamespace(
             method=None,
             wall_time_seconds=1200,
@@ -1000,6 +1018,9 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 {key: payload[key] for key in role_config},
                 role_config,
             )
+            self.assertEqual(payload["global_evidence_mode"], "independent")
+        snapshot = EDGE.read_json(destination / "profile.json")
+        self.assertEqual(snapshot["global_evidence_mode"], "independent")
 
         models_path = self.temp / "runtime-models.json"
         env = EDGE.cell_environment(
@@ -1023,6 +1044,9 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         }
         for env_name, profile_name in field_map.items():
             self.assertEqual(extra[env_name], str(role_config[profile_name]))
+        self.assertEqual(
+            extra["GOAL_PLUS_GLOBAL_EVIDENCE_MODE"], "independent"
+        )
         self.assertEqual(
             extra["SFORGE_PI_AUX_MODELS"],
             "worker-provider/worker-model annotation-provider/annotation-model",
@@ -1390,6 +1414,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertEqual(extra["SFORGE_GOAL_PLUS_PARALLEL_NUM"], "4")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "600")
+        self.assertEqual(extra["GOAL_PLUS_GLOBAL_EVIDENCE_MODE"], "manual")
         self.assertEqual(
             extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "90"
         )
