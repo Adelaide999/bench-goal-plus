@@ -149,8 +149,13 @@ def generic_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "directional_gain": score.get("directional_gain"),
                 "valid": score.get("valid"),
                 "wall_time_seconds": (record.get("budget") or {}).get(
-                    "wall_time_seconds"
+                    "wall_time_seconds", protocol.get("wall_time_seconds")
                 ),
+                "iteration_budget": protocol.get("iterations"),
+                "completed_iterations": (
+                    execution.get("iterations") or {}
+                ).get("completed_candidates"),
+                "native_best_iteration": execution.get("native_best_iteration"),
                 "live_concurrency_k": record.get(
                     "effective_concurrency",
                     (record.get("budget") or {}).get(
@@ -158,7 +163,8 @@ def generic_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                         (record.get("budget") or {}).get(
                             "concurrency",
                             (record.get("budget") or {}).get(
-                                "requested_live_concurrency"
+                                "requested_live_concurrency",
+                                protocol.get("concurrency"),
                             ),
                         ),
                     ),

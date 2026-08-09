@@ -71,11 +71,17 @@
       "controller": "experiments/frontier_engineering/experiment.py",
       "evidence_filename": "campaign-summary.json",
       "supported_methods": [
+        "openevolve",
         "plain-codex",
         "plain-pi",
         "goal-plus-codex",
         "goal-plus-pi"
       ],
+      "method_contracts": {
+        "openevolve": {
+          "bootstrap_targets": ["frontier_engineering"]
+        }
+      },
       "capabilities": {
         "provision": true,
         "detach": true,
@@ -275,6 +281,38 @@
     }
   ],
   "presets": [
+    {
+      "id": "frontier-engineering-energy-storage-openevolve-smoke-5",
+      "description": "One-task Frontier-Engineering OpenEvolve lifecycle smoke with 5 evolved candidates, the shipped initial program, and frozen UnifiedTask verifier.",
+      "benchmarks": ["frontier-engineering"],
+      "profile": "energy-storage-openevolve-smoke-5",
+      "campaign_id_template": "frontier-engineering-energy-storage-openevolve-gpt-5-6-sol-medium-5iter-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["openevolve"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "frontier-engineering-energy-storage-openevolve-paper-100",
+      "description": "One-task Frontier-Engineering paper-protocol OpenEvolve run with 100 iterations, the shipped initial program, and frozen UnifiedTask verifier.",
+      "benchmarks": ["frontier-engineering"],
+      "profile": "energy-storage-openevolve-paper-100",
+      "campaign_id_template": "frontier-engineering-energy-storage-openevolve-gpt-5-6-sol-medium-100iter-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["openevolve"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "wall_time_seconds": 43200,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
     {
       "id": "frontier-engineering-energy-storage-codex-smoke",
       "description": "One-task Frontier-Engineering v1-lite Plain Codex smoke on the fast BatteryFastChargingSPMe continuous evaluator.",

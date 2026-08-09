@@ -454,7 +454,20 @@ def format_budget(record: dict[str, Any]) -> str:
         time_text = f"{format_number(actual)}s"
     else:
         time_text = f"{format_number(actual)}/{format_number(limit)}s"
-    return f"T {time_text}; K {k if k is not None else '-'}"
+    rendered = f"T {time_text}; K {k if k is not None else '-'}"
+    requested_iterations = protocol.get("iterations")
+    iteration_evidence = record["execution"].get("iterations")
+    completed_iterations = (
+        iteration_evidence.get("completed_candidates")
+        if isinstance(iteration_evidence, dict)
+        else None
+    )
+    if requested_iterations is not None:
+        rendered += (
+            f"; N {completed_iterations if completed_iterations is not None else '-'}"
+            f"/{requested_iterations} iterations"
+        )
+    return rendered
 
 
 def format_calls(calls: dict[str, Any]) -> str:

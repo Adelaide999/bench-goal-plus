@@ -83,6 +83,20 @@ class RegistryTest(unittest.TestCase):
             self.assertIs(result["resolved"], True)
             self.assertIs(result["patch_successfully_applied"], True)
 
+    def test_frontier_readiness_keeps_openevolve_separate(self) -> None:
+        data = STATUS.load_registry()
+        item = next(
+            item for item in data["items"] if item["id"] == "frontier-engineering-lite"
+        )
+
+        self.assertEqual(item["gate_set"], "benchmark_search_methods")
+        self.assertEqual(
+            set(item["stages"]), set(data["gate_sets"]["benchmark_search_methods"])
+        )
+        self.assertEqual(item["stages"]["native_baseline"], "pass")
+        self.assertEqual(item["stages"]["openevolve"], "partial")
+        self.assertNotIn("openevolve", data["gate_sets"]["benchmark_methods"])
+
     def test_benchmark_method_pass_requires_stage_evidence(self) -> None:
         data = STATUS.load_registry()
         item = next(

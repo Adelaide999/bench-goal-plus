@@ -15,7 +15,13 @@ RUNS_ROOT = ROOT / "runs" / "frontier-engineering"
 UPSTREAM_ROOT = ROOT / "third_party" / "frontier-engineering"
 GOAL_PLUS_ROOT = ROOT / "third_party" / "goal-plus"
 SAFE_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
-SUPPORTED_METHODS = {"plain-codex", "plain-pi", "goal-plus-codex", "goal-plus-pi"}
+SUPPORTED_METHODS = {
+    "openevolve",
+    "plain-codex",
+    "plain-pi",
+    "goal-plus-codex",
+    "goal-plus-pi",
+}
 REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 ACCELERATOR_POLICIES = {"cpu-only", "nvidia-cuda-opt-in"}
 NVIDIA_CUDA_ACCELERATOR = "nvidia-cuda"
@@ -188,6 +194,25 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         raise FrontierEngineeringContractError(
             f"{profile_id}: unsupported methods: {', '.join(sorted(unknown_methods))}"
         )
+    if "openevolve" in methods:
+        if methods != ["openevolve"]:
+            raise FrontierEngineeringContractError(
+                f"{profile_id}: OpenEvolve must use a dedicated profile"
+            )
+        iterations = profile.get("iterations")
+        if not isinstance(iterations, int) or isinstance(iterations, bool) or iterations < 1:
+            raise FrontierEngineeringContractError(
+                f"{profile_id}: OpenEvolve iterations must be positive"
+            )
+        protocol = profile.get("openevolve_protocol")
+        if protocol not in {"paper", "smoke"}:
+            raise FrontierEngineeringContractError(
+                f"{profile_id}: OpenEvolve protocol must be paper or smoke"
+            )
+        if protocol == "paper" and iterations != 100:
+            raise FrontierEngineeringContractError(
+                f"{profile_id}: paper OpenEvolve requires 100 iterations"
+            )
     if not isinstance(profile.get("model"), str) or not profile["model"]:
         raise FrontierEngineeringContractError(f"{profile_id}: model is required")
     if profile.get("reasoning_effort") not in REASONING_EFFORTS:

@@ -21,6 +21,7 @@ from .config import (
     campaign_dir,
     write_json,
 )
+from . import openevolve_runtime
 
 
 ADAPTER_ID = "frontier-engineering-v1-lite"
@@ -67,6 +68,7 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
             "hard_kill_grace_seconds": profile["hard_kill_grace_seconds"],
             "worker_runtime_seconds": profile["worker_runtime_seconds"],
             "worker_min_runtime_seconds": profile.get("worker_min_runtime_seconds"),
+            "iterations": profile.get("iterations"),
         },
         "source": {
             "frontier_engineering_root": str(UPSTREAM_ROOT),
@@ -95,28 +97,36 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
                 campaign["cells"].append(cell)
                 write_json(campaign_path, campaign)
                 try:
-                    standalone.prepare(
-                        standalone.PrepareConfig(
-                            benchmark=ADAPTER_ID,
-                            adapter_module=ADAPTER_MODULE,
+                    if method == "openevolve":
+                        openevolve_runtime.prepare_cell(
+                            run_dir,
                             task_id=task_id,
-                            method=method,
-                            model=profile["model"],
-                            reasoning_effort=profile["reasoning_effort"],
-                            wall_time_seconds=profile["wall_time_seconds"],
-                            concurrency=profile["concurrency"],
-                            soft_closeout_seconds=profile["soft_closeout_seconds"],
-                            hard_kill_grace_seconds=profile["hard_kill_grace_seconds"],
-                            worker_runtime_seconds=profile["worker_runtime_seconds"],
-                            worker_min_runtime_seconds=profile.get("worker_min_runtime_seconds"),
-                            iterations_ceiling=1,
                             seed=seed,
-                            run_dir=run_dir,
-                            environment_manifest=ROOT / "environment/upstreams.json",
-                            checkout_root=ROOT / "third_party",
-                            venv=ROOT / ".bench-env/venv",
-                        ).to_namespace()
-                    )
+                            profile=profile,
+                        )
+                    else:
+                        standalone.prepare(
+                            standalone.PrepareConfig(
+                                benchmark=ADAPTER_ID,
+                                adapter_module=ADAPTER_MODULE,
+                                task_id=task_id,
+                                method=method,
+                                model=profile["model"],
+                                reasoning_effort=profile["reasoning_effort"],
+                                wall_time_seconds=profile["wall_time_seconds"],
+                                concurrency=profile["concurrency"],
+                                soft_closeout_seconds=profile["soft_closeout_seconds"],
+                                hard_kill_grace_seconds=profile["hard_kill_grace_seconds"],
+                                worker_runtime_seconds=profile["worker_runtime_seconds"],
+                                worker_min_runtime_seconds=profile.get("worker_min_runtime_seconds"),
+                                iterations_ceiling=1,
+                                seed=seed,
+                                run_dir=run_dir,
+                                environment_manifest=ROOT / "environment/upstreams.json",
+                                checkout_root=ROOT / "third_party",
+                                venv=ROOT / ".bench-env/venv",
+                            ).to_namespace()
+                        )
                     cell["state"] = "prepared"
                 except Exception as error:
                     cell["state"] = "failed"
@@ -176,15 +186,18 @@ def execute_campaign(destination: Path) -> int:
             _set_controller(destination, active=True, current_cell=cell["cell_id"])
             write_json(campaign_path, campaign)
             try:
-                returncode = standalone.execute(
-                    standalone.RunConfig(
-                        run_dir=Path(cell["run_dir"]),
-                        model=campaign["model"],
-                        codex_bin="codex",
-                        pi_bin="pi",
-                        api_base=os.environ.get("OPENAI_BASE_URL"),
-                    ).to_namespace()
-                )
+                if cell["method"] == "openevolve":
+                    returncode = openevolve_runtime.execute_cell(Path(cell["run_dir"]))
+                else:
+                    returncode = standalone.execute(
+                        standalone.RunConfig(
+                            run_dir=Path(cell["run_dir"]),
+                            model=campaign["model"],
+                            codex_bin="codex",
+                            pi_bin="pi",
+                            api_base=os.environ.get("OPENAI_BASE_URL"),
+                        ).to_namespace()
+                    )
                 manifest = json.loads(
                     (Path(cell["run_dir"]) / "experiment.json").read_text(encoding="utf-8")
                 )
@@ -291,7 +304,12 @@ def status_payload(destination: Path) -> dict[str, Any]:
         observed = dict(cell)
         manifest = Path(cell["run_dir"]) / "experiment.json"
         if manifest.is_file():
-            observed["run_status"] = json.loads(manifest.read_text()).get("status")
+            observed_manifest = json.loads(manifest.read_text())
+            observed["run_status"] = observed_manifest.get("status")
+            if observed_manifest.get("method") == "openevolve":
+                observed["iterations"] = openevolve_runtime.iteration_progress(
+                    Path(cell["run_dir"])
+                )
         counts[cell["state"]] = counts.get(cell["state"], 0) + 1
         cells.append(observed)
     controller_path = destination / "controller.json"

@@ -80,7 +80,10 @@ def venv_bin(venv: Path) -> Path:
 
 
 def selected_upstreams(
-    manifest: dict[str, Any], only: list[str] | None = None
+    manifest: dict[str, Any],
+    only: list[str] | None = None,
+    *,
+    include_always: bool = True,
 ) -> dict[str, dict[str, Any]]:
     upstreams = manifest["upstreams"]
     if not only:
@@ -92,7 +95,7 @@ def selected_upstreams(
     return {
         name: entry
         for name, entry in upstreams.items()
-        if entry.get("always") is True or name in requested
+        if (include_always and entry.get("always") is True) or name in requested
     }
 
 
@@ -100,10 +103,14 @@ def checkout_paths(
     manifest: dict[str, Any],
     checkout_root: Path,
     only: list[str] | None = None,
+    *,
+    include_always: bool = True,
 ) -> dict[str, Path]:
     return {
         name: checkout_root / entry["checkout_dir"]
-        for name, entry in selected_upstreams(manifest, only).items()
+        for name, entry in selected_upstreams(
+            manifest, only, include_always=include_always
+        ).items()
     }
 
 
@@ -838,11 +845,14 @@ def collect_doctor(
     only: list[str] | None = None,
     require_pi: bool = False,
     require_codex: bool = False,
+    include_always: bool = True,
 ) -> dict[str, Any]:
     ensure_temp_root()
     python = venv_python(venv)
-    chosen = selected_upstreams(manifest, only)
-    paths = checkout_paths(manifest, checkout_root, only)
+    chosen = selected_upstreams(manifest, only, include_always=include_always)
+    paths = checkout_paths(
+        manifest, checkout_root, only, include_always=include_always
+    )
     checks: list[dict[str, Any]] = []
     checks.append(
         {
@@ -981,7 +991,10 @@ def bootstrap_environment(args: argparse.Namespace) -> dict[str, Any]:
     manifest = load_manifest(args.manifest)
     checkout_root = args.checkout_root.expanduser().absolute()
     venv = args.venv.expanduser().absolute()
-    chosen = selected_upstreams(manifest, args.only)
+    include_always = not bool(getattr(args, "exact_only", False))
+    chosen = selected_upstreams(
+        manifest, args.only, include_always=include_always
+    )
     for name, entry in chosen.items():
         ensure_checkout(checkout_root / entry["checkout_dir"], entry)
     if "edgebench" in chosen:
@@ -1010,7 +1023,9 @@ def bootstrap_environment(args: argparse.Namespace) -> dict[str, Any]:
             [uv, "pip", "install", "--python", str(python), "-r", str(args.lock)],
             capture=False,
         )
-        paths = checkout_paths(manifest, checkout_root, args.only)
+        paths = checkout_paths(
+            manifest, checkout_root, args.only, include_always=include_always
+        )
         editable_paths = [
             paths[name] for name, entry in chosen.items() if entry.get("editable") is True
         ]
@@ -1040,6 +1055,7 @@ def bootstrap_environment(args: argparse.Namespace) -> dict[str, Any]:
         only=args.only,
         require_pi=args.require_pi,
         require_codex=args.require_codex,
+        include_always=include_always,
     )
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(payload, indent=2) + "\n")
@@ -1053,6 +1069,7 @@ def bootstrap(args: argparse.Namespace) -> int:
 
 
 def doctor(args: argparse.Namespace) -> int:
+    include_always = not bool(getattr(args, "exact_only", False))
     payload = collect_doctor(
         load_manifest(args.manifest),
         args.checkout_root.expanduser().absolute(),
@@ -1061,6 +1078,7 @@ def doctor(args: argparse.Namespace) -> int:
         only=args.only,
         require_pi=args.require_pi,
         require_codex=args.require_codex,
+        include_always=include_always,
     )
     print(json.dumps(payload, indent=2))
     return 0 if payload["ok"] else 1
@@ -1215,9 +1233,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="clone/check one named benchmark plus the always-managed runtime checkouts",
     )
+    bootstrap_parser.add_argument(
+        "--exact-only",
+        action="store_true",
+        help="do not add always-managed checkouts to an explicit --only selection",
+    )
 
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument("--only", action="append")
+    doctor_parser.add_argument("--exact-only", action="store_true")
     doctor_parser.add_argument("--require-pi", action="store_true")
     doctor_parser.add_argument("--require-codex", action="store_true")
     check_parser = subparsers.add_parser(

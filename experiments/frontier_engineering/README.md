@@ -31,3 +31,17 @@ preset remains available as a slower scheduling regression.
 restricted to one until cross-task resource isolation has separate evidence.
 The legacy `frontier-engineering-malloclab` common target remains a fast portable
 regression and is not the v1-lite campaign target.
+
+The `frontier-engineering-energy-storage-openevolve-paper-100` preset preserves
+the upstream Experiment 1 search protocol on the same EnergyStorage task. It
+uses the shipped initial program, frozen UnifiedTask verifier, OpenEvolve 0.2.26
+defaults, temperature 0.7, and 100 evolution iterations. The 12-hour wall value
+is a fail-safe ceiling rather than the selection budget. Completion requires an
+audited initial-program record, exactly 100 evolved candidates, and a valid
+controller final evaluation.
+
+The `frontier-engineering-energy-storage-openevolve-smoke-5` preset exercises
+the same initial program, verifier, model configuration, and OpenEvolve search
+path with five evolution iterations. It is diagnostic rather than a paper
+result. Completion requires one initial-program record, exactly five evolved
+candidates, a saved best program, and a valid controller final evaluation.

@@ -191,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
             result = agent.setup(
                 targets,
                 profile=args.profile or (preset.profile if preset else None),
+                methods=tuple(
+                    (preset.expected_profile.get("methods") or []) if preset else []
+                ),
                 skip_bootstrap=args.skip_bootstrap,
                 skip_provision=args.skip_provision,
                 dry_run=args.dry_run,

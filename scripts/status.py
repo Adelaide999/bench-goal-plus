@@ -112,7 +112,7 @@ def validate(data: dict) -> list[str]:
                             f"item evidence list: {evidence}"
                         )
 
-        if gate_set == "benchmark_methods":
+        if gate_set in {"benchmark_methods", "benchmark_search_methods"}:
             claim_gates = expected - {
                 "source_forked",
                 "environment",

@@ -38,6 +38,20 @@ def finalize_campaign(destination: Path) -> dict[str, Any]:
         )
         score = record.get("score") or {}
         protocol = record.get("protocol") or {}
+        execution = (
+            manifest.get("execution")
+            if isinstance(manifest.get("execution"), dict)
+            else {}
+        )
+        if manifest.get("method") == "openevolve":
+            protocol["iterations"] = (manifest.get("budget") or {}).get(
+                "iterations_ceiling"
+            )
+            record["protocol"] = protocol
+            record["execution"]["iterations"] = execution.get("iterations")
+            record["execution"]["total_duration_seconds"] = execution.get(
+                "total_duration_seconds"
+            )
         record.update(
             {
                 "benchmark_id": "frontier-engineering",

@@ -25,6 +25,19 @@
       "matched_baseline",
       "campaign_ready"
     ],
+    "benchmark_search_methods": [
+      "source_forked",
+      "environment",
+      "official_verifier",
+      "native_baseline",
+      "openevolve",
+      "plain_codex",
+      "goal_plus_codex",
+      "plain_pi",
+      "goal_plus_pi",
+      "matched_baseline",
+      "campaign_ready"
+    ],
     "search_backend": [
       "source_forked",
       "native_smoke",
@@ -123,7 +136,7 @@
       "id": "frontier-engineering-lite",
       "display_name": "Frontier-Engineering v1-lite",
       "kind": "benchmark",
-      "gate_set": "benchmark_methods",
+      "gate_set": "benchmark_search_methods",
       "priority": 3,
       "repositories": [
         {
@@ -143,6 +156,7 @@
         "environment": "pass",
         "official_verifier": "pass",
         "native_baseline": "pass",
+        "openevolve": "partial",
         "plain_codex": "pass",
         "goal_plus_codex": "partial",
         "plain_pi": "partial",
@@ -179,8 +193,9 @@
           "evidence/runs/2026-08-07-frontier-engineering-energy-storage-goal-plus-pi/official-report.json"
         ]
       },
-      "next_action": "Validate Plain Pi and Goal Plus + Codex on the CPU-only EnergyStorage task, then validate K>1 before expanding the default 9-task CPU campaign.",
+      "next_action": "Complete the registered 100-iteration OpenEvolve EnergyStorage acceptance run, then validate Plain Pi and Goal Plus + Codex on the same CPU task.",
       "blockers": [
+        "The OpenEvolve paper-protocol path is registered as partial until its 100-iteration EnergyStorage campaign is archived as method-specific evidence.",
         "The native Plain Codex and Goal Plus + Pi K=1 EnergyStorage paths have real E2E evidence, but Plain Pi and Goal Plus + Codex still require separate real E2E evidence.",
         "K>1 and matched-method comparisons remain unproven; current native profiles use K=1 and C=1.",
         "The full 10-task v1-lite profile includes CUDA-backed RobotArm and remains explicit opt-in; default inventory and campaigns use the 9-task CPU subset."

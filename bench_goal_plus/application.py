@@ -309,6 +309,7 @@ class BenchmarkAgent:
         targets: tuple[TargetDefinition, ...],
         *,
         profile: str | None,
+        methods: tuple[str, ...] = (),
         skip_bootstrap: bool,
         skip_provision: bool,
         dry_run: bool,
@@ -331,6 +332,7 @@ class BenchmarkAgent:
             targets,
             skip_bootstrap=skip_bootstrap,
             skip_provision=skip_provision,
+            bootstrap_targets=self._bootstrap_targets_for_methods(targets, methods),
         ))
         groups: dict[str, list[TargetDefinition]] = {}
         for target in targets:
@@ -392,6 +394,9 @@ class BenchmarkAgent:
             spec.targets,
             skip_bootstrap=skip_bootstrap,
             skip_provision=skip_provision,
+            bootstrap_targets=self._bootstrap_targets_for_methods(
+                spec.targets, spec.methods
+            ),
         ))
         setup_commands.extend(
             runner.provision_commands(spec, skip_provision=skip_provision)
@@ -435,6 +440,28 @@ class BenchmarkAgent:
         plan["agent_state"] = str(campaign.path / STATE_FILE)
         plan["agent_phase"] = state["agent_phase"]
         return plan
+
+    def _bootstrap_targets_for_methods(
+        self,
+        targets: tuple[TargetDefinition, ...],
+        methods: tuple[str, ...],
+    ) -> tuple[str, ...] | None:
+        if not methods:
+            return None
+        selected: set[str] = set()
+        for target in targets:
+            runner = self.catalog.runners[target.runner_id]
+            applicable = [method for method in methods if method in runner.supported_methods]
+            if not applicable:
+                return None
+            for method in applicable:
+                override = runner.method_contracts.get(method, {}).get(
+                    "bootstrap_targets"
+                )
+                if override is None:
+                    return None
+                selected.update(override)
+        return tuple(sorted(selected))
 
     def status(self, campaign_value: str | Path, *, benchmark: str | None = None) -> dict[str, Any]:
         campaign, state, ref, runner = self._campaign_context(campaign_value, benchmark)

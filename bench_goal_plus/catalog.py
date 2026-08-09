@@ -119,17 +119,30 @@ class Catalog:
                     raise ContractError(
                         f"{runner_id}: contract for {method} must be an object"
                     )
-                unknown_fields = set(contract) - {"model_format"}
+                unknown_fields = set(contract) - {"model_format", "bootstrap_targets"}
                 if unknown_fields:
                     raise ContractError(
                         f"{runner_id}: contract for {method} has unknown fields: "
                         + ", ".join(sorted(unknown_fields))
                     )
                 model_format = contract.get("model_format")
-                if model_format != "provider/model":
+                if model_format is not None and model_format != "provider/model":
                     raise ContractError(
                         f"{runner_id}: contract for {method} has unsupported "
                         f"model_format {model_format!r}"
+                    )
+                bootstrap_targets = contract.get("bootstrap_targets")
+                if bootstrap_targets is not None and (
+                    not isinstance(bootstrap_targets, list)
+                    or not bootstrap_targets
+                    or not all(
+                        isinstance(item, str) and item in upstreams
+                        for item in bootstrap_targets
+                    )
+                ):
+                    raise ContractError(
+                        f"{runner_id}: contract for {method} bootstrap_targets must "
+                        "name managed upstreams"
                     )
                 method_contracts[method] = dict(contract)
             raw_capabilities = entry.get("capabilities")

@@ -92,6 +92,10 @@ class ReproEnvironmentTest(unittest.TestCase):
             self.assertEqual(Path(upstream["checkout_dir"]).parent, Path("."))
         selected = repro_env.selected_upstreams(manifest, ["heurigym"])
         self.assertEqual(set(selected), {"openevolve", "goal_plus", "heurigym"})
+        exact = repro_env.selected_upstreams(
+            manifest, ["frontier_engineering"], include_always=False
+        )
+        self.assertEqual(set(exact), {"frontier_engineering"})
         selected_edgebench = repro_env.selected_upstreams(manifest, ["edgebench"])
         self.assertEqual(
             set(selected_edgebench), {"openevolve", "goal_plus", "edgebench"}

@@ -23,6 +23,16 @@ runtime's PyTorch CUDA probe before evaluating a seed. The legacy target
   inherited and never written to campaign manifests or reports.
 - Final source is `campaign-summary.json`; `finish` exports `report.md` and the
   campaign-named XLSX.
+- The `openevolve` method preserves the upstream Experiment 1 protocol: the
+  shipped initial program, frozen UnifiedTask verifier, OpenEvolve 0.2.26
+  defaults, and exactly 100 evolution iterations. It requires `K=1, C=1` and
+  records one initial-program evaluation separately from the 100 evolved
+  candidates. Its `T` is only an operational hard ceiling; a cell is complete
+  only when the full iteration ledger and controller final score are present.
+- The registered 5-iteration OpenEvolve smoke uses the same upstream search
+  path and frozen task assets, but is diagnostic rather than a paper result.
+  Its completion ledger is one initial program plus exactly five evolved
+  candidates.
 
 ## Lifecycle
 
@@ -40,3 +50,6 @@ runtimes used by v1-lite (`frontier-eval-driver`, `frontier-v1-main`, and
 `frontier-v1-summit`); it does not install host packages or unrelated v1 assets.
 The EnergyStorage acceptance profiles freeze `K=1, C=1, R=1`; Plain Pi uses
 `T=300`, while Goal Plus + Pi uses the exercised `T=600` closeout budget.
+The paper-protocol OpenEvolve profile uses a 12-hour operational `T` guard and
+an authoritative fixed budget of 100 iterations; do not compare that guard to
+the time-budgeted Agent profiles as if it were their search budget.

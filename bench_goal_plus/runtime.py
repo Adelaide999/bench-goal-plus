@@ -59,6 +59,7 @@ class RuntimeManager:
         *,
         skip_bootstrap: bool,
         skip_provision: bool,
+        bootstrap_targets: tuple[str, ...] | None = None,
     ) -> list[list[str]]:
         commands: list[list[str]] = []
         docker_targets = [
@@ -66,15 +67,19 @@ class RuntimeManager:
         ]
         if docker_targets:
             commands.append(["docker", "info"])
-        upstreams = sorted(
+        upstreams = list(bootstrap_targets) if bootstrap_targets is not None else sorted(
             {name for target in targets for name in target.bootstrap_targets}
         )
         if not skip_bootstrap:
             bootstrap = [sys.executable, "scripts/repro_env.py", "bootstrap"]
+            if bootstrap_targets is not None:
+                bootstrap.append("--exact-only")
             for upstream in upstreams:
                 bootstrap.extend(["--only", upstream])
             commands.append(bootstrap)
         doctor = [sys.executable, "scripts/repro_env.py", "doctor"]
+        if bootstrap_targets is not None:
+            doctor.append("--exact-only")
         for upstream in upstreams:
             doctor.extend(["--only", upstream])
         commands.append(doctor)

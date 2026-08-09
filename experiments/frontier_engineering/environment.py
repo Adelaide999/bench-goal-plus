@@ -6,6 +6,8 @@ import json
 import os
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -30,10 +32,159 @@ REQUIRED_METADATA = (
 )
 REQUIRED_CONTROL_FILES = (
     "frontier_eval/conf/batch/v1_lite.yaml",
+    "frontier_eval/conf/algorithm/openevolve.yaml",
+    "frontier_eval/conf/llm/openai_compatible.yaml",
     "frontier_eval/tasks/unified/evaluator/python.py",
     "frontier_eval/tasks/unified/spec.py",
     "scripts/env/ensure_uv_env.py",
 )
+
+
+def _openevolve_chat_probe(profile: dict[str, Any]) -> dict[str, Any]:
+    base_url = str(os.environ.get("OPENAI_BASE_URL") or "").rstrip("/")
+    api_key = str(os.environ.get("OPENAI_API_KEY") or "")
+    if not base_url or not api_key:
+        return {
+            "ok": False,
+            "http_status": None,
+            "error": "OPENAI_BASE_URL and OPENAI_API_KEY are required",
+        }
+    request = urllib.request.Request(
+        f"{base_url}/chat/completions",
+        data=json.dumps(
+            {
+                "model": profile["model"],
+                "messages": [
+                    {"role": "user", "content": "Reply with exactly WIRE_OK."}
+                ],
+                "max_tokens": 64,
+                "temperature": 0.7,
+                "reasoning_effort": profile["reasoning_effort"],
+            }
+        ).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "bench-goal-plus-frontier-openevolve-doctor/1",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            raw = response.read()
+            status = response.status
+    except urllib.error.HTTPError as error:
+        raw = error.read()
+        status = error.code
+    except urllib.error.URLError as error:
+        return {
+            "ok": False,
+            "http_status": None,
+            "transport_error": type(error.reason).__name__,
+        }
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = {}
+    result: dict[str, Any] = {
+        "ok": 200 <= status < 300,
+        "http_status": status,
+    }
+    if result["ok"]:
+        if isinstance(payload.get("object"), str):
+            result["object"] = payload["object"]
+        if isinstance(payload.get("model"), str):
+            result["model"] = payload["model"]
+    elif isinstance(payload.get("error"), dict):
+        result["error"] = {
+            key: payload["error"][key]
+            for key in ("type", "code", "param")
+            if isinstance(payload["error"].get(key), (str, int, float, bool))
+        }
+    return result
+
+
+def _openevolve_agent_checks(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    runtime_ok, version = command_output(
+        [
+            str(UPSTREAM_ROOT / ".venvs/frontier-eval-driver/bin/python"),
+            "-c",
+            (
+                "from importlib.metadata import version; "
+                "print(version('openevolve'))"
+            ),
+        ],
+        cwd=UPSTREAM_ROOT,
+    )
+    base_present = bool(os.environ.get("OPENAI_BASE_URL"))
+    key_present = bool(os.environ.get("OPENAI_API_KEY"))
+    probe = (
+        _openevolve_chat_probe(profile)
+        if runtime_ok and base_present and key_present
+        else {"ok": False, "http_status": None, "error": "provider input missing"}
+    )
+    return [
+        {
+            "kind": "search-runtime",
+            "name": "openevolve",
+            "version": version,
+            "expected_version": "0.2.26",
+            "passed": runtime_ok and version == "0.2.26",
+        },
+        {
+            "kind": "agent-provider",
+            "name": "openevolve-openai-compatible",
+            "model": profile["model"],
+            "reasoning_effort": profile["reasoning_effort"],
+            "wire_api": "openai-completions",
+            "api_base_env": "OPENAI_BASE_URL",
+            "api_base_present": base_present,
+            "api_key_env": "OPENAI_API_KEY",
+            "api_key_present": key_present,
+            "probe": probe,
+            "passed": bool(probe.get("ok")),
+        },
+    ]
+
+
+def _openevolve_config_check(profile: dict[str, Any]) -> dict[str, Any]:
+    from .openevolve_runtime import build_command
+
+    output_dir = ROOT / ".tmp/frontier-engineering/openevolve-config-probe"
+    command = build_command(
+        profile,
+        task_id=str(profile["task_ids"][0]),
+        output_dir=output_dir,
+    )
+    command.extend(["--cfg", "job"])
+    probe_environment = configure_temp_environment(os.environ.copy())
+    probe_environment["OPENAI_API_BASE"] = "https://invalid.example/v1"
+    probe_environment["OPENAI_API_KEY"] = "DUMMY_CONFIG_PROBE_KEY"
+    ok, output = command_output(
+        command,
+        cwd=UPSTREAM_ROOT,
+        environment=probe_environment,
+    )
+    iterations = int(profile["iterations"])
+    expected = {
+        f"iterations: {iterations}": "iterations",
+        "random_seed: 42": "random_seed",
+        "parallel_evaluations: 1": "parallel_evaluations",
+        f"reasoning_effort: {profile['reasoning_effort']}": "reasoning_effort",
+        f"model: {profile['model']}": "model",
+    }
+    missing = [label for text, label in expected.items() if text not in output]
+    return {
+        "kind": "native-config-resolution",
+        "name": f"frontier-engineering-openevolve-{profile['openevolve_protocol']}-protocol",
+        "iterations": iterations,
+        "random_seed": 42,
+        "parallel_evaluations": 1,
+        "model": profile["model"],
+        "reasoning_effort": profile["reasoning_effort"],
+        "missing": missing,
+        "passed": ok and not missing,
+    }
 
 
 def command_output(
@@ -417,10 +568,13 @@ def doctor(
         )
     if any(method.endswith("-pi") for method in profile["methods"]):
         checks.extend(_pi_agent_checks(profile))
-    for name, root, expected_branch in (
-        ("frontier_engineering", UPSTREAM_ROOT, "main"),
-        ("goal_plus", GOAL_PLUS_ROOT, "main"),
-    ):
+    if "openevolve" in profile["methods"]:
+        checks.extend(_openevolve_agent_checks(profile))
+        checks.append(_openevolve_config_check(profile))
+    managed_checkouts = [("frontier_engineering", UPSTREAM_ROOT, "main")]
+    if any(method.startswith("goal-plus-") for method in profile["methods"]):
+        managed_checkouts.append(("goal_plus", GOAL_PLUS_ROOT, "main"))
+    for name, root, expected_branch in managed_checkouts:
         branch = git_value(root, "symbolic-ref", "--short", "HEAD")
         dirty = git_value(root, "status", "--porcelain")
         checks.append(
@@ -445,7 +599,10 @@ def doctor(
     )
     required_envs.add("frontier-eval-driver")
     if "frontier-eval-driver" in required_envs:
-        checks.append(_runtime_probe("frontier-eval-driver", ["hydra", "omegaconf", "yaml"]))
+        modules = ["hydra", "omegaconf", "yaml"]
+        if "openevolve" in profile["methods"]:
+            modules.extend(["openevolve", "openai"])
+        checks.append(_runtime_probe("frontier-eval-driver", modules))
     if "frontier-v1-main" in required_envs:
         checks.append(
             _runtime_probe(
