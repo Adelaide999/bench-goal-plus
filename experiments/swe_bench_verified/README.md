@@ -10,13 +10,13 @@ repository lifecycle through `python3 scripts/bench.py`.
 | Dataset | `SWE-bench/SWE-bench_Verified` at `91aa3ed51b709be6457e12d00300a6a596d4c6a3` |
 | Instance | `sympy__sympy-16886` |
 | Image | `swebench/sweb.eval.x86_64.sympy_1776_sympy-16886:latest` |
-| Methods | `plain-codex`, `plain-pi`, `goal-plus-pi` |
-| Budget | `T=1800`, `K=1`, `C=1`, `R=1` |
+| Methods | `plain-codex`, `plain-pi`, `goal-plus-codex`, `goal-plus-pi` |
+| Standard budget | `T=1800`, `K=1`, `C=1`, `R=1` |
 | Metric | official `resolved`, maximize |
 | Codex auth | `OPENAI_BASE_URL` + `OPENAI_API_KEY`, OpenAI-compatible Responses |
 
-Detached execution, stop/resume, `K>1`, `C>1`, and automatic image provisioning are not supported
-by this initial acceptance path. Plain Codex, Plain Pi, and Goal Plus + Pi at `K=1,C=1` passed
+Detached execution, stop/resume, `C>1`, and automatic image provisioning are not supported by this
+initial acceptance path. Plain Codex, Plain Pi, and Goal Plus + Pi at `K=1,C=1` passed
 archived Linux/amd64 official-harness smokes under `evidence/runs/`; this does not extend the claim
 to other topologies or the full Verified split. The two Plain development smokes retain their
 dirty-at-prepare provenance and later acceptance commit explicitly.
@@ -40,6 +40,23 @@ used by the repository's other direct-API Codex paths. On Linux, a loopback base
 the task container through the shared `systemd-socket-proxyd` bridge; setup verifies both host and
 container `POST /responses` before a campaign can start.
 
+Profiles with `agent_network_policy=public-egress-blocked` run the Agent on a campaign-specific
+Docker `--internal` bridge. The provider socket bridge listens on that bridge's gateway, so model
+traffic remains available without a public route. Before the trajectory starts, the controller
+requires Docker inspect to show the exact internal network and requires a direct public-IP probe to
+fail; the verification and network cleanup disposition are persisted in the final evidence.
+The container temporarily joins Docker's default bridge only while the controller installs the
+profile-locked Goal Plus runtime, before any Agent or model process starts. The controller then
+disconnects that setup network and requires the internal network to be the sole remaining attachment
+before either the Responses probe or Agent invocation.
+The pre-Agent container Responses probe retries only transient transport outcomes (`408`, `425`,
+`429`, `5xx`, or no HTTP status) up to three attempts and records every attempt. Deterministic
+authentication, protocol, and model-selection failures remain fail-fast.
+During the timed process, ordinary HTTP and Git clients inherit a loopback refusal proxy while the
+model gateway is exempt through `NO_PROXY`; public lookups fail quickly and the internal network
+still blocks direct-socket bypasses. A campaign accepts one positive attempt seed and records the
+same value in its Search strategy configuration, manifest, and report.
+
 Goal Plus + Pi starts one outer Pi JSON session through the project extension, then requires one
 candidate-bound `pi-rpc` worker in the shared Search state. Its frozen SearchSpec uses only an
 Agent-selected visible test command wrapped by the repository-owned numeric verifier. The wrapper
@@ -47,6 +64,20 @@ does not read hidden dataset fields and is not the official score. On completion
 controller closes Pi pools, performs idempotent select/promote/apply closeout, exports `.gp` into the
 campaign, and only then disposes the Agent container. The separate official harness remains the sole
 owner of `resolved`.
+
+Goal Plus profiles may also run an independent Codex ViewAgent for every verifier-settled
+candidate iteration. It always writes a concise evidence description into Global Evidence View.
+The supplemental-evaluation ON condition additionally gives ViewAgent the immutable public task
+context, current cumulative diff, verifier evidence, and at most one hard-score incumbent snapshot
+per peer candidate. ViewAgent derives fresh open-ended dimensions for that commit and records only
+non-directional peer relationships; FrozenSpec contains no soft rubric. OFF runs the same ViewAgent
+and records descriptions, keeping the model, provider, prompt, budget, and call count matched apart
+from the supplemental output and its extra tokens.
+
+During controller closeout, any ViewAgent work already queued by verifier-settled Evidence is drained
+before `search_select`. This preserves the search-period feedback contract for the final iteration;
+annotation errors remain durable evidence failures rather than being converted to a soft score or a
+hard verifier result.
 
 ## Public lifecycle
 
@@ -66,6 +97,21 @@ Use `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` for the Goal Plus + Pi p
 `T=1800,K=1,C=1,R=1`, a 1500-second worker budget, and a 300-second Search closeout reserve.
 Use `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` for the same topology with the
 profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning.
+
+Use `swe-bench-verified-sympy-16886-goal-plus-codex-smoke` for a five-minute native
+Codex host check. It uses the host Codex ChatGPT login and therefore requires outbound access to
+`chatgpt.com`; connectivity failure is a campaign partial, never a verifier result.
+
+Supplemental evaluation sets both `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED=1` and
+`GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1`, so a requested post-settlement evaluation cannot
+silently degrade into OFF. The official SWE-bench `resolved` result remains the sole hard score.
+Reports preserve per-iteration Global Evidence, immutable comparison bases, ViewAgent token usage,
+and completion checks proving that FrozenSpec contained no legacy soft rubric. Goal Plus also
+persists every Global Evidence read with the completed View commit references visible at that time;
+the report distinguishes a supplemental evaluation read before a later verifier from one published
+only during closeout. Before freezing the hard verifier, the MainAgent builds a public behavior
+inventory from the issue, implementation, and existing tests, and keeps relevant regression tests in
+the candidate edit surface without allowing them to redefine the frozen verifier.
 
 Run `launch` only after reviewing and confirming the resolved `T/K/C/R` block. A terminal campaign
 is archived with `finish`, which consumes `campaign-summary.json` and exports `report.md` plus the
