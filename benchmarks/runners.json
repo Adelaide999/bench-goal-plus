@@ -32,6 +32,7 @@
         "cell_concurrency": true,
         "retain_containers": false,
         "official_evaluator": true,
+        "attempt_seed": false,
         "resume_semantics": "stopped campaigns are finalized as partial; retry uses a new campaign"
       }
     },
@@ -43,6 +44,7 @@
       "supported_methods": [
         "plain-codex",
         "plain-pi",
+        "goal-plus-codex",
         "goal-plus-pi"
       ],
       "method_contracts": {
@@ -62,6 +64,7 @@
         "cell_concurrency": false,
         "retain_containers": true,
         "official_evaluator": true,
+        "attempt_seed": true,
         "resume_semantics": "initial acceptance supports one non-resumable task attempt; retry uses a new campaign"
       }
     },
@@ -91,6 +94,7 @@
         "cell_concurrency": false,
         "retain_containers": false,
         "official_evaluator": true,
+        "attempt_seed": false,
         "resume_semantics": "stopped campaigns are finalized as partial; retry uses a new campaign"
       }
     },
@@ -116,6 +120,7 @@
         "cell_concurrency": false,
         "retain_containers": false,
         "official_evaluator": true,
+        "attempt_seed": true,
         "resume_semantics": "rerun only prepared or interrupted cells"
       }
     },
@@ -139,6 +144,7 @@
         "cell_concurrency": false,
         "retain_containers": false,
         "official_evaluator": true,
+        "attempt_seed": true,
         "resume_semantics": "run-batch skips cells already present in campaign-results.json"
       }
     }
@@ -493,6 +499,22 @@
           "wire_api": "responses"
         },
         "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "swe-bench-verified-sympy-16886-goal-plus-codex-smoke",
+      "description": "One-instance SWE-bench Verified Goal Plus + Codex lifecycle smoke with T=300, K=1, C=1, R=1.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "sympy-16886-goal-plus-codex-smoke",
+      "campaign_id_template": "swe-bench-verified-sympy-16886-goal-plus-codex-5m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-codex"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "low",
+        "wall_time_seconds": 300,
         "concurrency": 1,
         "cell_concurrency": 1
       }

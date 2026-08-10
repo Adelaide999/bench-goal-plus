@@ -6,10 +6,10 @@
 - Runner: `swe-bench-native`
 - Initial task: `sympy__sympy-16886`
 - Raw metric: official `resolved` boolean, direction `maximize`
-- Methods: `plain-codex`, `plain-pi`, and `goal-plus-pi`
-- Topology: Plain methods use one isolated outer trajectory; Goal Plus + Pi uses one outer Goal
-  Plus main session with one bound internal Pi worker. Initial acceptance restricts every method to
-  `K=1,C=1,R=1`
+- Methods: `plain-codex`, `plain-pi`, `goal-plus-codex`, and `goal-plus-pi`
+- Topology: Plain methods use one isolated outer trajectory. Goal Plus uses one outer main session
+  with bound internal workers on the selected Codex or Pi host. Standard acceptance restricts
+  every method to `K=1,C=1,R=1`; validate dynamic peer comparison separately at `K>1`
 - Final source JSON: `campaign-summary.json`
 
 The official harness owns final scoring in a separate container. The runner has no host-only score,
@@ -23,6 +23,7 @@ provision, detach, stop, resume, or cross-cell concurrency.
 | `swe-bench-verified-sympy-16886-pi-smoke` | `zai/glm-5.2`, medium | `1800/1/1/1` | inherited `ZAI_API_KEY` |
 | `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` | `zai/glm-5.2`, medium | `1800/1/1/1` | inherited `ZAI_API_KEY` |
 | `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | profile-frozen `OPENAI_BASE_URL` + `OPENAI_API_KEY`, Responses |
+| `swe-bench-verified-sympy-16886-goal-plus-codex-smoke` | `gpt-5.6-sol`, low | `300/1/1/1` | native Codex lifecycle smoke |
 
 The Pi credential value is never serialized. Docker receives only the selected environment variable
 name. The complete dataset row is host-side evaluator input; the Agent receives only the public
@@ -32,6 +33,52 @@ The Luna profile materializes a campaign-local Pi `models.json` containing only 
 `$OPENAI_API_KEY` environment reference. A Linux loopback endpoint uses the same repository-owned
 socket bridge as Plain Codex; doctor must pass host Responses, task-container Responses, and Pi's
 exact `bench-openai/gpt-5.6-luna` model listing before launch.
+
+Supplemental ViewAgent evaluation is an optional run condition. The baseline publishes only the
+candidate evidence description. When enabled, the same independent ViewAgent also publishes fresh
+open-ended dimensions from the immutable public task context and current cumulative diff, plus
+non-directional comparisons to other candidates' settled hard-score incumbents. FrozenSpec never
+contains a soft rubric, and official `resolved` remains the sole hard result. A missing or malformed
+enabled output, disabled-condition output leakage, or incomplete ViewAgent task makes Goal Plus
+evidence incomplete and therefore the campaign `partial`, while preserving a valid official raw
+metric.
+
+The Goal Plus + Codex pair uses the same Responses endpoint and key contract as Plain Codex and
+does not mount OAuth. Matched baseline/enabled prompts, task, evaluator, model, reasoning, and
+`T/K/C/R` must be byte-identical; only the supplemental-evaluation environment boolean differs.
+Keep task/model-specific experiment profiles in ignored campaign evidence rather than the tracked
+runner catalog. Promote a profile into the catalog only when it is a reusable lifecycle smoke.
+
+At `K>1`, dynamic peer comparison is a mechanism experiment, not a matched `K=1` quality result.
+MainAgent must create exactly `K` distinct initial candidates in one batch and bind one worker to
+each. Completion additionally requires overlapping runtime lease intervals, at least one ViewAgent
+output whose comparison basis contains another candidate's settled incumbent, and a persisted
+Global Evidence read showing a worker consumed a completed peer View before its next verifier
+attempt. Merely recording `budget.max_parallel=K` is incomplete evidence.
+
+When a profile freezes `agent_network_policy=public-egress-blocked`, the runner
+creates a campaign-owned Docker `--internal` bridge, binds the fixed loopback provider proxy to its
+gateway, and attaches the Agent container to that network. Launch fails closed unless Docker inspect
+reports the exact network and a direct public-IP connection probe is blocked; the model Responses
+probe must still pass through the gateway bridge. Preserve the network verification and cleanup
+disposition in final evidence. This prevents public web lookup without hiding the configured model
+endpoint or changing the official evaluator network.
+The profile-locked Goal Plus runtime may use a temporary default-bridge attachment during
+controller-owned setup, before any Agent/model process starts. The runner must disconnect that
+attachment and prove the internal network is the container's sole remaining network before the
+Responses probe or Agent invocation; persist this setup-egress disposition with the isolation probe.
+The timed Agent process also receives a loopback refusal proxy, with the campaign gateway in
+`NO_PROXY`, so ordinary HTTP/Git lookup attempts fail promptly while the Docker internal network
+remains the fail-closed boundary. One native campaign accepts exactly one positive attempt seed;
+persist it in the profile snapshot, prompt strategy config, campaign manifest, and report.
+
+The visible-test wrapper is a benchmark-owned read-only bind mount inside `/testbed`. Freeze records
+its exact hash. The ranking verifier directly uses `--ranking-signal`, allowing a completed public
+test failure to become a valid zero baseline for freeze preflight. The separate promotion verifier
+must directly invoke the same wrapper without that flag, so a zero visible score exits nonzero and
+cannot pass the hard promotion gate. Outer shell/Python exit-code suppressors are rejected by the
+completion contract. MainAgent must use the repository-native runner already present in the task
+image; missing pytest/plugins/dependencies are invalid verifier configuration, not candidate quality.
 
 The archived Linux/amd64 `sympy__sympy-16886` smokes pass the complete `K=1,C=1`
 official-harness contract for
@@ -57,12 +104,21 @@ An unresolved result is a valid completed score. Missing patch, missing report, 
 container isolation, or a second evaluator attempt is `partial` or `failed`, not a zero-filled
 success.
 
-For `goal-plus-pi`, score completion additionally requires exported durable state proving exactly
+For Goal Plus methods, score completion additionally requires exported durable state proving exactly
 one terminal Goal Plus record and linked promoted Search run, a frozen spec with
-`budget.max_parallel=K`, `pi-rpc/parallel_loops`, the frozen worker/closeout budgets, one candidate,
-one bound Pi worker session, worker-origin verifier evidence, the registered visible-test wrapper,
-and no active Pi pool job. The controller exports `/testbed/.gp` before container disposal. Missing
-Goal Plus evidence downgrades the cell to `partial` while preserving any complete official raw score.
+`budget.max_parallel=K`, the method's bound `codex` or `pi-rpc` worker topology, the frozen
+worker/closeout budgets, exactly `K` candidates, one bound worker session per candidate,
+worker-origin verifier evidence for every candidate,
+any profile-frozen minimum worker budget plus its satisfied runtime lease,
+the registered visible-test wrapper with the benchmark-owned frozen hash, a passing promotion
+`visible_test_score=1.0`, and no active Pi pool job. When the profile enables the
+ViewAgent, every candidate iteration must
+have a completed Global Evidence description and an immutable original-task context snapshot. ON
+additionally requires 1–8 open dimensions and peer comparisons exactly matching the task snapshot;
+OFF requires supplemental output to be absent. Both require FrozenSpec to contain no legacy soft
+rubric. The controller exports `/testbed/.gp` before container disposal.
+Missing Goal Plus evidence downgrades the cell to `partial` while preserving any complete official
+raw score.
 
 ## Debug container retention
 
@@ -132,10 +188,19 @@ checkout branch, image tag, image ID, or evaluator implementation.
   custom-provider outage. Do not fall back to OAuth or substitute `SFORGE_AGENT_*` when both
   protocol configurations exist.
 - Codex runtime extraction must fit the same bounded tmpfs in doctor and run. A pre-Agent
-  `No space left on device` result has no model/evaluator call; finish that failed campaign, fix and
+`No space left on device` result has no model/evaluator call; finish that failed campaign, fix and
   test the tmpfs contract, then create a fresh planned campaign rather than retrying it in place.
   The runtime mount also needs explicit `exec` because the pinned binary runs from `/opt/codex`;
   retain `nosuid,nodev` and verify the exact mount through full doctor.
+- The pre-Agent container Responses probe retries only transient transport outcomes (`408`, `425`,
+  `429`, `5xx`, or no HTTP status) up to three attempts, with every attempt retained in runtime
+  evidence. Authentication, protocol, and model-selection failures remain fail-fast. A retry must
+  not change `T`, `K`, `C`, `R`, the task, or the evaluator.
+- The official Astropy 4.3 image applies the upstream SWE-bench `pre_install` setuptools pin before
+  creating its synthetic `SWE-bench` commit. The Astropy profiles freeze that commit HEAD, tree,
+  changed-file list, and complete patch SHA-256. Full doctor accepts it only when all four values
+  match exactly and the dataset base is its ancestor; the disposable Agent checkout is then reset
+  to the dataset base. Any extra source change remains a blocking image mismatch.
 
 The full installation and mirror procedure is in the
 [benchmark setup matrix](../../../benchmark-setup/references/benchmark-matrix.md#swe-bench-verified-on-a-shared-linux-host).

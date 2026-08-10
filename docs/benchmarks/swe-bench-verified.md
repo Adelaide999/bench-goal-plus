@@ -20,8 +20,9 @@ Agent 只看到 issue problem statement、仓库名、base commit 和任务镜�
 ### Agent 要做什么
 
 Plain Codex 或 Plain Pi 在精确的 SWE-bench task image 内运行一条隔离 outer trajectory。
-Goal Plus + Pi 运行一个 outer Goal Plus 主会话，并由它启动一个共享 Search 状态的内部
-Pi worker。当前三种方法都固定 `K=1,C=1,R=1`。
+Goal Plus 运行一个 outer 主会话，并由它启动共享同一 Search 状态的内部 worker。标准对比
+固定 `K=1,C=1,R=1`；另有一个 Astropy Goal Plus + Codex 专用机制实验使用
+`K=2,C=1,R=1`，不与 `K=1` 合并为 matched 主结果。
 
 ### 期待输出是什么
 
@@ -50,7 +51,7 @@ task image 始终保留：controller 固定使用官方 harness 的 `cache_level
 
 ## 实验怎么用
 
-当前提供四个冻结 preset：
+当前提供 Plain、Pi、Goal Plus + Pi，以及 Goal Plus + Codex 冻结 preset：
 
 | Preset | Method | Model | T/K/C/R |
 | --- | --- | --- | --- |
@@ -58,8 +59,9 @@ task image 始终保留：controller 固定使用官方 harness 的 `cache_level
 | `swe-bench-verified-sympy-16886-pi-smoke` | Plain Pi | `zai/glm-5.2`, medium | `1800/1/1/1` |
 | `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` | Goal Plus + Pi | `zai/glm-5.2`, medium | `1800/1/1/1` |
 | `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | Goal Plus + Pi | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` |
+| `swe-bench-verified-sympy-16886-goal-plus-codex-smoke` | Goal Plus + Codex lifecycle smoke | `gpt-5.6-sol`, low | `300/1/1/1` |
 
-campaign 顺序运行。runner 暂不支持 provision、detach、stop、resume、`K>1` 或 `C>1`。
+campaign 顺序运行。runner 暂不支持 provision、detach、stop、resume 或 `C>1`。
 真实 launch 前仍必须展示并确认解析后的 T/K/C/R。以下 `K=1,C=1` 路径均已通过归档的
 真实官方 harness smoke：
 
@@ -75,6 +77,18 @@ Codex preset 另外冻结 `auth_mode=openai-compatible`、`OPENAI_BASE_URL`、
 `OPENAI_API_KEY` 和 Responses wire API。Linux 上的 loopback endpoint 使用与 EdgeBench
 相同的 `systemd-socket-proxyd` bridge；doctor 会分别验证 host 和实际 task container 的
 `POST /responses`。该路径不读取 OAuth auth file；日志里出现 `chatgpt.com` 应视为路由错误。
+
+可选的 `agent_network_policy=public-egress-blocked` 会让 controller 为 campaign 创建独立 Docker
+internal network，把模型 API bridge 绑定到该 network 的 host gateway，并在 Agent 启动前
+同时验证 Docker network mode 和公网 IP 连接失败。模型调用仍可用，但 Agent 没有公网路由，
+不能通过网页搜索题目；验证与 network 清理状态进入最终报告。
+固定 Goal Plus runtime 安装发生在 Agent/模型进程启动前；仅这个 setup 阶段临时连接 Docker
+默认 bridge。安装后 controller 必须先断开 setup bridge，并验证 internal network 是唯一剩余
+网络，才允许模型探针和 Agent 启动。
+计时 Agent 还会获得指向容器本地拒绝端口的 HTTP/HTTPS proxy，并将模型 gateway 放入
+`NO_PROXY`，让常见网页与 Git 查询快速失败；Docker internal network 仍是最终隔离边界。
+每个 native campaign 只接受一个正整数 attempt seed，并在 Search strategy、manifest 和报告中
+保持一致。
 
 Luna Goal Plus + Pi preset 复用同一组 OpenAI-compatible Responses 环境变量，但通过
 campaign-local Pi provider registry 选择 `bench-openai/gpt-5.6-luna`。该 registry 只保存
