@@ -1066,7 +1066,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
         self.assertEqual(
             managed_upstream_branch("goal_plus"),
-            "codex/acceptance-view",
+            "main",
         )
 
     def test_luna_pi_runtime_writes_environment_reference_not_secret(self) -> None:
