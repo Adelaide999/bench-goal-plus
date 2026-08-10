@@ -141,6 +141,50 @@ EdgeBench README 提供 open-source 51-task 的 model reference curves，fork �
 score reporter 会按任务和最近 checkpoint 保留官方参考。当前本地两条真实
 VLIW smoke 为：
 
+### Opus 4.8 对 GPT-5.5 的公开 51 题 headroom 标记
+
+论文 Appendix 14.6 给出每个 task/model 在 12 小时终点的 0–100 mean 和样本标准差；
+公开数据集 README 另给出 2/4/6/8/10/12 小时 checkpoint。以
+`Opus - GPT-5.5 >= 5` 分作为 material headroom：
+
+- 20/51 题在 2h 或 12h 至少一个 checkpoint 有 material headroom；
+- 8 题在 2h 和 12h 都保持至少 5 分优势：
+  `openttd_transport_ai`、`exchange_core_throughput`、`wesnoth_tactical_ai`、
+  `apple_incremental_game`、`schemathesis_datagen_pipeline`、
+  `nethack_dungeon_agent`、`vibrating_path_graph_coloring`、
+  `order_addition_permutation_optimization`；
+- 2h-only 有 4 题：`ad_placement_optimization`、
+  `new_foundations_consistency`、`integer_compression_codec`、
+  `git_rewrite_in_zig`；
+- 12h-only 有 8 题：`jagua_nesting_optimization`、`ann_vector_search_qps`、
+  `smt_solver`、`molecular_self_assembly`、`graph_node_classification`、
+  `borden_source_inversion`、`wireless_electricity_layout`、
+  `ffmpeg_swscale_reimplementation`。
+
+优先用于 GPT + Goal Plus 的第一组是：
+
+| Task | Opus-GPT @2h | Opus-GPT @12h | 12h 运行间波动 | Judge timeout | 选择理由 |
+|---|---:|---:|---|---:|---|
+| `order_addition_permutation_optimization` | +5.9 | +13.1 | 1-SD bands 不重叠 | 600s | 黑盒连续优化、搜索方向多、低成本复评 |
+| `schemathesis_datagen_pipeline` | +13.4 | +13.5 | 1-SD bands 不重叠 | 1800s | 结构化软件任务、可分解、反馈密集 |
+| `ad_placement_optimization` | +21.2 | +4.8 | 12h 差距收窄 | 600s | 特别适合检验 Goal Plus 是否提升 2h 学习速度 |
+| `apple_incremental_game` | +16.1 | +17.0 | 波动较大 | 600s | 低成本策略搜索，但必须重复验证 |
+| `molecular_self_assembly` | +2.2 | +14.0 | 1-SD bands 不重叠 | 600s | 明显的晚期提升；先复现已有 `REVIEW_HIGH` 异常 |
+
+`smt_solver` 和 `nethack_dungeon_agent` 的 12h gap 也较强，但单次 Judge timeout
+分别为 7200s 和 3600s，不适合作为第一轮低成本筛选。`openttd_transport_ai`、
+`ann_vector_search_qps` 的方差或 evaluator 成本同样偏高。
+
+完整 51 题分组、2h/12h 分数、样本标准差、evaluator timeout 与 source hash 见
+[`paper-opus-4.8-vs-gpt-5.5-headroom.json`](../../experiments/edgebench/references/paper-opus-4.8-vs-gpt-5.5-headroom.json)。
+
+这个标记只回答“公开结果中是否存在更好的 task trajectory”。它不是 matched
+Goal Plus effect：论文中的 Opus 主要使用 1M Claude Code，而 GPT-5.5 使用 256k
+Codex。当前 profile 又是 `gpt-5.6-sol/medium,T=2h`。正式判断必须先跑同协议 Plain GPT
+baseline；若它已达到论文 Opus@2h，则该题不再具有这个外部 headroom。随后固定同一
+task、model、reasoning、T/K/C 和 evaluator，比较 Plain 与 Goal Plus；论文 Opus 分数
+只保留为 external target，不作为 pass 阈值。
+
 - Plain Codex `gpt-5.5`，`T=180s,K=1`：4941 cycles；
 - Goal Plus + Codex `gpt-5.6-terra/high`，`T=3600s,K=3`：1878 cycles，
   EdgeBench score 57.9476。

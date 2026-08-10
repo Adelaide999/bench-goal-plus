@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "id": "edgebench-public-51-opus-4.8-vs-gpt-5.5-headroom",
+  "source": {
+    "title": "EdgeBench: Unveiling Scaling Laws of Learning from Real-World Environments",
+    "arxiv_id": "2607.05155v1",
+    "html_url": "https://arxiv.org/html/2607.05155v1",
+    "source_archive_sha256": "8193aeb41a3474690a40fac82e2ecbd53e651ab6b4759984b4c6845c04fbfd29",
+    "source_file": "tables/category_score_tables.tex",
+    "source_file_sha256": "a71605685889384c6fb8fffb5d83622001a5ea458042d798e73ba1323f7e36c5",
+    "checkpoint_source": "third_party/edgebench/tasks/README.md"
+  },
+  "scope": {
+    "profile": "experiments/edgebench/profiles/full-codex-2h.json",
+    "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+    "task_count": 51
+  },
+  "comparison": {
+    "opus": {
+      "agent": "Claude Code",
+      "model": "Claude Opus 4.8",
+      "primary_compact_context_tokens": 1000000
+    },
+    "gpt55": {
+      "agent": "Codex",
+      "model": "GPT-5.5",
+      "compact_context_tokens": 256000
+    },
+    "scheduled_runs_per_task_model": 3,
+    "score_scale": "0-100",
+    "material_headroom_threshold_points": 5.0,
+    "material_at_checkpoint": "opus_score - gpt55_score >= 5.0",
+    "one_sd_bands_nonoverlap_at_12h": "opus_mean - opus_sample_stddev > gpt55_mean + gpt55_sample_stddev",
+    "intended_use": "Task screening and external headroom reference only; not a matched Goal Plus effect estimate or a pass threshold."
+  },
+  "summary": {
+    "material_at_2h_or_12h": 20,
+    "material_at_both_2h_and_12h": 8,
+    "material_at_2h_only": 4,
+    "material_at_12h_only": 8,
+    "not_material_at_either_checkpoint": 30,
+    "missing_opus_result": 1
+  },
+  "candidate_groups": {
+    "material_at_both_2h_and_12h": [
+      "openttd_transport_ai",
+      "exchange_core_throughput",
+      "wesnoth_tactical_ai",
+      "apple_incremental_game",
+      "schemathesis_datagen_pipeline",
+      "nethack_dungeon_agent",
+      "vibrating_path_graph_coloring",
+      "order_addition_permutation_optimization"
+    ],
+    "material_at_2h_only": [
+      "ad_placement_optimization",
+      "new_foundations_consistency",
+      "integer_compression_codec",
+      "git_rewrite_in_zig"
+    ],
+    "material_at_12h_only": [
+      "jagua_nesting_optimization",
+      "ann_vector_search_qps",
+      "smt_solver",
+      "molecular_self_assembly",
+      "graph_node_classification",
+      "borden_source_inversion",
+      "wireless_electricity_layout",
+      "ffmpeg_swscale_reimplementation"
+    ],
+    "not_material_at_either_checkpoint": [
+      "anchorhead_text_adventure",
+      "arc_compiler_runtime",
+      "bipedalwalker_locomotion_rl",
+      "carleson_formalization",
+      "college_english_exam_bank",
+      "combinatorial_games_formalization",
+      "cta_risk_budget_optimization",
+      "dabic_gravity_inversion",
+      "dcss_dungeon_ai",
+      "equivalence_class_divide_and_conquer",
+      "flt_regular_formalization",
+      "grid_turing_robot",
+      "juliet_vulnerability_analyzer",
+      "k12_math_recommendation",
+      "lean_analysis_proofs",
+      "openrct2_theme_park_ai",
+      "ordinal_notation_well_foundedness",
+      "pfr_formalization",
+      "portfolio_risk_calibration",
+      "schemathesis_config_modernization",
+      "schemathesis_reporting_observability",
+      "sphere_eversion_formalization",
+      "treant_forest",
+      "tree_block_partitioning",
+      "triangulation_coloring_optimization",
+      "trinity_text_adventure",
+      "tryst_text_adventure",
+      "vehicle_routing_time_windows",
+      "vliw_kernel_optimization",
+      "warehouse_forklift_routing"
+    ],
+    "missing_opus_result": [
+      "rust_multicrate_reconstruction"
+    ]
+  },
+  "candidates": {
+    "openttd_transport_ai": {"category": "Games", "opus_2h": 50.0, "gpt55_2h": 10.1, "delta_2h": 39.9, "opus_12h": {"mean": 52.0, "sample_stddev": 8.5}, "gpt55_12h": {"mean": 28.1, "sample_stddev": 24.4}, "delta_12h": 23.9, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 3600},
+    "jagua_nesting_optimization": {"category": "Optimization", "opus_2h": 11.2, "gpt55_2h": 15.9, "delta_2h": -4.7, "opus_12h": {"mean": 44.2, "sample_stddev": 16.7}, "gpt55_12h": {"mean": 21.6, "sample_stddev": 10.9}, "delta_12h": 22.6, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 1200},
+    "nethack_dungeon_agent": {"category": "Games", "opus_2h": 29.7, "gpt55_2h": 16.6, "delta_2h": 13.1, "opus_12h": {"mean": 41.9, "sample_stddev": 9.1}, "gpt55_12h": {"mean": 22.5, "sample_stddev": 4.8}, "delta_12h": 19.4, "one_sd_bands_nonoverlap_at_12h": true, "evaluator_timeout_seconds": 3600},
+    "ann_vector_search_qps": {"category": "Systems & SE", "opus_2h": 26.2, "gpt55_2h": 22.3, "delta_2h": 3.9, "opus_12h": {"mean": 59.7, "sample_stddev": 2.1}, "gpt55_12h": {"mean": 40.7, "sample_stddev": 18.8}, "delta_12h": 19.0, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 7800},
+    "apple_incremental_game": {"category": "Optimization", "opus_2h": 42.7, "gpt55_2h": 26.6, "delta_2h": 16.1, "opus_12h": {"mean": 50.6, "sample_stddev": 8.1}, "gpt55_12h": {"mean": 33.6, "sample_stddev": 15.9}, "delta_12h": 17.0, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 600},
+    "smt_solver": {"category": "Optimization", "opus_2h": 10.3, "gpt55_2h": 7.2, "delta_2h": 3.1, "opus_12h": {"mean": 23.9, "sample_stddev": 7.0}, "gpt55_12h": {"mean": 8.6, "sample_stddev": 3.1}, "delta_12h": 15.3, "one_sd_bands_nonoverlap_at_12h": true, "evaluator_timeout_seconds": 7200},
+    "molecular_self_assembly": {"category": "Optimization", "opus_2h": 22.4, "gpt55_2h": 20.2, "delta_2h": 2.2, "opus_12h": {"mean": 34.7, "sample_stddev": 0.9}, "gpt55_12h": {"mean": 20.7, "sample_stddev": 1.0}, "delta_12h": 14.0, "one_sd_bands_nonoverlap_at_12h": true, "evaluator_timeout_seconds": 600},
+    "vibrating_path_graph_coloring": {"category": "Optimization", "opus_2h": 19.7, "gpt55_2h": 10.1, "delta_2h": 9.6, "opus_12h": {"mean": 25.3, "sample_stddev": 11.7}, "gpt55_12h": {"mean": 11.4, "sample_stddev": 5.1}, "delta_12h": 13.9, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 600},
+    "schemathesis_datagen_pipeline": {"category": "Systems & SE", "opus_2h": 68.0, "gpt55_2h": 54.6, "delta_2h": 13.4, "opus_12h": {"mean": 70.2, "sample_stddev": 2.7}, "gpt55_12h": {"mean": 56.7, "sample_stddev": 3.0}, "delta_12h": 13.5, "one_sd_bands_nonoverlap_at_12h": true, "evaluator_timeout_seconds": 1800},
+    "order_addition_permutation_optimization": {"category": "Optimization", "opus_2h": 22.6, "gpt55_2h": 16.7, "delta_2h": 5.9, "opus_12h": {"mean": 36.4, "sample_stddev": 5.7}, "gpt55_12h": {"mean": 23.3, "sample_stddev": 1.4}, "delta_12h": 13.1, "one_sd_bands_nonoverlap_at_12h": true, "evaluator_timeout_seconds": 600},
+    "graph_node_classification": {"category": "Scientific & ML", "opus_2h": 59.4, "gpt55_2h": 54.7, "delta_2h": 4.7, "opus_12h": {"mean": 66.6, "sample_stddev": 3.0}, "gpt55_12h": {"mean": 56.0, "sample_stddev": 15.8}, "delta_12h": 10.6, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 1800},
+    "borden_source_inversion": {"category": "Scientific & ML", "opus_2h": 7.5, "gpt55_2h": 20.1, "delta_2h": -12.6, "opus_12h": {"mean": 48.4, "sample_stddev": 7.3}, "gpt55_12h": {"mean": 38.5, "sample_stddev": 14.3}, "delta_12h": 9.9, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 600},
+    "wesnoth_tactical_ai": {"category": "Games", "opus_2h": 84.0, "gpt55_2h": 64.7, "delta_2h": 19.3, "opus_12h": {"mean": 88.0, "sample_stddev": 2.6}, "gpt55_12h": {"mean": 79.3, "sample_stddev": 6.4}, "delta_12h": 8.7, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 900},
+    "wireless_electricity_layout": {"category": "Optimization", "opus_2h": 6.5, "gpt55_2h": 6.2, "delta_2h": 0.3, "opus_12h": {"mean": 14.5, "sample_stddev": 6.1}, "gpt55_12h": {"mean": 7.2, "sample_stddev": 7.9}, "delta_12h": 7.3, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 600},
+    "exchange_core_throughput": {"category": "Systems & SE", "opus_2h": 40.7, "gpt55_2h": 15.4, "delta_2h": 25.3, "opus_12h": {"mean": 59.7, "sample_stddev": 2.7}, "gpt55_12h": {"mean": 53.2, "sample_stddev": 6.8}, "delta_12h": 6.5, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 2400},
+    "ffmpeg_swscale_reimplementation": {"category": "Systems & SE", "opus_2h": 9.9, "gpt55_2h": 8.8, "delta_2h": 1.1, "opus_12h": {"mean": 21.1, "sample_stddev": 7.9}, "gpt55_12h": {"mean": 15.3, "sample_stddev": 2.8}, "delta_12h": 5.8, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 5400},
+    "ad_placement_optimization": {"category": "Optimization", "opus_2h": 65.2, "gpt55_2h": 44.0, "delta_2h": 21.2, "opus_12h": {"mean": 67.7, "sample_stddev": 1.0}, "gpt55_12h": {"mean": 62.9, "sample_stddev": 6.2}, "delta_12h": 4.8, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 600},
+    "new_foundations_consistency": {"category": "Formal", "opus_2h": 28.9, "gpt55_2h": 13.7, "delta_2h": 15.2, "opus_12h": {"mean": 65.1, "sample_stddev": null, "fewer_than_three_valid_runs": true}, "gpt55_12h": {"mean": 66.5, "sample_stddev": 2.0}, "delta_12h": -1.4, "one_sd_bands_nonoverlap_at_12h": false, "evaluator_timeout_seconds": 2400},
+    "integer_compression_codec": {"category": "Systems & SE", "opus_2h": 69.4, "gpt55_2h": 61.1, "delta_2h": 8.3, "opus_12h": {"mean": 75.3, "sample_stddev": 0.3}, "gpt55_12h": {"mean": 74.4, "sample_stddev": 0.5}, "delta_12h": 0.9, "one_sd_bands_nonoverlap_at_12h": true, "evaluator_timeout_seconds": 2400},
+    "git_rewrite_in_zig": {"category": "Systems & SE", "opus_2h": 22.0, "gpt55_2h": 16.1, "delta_2h": 5.9, "opus_12h": {"mean": 23.1, "sample_stddev": 2.2}, "gpt55_12h": {"mean": 18.4, "sample_stddev": 0.4}, "delta_12h": 4.7, "one_sd_bands_nonoverlap_at_12h": true, "evaluator_timeout_seconds": 7200}
+  }
+}

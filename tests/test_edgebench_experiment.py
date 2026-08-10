@@ -707,6 +707,42 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "8193aeb41a3474690a40fac82e2ecbd53e651ab6b4759984b4c6845c04fbfd29",
         )
 
+    def test_paper_opus_headroom_reference_partitions_public_profile(self) -> None:
+        _, profile = EDGE.load_profile("full-codex-2h")
+        reference_path = (
+            ROOT
+            / "experiments"
+            / "edgebench"
+            / "references"
+            / "paper-opus-4.8-vs-gpt-5.5-headroom.json"
+        )
+        reference = json.loads(reference_path.read_text(encoding="utf-8"))
+        groups = reference["candidate_groups"]
+
+        partition = [task_id for task_ids in groups.values() for task_id in task_ids]
+        material = (
+            groups["material_at_both_2h_and_12h"]
+            + groups["material_at_2h_only"]
+            + groups["material_at_12h_only"]
+        )
+
+        self.assertEqual(len(partition), 51)
+        self.assertEqual(len(partition), len(set(partition)))
+        self.assertEqual(set(partition), set(profile["task_ids"]))
+        self.assertEqual(set(material), set(reference["candidates"]))
+        self.assertEqual(reference["summary"]["material_at_2h_or_12h"], 20)
+        self.assertEqual(reference["summary"]["material_at_both_2h_and_12h"], 8)
+        self.assertEqual(
+            reference["candidates"]["order_addition_permutation_optimization"][
+                "delta_12h"
+            ],
+            13.1,
+        )
+        self.assertEqual(
+            reference["candidates"]["schemathesis_datagen_pipeline"]["delta_2h"],
+            13.4,
+        )
+
     def test_comparison_workbook_uses_same_budget_gap_for_issue_marker(self) -> None:
         paper = EDGE.load_paper_reference()
         payload = {
