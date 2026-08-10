@@ -108,6 +108,24 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                     "verifier_candidate_ids": ["c001", "c002"],
                     "selected_candidate_ids": ["c001"],
                     "promoted_candidate_ids": ["c001"],
+                    "evidence_annotations": {
+                        "tasks": 3,
+                        "attempts": 2,
+                        "views_published": 1,
+                        "states": {"completed": 1, "pending": 2},
+                        "active_attempts": [
+                            {
+                                "candidate_id": "c002",
+                                "iteration": 1,
+                                "attempt": 1,
+                                "state": "running",
+                                "json_lines": 4,
+                                "event_type_counts": {"message_update": 4},
+                            }
+                        ],
+                        "recent_attempts": [],
+                        "monitor_files": 1,
+                    },
                     "goal_statuses": [
                         {"goal_plus_id": "gp_0001", "status": "complete"}
                     ],
@@ -135,6 +153,17 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(status["actual_worker_launch_count"], 2)
         self.assertEqual(status["worker_verifier_runs"], 11)
         self.assertEqual(status["promoted_candidate_ids"], ["c001"])
+        self.assertEqual(status["evidence_annotations"]["views_published"], 1)
+        self.assertEqual(
+            status["evidence_annotations"]["active_attempts"][0]["state"],
+            "running",
+        )
+        self.assertEqual(
+            status["evidence_annotations"]["active_attempts"][0][
+                "event_type_counts"
+            ],
+            {"message_update": 4},
+        )
         self.assertTrue(status["terminal_ready"])
         self.assertEqual(
             status["state_sources"], ["goal-plus-live-status.json"]

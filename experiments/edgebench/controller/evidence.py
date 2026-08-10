@@ -515,6 +515,24 @@ def live_goal_plus_status(
         (archived or {}).get("goal_statuses") or [],
         "goal_plus_id",
     )
+    evidence_annotations = (live or {}).get("evidence_annotations")
+    if not isinstance(evidence_annotations, dict):
+        archived_usage = (archived or {}).get("evidence_annotator_usage")
+        evidence_annotations = (
+            {
+                "tasks": archived_usage.get("tasks"),
+                "attempts": archived_usage.get("attempts"),
+                "views_published": archived_usage.get("states", {}).get(
+                    "completed", 0
+                ),
+                "states": archived_usage.get("states") or {},
+                "active_attempts": [],
+                "recent_attempts": [],
+                "monitor_files": 0,
+            }
+            if isinstance(archived_usage, dict)
+            else None
+        )
     state_sources = []
     if live is not None:
         state_sources.append("goal-plus-live-status.json")
@@ -583,6 +601,7 @@ def live_goal_plus_status(
                 *((archived or {}).get("promoted_candidate_ids") or []),
             }
         ),
+        "evidence_annotations": evidence_annotations,
         "goal_statuses": goal_statuses,
         "terminal_ready": (live or {}).get("terminal_ready"),
         "snapshot_at": (live or {}).get("captured_at"),
