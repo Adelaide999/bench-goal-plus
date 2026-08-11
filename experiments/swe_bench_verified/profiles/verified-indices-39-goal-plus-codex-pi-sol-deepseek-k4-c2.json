@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "id": "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k1-c2",
+  "id": "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2",
   "benchmark_id": "swe-bench-verified",
   "dataset": {
     "name": "SWE-bench/SWE-bench_Verified",
@@ -173,7 +173,7 @@
     "wire_api": "responses"
   },
   "wall_time_seconds": 1800,
-  "concurrency": 1,
+  "concurrency": 4,
   "cell_concurrency": 2,
   "container_network": "internal-provider-proxy",
   "retain_containers": false,

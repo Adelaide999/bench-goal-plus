@@ -106,12 +106,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             }
         )
         return profile
-    def test_verified_indices_39_profile_freezes_k1_c2_and_internal_network(self) -> None:
+    def test_verified_indices_39_profile_freezes_k4_c2_and_internal_network(self) -> None:
         profile = self.profile(
-            "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k1-c2"
+            "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2"
         )
         self.assertEqual(len(profile["task_ids"]), 39)
-        self.assertEqual(profile["concurrency"], 1)
+        self.assertEqual(profile["concurrency"], 4)
         self.assertEqual(profile["cell_concurrency"], 2)
         self.assertEqual(profile["container_network"], "internal-provider-proxy")
         self.assertEqual(profile["methods"], ["goal-plus-codex-pi"])
@@ -131,16 +131,16 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "strategy.worker_launch.model=deepseek/deepseek-v4-flash", prompt
         )
         self.assertIn("strategy.worker_launch.reasoning_effort=medium", prompt)
-        self.assertIn("budget.max_parallel=1", prompt)
+        self.assertIn("budget.max_parallel=4", prompt)
         self.assertNotIn(
             "budget.max_candidates=",
             prompt,
         )
 
         spec = BenchmarkAgent(catalog=Catalog()).resolve_spec(
-            preset_id="swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-k1-c2"
+            preset_id="swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2"
         )
-        self.assertEqual(spec.concurrency(), {"T": 1800, "K": 1, "C": 2, "R": 1})
+        self.assertEqual(spec.concurrency(), {"T": 1800, "K": 4, "C": 2, "R": 1})
 
     def test_allowlisted_connect_proxy_relays_only_exact_target(self) -> None:
         class EchoHandler(socketserver.BaseRequestHandler):
@@ -183,7 +183,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
     def test_mixed_sol_main_deepseek_workers_and_sol_view_are_explicit(self) -> None:
         profile = self.profile(
-            "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k1-c2"
+            "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2"
         )
         with self.temporary_directory() as temporary:
             assets = Path(temporary)

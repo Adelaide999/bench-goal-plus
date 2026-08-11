@@ -102,9 +102,9 @@ Use `swe-bench-verified-sympy-16886-goal-plus-codex-smoke` for a five-minute nat
 Codex host check. It uses the host Codex ChatGPT login and therefore requires outbound access to
 `chatgpt.com`; connectivity failure is a campaign partial, never a verifier result.
 
-The `swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-k1-c2` preset covers the 39
-workbook-selected tasks with a GPT Sol Codex MainAgent, one DeepSeek Pi worker, a GPT Sol
-ViewAgent, and `T=1800,K=1,C=2,R=1`. Its Agent containers share a
+The `swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2` preset covers the 39
+workbook-selected tasks with a GPT Sol Codex MainAgent, four DeepSeek Pi workers, a GPT Sol
+ViewAgent, and `T=1800,K=4,C=2,R=1`. Its Agent containers share a
 campaign-owned internal Docker network and reach only the selected provider through an
 ephemeral host allowlist proxy. The official evaluator still runs with Docker network
 mode `none`.
