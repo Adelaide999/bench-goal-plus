@@ -1219,6 +1219,13 @@ def _pi_container_probe(
     return run_capture(command, timeout=120)
 
 
+def _pi_model_probe_passed(
+    probe: subprocess.CompletedProcess[str], model_id: str
+) -> bool:
+    combined = "\n".join((probe.stdout or "", probe.stderr or ""))
+    return bool(probe.returncode == 0 and model_id in combined.split())
+
+
 def _goal_plus_container_probe(
     image: str, runtime: dict[str, Any]
 ) -> subprocess.CompletedProcess[str]:
@@ -1967,9 +1974,8 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                             )
                             model_probe = _pi_container_probe(image, routed)
                             model_recorded = True
-                            model_passed = bool(
-                                model_probe.returncode == 0
-                                and str(routed["model_id"]) in model_probe.stdout
+                            model_passed = _pi_model_probe_passed(
+                                model_probe, str(routed["model_id"])
                             )
                             checks.append(
                                 _check(
@@ -2012,9 +2018,8 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             model_passed = False
             if paths_present and runtime["credential_present"]:
                 probe = _pi_container_probe(image, runtime)
-                model_passed = bool(
-                    probe.returncode == 0
-                    and str(runtime["model_id"]) in probe.stdout
+                model_passed = _pi_model_probe_passed(
+                    probe, str(runtime["model_id"])
                 )
                 checks.append(
                     _check(

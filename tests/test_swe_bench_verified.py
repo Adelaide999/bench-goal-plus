@@ -1817,6 +1817,23 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn("NO_PROXY=192.0.2.10", command)
         self.assertNotIn(secret, joined)
 
+    def test_pi_model_probe_accepts_successful_stderr_table(self) -> None:
+        stderr_table = (
+            "provider  model\n"
+            "deepseek  deepseek-v4-flash\n"
+        )
+        probe = subprocess.CompletedProcess([], 0, "", stderr_table)
+        self.assertTrue(
+            environment._pi_model_probe_passed(probe, "deepseek-v4-flash")
+        )
+        self.assertFalse(
+            environment._pi_model_probe_passed(probe, "deepseek-v4")
+        )
+        failed = subprocess.CompletedProcess([], 1, "deepseek-v4-flash", "")
+        self.assertFalse(
+            environment._pi_model_probe_passed(failed, "deepseek-v4-flash")
+        )
+
     def test_goal_plus_container_mounts_and_outer_pi_command_are_explicit(self) -> None:
         profile = self.profile("sympy-16886-goal-plus-pi-smoke")
         secret = "not-for-command-lines"
