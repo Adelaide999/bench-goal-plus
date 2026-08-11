@@ -1338,6 +1338,36 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "codex/pi-supplemental-view-adapter",
         )
 
+    def test_goal_plus_container_probe_loads_pi_extension_contract(self) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary)
+            runtime_info = {
+                "provider": "deepseek",
+                "credential_env": "DEEPSEEK_API_KEY",
+                "node_root": root / "node",
+                "package_root": root / "pi",
+                "goal_plus_root": root / "goal-plus",
+                "goal_plus_dependency_lock": root / "requirements.lock",
+                "goal_plus_visible_verifier": root / "visible.py",
+                "goal_plus_controller": root / "controller.py",
+                "goal_plus_pip_cache": root / "pip-cache",
+                "goal_plus_evidence_annotator": None,
+            }
+            completed = subprocess.CompletedProcess([], 0, "0.80.6\n", "")
+            with mock.patch.object(
+                environment, "run_capture", return_value=completed
+            ) as run_capture:
+                environment._goal_plus_container_probe("image:latest", runtime_info)
+
+        command = run_capture.call_args.args[0]
+        shell_script = command[-1]
+        self.assertIn("pi --mode rpc --approve", shell_script)
+        self.assertIn("--session-id doctor", shell_script)
+        self.assertIn(
+            "-e /opt/goal-plus/.pi/extensions/goal-plus.ts </dev/null",
+            shell_script,
+        )
+
     def test_luna_pi_runtime_writes_environment_reference_not_secret(self) -> None:
         profile = self.profile("sympy-16886-goal-plus-pi-luna-high-smoke")
         secret = "not-for-provider-config"
@@ -3125,7 +3155,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 },
             )
             completed = subprocess.CompletedProcess([], 0, "official output", "")
-            with mock.patch.object(runtime, "_run", return_value=completed):
+            with mock.patch.object(
+                runtime, "_run", return_value=completed
+            ) as run_command:
                 result = runtime._official_evaluation(campaign, manifest, cell)
 
             self.assertEqual(result["state"], "completed")
@@ -3144,6 +3176,11 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(
                 result["command"][result["command"].index("--force_rebuild") + 1],
                 "false",
+            )
+            evaluator_environment = run_command.call_args.kwargs["environment"]
+            self.assertIn(
+                str(runtime.SWEBENCH_ROOT),
+                evaluator_environment["PYTHONPATH"].split(os.pathsep),
             )
             persisted = json.loads((campaign / "campaign.json").read_text())
             self.assertEqual(persisted["cells"][0]["evaluation"]["calls"], 1)

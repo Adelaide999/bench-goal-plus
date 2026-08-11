@@ -2557,6 +2557,7 @@ def _official_evaluation(
     timed_out = False
     try:
         child_environment = configure_temp_environment(dict(os.environ))
+        pythonpath_entries = [str(SWEBENCH_ROOT)]
         if profile.get("container_network") in ISOLATED_CONTAINER_NETWORK_POLICIES:
             sitecustomize = evaluator_dir / "sitecustomize.py"
             sitecustomize.write_text(
@@ -2569,10 +2570,11 @@ def _official_evaluation(
                 "ContainerCollection.create = _offline_create\n",
                 encoding="utf-8",
             )
-            existing_pythonpath = child_environment.get("PYTHONPATH")
-            child_environment["PYTHONPATH"] = str(evaluator_dir) + (
-                os.pathsep + existing_pythonpath if existing_pythonpath else ""
-            )
+            pythonpath_entries.insert(0, str(evaluator_dir))
+        existing_pythonpath = child_environment.get("PYTHONPATH")
+        if existing_pythonpath:
+            pythonpath_entries.append(existing_pythonpath)
+        child_environment["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
         result = _run(
             command,
             cwd=evaluator_dir,

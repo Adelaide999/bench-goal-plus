@@ -1299,6 +1299,13 @@ def _goal_plus_container_probe(
             + goal_plus_install_script()
             + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
             + " && pi --version"
+            + " && mkdir -p /opt/agent-tmp/pi-extension-smoke/sessions"
+            + " && GOAL_PLUS_ROOT=/opt/agent-tmp/pi-extension-smoke"
+            + " GOAL_PLUS_PI_ROLE=worker GOAL_PLUS_SOURCE_PATH=/opt/goal-plus"
+            + " timeout 15 pi --mode rpc --approve"
+            + " --session-dir /opt/agent-tmp/pi-extension-smoke/sessions"
+            + " --session-id doctor --no-extensions"
+            + " -e /opt/goal-plus/.pi/extensions/goal-plus.ts </dev/null"
             + (
                 " && /opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex --version"
                 if annotator_enabled
