@@ -184,6 +184,22 @@ VLIW smoke 为：
 完整 51 题分组、2h/12h 分数、样本标准差、evaluator timeout 与 source hash 见
 [`paper-opus-4.8-vs-gpt-5.5-headroom.json`](../../experiments/edgebench/references/paper-opus-4.8-vs-gpt-5.5-headroom.json)。
 
+同一 task、同一 model 的时间增益使用离线筛选器计算；默认把 2h→12h 至少提升
+10 个 EdgeBench 分数点视为大幅提升：
+
+```bash
+.bench-env/venv/bin/python experiments/edgebench/reference_gain.py \
+  --start-hour 2 --end-hour 12 --min-gain 10
+```
+
+`--model GPT-5.5` 可只看一个模型；重复 `--model` 可选择多个模型；
+`--min-model-count 3` 可要求同一 task 至少有三个所选模型达到增益阈值，从而筛掉
+单模型偶然值；`--top` 限制展示行数；`--format json --output <path>` 生成机器可读
+报告。工具从受管 EdgeBench checkout 的公开 51 题 checkpoint 表读取原始曲线，
+在报告中记录 source SHA256，并把缺少任一 endpoint 的 pair 保留为 missing，而不是填成 0。
+这些 checkpoint 是公开 model reference curve，用于筛选 time-scaling case；它们不是
+逐次 run 配对后的因果增益，正式实验仍需固定同一协议并重复运行。
+
 这个标记只回答“公开结果中是否存在更好的 task trajectory”。它不是 matched
 Goal Plus effect：论文中的 Opus 主要使用 1M Claude Code，而 GPT-5.5 使用 256k
 Codex。当前 profile 又是 `gpt-5.6-sol/medium,T=2h`。正式判断必须先跑同协议 Plain GPT
