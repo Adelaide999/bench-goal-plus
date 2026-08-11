@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "vliw-goal-plus-pi-sol-medium-local-smoke",
-  "description": "Local open-network VLIW smoke for Goal Plus + Pi with two live workers.",
+  "description": "Local API-only VLIW smoke for Goal Plus + Pi with two live workers.",
   "protocol_source": "edgebench-official-codex",
   "backend": "docker",
   "dataset_repository": "ByteDance-Seed/EdgeBench",
@@ -24,7 +24,7 @@
   "judge_port": 8080,
   "protocol_overrides": {
     "eval_interval": 60,
-    "internet": true
+    "internet": false
   },
   "protocol_override_reasons": {
     "agent": "the smoke validates Goal Plus with Pi and two live search workers",
@@ -36,6 +36,6 @@
     "cell_concurrency": "the local wiring smoke runs one task cell",
     "judge_concurrency": "the local shared Judge serializes ephemeral Judge containers",
     "eval_interval": "the smoke evaluates once per minute so it records hidden-Judge evidence",
-    "internet": "the local Pi login smoke uses the validated open-network container path because host iptables isolation is unavailable"
+    "internet": "all Agent execution is restricted to the Judge and resolved LLM API endpoints"
   }
 }

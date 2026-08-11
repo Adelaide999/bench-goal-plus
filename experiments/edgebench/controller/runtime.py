@@ -28,7 +28,10 @@ from .environment import (
     judge_server_environment,
     loopback_api_target,
     resolve_agent_api_config,
+    resolve_profile_api_endpoints,
     resolve_pi_provider_bundle,
+    sanitized_api_endpoint,
+    SFORGE_AGENT_DEFAULT_API_BASE_URLS,
     start_socket_bridge,
     task_images,
 )
@@ -96,7 +99,11 @@ def build_sforge_command(destination: Path, cell: dict[str, Any]) -> list[str]:
         command.append("--disable-auto-resume")
     if not cell.get("stop_hook_enabled", True):
         command.append("--disable-stop-hook")
-    command.append("--enable-internet" if cell["internet"] else "--disable-internet")
+    if cell.get("internet") is not False:
+        raise ValueError(
+            "EdgeBench Agent network policy must be API-only; refusing internet=true"
+        )
+    command.append("--disable-internet")
     return command
 
 
@@ -128,44 +135,45 @@ def cell_environment(
     *,
     api_key: str | None = None,
     api_base_url: str | None = None,
+    api_base_urls: list[str] | None = None,
     bridge_host: str | None = None,
     pi_models_file: Path | None = None,
     pi_provider_credentials: dict[str, str] | None = None,
 ) -> dict[str, str]:
     env = dict(os.environ)
     configure_temp_environment(env)
-    internet = bool(cell.get("internet", True))
-    if internet:
-        for sforge_key, candidates in (
-            ("SFORGE_HTTP_PROXY", ("SFORGE_HTTP_PROXY", "HTTP_PROXY", "http_proxy")),
-            (
-                "SFORGE_HTTPS_PROXY",
-                ("SFORGE_HTTPS_PROXY", "HTTPS_PROXY", "https_proxy"),
-            ),
-        ):
-            value = next((env[key] for key in candidates if env.get(key)), None)
-            if value:
-                env[sforge_key] = value.replace(
-                    "127.0.0.1", "host.docker.internal"
-                ).replace("localhost", "host.docker.internal")
-    else:
-        for key in (
-            "ALL_PROXY",
-            "HTTP_PROXY",
-            "HTTPS_PROXY",
-            "SFORGE_HTTP_PROXY",
-            "SFORGE_HTTPS_PROXY",
-            "all_proxy",
-            "http_proxy",
-            "https_proxy",
-        ):
-            env.pop(key, None)
+    if cell.get("internet") is not False:
+        raise ValueError(
+            "EdgeBench Agent network policy must be API-only; refusing internet=true"
+        )
+    for key in (
+        "ALL_PROXY",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "SFORGE_HTTP_PROXY",
+        "SFORGE_HTTPS_PROXY",
+        "all_proxy",
+        "http_proxy",
+        "https_proxy",
+    ):
+        env.pop(key, None)
     env.setdefault("SFORGE_NODEJS_MIRROR_URL", "https://npmmirror.com/mirrors/node")
     env.setdefault("SFORGE_NPM_REGISTRY_URL", "https://registry.npmmirror.com")
     if api_key:
         env["SFORGE_AGENT_API_KEY"] = api_key
     if api_base_url:
         env["SFORGE_AGENT_API_BASE_URL"] = api_base_url
+    resolved_api_urls = list(dict.fromkeys(api_base_urls or []))
+    if api_base_url and api_base_url not in resolved_api_urls:
+        resolved_api_urls.insert(0, api_base_url)
+    if not resolved_api_urls:
+        agent = str(cell.get("sforge_agent") or METHODS[cell["method"]]["agent"])
+        default_api_url = SFORGE_AGENT_DEFAULT_API_BASE_URLS.get(agent)
+        if default_api_url:
+            resolved_api_urls.append(default_api_url)
+    if not resolved_api_urls:
+        raise ValueError("API-only EdgeBench cells require at least one LLM API endpoint")
+    env["SFORGE_AGENT_API_BASE_URLS"] = json.dumps(resolved_api_urls)
     if pi_models_file is not None:
         env["SFORGE_PI_MODELS_FILE"] = str(pi_models_file)
     if pi_provider_credentials:
@@ -460,6 +468,7 @@ def start_campaign_cell(
     api_config: dict[str, str | None],
     api_key: str | None,
     runtime_api_base_url: str | None,
+    runtime_api_base_urls: list[str],
     bridge_host: str | None,
     pi_models_file: Path | None = None,
     pi_provider_credentials: dict[str, str] | None = None,
@@ -486,6 +495,12 @@ def start_campaign_cell(
                 ),
                 "api_key_source": api_config["api_key_source"],
                 "api_base_url_source": api_config["api_base_url_source"],
+                "network": "api-only",
+                "allowed_endpoint_classes": ["judge", "llm-api"],
+                "judge_endpoint": sanitized_api_endpoint(judge_container_url),
+                "llm_api_endpoints": [
+                    sanitized_api_endpoint(url) for url in runtime_api_base_urls
+                ],
                 "temp": ".tmp",
                 "goal_plus_source": (
                     "third_party/goal-plus"
@@ -512,6 +527,7 @@ def start_campaign_cell(
                 cell,
                 api_key=api_key,
                 api_base_url=runtime_api_base_url,
+                api_base_urls=runtime_api_base_urls,
                 bridge_host=bridge_host,
                 pi_models_file=pi_models_file,
                 pi_provider_credentials=pi_provider_credentials,
@@ -575,6 +591,7 @@ def execute_cell_queue(
     api_config: dict[str, str | None],
     api_key: str | None,
     runtime_api_base_url: str | None,
+    runtime_api_base_urls: list[str],
     bridge_host: str | None,
     stop_requested: Any,
     pi_models_file: Path | None = None,
@@ -611,6 +628,7 @@ def execute_cell_queue(
                     api_config=api_config,
                     api_key=api_key,
                     runtime_api_base_url=runtime_api_base_url,
+                    runtime_api_base_urls=runtime_api_base_urls,
                     bridge_host=bridge_host,
                     pi_models_file=pi_models_file,
                     pi_provider_credentials=pi_provider_credentials,
@@ -676,6 +694,7 @@ class RuntimeResources:
         self.api_config: dict[str, str | None] = {}
         self.api_key: str | None = None
         self.runtime_api_base_url: str | None = None
+        self.runtime_api_base_urls: list[str] = []
         self.bridge_host: str | None = None
         self.pi_models_file: Path | None = None
         self.pi_provider_credentials: dict[str, str] = {}
@@ -789,6 +808,19 @@ def prepare_pi_provider_runtime(
         main_base_url = providers.get(main_provider, {}).get("baseUrl")
     if isinstance(main_base_url, str) and main_base_url:
         resources.runtime_api_base_url = main_base_url
+    resolved_provider_urls: list[str] = []
+    for status in bundle["models"]:
+        if status.get("models_path") is None:
+            base_url = status.get("api_base_url")
+        else:
+            provider = str(status["provider"])
+            base_url = providers.get(provider, {}).get("baseUrl")
+        if not isinstance(base_url, str) or not base_url:
+            raise RuntimeError(
+                f"Pi provider {status['provider']!r} has no runtime API base URL"
+            )
+        resolved_provider_urls.append(base_url)
+    resources.runtime_api_base_urls = list(dict.fromkeys(resolved_provider_urls))
     controller["pi_provider_roles"] = {
         "main": str(profile["model"]),
         "worker": str(profile.get("worker_model") or profile["model"]),
@@ -815,6 +847,12 @@ def prepare_runtime_resources(
     resources.api_key = resources.api_config["api_key"]
     api_base_url = resources.api_config["api_base_url"]
     resources.runtime_api_base_url = str(api_base_url) if api_base_url else None
+    resources.runtime_api_base_urls = list(
+        dict.fromkeys(
+            endpoint["base_url"]
+            for endpoint in resolve_profile_api_endpoints(profile)
+        )
+    )
     controller["bridges"] = []
     try:
         if api_protocol == "anthropic" and (
@@ -830,6 +868,7 @@ def prepare_runtime_resources(
         if resources.runtime_api_base_url and loopback_api_target(
             resources.runtime_api_base_url
         ):
+            unbridged_base_url = resources.runtime_api_base_url
             resources.bridge_host = default_route_ipv4()
             target_host, target_port = loopback_api_target(
                 resources.runtime_api_base_url
@@ -849,6 +888,12 @@ def prepare_runtime_resources(
                 resources.bridge_host,
                 int(metadata["listen_port"]),
             )
+            resources.runtime_api_base_urls = [
+                resources.runtime_api_base_url
+                if url == unbridged_base_url
+                else url
+                for url in resources.runtime_api_base_urls
+            ]
             api_probe = authenticated_api_probe(
                 resources.runtime_api_base_url,
                 str(resources.api_key or ""),
@@ -929,6 +974,11 @@ def prepare_runtime_resources(
                     "api_base_url_source"
                 ],
                 "agent_container_api_base_url": resources.runtime_api_base_url,
+                "agent_container_api_endpoints": [
+                    sanitized_api_endpoint(url)
+                    for url in resources.runtime_api_base_urls
+                ],
+                "agent_network_policy": "api-only",
                 "judge_container_url": resources.judge_container_url,
             }
         )
@@ -1006,6 +1056,7 @@ def execute_campaign(destination: Path) -> int:
         api_config=resources.api_config,
         api_key=str(resources.api_key) if resources.api_key else None,
         runtime_api_base_url=resources.runtime_api_base_url,
+        runtime_api_base_urls=resources.runtime_api_base_urls,
         bridge_host=resources.bridge_host,
         stop_requested=lambda: stop_requested,
         pi_models_file=resources.pi_models_file,

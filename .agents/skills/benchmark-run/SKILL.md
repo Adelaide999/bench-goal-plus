@@ -34,12 +34,16 @@ benchmark 使用相同 lifecycle 或支持相同并发。
 1. 冻结 task/evaluator、model、reasoning、`T/K/C/R`、seed、method 和 resolved commit。
 2. 在 `benchmarks/runners.json` 解析 target/runner；使用 native controller、common matrix 或 OpenEvolve batch 的 `prepare`，确认 prepare 不调用模型且不预建 Goal Plus state。
    Common matrix 的普通方法运行使用 `--method plain-codex` 或 `--method goal-plus-codex`；只有做 B0-B4 消融实验时才使用 `--condition`。两者不能混用。
-3. 完成下面的 K/C 启动确认门禁；未确认前只能执行只读的 `catalog`、`doctor` 和 `plan`，
+3. 对 Agent 容器执行网络门禁：doctor 必须证明 effective `internet=false`、每个模型调用角色的
+   API endpoint 完整、Judge + LLM API 精确 allowlist 可实施，prepare 生成的命令必须包含
+   `--disable-internet`。不得允许任务公网、包仓库或公共代理；provider 路由失败时停止并报告，
+   不得静默切到 `--enable-internet`。
+4. 完成下面的 K/C 启动确认门禁；未确认前只能执行只读的 `catalog`、`doctor` 和 `plan`，
    不得执行 `launch` 或 `e2e`。
-4. 用 `launch` 启动 runner。长运行使用已有 detach/controller，不自行拼后台 shell。
-5. 用统一 `status --campaign <path>` 读取 `agent-run.json` 和 native manifest。不要因为终端断开就重建 campaign。后台 campaign 的进展查询还必须按下文的“进展查询与终态归档”处理。
-6. 只在 capability 允许时调用 `stop` 或 `resume`。EdgeBench stop 后归档 partial，不伪称原 trajectory 可恢复；common/OpenEvolve batch 只补跑未完成 cell。
-7. native final artifact 存在后再 `finalize`/`summarize`，再用 `$benchmark-report` 导出。后台 campaign 在进展查询中到达终态时，不得停在“可以归档”的提示；满足条件就完成归档。
+5. 用 `launch` 启动 runner。长运行使用已有 detach/controller，不自行拼后台 shell。
+6. 用统一 `status --campaign <path>` 读取 `agent-run.json` 和 native manifest。不要因为终端断开就重建 campaign。后台 campaign 的进展查询还必须按下文的“进展查询与终态归档”处理。
+7. 只在 capability 允许时调用 `stop` 或 `resume`。EdgeBench stop 后归档 partial，不伪称原 trajectory 可恢复；common/OpenEvolve batch 只补跑未完成 cell。
+8. native final artifact 存在后再 `finalize`/`summarize`，再用 `$benchmark-report` 导出。后台 campaign 在进展查询中到达终态时，不得停在“可以归档”的提示；满足条件就完成归档。
 
 ## 进展查询与终态归档
 

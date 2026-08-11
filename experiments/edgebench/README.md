@@ -91,8 +91,9 @@ python3 scripts/bench.py start \
 
 该 preset 固定 `plain-codex`、`gpt-5.6-sol/medium`、`T=300s`、`K=1`、
 `cell_concurrency=1`。由于官方 1800 秒 auto-eval 周期长于 smoke 总预算，它在
-profile 中显式改为每 60 秒评测一次；macOS 本地 OAuth 路径也显式使用
-`internet=true`。这两个差异都有逐字段原因并把结果标成
+profile 中显式改为每 60 秒评测一次。Agent 网络固定为 API-only，只放行 Judge 和
+resolved LLM API endpoint；`internet=true` 会在 doctor、prepare 和 launch 三层失败关闭。
+评测周期差异有逐字段原因并把结果标成
 `official_protocol_with_intentional_overrides`，不能当作官方同口径结果。
 
 2026-07-31 已在模块化 controller 上用 campaign

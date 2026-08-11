@@ -26,6 +26,7 @@ sys.modules[SPEC.name] = EDGE
 SPEC.loader.exec_module(EDGE)
 
 from experiments.edgebench.controller import io as EDGE_IO
+from experiments.edgebench.controller import environment as EDGE_ENV
 from experiments.edgebench.controller import evidence as EDGE_EVIDENCE
 from experiments.edgebench.controller import reporting as EDGE_REPORTING
 from experiments.edgebench.controller import runtime as EDGE_RUNTIME
@@ -351,6 +352,127 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(payload["missing_image_references"], [missing_ref])
         self.assertEqual(payload["tasks"][0]["images"][1]["error"], "No such image")
 
+    def test_local_asset_inventory_blocks_known_broken_judge_image(self) -> None:
+        task_id = "order_addition_permutation_optimization"
+        work_ref = f"edgebench.work.{task_id}:f723a1d13d8e"
+        judge_ref = f"edgebench.judge.{task_id}:f6f385925889"
+        judge_image_id = (
+            "sha256:97b871cd558d3e7eacc22f5a85ac50a85ffe2e7333512de8cfdf3fc2cadd4f09"
+        )
+        profile = {
+            **self.profile(),
+            "task_ids": [task_id],
+        }
+        (self.test_paths.tasks_dir / f"{task_id}.json").write_text(
+            json.dumps(
+                {
+                    "task_id": task_id,
+                    "work": {"image_tag": "f723a1d13d8e"},
+                    "judge": {"image_tag": "f6f385925889"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        metadata = (
+            self.test_paths.tasks_dir
+            / ".cache"
+            / "huggingface"
+            / "download"
+            / f"{task_id}.json.metadata"
+        )
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        metadata.write_text(profile["dataset_revision"] + "\n", encoding="utf-8")
+
+        def fake_run_capture(command, *, env=None):
+            if command[:3] == ["docker", "ps", "-a"]:
+                return {"returncode": 0, "stdout": "", "stderr": ""}
+            reference = command[-1]
+            return {
+                "returncode": 0,
+                "stdout": json.dumps(
+                    [
+                        {
+                            "Id": (
+                                judge_image_id
+                                if reference == judge_ref
+                                else "sha256:work-id"
+                            ),
+                            "RepoTags": [reference],
+                            "RepoDigests": [],
+                            "Size": 123456,
+                            "Architecture": "amd64",
+                            "Os": "linux",
+                        }
+                    ]
+                ),
+                "stderr": "",
+            }
+
+        with mock.patch.object(EDGE_IO, "run_capture", side_effect=fake_run_capture):
+            payload = EDGE.local_asset_inventory(profile)
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["summary"]["images_present"], 2)
+        self.assertEqual(payload["summary"]["blocking_known_asset_issues"], 1)
+        self.assertEqual(
+            payload["blocking_known_asset_issues"][0]["id"],
+            "order-addition-judge-score-helper-sha-mismatch",
+        )
+        judge = payload["tasks"][0]["images"][1]
+        self.assertEqual(judge["reference"], judge_ref)
+        self.assertTrue(judge["known_issue_image_id_matches"])
+        self.assertEqual(judge["known_issue"]["severity"], "blocking")
+        self.assertEqual(
+            [work_ref, judge_ref],
+            [image["reference"] for image in payload["tasks"][0]["images"]],
+        )
+
+    def test_known_judge_asset_issue_qualifies_existing_campaign_score(self) -> None:
+        issue = EDGE.asset_protocol_issue(
+            "order_addition_permutation_optimization",
+            "47846a4c3669ad447e0ea984833b0d352460c5f9",
+        )
+
+        self.assertIsNotNone(issue)
+        self.assertIn("score-helper-sha-mismatch", issue)
+        self.assertIsNotNone(
+            EDGE.asset_protocol_issue(
+                "order_addition_permutation_optimization",
+                "6cc5a7f1b3288ce52484ad828177b8cc86b05b75",
+            )
+        )
+        self.assertIsNone(
+            EDGE.asset_protocol_issue(
+                "order_addition_permutation_optimization",
+                "future-corrected-dataset-revision",
+            )
+        )
+
+    def test_known_asset_issue_requires_the_broken_image_id(self) -> None:
+        issues = EDGE_ENV.known_asset_issues()
+        reference = (
+            "edgebench.judge.order_addition_permutation_optimization:f6f385925889"
+        )
+
+        self.assertIsNotNone(
+            EDGE_ENV._known_asset_issue(
+                issues,
+                "Judge",
+                reference,
+                "6cc5a7f1b3288ce52484ad828177b8cc86b05b75",
+                "sha256:97b871cd558d3e7eacc22f5a85ac50a85ffe2e7333512de8cfdf3fc2cadd4f09",
+            )
+        )
+        self.assertIsNone(
+            EDGE_ENV._known_asset_issue(
+                issues,
+                "Judge",
+                reference,
+                "6cc5a7f1b3288ce52484ad828177b8cc86b05b75",
+                "sha256:corrected-image",
+            )
+        )
+
     def test_full_codex_profile_covers_all_public_tasks(self) -> None:
         _, profile = EDGE.load_profile("full-codex-2h")
 
@@ -377,10 +499,19 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(profile["cell_concurrency"], 1)
         self.assertEqual(
             profile["protocol_overrides"],
-            {"eval_interval": 60, "internet": True},
+            {"eval_interval": 60, "internet": False},
         )
         self.assertTrue(profile["protocol_override_reasons"]["eval_interval"])
         self.assertTrue(profile["protocol_override_reasons"]["internet"])
+
+    def test_registered_profiles_never_enable_agent_internet(self) -> None:
+        for path in sorted((ROOT / "experiments/edgebench/profiles").glob("*.json")):
+            profile = json.loads(path.read_text())
+            self.assertIsNot(
+                (profile.get("protocol_overrides") or {}).get("internet"),
+                True,
+                path.name,
+            )
 
     def test_pi_profiles_use_canonical_method_names_and_explicit_budgets(self) -> None:
         _, plain = EDGE.load_profile("vliw-pi-sol-medium-local-smoke")
@@ -634,6 +765,51 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertTrue(explicit["disable_auto_eval"])
         self.assertEqual(explicit["max_submissions"], 5)
+
+    def test_api_only_preflight_rejects_open_network_with_source(self) -> None:
+        profile = self.profile()
+        profile["protocol_overrides"] = {"internet": True}
+        profile["protocol_override_reasons"]["internet"] = "invalid test override"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"internet=true.*profiles/vliw-smoke\.protocol_overrides\.internet",
+        ):
+            EDGE_ENV.require_api_only_network(profile)
+
+        args = SimpleNamespace(
+            method=None,
+            wall_time_seconds=None,
+            concurrency=None,
+            cell_concurrency=None,
+            model=None,
+            reasoning_effort=None,
+            campaign_id="must-not-exist",
+        )
+        with self.assertRaisesRegex(ValueError, "API-only"):
+            EDGE.prepare(args, profile)
+        self.assertFalse((self.test_paths.runs_root / "must-not-exist").exists())
+
+    def test_doctor_api_only_check_lists_model_calling_roles(self) -> None:
+        profile = self.profile()
+        report = EDGE_ENV.DoctorReport(profile["id"])
+        EDGE_ENV._check_api_only_network(
+            report, profile, EDGE.load_official_codex_protocol()
+        )
+
+        check = report.payload()["checks"][0]
+        self.assertTrue(check["passed"])
+        self.assertEqual(check["policy"], "api-only")
+        self.assertEqual(check["allowed_classes"], ["judge", "llm-api"])
+        self.assertEqual(
+            {(item["method"], item["role"]) for item in check["api_endpoints"]},
+            {
+                ("plain-codex", "main"),
+                ("goal-plus-codex", "main"),
+                ("goal-plus-codex", "worker"),
+                ("goal-plus-codex", "evidence_annotator"),
+            },
+        )
 
     def test_known_protocol_marker_depends_on_effective_cell_config(self) -> None:
         aligned = {
@@ -1056,7 +1232,31 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             campaign_id="unit-dynamic-protocol-reasons",
         )
 
-        destination = EDGE.prepare(args, profile)
+        models = self.temp / "role-models.json"
+        models.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "worker-provider": {
+                            "baseUrl": "http://127.0.0.1:4101/v1",
+                            "apiKey": "$WORKER_API_KEY",
+                            "models": [{"id": "worker-model"}],
+                        },
+                        "annotation-provider": {
+                            "baseUrl": "http://127.0.0.1:4102/v1",
+                            "apiKey": "$ANNOTATION_API_KEY",
+                            "models": [{"id": "annotation-model"}],
+                        },
+                    }
+                }
+            )
+        )
+        with mock.patch.dict(
+            EDGE.os.environ,
+            {"SFORGE_PI_MODELS_FILE": str(models)},
+            clear=False,
+        ):
+            destination = EDGE.prepare(args, profile)
         cell = json.loads(
             (
                 destination
@@ -1090,6 +1290,11 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         models_path = self.temp / "runtime-models.json"
         env = EDGE.cell_environment(
             cell,
+            api_base_urls=[
+                "https://api.z.ai/api/coding/paas/v4",
+                "http://127.0.0.1:4101/v1",
+                "http://127.0.0.1:4102/v1",
+            ],
             pi_models_file=models_path,
             pi_provider_credentials={"TEST_API_KEY": "test-secret"},
         )
@@ -1207,23 +1412,22 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         command = EDGE.build_sforge_command(destination, cell)
 
-        self.assertTrue(cell["internet"])
+        self.assertFalse(cell["internet"])
         self.assertEqual(cell["eval_interval_seconds"], 60)
         self.assertEqual(
             cell["internet_source"],
             "profiles/vliw-codex-sol-medium-local-smoke.protocol_overrides.internet",
         )
-        self.assertTrue(
-            {"eval_interval", "internet"}
-            <= {item["field"] for item in cell["protocol_diff"]}
+        self.assertIn(
+            "eval_interval", {item["field"] for item in cell["protocol_diff"]}
         )
         self.assertFalse(cell["official_edgebench_comparable"])
         self.assertEqual(
             command[command.index("--eval-interval") + 1],
             "60",
         )
-        self.assertIn("--enable-internet", command)
-        self.assertNotIn("--disable-internet", command)
+        self.assertIn("--disable-internet", command)
+        self.assertNotIn("--enable-internet", command)
 
     def test_prepare_encodes_plain_claude_api_and_thinking_contract(self) -> None:
         _, profile = EDGE.load_profile("vliw-glm-5-2-high-20m-k1")
@@ -1357,6 +1561,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 api_config={"api_key_source": None, "api_base_url_source": None},
                 api_key=None,
                 runtime_api_base_url=None,
+                runtime_api_base_urls=["https://api.openai.com"],
                 bridge_host=None,
                 stop_requested=lambda: False,
             )
@@ -1439,6 +1644,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 api_config={"api_key_source": None, "api_base_url_source": None},
                 api_key=None,
                 runtime_api_base_url=None,
+                runtime_api_base_urls=["https://api.openai.com"],
                 bridge_host=None,
                 stop_requested=lambda: requested,
             )
@@ -1459,6 +1665,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "method": "goal-plus-codex",
             "model": "gpt-5.6-sol",
             "reasoning_effort": "xhigh",
+            "internet": False,
             "inner_search_concurrency": 4,
             "worker_runtime_seconds": 600,
             "goal_plus_finalization_grace_seconds": 90,
@@ -1508,7 +1715,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "model": "gpt-5.6-sol",
                 "reasoning_effort": "medium",
                 "pi_package_version": "0.83.0",
-                "internet": True,
+                "internet": False,
                 "inner_search_concurrency": 2,
                 "worker_runtime_seconds": 240,
                 "worker_min_runtime_seconds": 180,
@@ -1545,11 +1752,12 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "sforge_agent": "pi-goal-plus-provider",
                 "model": "glm-proxy/GLM-5.2",
                 "reasoning_effort": "high",
-                "internet": True,
+                "internet": False,
                 "inner_search_concurrency": 2,
                 "worker_runtime_seconds": 3300,
                 "goal_plus_finalization_grace_seconds": 300,
-            }
+            },
+            api_base_urls=["https://api.z.ai/api/coding/paas/v4"],
         )
         extra = dict(
             item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
@@ -1740,6 +1948,61 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "https://api.z.ai/api/coding/paas/v4",
         )
         self.assertNotIn("secret-value", json.dumps(status))
+
+    def test_pi_builtin_openai_and_anthropic_endpoints_are_resolvable(self) -> None:
+        cases = (
+            ("openai/gpt-5.6-sol", "OPENAI_API_KEY", "api.openai.com"),
+            ("anthropic/claude-sonnet-5", "ANTHROPIC_API_KEY", "api.anthropic.com"),
+        )
+        for model_ref, key_name, host in cases:
+            with self.subTest(model_ref=model_ref):
+                status = EDGE.resolve_pi_provider(model_ref, {key_name: "secret"})
+                self.assertTrue(status["valid"])
+                self.assertEqual(
+                    EDGE_ENV.sanitized_api_endpoint(status["api_base_url"])["host"],
+                    host,
+                )
+
+    def test_goal_plus_pi_roles_resolve_multiple_provider_endpoints(self) -> None:
+        models = self.temp / "multi-role-models.json"
+        models.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local-worker": {
+                            "baseUrl": "http://127.0.0.1:4101/v1",
+                            "apiKey": "$LOCAL_WORKER_KEY",
+                            "models": [{"id": "worker"}],
+                        },
+                        "local-view": {
+                            "baseUrl": "http://127.0.0.1:4102/v1",
+                            "apiKey": "$LOCAL_VIEW_KEY",
+                            "models": [{"id": "annotator"}],
+                        },
+                    }
+                }
+            )
+        )
+        profile = {
+            **self.profile(),
+            "methods": ["goal-plus-pi-provider"],
+            "model": "zai/glm-5.2",
+            "worker_model": "local-worker/worker",
+            "evidence_annotator_model": "local-view/annotator",
+        }
+        endpoints = EDGE_ENV.resolve_profile_api_endpoints(
+            profile, {"SFORGE_PI_MODELS_FILE": str(models)}
+        )
+
+        self.assertEqual([item["role"] for item in endpoints], ["main", "worker", "evidence_annotator"])
+        self.assertEqual(
+            {(item["host"], item["port"]) for item in endpoints},
+            {
+                ("api.z.ai", 443),
+                ("127.0.0.1", 4101),
+                ("127.0.0.1", 4102),
+            },
+        )
 
     def test_pi_provider_prefers_anthropic_oauth_environment(self) -> None:
         status = EDGE.resolve_pi_provider(
@@ -1994,6 +2257,13 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "http://192.0.2.10:28080/v1",
         )
         self.assertEqual(
+            resources.runtime_api_base_urls,
+            [
+                "http://192.0.2.10:28080/v1",
+                "http://192.0.2.10:28081/v1",
+            ],
+        )
+        self.assertEqual(
             controller["pi_provider_roles"],
             {
                 "main": "main-provider/main-model",
@@ -2009,6 +2279,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             {
                 "method": "plain-codex",
                 "reasoning_effort": "medium",
+                "internet": False,
             },
             api_key="runtime-key",
             api_base_url="http://192.0.2.10:45678/v1",
@@ -2021,6 +2292,29 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "http://192.0.2.10:45678/v1",
         )
         self.assertIn("192.0.2.10", env["SFORGE_NO_PROXY"].split(","))
+        self.assertEqual(
+            json.loads(env["SFORGE_AGENT_API_BASE_URLS"]),
+            ["http://192.0.2.10:45678/v1"],
+        )
+
+    def test_command_rejects_open_network_cell(self) -> None:
+        with self.assertRaisesRegex(ValueError, "API-only"):
+            EDGE.build_sforge_command(
+                self.temp,
+                {
+                    "cell_id": "open-network",
+                    "task_id": "vliw_kernel_optimization",
+                    "sforge_agent": "codex",
+                    "model": "gpt-5.6-sol",
+                    "wall_time_seconds": 60,
+                    "eval_interval_seconds": 60,
+                    "sforge_run_id": "open-network",
+                    "outer_replicas": 1,
+                    "outer_replica_concurrency": 1,
+                    "judge_concurrency": 1,
+                    "internet": True,
+                },
+            )
 
     def test_judge_environment_uses_fixed_model_and_runtime_api(self) -> None:
         previous = EDGE.os.environ.pop("SFORGE_JUDGE_EXTRA_ENV", None)
@@ -2045,7 +2339,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertEqual(values["SFORGE_JUDGE_MODEL"], "gpt-5.5")
 
-    def test_child_proxy_is_rewritten_for_container_access(self) -> None:
+    def test_open_network_cell_environment_is_rejected(self) -> None:
         previous = {
             key: EDGE.os.environ.get(key)
             for key in ("SFORGE_HTTPS_PROXY", "HTTPS_PROXY")
@@ -2053,23 +2347,20 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         EDGE.os.environ.pop("SFORGE_HTTPS_PROXY", None)
         EDGE.os.environ["HTTPS_PROXY"] = "http://127.0.0.1:3128"
         try:
-            env = EDGE.cell_environment(
-                {
-                    "method": "plain-codex",
-                    "reasoning_effort": "high",
-                }
-            )
+            with self.assertRaisesRegex(ValueError, "API-only"):
+                EDGE.cell_environment(
+                    {
+                        "method": "plain-codex",
+                        "reasoning_effort": "high",
+                        "internet": True,
+                    }
+                )
         finally:
             for key, value in previous.items():
                 if value is None:
                     EDGE.os.environ.pop(key, None)
                 else:
                     EDGE.os.environ[key] = value
-
-        self.assertEqual(
-            env["SFORGE_HTTPS_PROXY"],
-            "http://host.docker.internal:3128",
-        )
 
     def test_isolated_cell_environment_removes_all_proxy_variables(self) -> None:
         proxy_keys = (

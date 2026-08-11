@@ -37,6 +37,9 @@
   "worker_runtime_seconds": 7200,
   "judge_concurrency": 1,
   "judge_port": 8080,
+  "protocol_overrides": {
+    "internet": false
+  },
   "protocol_override_reasons": {
     "backend": "local regression uses Docker instead of the official Kubernetes backend",
     "model": "the regression evaluates gpt-5.6-sol instead of the paper model",
@@ -44,6 +47,7 @@
     "timeout": "the regression uses a two-hour task budget instead of twelve hours",
     "attempts_per_task": "the regression runs one trajectory per task instead of three",
     "cell_concurrency": "the local controller runs at most four different tasks concurrently",
-    "judge_concurrency": "each independent SForge replica group runs at most one Judge evaluation at a time"
+    "judge_concurrency": "each independent SForge replica group runs at most one Judge evaluation at a time",
+    "internet": "API-only policy also isolates the official college English task that otherwise requests public Internet"
   }
 }

@@ -17,13 +17,19 @@
 | EdgeBench 容器架构 | Docker VM 必须提供 `linux/amd64` | daemon 必须是 `amd64/x86_64` |
 | 宿主 Judge | Work container 通过 `host.docker.internal` 访问 | controller 使用 host route + systemd socket bridge |
 | 宿主 loopback API | 当前 EdgeBench controller 不支持把 `127.0.0.1` API 从 Mac 桥入容器；使用容器可达的非 loopback URL | 需要 `ip`、`systemd-socket-activate` 和 `systemd-socket-proxyd` |
-| `internet=false` | Docker VM 通常不能满足 SForge 的 host `iptables` gate；只能使用 profile 明确声明的 open-network smoke | 需要 SForge 可使用 passwordless `sudo iptables` 完成 allowlist |
+| API-only Agent 网络 | Docker VM 无法满足 SForge host `iptables` gate 时不得启动 EdgeBench Agent 测评 | 需要 SForge 可使用 passwordless `sudo iptables` 完成 Judge + LLM API allowlist |
 | Codex container runtime | 需要 Linux x64 Codex runtime cache | 同样需要 Linux x64 Codex runtime cache |
 | Goal Plus container runtime | controller 会把受管 Goal Plus checkout 复制进容器；不能复制 macOS Python/venv | 可选复制兼容目标镜像的 Linux x64 便携 Python；普通 host venv 不能直接复用 |
 
 两种 host 都必须通过 benchmark-native doctor。macOS 能跑 local smoke 不等于官方
 offline/network-isolated protocol 已满足；正式 Linux 运行也不能跳过 bridge、resource limit
 和 `iptables` 检查。
+
+EdgeBench Agent 测评统一使用 API-only 网络：`internet=true` 即失败；只放行每个 cell 的
+Judge 和 main/worker/evidence annotation 实际使用的 LLM API endpoint。OpenAI、Anthropic、
+Z.AI/GLM、自定义 local endpoint 可以同时解析成多 endpoint allowlist，但 endpoint 多或
+loopback bridge 失败都不能触发开放公网回退。安装依赖发生在 Agent 隔离启用前，npm/PyPI、
+公网代理和任务网站不得进入 Agent 运行阶段 allowlist。
 
 ## 鉴权方式
 

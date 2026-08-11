@@ -1,5 +1,10 @@
 # EdgeBench 官方协议对齐 TODO
 
+> 2026-08-11 更新：下文保留的是历史协议对齐记录。当前控制面强制所有 Agent cell 使用
+> API-only 网络，即使官方 task 声明 `internet=true` 也由 profile 显式覆盖为 false；
+> doctor、prepare 和 launch 均拒绝开放公网。当前可执行事实以 controller、profile 和
+> benchmark Skills 为准。
+
 ## 2026-07-27 实现状态
 
 控制面映射已完成，适用于新建 campaign：

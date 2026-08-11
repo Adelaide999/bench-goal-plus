@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "vliw-codex-sol-medium-local-smoke",
-  "description": "Local open-network VLIW wiring smoke for Plain Codex with gpt-5.6-sol medium.",
+  "description": "Local API-only VLIW wiring smoke for Plain Codex with gpt-5.6-sol medium.",
   "protocol_source": "edgebench-official-codex",
   "backend": "docker",
   "dataset_repository": "ByteDance-Seed/EdgeBench",
@@ -22,7 +22,7 @@
   "judge_port": 8080,
   "protocol_overrides": {
     "eval_interval": 60,
-    "internet": true
+    "internet": false
   },
   "protocol_override_reasons": {
     "backend": "the local smoke uses Docker instead of the official Kubernetes backend",
@@ -33,6 +33,6 @@
     "cell_concurrency": "the local wiring smoke runs one task cell",
     "judge_concurrency": "the local shared Judge serializes ephemeral Judge containers",
     "eval_interval": "the five-minute smoke evaluates once per minute so it always records hidden-Judge evidence before the agent deadline",
-    "internet": "the local Codex OAuth smoke uses the validated open-network container path because host iptables isolation is unavailable"
+    "internet": "all Agent execution is restricted to the Judge and resolved LLM API endpoints"
   }
 }

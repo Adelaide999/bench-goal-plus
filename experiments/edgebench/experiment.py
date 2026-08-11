@@ -55,6 +55,7 @@ from experiments.edgebench.controller.environment import (  # noqa: E402
 )
 from experiments.edgebench.controller.evidence import (  # noqa: E402
     add_usage,
+    asset_protocol_issue,
     codex_usage,
     goal_plus_completion_evidence,
     goal_plus_stats,

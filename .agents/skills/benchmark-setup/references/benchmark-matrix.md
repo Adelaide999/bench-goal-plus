@@ -99,7 +99,9 @@ gate for `required`/relevant `mixed` paths.
 - Reuse repository code for mirrors. EdgeBench Rust assets try rsproxy, SJTU, then official and verify the official SHA256.
 - EdgeBench task containers keep exact work/judge image tags. A Docker daemon mirror may accelerate identical layers, but do not retag a different image as the pinned tag.
 - The control plane currently relies on benchmark-native provisioning or an already-present exact image. It does not retry Docker Hub through a hard-coded mirror; add future transport support behind the registered runner/adapter provision hook.
-- SForge child environments default Node.js/npm downloads to `npmmirror.com`; task network policy still comes from the official protocol.
+- SForge child environments default Node.js/npm downloads to `npmmirror.com` during pre-Agent installation.
+  Agent execution must pass the API-only doctor gate and may reach only Judge plus resolved LLM API
+  endpoints, even when an official task requests public Internet.
 - Record which source succeeded when evidence depends on a downloaded asset. Never record authorization headers.
 
 ## SWE-bench Verified on a shared Linux host

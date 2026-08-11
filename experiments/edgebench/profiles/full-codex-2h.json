@@ -71,6 +71,9 @@
   "worker_runtime_seconds": 7200,
   "judge_concurrency": 1,
   "judge_port": 8080,
+  "protocol_overrides": {
+    "internet": false
+  },
   "protocol_override_reasons": {
     "backend": "local development uses the Docker backend instead of the official Kubernetes backend",
     "model": "the development campaign evaluates gpt-5.6-sol instead of the paper model",
@@ -78,6 +81,7 @@
     "timeout": "the development campaign uses a two-hour task budget instead of twelve hours",
     "attempts_per_task": "the development campaign runs one independent trajectory per task instead of three",
     "cell_concurrency": "the local controller runs at most two different tasks concurrently",
-    "judge_concurrency": "the local shared Judge serializes ephemeral Judge containers"
+    "judge_concurrency": "the local shared Judge serializes ephemeral Judge containers",
+    "internet": "API-only policy also isolates the one official task that otherwise requests public Internet"
   }
 }

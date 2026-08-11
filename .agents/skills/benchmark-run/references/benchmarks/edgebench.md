@@ -10,6 +10,9 @@ EdgeBench 保留 native SForge lifecycle。控制面负责选择 profile/preset�
 2. 用 `catalog` 确认 `edgebench-native` 的 method 和 capability。
 3. 用 preset 或 profile 冻结 task、method、model、reasoning 和 `T/K/C/R`。
 4. 运行 `plan`，检查 native `provision → doctor → prepare → run --detach` 命令链。
+5. 检查 doctor 中 `network:api-only-policy` 和 `network:offline-task-isolation` 均通过，
+   endpoint 清单覆盖 main、Goal Plus worker 和 evidence annotation；检查 prepare 产物只有
+   `--disable-internet`。任一缺失时不得 launch，也不得用开放公网 smoke 替代。
 
 ## 已登记方法
 
@@ -31,6 +34,11 @@ provider 的 wire API 由 Pi registry 决定：`anthropic-messages` 和
 `openai-completions`/`openai-responses` 使用同一个 method。macOS 与 Linux
 也使用同一 adapter；host 只提供 registry/credential，实际 agent 始终运行在
 EdgeBench Linux Work container 中。
+
+一个 Goal Plus cell 可为 main、worker、annotation 选择不同 provider。controller 必须把
+所有角色 base URL 传给 SForge；SForge 只将这些 URL 与 Judge 解析成精确 `IP:port`
+allowlist。缺失 built-in endpoint、custom `baseUrl`、loopback bridge 或 iptables 权限时失败
+关闭；不得因为 provider 多样而设置 `internet=true`。
 
 `goal-plus-pi-provider` 在开始计时前必须完成 provider runtime gate：使用 Work
 container 的实际运行用户和实际 `PI_CODING_AGENT_DIR` 执行
@@ -72,6 +80,17 @@ python3 scripts/bench.py plan \
 profile 中的 `protocol_source=edgebench-official-codex` 只表示资源、网络、评测周期等
 协议默认值来自 EdgeBench 官方 `experiment-codex.yaml`。实际 agent/provider 仍由
 method 和 model 决定；该字段不把 Pi campaign 变成 Codex campaign。
+
+## Judge 资产完整性
+
+profiled `check` 会把精确 task revision、Work/Judge tag、image ID 与
+`experiments/edgebench/references/known-asset-issues.json` 核对。命中 blocking issue 时，即使
+镜像存在也必须失败关闭，不得 launch、不得把失败的 harness pass rate 当作 0–100 分，也
+不得把修补后的镜像重新标成原 tag。
+
+`order_addition_permutation_optimization` 的 Judge tag `f6f385925889` 已确认存在发布时的
+score-helper SHA 自检不一致。恢复正式测评需要上游发布新的 Judge tag，并由新的 task dataset
+revision 引用它；只修改本地 test 常量最多是诊断验证，不构成 official evaluator 修复。
 
 ## 完整 Codex campaign
 

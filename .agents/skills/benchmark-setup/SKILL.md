@@ -46,7 +46,12 @@ description: 自动盘点本地 Docker 镜像并部署或诊断 bench-goal-plus 
    直接使用 `scripts/repro_env.py`。
 8. 不得绕过 dirty、wrong-origin、wrong-branch、divergent、版本、auth、container
    architecture、network bridge 或 resource-limit 检查。
-9. 汇报 host/auth 组合、resolved branch/commit、Docker 状态、复用或新拉取的镜像、数据 revision、
+9. 对会启动 Agent 的正式测评，逐项核对 native doctor 的 API-only 网络证据：所有 task 的
+   effective `internet=false`；主会话、worker、annotation 等每个模型调用角色都有明确的
+   scheme/host/port；allowlist 只包含 Judge 和这些 LLM API endpoint；Linux SForge
+   `iptables` probe 通过。任何一项缺失都必须失败关闭，不得因为 OpenAI、local、GLM
+   或其他 provider 地址不通而改成开放公网，也不得不通知用户就放宽网络。
+10. 汇报 host/auth 组合、resolved branch/commit、Docker 状态、复用或新拉取的镜像、数据 revision、
    pass/fail/partial 和下一步。
 
 ## 约束
@@ -56,6 +61,8 @@ description: 自动盘点本地 Docker 镜像并部署或诊断 bench-goal-plus 
 - 国内镜像只用于传输加速。不得替换 benchmark 固定的 image tag、数据 revision、SHA256 或 evaluator。
 - 不在命令、日志、manifest 或报告中持久化 API key、auth、cookie、provider header。
 - 只有实际执行且留下 evidence 的检查才能记为 `pass`；未运行能力最多为 `partial`。
+- provider/API 地址数量不是开放公网的理由。单 endpoint 或多角色多 endpoint 都必须解析成
+  精确 API allowlist；不支持的动态 endpoint 应报告缺失配置并停止。
 
 ## Gotchas
 
@@ -63,7 +70,8 @@ description: 自动盘点本地 Docker 镜像并部署或诊断 bench-goal-plus 
 - `mixed` 不代表无 Docker 等价可跑；只运行 `docker_scope` 明确允许的 host-portable task。
 - 不带 `--profile` 的 benchmark `check` 只是仓库契约检查，不是 Docker inventory。
   target 不支持 profiled local-asset check 时必须默认拒绝，不得改用 provision 探测。
-- EdgeBench 的 `doctor` 是必要步骤；只有本地 task/data/image gate 失败时才需要
+- EdgeBench 的 `doctor` 是必要步骤；正式 run 前必须看到通过的
+  `network:api-only-policy` 与 `network:offline-task-isolation`。只有本地 task/data/image gate 失败时才需要
   `provision`。只拉源码不代表 work/judge image 和隔离能力可用，本地 gate 全部通过也不应
   重复拉取。
 - 新 benchmark 自带 Docker 时优先登记 `owner=runner` 并复用其 native 命令；不要把 Dockerfile 或镜像逻辑复制进 Skill。

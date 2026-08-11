@@ -385,7 +385,7 @@
     },
     {
       "id": "edgebench-vliw-codex-local-smoke",
-      "description": "One-task local Plain Codex smoke using an explicit non-official open-network protocol override.",
+      "description": "One-task local Plain Codex smoke using the mandatory Judge plus LLM API-only network policy.",
       "benchmarks": ["edgebench"],
       "profile": "vliw-codex-sol-medium-local-smoke",
       "campaign_id_template": "edgebench-vliw-codex-gpt-5-6-sol-medium-local-smoke-5m-k1-c1-{timestamp}",

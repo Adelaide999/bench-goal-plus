@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -72,9 +73,43 @@ PI_BUILTIN_PROVIDER_API_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 PI_BUILTIN_PROVIDER_API_BASE_URLS: dict[str, str] = {
+    "github-copilot": "https://api.individual.githubcopilot.com",
+    "anthropic": "https://api.anthropic.com",
+    "ant-ling": "https://api.ant-ling.com/v1",
+    "openai": "https://api.openai.com/v1",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
     "deepseek": "https://api.deepseek.com",
+    "google": "https://generativelanguage.googleapis.com/v1beta",
+    "groq": "https://api.groq.com/openai/v1",
+    "cerebras": "https://api.cerebras.ai/v1",
+    "xai": "https://api.x.ai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "vercel-ai-gateway": "https://ai-gateway.vercel.sh",
     "zai": "https://api.z.ai/api/coding/paas/v4",
     "zai-coding-cn": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "mistral": "https://api.mistral.ai",
+    "minimax": "https://api.minimax.io/anthropic",
+    "minimax-cn": "https://api.minimaxi.com/anthropic",
+    "moonshotai": "https://api.moonshot.ai/v1",
+    "moonshotai-cn": "https://api.moonshot.cn/v1",
+    "huggingface": "https://router.huggingface.co/v1",
+    "fireworks": "https://api.fireworks.ai/inference",
+    "together": "https://api.together.ai/v1",
+    "opencode": "https://opencode.ai/zen",
+    "opencode-go": "https://opencode.ai/zen/go",
+    "kimi-coding": "https://api.kimi.com/coding",
+    "xiaomi": "https://api.xiaomimimo.com/v1",
+    "xiaomi-token-plan-cn": "https://token-plan-cn.xiaomimimo.com/v1",
+    "xiaomi-token-plan-ams": "https://token-plan-ams.xiaomimimo.com/v1",
+    "xiaomi-token-plan-sgp": "https://token-plan-sgp.xiaomimimo.com/v1",
+}
+
+SFORGE_AGENT_DEFAULT_API_BASE_URLS: dict[str, str] = {
+    "codex": "https://api.openai.com",
+    "codex-goal-plus": "https://api.openai.com",
+    "pi": "https://chatgpt.com/backend-api",
+    "pi-goal-plus": "https://chatgpt.com/backend-api",
+    "claude-code": "https://api.anthropic.com",
 }
 
 
@@ -318,6 +353,146 @@ def resolve_pi_provider_bundle(
         "models": statuses,
         "credential_envs": credential_envs,
         "registry": registry,
+    }
+
+
+def sanitized_api_endpoint(base_url: str) -> dict[str, Any]:
+    """Return a credential-free endpoint identity suitable for evidence files."""
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError(
+            f"LLM API base URL must be an absolute http(s) URL: {base_url!r}"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("LLM API base URL must not contain credentials")
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise ValueError(f"LLM API base URL has an invalid port: {base_url!r}") from exc
+    return {"scheme": parsed.scheme, "host": parsed.hostname, "port": port}
+
+
+def resolve_profile_api_endpoints(
+    profile: dict[str, Any],
+    env: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve every model-calling role to the API endpoint it must reach."""
+    source = os.environ if env is None else env
+    methods = [str(method) for method in profile["methods"]]
+    protocol = api_protocol_for_methods(methods)
+    endpoints: list[dict[str, Any]] = []
+
+    if protocol == "pi-provider":
+        role_refs = [("main", str(profile["model"]))]
+        if set(methods) & GOAL_PLUS_METHODS:
+            role_refs.extend(
+                [
+                    (
+                        "worker",
+                        str(profile.get("worker_model") or profile["model"]),
+                    ),
+                    (
+                        "evidence_annotator",
+                        str(
+                            profile.get("evidence_annotator_model")
+                            or profile["model"]
+                        ),
+                    ),
+                ]
+            )
+        for role, model_ref in role_refs:
+            status = resolve_pi_provider(model_ref, source)
+            base_url = status.get("api_base_url")
+            if not isinstance(base_url, str) or not base_url:
+                raise ValueError(
+                    f"Pi {role} model {model_ref!r} has no resolvable API base URL; "
+                    "use a built-in provider with a registered endpoint or set baseUrl "
+                    "in SFORGE_PI_MODELS_FILE"
+                )
+            endpoints.append(
+                {
+                    "method": methods[0],
+                    "role": role,
+                    "model": model_ref,
+                    "base_url": base_url,
+                    "source": (
+                        "pi-built-in-provider"
+                        if status.get("models_path") is None
+                        else "pi-models-file"
+                    ),
+                    **sanitized_api_endpoint(base_url),
+                }
+            )
+        return endpoints
+
+    api_config = resolve_agent_api_config(source, protocol=protocol)
+    configured_base_url = api_config.get("api_base_url")
+    for method in methods:
+        agent = str(METHODS[method]["agent"])
+        base_url = configured_base_url or SFORGE_AGENT_DEFAULT_API_BASE_URLS.get(agent)
+        if not isinstance(base_url, str) or not base_url:
+            raise ValueError(
+                f"EdgeBench method {method!r} has no resolvable LLM API base URL"
+            )
+        roles = ["main"]
+        if method in GOAL_PLUS_METHODS:
+            roles.extend(["worker", "evidence_annotator"])
+        for role in roles:
+            endpoints.append(
+                {
+                    "method": method,
+                    "role": role,
+                    "model": str(profile["model"]),
+                    "base_url": str(base_url),
+                    "source": (
+                        str(api_config.get("api_base_url_source"))
+                        if configured_base_url
+                        else "sforge-agent-default"
+                    ),
+                    **sanitized_api_endpoint(str(base_url)),
+                }
+            )
+    return endpoints
+
+
+def require_api_only_network(
+    profile: dict[str, Any],
+    official_protocol: dict[str, Any] | None = None,
+    *,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Fail closed unless every task is isolated and every API role is resolvable."""
+    protocol = official_protocol or load_official_codex_protocol()
+    task_contracts: list[dict[str, Any]] = []
+    open_network: list[dict[str, str]] = []
+    for task_id in profile["task_ids"]:
+        config = task_config(str(task_id))
+        effective = profile_task_protocol(profile, protocol, str(task_id), config)
+        source = (
+            f"profiles/{profile['id']}.protocol_overrides.internet"
+            if "internet" in profile.get("protocol_overrides", {})
+            else f"tasks/{task_id}.json"
+        )
+        task_contracts.append(
+            {"task_id": str(task_id), "internet": effective["internet"], "source": source}
+        )
+        if effective["internet"] is not False:
+            open_network.append({"task_id": str(task_id), "source": source})
+    if open_network:
+        details = ", ".join(
+            f"{item['task_id']} ({item['source']})" for item in open_network
+        )
+        raise ValueError(
+            "EdgeBench Agent network policy must be API-only; internet=true is "
+            f"forbidden for: {details}"
+        )
+
+    endpoints = resolve_profile_api_endpoints(profile, env)
+    return {
+        "policy": "api-only",
+        "tasks": task_contracts,
+        "judge": "per-cell SForge Judge endpoint",
+        "api_endpoints": endpoints,
     }
 
 
@@ -806,6 +981,52 @@ def _inspect_local_image(
     return record, command
 
 
+def known_asset_issues() -> list[dict[str, Any]]:
+    path = (
+        current_paths().root
+        / "experiments"
+        / "edgebench"
+        / "references"
+        / "known-asset-issues.json"
+    )
+    payload = io.read_json(path)
+    issues = (
+        payload.get("issues")
+        if isinstance(payload, dict) and payload.get("schema_version") == 1
+        else None
+    )
+    if not isinstance(issues, list) or any(not isinstance(item, dict) for item in issues):
+        raise ValueError(f"invalid EdgeBench known asset issue registry: {path}")
+    return [dict(item) for item in issues]
+
+
+def asset_issue_matches_revision(
+    issue: dict[str, Any], dataset_revision: str | None
+) -> bool:
+    revisions = issue.get("dataset_revisions")
+    if isinstance(revisions, list):
+        return dataset_revision in revisions
+    return issue.get("dataset_revision") == dataset_revision
+
+
+def _known_asset_issue(
+    issues: list[dict[str, Any]],
+    role: str,
+    reference: str,
+    dataset_revision: str | None,
+    image_id: str | None,
+) -> dict[str, Any] | None:
+    for issue in issues:
+        if (
+            issue.get("role") == role
+            and issue.get("reference") == reference
+            and asset_issue_matches_revision(issue, dataset_revision)
+            and issue.get("image_id") == image_id
+        ):
+            return issue
+    return None
+
+
 def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
     """Inspect exact local EdgeBench assets without acquiring or running anything."""
 
@@ -816,6 +1037,13 @@ def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
         container_command,
     ) = _local_containers()
     docker_commands = [container_command]
+    try:
+        asset_issues = known_asset_issues()
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        asset_issues = []
+        asset_issue_registry_error: str | None = str(exc)
+    else:
+        asset_issue_registry_error = None
     expected_revision = str(profile["dataset_revision"])
     tasks: list[dict[str, Any]] = []
     for raw_task_id in profile["task_ids"]:
@@ -847,6 +1075,18 @@ def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
             else:
                 for role, reference in zip(("Work", "Judge"), references, strict=True):
                     image, command = _inspect_local_image(role, reference, containers)
+                    known_issue = _known_asset_issue(
+                        asset_issues,
+                        role,
+                        reference,
+                        actual_revision,
+                        image.get("image_id"),
+                    )
+                    if known_issue is not None:
+                        image["known_issue"] = known_issue
+                        image["known_issue_image_id_matches"] = (
+                            image.get("image_id") == known_issue.get("image_id")
+                        )
                     task["images"].append(image)
                     docker_commands.append(command)
         tasks.append(task)
@@ -860,6 +1100,13 @@ def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
     matched_container_ids.discard("None")
     expected_image_count = len(tasks) * 2
     present_image_count = sum(image["present"] for image in images)
+    blocking_known_issues = [
+        image["known_issue"]
+        for image in images
+        if image.get("present")
+        and isinstance(image.get("known_issue"), dict)
+        and image["known_issue"].get("severity") == "blocking"
+    ]
     summary = {
         "tasks_expected": len(tasks),
         "task_files_present": sum(task["task_file_present"] for task in tasks),
@@ -870,6 +1117,7 @@ def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
         "image_references_resolved": len(images),
         "images_present": present_image_count,
         "images_missing": expected_image_count - present_image_count,
+        "blocking_known_asset_issues": len(blocking_known_issues),
         "matching_containers": len(matched_container_ids),
     }
     container_inventory_ok = (
@@ -881,7 +1129,9 @@ def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
         and summary["task_revisions_matching"] == summary["tasks_expected"]
         and summary["image_references_resolved"] == expected_image_count
         and summary["images_present"] == expected_image_count
+        and not blocking_known_issues
         and container_inventory_ok
+        and asset_issue_registry_error is None
     )
     return {
         "schema_version": 1,
@@ -899,6 +1149,7 @@ def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
             "error": container_result["stderr"] or None,
             "parse_errors": container_parse_errors,
         },
+        "asset_issue_registry_error": asset_issue_registry_error,
         "tasks": tasks,
         "summary": summary,
         "missing_image_references": [
@@ -907,6 +1158,7 @@ def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
         "unresolved_image_task_ids": [
             task["task_id"] for task in tasks if len(task["images"]) != 2
         ],
+        "blocking_known_asset_issues": blocking_known_issues,
         "docker_commands": docker_commands,
     }
 
@@ -1350,9 +1602,60 @@ def _check_tasks_and_resources(
         )
 
 
+def _check_api_only_network(
+    report: DoctorReport,
+    profile: dict[str, Any],
+    official_protocol: dict[str, Any] | None,
+) -> None:
+    if official_protocol is None:
+        report.add(
+            "network:api-only-policy",
+            False,
+            policy="api-only",
+            error="official protocol is unavailable",
+        )
+        return
+    try:
+        contract = require_api_only_network(profile, official_protocol)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        report.add(
+            "network:api-only-policy",
+            False,
+            policy="api-only",
+            allowed_classes=["judge", "llm-api"],
+            error=str(exc),
+        )
+        return
+    report.add(
+        "network:api-only-policy",
+        True,
+        policy=contract["policy"],
+        allowed_classes=["judge", "llm-api"],
+        blocked_classes=["task-internet", "package-registry", "public-proxy"],
+        tasks=contract["tasks"],
+        judge=contract["judge"],
+        api_endpoints=[
+            {
+                key: endpoint[key]
+                for key in (
+                    "method",
+                    "role",
+                    "model",
+                    "source",
+                    "scheme",
+                    "host",
+                    "port",
+                )
+            }
+            for endpoint in contract["api_endpoints"]
+        ],
+    )
+
+
 def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     report = DoctorReport(str(profile["id"]))
     official_protocol = _check_protocol(report, profile)
+    _check_api_only_network(report, profile, official_protocol)
     _check_checkouts_and_runtime(report, profile)
     _check_auth(report, profile)
     docker_details = _docker_details(report)

@@ -8,7 +8,7 @@ from typing import Any
 
 from . import io
 from .context import current_paths
-from .environment import task_config
+from .environment import require_api_only_network, task_config
 from .profiles import (
     ALLOWED_PROTOCOL_OVERRIDE_FIELDS,
     GOAL_PLUS_METHODS,
@@ -158,6 +158,14 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         raise ValueError(
             "effective worker runtime and closeout reserve must fit within wall time"
         )
+
+    resolved_network_profile = {
+        **profile,
+        "methods": methods,
+        "model": model,
+        **role_config,
+    }
+    require_api_only_network(resolved_network_profile, official_protocol)
 
     campaign_id = io.sanitize_id(
         args.campaign_id or f"{profile['id']}-{io.campaign_stamp()}"

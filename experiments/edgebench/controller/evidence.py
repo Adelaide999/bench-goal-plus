@@ -17,6 +17,7 @@ from bench_runtime_paths import configure_temp_environment
 
 from . import io
 from .context import current_paths
+from .environment import asset_issue_matches_revision, known_asset_issues
 from .profiles import GOAL_PLUS_METHODS, LEGACY_PAPER_PROTOCOL_ISSUES
 
 
@@ -810,6 +811,17 @@ def paper_protocol_issue(cell: dict[str, Any]) -> str | None:
     return None
 
 
+def asset_protocol_issue(task_id: str, dataset_revision: str | None) -> str | None:
+    for issue in known_asset_issues():
+        if (
+            issue.get("task_id") == task_id
+            and asset_issue_matches_revision(issue, dataset_revision)
+            and issue.get("severity") == "blocking"
+        ):
+            return f"{issue['id']}: {issue['reason']}"
+    return None
+
+
 def summarize_cell(destination: Path, cell: dict[str, Any]) -> dict[str, Any]:
     cell_path = destination / "cells" / cell["cell_id"]
     task_runs = sorted((cell_path / "sforge" / "runs").glob(f"*/{cell['task_id']}"))
@@ -822,6 +834,10 @@ def summarize_cell(destination: Path, cell: dict[str, Any]) -> dict[str, Any]:
     best = max(valid, key=lambda item: float(item["edgebench_score"])) if valid else None
     completion_evidence = goal_plus_completion_evidence(
         cell, observations, valid_trajectories=len(valid)
+    )
+    campaign = io.read_json(destination / "campaign.json")
+    known_issue = paper_protocol_issue(cell) or asset_protocol_issue(
+        str(cell["task_id"]), campaign.get("dataset_revision")
     )
     summary = {
         "schema_version": 1,
@@ -847,7 +863,7 @@ def summarize_cell(destination: Path, cell: dict[str, Any]) -> dict[str, Any]:
             "official_edgebench_comparable", False
         ),
         "protocol_diff": cell.get("protocol_diff", []),
-        "known_protocol_issue": paper_protocol_issue(cell),
+        "known_protocol_issue": known_issue,
         "finalized_at": io.utc_now(),
     }
     io.write_json(cell_path / "summary.json", summary)
