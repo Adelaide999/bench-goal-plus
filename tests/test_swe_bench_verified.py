@@ -2511,6 +2511,11 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             )
         probe = capture.call_args.args[0]
 
+        self.assertEqual(
+            capture.call_args.kwargs["timeout"],
+            environment.DOCKER_COLD_PROBE_TIMEOUT_SECONDS,
+        )
+
         docker_commands: list[list[str]] = []
 
         def docker_checked(command: list[str], *, timeout: int = 120) -> str:
@@ -2551,6 +2556,30 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY", agent_command)
         self.assertNotIn(secret, joined)
         self.assertNotIn("chatgpt.com", joined)
+
+    def test_swe_docker_probes_allow_cold_image_startup(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        runtime_info = {
+            "credential_env": "DEEPSEEK_API_KEY",
+            "provider": "deepseek",
+            "node_root": Path("/opt/node-host"),
+            "package_root": Path("/opt/pi-host"),
+        }
+        with mock.patch.object(
+            environment, "run_capture", return_value=completed
+        ) as capture:
+            environment._image_checkout_probe("image:latest", "a" * 40)
+            environment._image_setup_probe("image:latest", "a" * 40)
+            environment._pi_container_probe("image:latest", runtime_info)
+
+        self.assertEqual(capture.call_count, 4)
+        self.assertTrue(
+            all(
+                call.kwargs["timeout"]
+                == environment.DOCKER_COLD_PROBE_TIMEOUT_SECONDS
+                for call in capture.call_args_list
+            )
+        )
 
     def test_container_responses_probe_inherits_key_by_name(self) -> None:
         secret = "not-for-command-lines"

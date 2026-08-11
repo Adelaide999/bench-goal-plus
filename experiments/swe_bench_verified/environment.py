@@ -85,6 +85,8 @@ PI_RESPONSES_PROVIDER_COMPAT = {
     }
 }
 
+DOCKER_COLD_PROBE_TIMEOUT_SECONDS = 300
+
 
 def run_capture(
     command: list[str],
@@ -870,7 +872,7 @@ def _codex_container_probe(image: str, archive: Path) -> subprocess.CompletedPro
             "mkdir -p /opt/codex && tar -xzf /opt/runtime/codex.tgz -C /opt/codex && "
             "/opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex --version",
         ],
-        timeout=120,
+        timeout=DOCKER_COLD_PROBE_TIMEOUT_SECONDS,
     )
 
 
@@ -1122,7 +1124,7 @@ def _image_checkout_probe(
             f"{base_commit}^{{tree}}",
             "HEAD^{tree}",
         ],
-        timeout=120,
+        timeout=DOCKER_COLD_PROBE_TIMEOUT_SECONDS,
     )
 
 
@@ -1144,10 +1146,12 @@ def _image_setup_probe(
         "/testbed",
     ]
     patch = run_capture(
-        [*prefix, "diff", "--binary", f"{base_commit}..HEAD"], timeout=120
+        [*prefix, "diff", "--binary", f"{base_commit}..HEAD"],
+        timeout=DOCKER_COLD_PROBE_TIMEOUT_SECONDS,
     )
     files = run_capture(
-        [*prefix, "diff", "--name-only", f"{base_commit}..HEAD"], timeout=120
+        [*prefix, "diff", "--name-only", f"{base_commit}..HEAD"],
+        timeout=DOCKER_COLD_PROBE_TIMEOUT_SECONDS,
     )
     return patch, files
 
@@ -1216,7 +1220,7 @@ def _pi_container_probe(
                 provider,
             ]
         )
-    return run_capture(command, timeout=120)
+    return run_capture(command, timeout=DOCKER_COLD_PROBE_TIMEOUT_SECONDS)
 
 
 def _pi_model_probe_passed(
