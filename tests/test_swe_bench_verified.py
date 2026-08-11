@@ -2061,6 +2061,85 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertFalse(any(secret in argument for argument in closeout_command))
         self.assertEqual(capture.call_args.kwargs["timeout"], 1020)
 
+    def test_pure_pi_sol_view_uses_pi_without_codex_runtime(self) -> None:
+        profile = self.profile(
+            "sympy-16886-goal-plus-pi-sol-medium-view-smoke"
+        )
+        prompt = runtime.build_goal_plus_prompt(
+            {"problem_statement": "Public issue text"}, profile
+        )
+        self.assertEqual(profile["goal_plus"]["evidence_annotator"]["kind"], "pi")
+        self.assertIn("strategy.evidence_annotator.host=pi-rpc", prompt)
+
+        annotator_environment = runtime._goal_plus_evidence_annotator_environment(
+            profile, {"runtime_api_base_url": "http://192.0.2.10:45678/v1"}
+        )
+        self.assertEqual(
+            annotator_environment["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"],
+            "bench-openai/gpt-5.6-sol",
+        )
+        self.assertNotIn("CODEX_HOME", annotator_environment)
+        self.assertNotIn(
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL", annotator_environment
+        )
+        self.assertEqual(
+            runtime._goal_plus_evidence_annotator_public(profile),
+            {
+                "kind": "pi",
+                "model": "bench-openai/gpt-5.6-sol",
+                "reasoning_effort": "medium",
+                "timeout_seconds": 300,
+            },
+        )
+
+        with self.temporary_directory() as temporary:
+            assets = Path(temporary)
+            path_assets = {
+                "goal_plus_root": assets / "goal-plus",
+                "goal_plus_dependency_lock": assets / "requirements.lock",
+                "goal_plus_visible_verifier": assets / "visible.py",
+                "goal_plus_controller": assets / "controller.py",
+                "goal_plus_pip_cache": assets / "pip-cache",
+            }
+            path_assets["goal_plus_root"].mkdir()
+            path_assets["goal_plus_pip_cache"].mkdir()
+            for name, path in path_assets.items():
+                if name not in {"goal_plus_root", "goal_plus_pip_cache"}:
+                    path.write_text("fixture\n", encoding="utf-8")
+            runtime_info = {
+                **path_assets,
+                "credential_env": "OPENAI_API_KEY",
+                "credential_present": True,
+                "provider": "bench-openai",
+                "provider_name": "Benchmark OpenAI-compatible proxy",
+                "model_id": "gpt-5.6-sol",
+                "node_root": Path("/host/node"),
+                "package_root": Path("/host/pi"),
+                "goal_plus_evidence_annotator": profile["goal_plus"][
+                    "evidence_annotator"
+                ],
+            }
+            docker_commands: list[list[str]] = []
+
+            def docker_checked(command: list[str], *, timeout: int = 120) -> str:
+                del timeout
+                docker_commands.append(command)
+                return "container-id" if command[:2] == ["docker", "create"] else ""
+
+            with mock.patch.object(
+                runtime, "_docker_checked", side_effect=docker_checked
+            ):
+                runtime._create_agent_container(
+                    "goal-plus-pure-pi-view", profile, runtime_info
+                )
+
+        create = docker_commands[0]
+        joined = " ".join(create)
+        self.assertNotIn(environment.CODEX_RUNTIME_TMPFS, create)
+        self.assertNotIn(environment.CODEX_HOME_TMPFS, create)
+        self.assertNotIn("codex.tgz", joined)
+        self.assertIn("dst=/opt/pi,readonly", joined)
+
     def test_goal_plus_durable_evidence_enforces_k_and_verifier_contract(self) -> None:
         with self.temporary_directory() as temporary:
             root = Path(temporary) / "passing"

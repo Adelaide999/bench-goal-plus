@@ -713,7 +713,9 @@ def resolve_goal_plus_runtime(profile: dict[str, Any]) -> dict[str, Any]:
     runtime = resolve_pi_runtime(profile)
     annotator = profile["goal_plus"]["evidence_annotator"]
     codex_runtime = (
-        resolve_codex_runtime(profile) if isinstance(annotator, dict) else None
+        resolve_codex_runtime(profile)
+        if isinstance(annotator, dict) and annotator.get("kind") == "codex"
+        else None
     )
     runtime.update(
         {
@@ -1249,8 +1251,11 @@ def _goal_plus_container_probe(
         "--tmpfs",
         "/opt/goal-plus-runtime:rw,exec,nosuid,nodev,size=512m",
     ]
-    annotator_enabled = runtime.get("goal_plus_evidence_annotator") is not None
-    if annotator_enabled:
+    annotator = runtime.get("goal_plus_evidence_annotator")
+    codex_annotator_enabled = bool(
+        isinstance(annotator, dict) and annotator.get("kind") == "codex"
+    )
+    if codex_annotator_enabled:
         command.extend(
             [
                 "--tmpfs",
@@ -1297,7 +1302,7 @@ def _goal_plus_container_probe(
             (
                 "mkdir -p /opt/codex && "
                 "tar -xzf /opt/runtime/codex.tgz -C /opt/codex && "
-                if annotator_enabled
+                if codex_annotator_enabled
                 else ""
             )
             + goal_plus_install_script()
@@ -1312,7 +1317,7 @@ def _goal_plus_container_probe(
             + " -e /opt/goal-plus/.pi/extensions/goal-plus.ts </dev/null"
             + (
                 " && /opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex --version"
-                if annotator_enabled
+                if codex_annotator_enabled
                 else ""
             )
             + " && python -m goal_plus.pi_tool --help >/dev/null"
@@ -2187,8 +2192,12 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             ) and (
                 runtime["goal_plus_root"] / ".pi" / "extensions" / "goal-plus.ts"
             ).is_file()
+            annotator = runtime.get("goal_plus_evidence_annotator")
+            annotator_kind = (
+                str(annotator.get("kind")) if isinstance(annotator, dict) else None
+            )
             annotator_assets_present = bool(
-                runtime.get("goal_plus_evidence_annotator") is None
+                annotator_kind != "codex"
                 or runtime.get("goal_plus_codex_archive_present")
             )
             checkout_valid = bool(
@@ -2216,14 +2225,10 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                         dependency_lock=str(runtime["goal_plus_dependency_lock"]),
                         visible_verifier=str(runtime["goal_plus_visible_verifier"]),
                         controller=str(runtime["goal_plus_controller"]),
-                        evidence_annotator=(
-                            "codex"
-                            if runtime.get("goal_plus_evidence_annotator")
-                            else "disabled"
-                        ),
+                        evidence_annotator=annotator_kind or "disabled",
                         codex_archive=(
                             str(runtime.get("goal_plus_codex_archive") or "")
-                            if runtime.get("goal_plus_evidence_annotator")
+                            if annotator_kind == "codex"
                             else None
                         ),
                     ),

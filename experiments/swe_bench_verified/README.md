@@ -97,6 +97,9 @@ Use `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` for the Goal Plus + Pi p
 `T=1800,K=1,C=1,R=1`, a 1500-second worker budget, and a 300-second Search closeout reserve.
 Use `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` for the same topology with the
 profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning.
+Use `swe-bench-verified-sympy-16886-goal-plus-pi-sol-medium-view-smoke` for a pure Pi topology:
+the outer MainAgent, independent no-session/no-tools Evidence ViewAgent, and search worker all use
+`bench-openai/gpt-5.6-sol`; no Codex runtime is mounted.
 
 Use `swe-bench-verified-sympy-16886-goal-plus-codex-smoke` for a five-minute native
 Codex host check. It uses the host Codex ChatGPT login and therefore requires outbound access to

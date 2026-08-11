@@ -462,9 +462,9 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 raise SweBenchContractError(
                     f"{profile_id}: Goal Plus Evidence annotator contract is invalid"
                 )
-            if annotator["kind"] != "codex":
+            if annotator["kind"] not in {"codex", "pi"}:
                 raise SweBenchContractError(
-                    f"{profile_id}: Goal Plus Evidence annotator kind must be codex"
+                    f"{profile_id}: Goal Plus Evidence annotator kind must be codex or pi"
                 )
             if (
                 not isinstance(annotator["model"], str)
@@ -489,7 +489,31 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 raise SweBenchContractError(
                     f"{profile_id}: Goal Plus Evidence annotator timeout must be 1..600"
                 )
-            if methods[0] == "goal-plus-pi" and provider_contract is None:
+            if annotator["kind"] == "pi":
+                annotator_provider, separator, annotator_model = annotator[
+                    "model"
+                ].partition("/")
+                if not separator or not annotator_provider or not annotator_model:
+                    raise SweBenchContractError(
+                        f"{profile_id}: Pi Evidence annotator model must be PROVIDER/MODEL"
+                    )
+                if methods[0] not in {"goal-plus-pi", "goal-plus-codex-pi"}:
+                    raise SweBenchContractError(
+                        f"{profile_id}: Pi Evidence annotator requires a Pi-capable Goal Plus method"
+                    )
+                if (
+                    methods[0] == "goal-plus-pi"
+                    and provider_contract is not None
+                    and provider_contract["id"] != annotator_provider
+                ):
+                    raise SweBenchContractError(
+                        f"{profile_id}: Pi Evidence annotator provider must match agent_provider.id"
+                    )
+            if (
+                annotator["kind"] == "codex"
+                and methods[0] == "goal-plus-pi"
+                and provider_contract is None
+            ):
                 raise SweBenchContractError(
                     f"{profile_id}: Codex Evidence annotator requires agent_provider"
                 )

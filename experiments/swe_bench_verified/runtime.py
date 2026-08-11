@@ -831,9 +831,11 @@ def _create_agent_container(
             "goal_plus_controller",
             "goal_plus_pip_cache",
         )
-        if method == "goal-plus-pi" and runtime.get(
-            "goal_plus_evidence_annotator"
-        ) is not None:
+        if (
+            method == "goal-plus-pi"
+            and isinstance(runtime.get("goal_plus_evidence_annotator"), dict)
+            and runtime["goal_plus_evidence_annotator"].get("kind") == "codex"
+        ):
             required_assets = (*required_assets, "goal_plus_codex_archive")
         missing = [
             name
@@ -870,9 +872,11 @@ def _create_agent_container(
                 "dst=/opt/pip-cache",
             ]
         )
-        if method == "goal-plus-pi" and runtime.get(
-            "goal_plus_evidence_annotator"
-        ) is not None:
+        if (
+            method == "goal-plus-pi"
+            and isinstance(runtime.get("goal_plus_evidence_annotator"), dict)
+            and runtime["goal_plus_evidence_annotator"].get("kind") == "codex"
+        ):
             command.extend(
                 [
                     "--tmpfs",
@@ -1033,9 +1037,11 @@ def _initialize_agent_container(
             ],
             timeout=120,
         )
-    elif method == "goal-plus-pi" and runtime.get(
-        "goal_plus_evidence_annotator"
-    ) is not None:
+    elif (
+        method == "goal-plus-pi"
+        and isinstance(runtime.get("goal_plus_evidence_annotator"), dict)
+        and runtime["goal_plus_evidence_annotator"].get("kind") == "codex"
+    ):
         _docker_checked(
             [
                 "docker",
@@ -1056,7 +1062,8 @@ def _initialize_agent_container(
         if os.environ.get("PIP_INDEX_URL"):
             install_command.extend(["-e", "PIP_INDEX_URL"])
         install_script = goal_plus_install_script(include_pi=method in PI_WORKER_METHODS)
-        if runtime.get("goal_plus_evidence_annotator") is not None:
+        annotator = runtime.get("goal_plus_evidence_annotator")
+        if isinstance(annotator, dict) and annotator.get("kind") == "codex":
             install_script += (
                 " && ln -sf "
                 "/opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex "
@@ -1150,6 +1157,11 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
     annotator_timeout = (
         annotator["timeout_seconds"] if isinstance(annotator, dict) else 300
     )
+    annotator_host = (
+        "pi-rpc"
+        if isinstance(annotator, dict) and annotator.get("kind") == "pi"
+        else "codex"
+    )
     codex_worker = profile["methods"][0] == "goal-plus-codex"
     worker_host = "codex" if codex_worker else "pi-rpc"
     if codex_worker and profile["concurrency"] > 1:
@@ -1214,7 +1226,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         f"{goal_plus['closeout_reserve_seconds']} and strategy.config.seed="
         f"{profile.get('seed', 1)} and strategy.config.global_evidence_mode="
         f"{global_evidence_mode}. {candidate_instruction}"
-        "Set strategy.evidence_annotator.host=codex and "
+        f"Set strategy.evidence_annotator.host={annotator_host} and "
         "strategy.evidence_annotator.timeout_seconds="
         f"{annotator_timeout}; "
         "leave its model and provider unset because the harness supplies the ViewAgent. "
@@ -1295,13 +1307,15 @@ def _goal_plus_evidence_annotator_environment(
     if annotator == "disabled":
         return {"GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED": "1"}
     environment = {
-        "CODEX_HOME": "/opt/codex-home",
         "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED": "0",
         "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": str(annotator["model"]),
         "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": str(
             annotator["reasoning_effort"]
         ),
     }
+    if annotator["kind"] == "pi":
+        return environment
+    environment["CODEX_HOME"] = "/opt/codex-home"
     provider = profile.get("agent_provider")
     if provider is None:
         return environment
@@ -1326,14 +1340,20 @@ def _goal_plus_evidence_annotator_public(profile: dict[str, Any]) -> Any:
     if annotator == "disabled":
         return "disabled"
     provider = profile.get("agent_provider")
-    return {
-        "kind": "codex",
+    result = {
+        "kind": annotator["kind"],
         "model": annotator["model"],
         "reasoning_effort": annotator["reasoning_effort"],
         "timeout_seconds": annotator["timeout_seconds"],
-        "provider_id": provider["id"] if provider else "chatgpt",
-        "wire_api": provider["wire_api"] if provider else "native-codex",
     }
+    if annotator["kind"] == "codex":
+        result.update(
+            {
+                "provider_id": provider["id"] if provider else "chatgpt",
+                "wire_api": provider["wire_api"] if provider else "native-codex",
+            }
+        )
+    return result
 
 
 def _agent_command(
@@ -2193,7 +2213,11 @@ def _run_agent(
                         ),
                         "codex_archive": (
                             str(runtime["goal_plus_codex_archive"])
-                            if runtime.get("goal_plus_evidence_annotator") is not None
+                            if isinstance(
+                                runtime.get("goal_plus_evidence_annotator"), dict
+                            )
+                            and runtime["goal_plus_evidence_annotator"].get("kind")
+                            == "codex"
                             else None
                         ),
                     }
