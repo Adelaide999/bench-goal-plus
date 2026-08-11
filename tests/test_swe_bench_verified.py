@@ -687,6 +687,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                         "external_id": f"agent_{index}",
                         "metadata": {
                             "pi_metrics": {
+                                "started_at": "2026-08-06T12:00:00Z",
+                                "ended_at": "2026-08-06T12:10:00Z",
+                                "duration_seconds": 600.0,
                                 "usage_total": {"input_tokens": 10 + index}
                             }
                         },
@@ -711,7 +714,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     ),
                 },
             )
-            if worker_min_runtime_seconds is not None:
+            if (
+                worker_min_runtime_seconds is not None
+                and worker_host != "pi-rpc"
+            ):
                 write_json(
                     root
                     / "host-logs"
@@ -893,6 +899,44 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn(
                 "peer_view_influence", missing_state["completion"]["reason"]
             )
+
+    def test_goal_plus_pi_uses_session_metrics_for_live_worker_overlap(self) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary)
+            self.write_goal_plus_state(
+                root,
+                max_parallel=2,
+                session_count=2,
+                verifier_runs=2,
+                supplemental_evaluation=True,
+                evidence_annotations=True,
+                worker_host="pi-rpc",
+                worker_min_runtime_seconds=600,
+                worker_min_verifier_runs=2,
+                candidate_count=2,
+                peer_comparison=True,
+            )
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=2,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator_enabled=True,
+                expected_worker_host="pi-rpc",
+            )
+
+        self.assertTrue(state["completion"]["passed"])
+        overlap = state["completion"]["checks"]["live_worker_overlap"]
+        self.assertTrue(overlap["passed"])
+        self.assertEqual(overlap["actual"]["overlap_seconds"], 600.0)
+        self.assertEqual(
+            {item["source"] for item in overlap["actual"]["intervals"]},
+            {"pi_session_metrics"},
+        )
 
     def test_goal_plus_codex_completion_enforces_worker_minimums(self) -> None:
         with self.temporary_directory() as temporary:
@@ -1291,7 +1335,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
         self.assertEqual(
             managed_upstream_branch("goal_plus"),
-            "main",
+            "codex/pi-supplemental-view-adapter",
         )
 
     def test_luna_pi_runtime_writes_environment_reference_not_secret(self) -> None:
