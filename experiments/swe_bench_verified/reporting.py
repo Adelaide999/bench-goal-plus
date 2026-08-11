@@ -94,6 +94,9 @@ def _revalidate_goal_plus_cell(
             expected_evidence_annotator_enabled=isinstance(
                 goal_plus_profile["evidence_annotator"], dict
             ),
+            expected_global_evidence_mode=goal_plus_profile.get(
+                "global_evidence_mode", "manual"
+            ),
         )
     except (KeyError, TypeError, ValueError):
         return False

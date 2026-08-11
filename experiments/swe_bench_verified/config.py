@@ -358,6 +358,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             "evidence_annotator",
         }
         optional_fields = {
+            "global_evidence_mode",
             "worker_min_runtime_seconds",
             "worker_min_verifier_runs",
             "supplemental_evaluation_enabled",
@@ -502,6 +503,12 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         if supplemental_evaluation_enabled and annotator == "disabled":
             raise SweBenchContractError(
                 f"{profile_id}: supplemental evaluation requires the Evidence annotator"
+            )
+        global_evidence_mode = goal_plus.get("global_evidence_mode", "manual")
+        if global_evidence_mode not in {"manual", "auto", "independent"}:
+            raise SweBenchContractError(
+                f"{profile_id}: goal_plus.global_evidence_mode must be one of "
+                "auto, independent, manual"
             )
         if concurrency == 2 and not (
             methods == ["goal-plus-codex"]
