@@ -34,17 +34,18 @@ from .environment import (
     codex_container_responses_probe,
     goal_plus_install_script,
     goal_plus_runtime_environment,
+    has_pi_worker_override,
     openai_responses_probe,
-    pi_worker_profile,
     pi_provider_proxy_environment,
     resolve_codex_runtime,
     resolve_goal_plus_codex_runtime,
     resolve_goal_plus_codex_pi_runtime,
-    resolve_goal_plus_runtime,
+    resolve_goal_plus_pi_runtime,
     resolve_pi_runtime,
     routed_codex_runtime,
     routed_goal_plus_codex_runtime,
     routed_goal_plus_codex_pi_runtime,
+    routed_goal_plus_pi_runtime,
     routed_pi_runtime,
 )
 from .goal_plus_evidence import collect_goal_plus_state, record_completion_check
@@ -791,13 +792,21 @@ def _create_agent_container(
             )
     else:
         runtime = runtime or (
-            resolve_goal_plus_runtime(profile)
+            resolve_goal_plus_pi_runtime(profile)
             if method == "goal-plus-pi"
             else resolve_pi_runtime(profile)
         )
         if not runtime["credential_present"]:
             raise SweBenchContractError(
                 f"Pi credential for provider {runtime['provider']} is missing"
+            )
+        if (
+            method == "goal-plus-pi"
+            and has_pi_worker_override(profile)
+            and not runtime.get("worker_credential_present")
+        ):
+            raise SweBenchContractError(
+                f"Pi worker credential for provider {runtime.get('worker_provider')} is missing"
             )
         if not all(runtime.get(name) for name in ("node_root", "package_root")):
             raise SweBenchContractError("Pi Node.js or package runtime is missing")
@@ -1188,7 +1197,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
             "gates: keep the same worker active until both are satisfied. "
         )
     worker_launch_instruction = ""
-    if profile["methods"][0] == "goal-plus-codex-pi":
+    if has_pi_worker_override(profile):
         worker_launch_instruction = (
             "Set strategy.worker_launch.model="
             f"{goal_plus['worker_model']} and "
@@ -1519,7 +1528,9 @@ def _agent_command(
             "GOAL_PLUS_ROOT": "/testbed/.gp",
             "GOAL_PLUS_SEARCH_ROOT": "/testbed/.gp",
             "GOAL_PLUS_SOURCE_PATH": "/opt/goal-plus",
-            "GOAL_PLUS_PI_MODEL": profile["model"],
+            "GOAL_PLUS_PI_MODEL": str(
+                profile["goal_plus"].get("worker_model", profile["model"])
+            ),
             "GOAL_PLUS_OUTER_DEADLINE_AT": str(runtime["outer_deadline_at"]),
             "PYTHONDONTWRITEBYTECODE": "1",
             **pi_provider_proxy_environment(runtime),
@@ -1536,10 +1547,17 @@ def _agent_command(
                     f"no_proxy={runtime['bridge_host']}",
                 ]
             )
+        credential_names = [credential_env]
+        worker_credential = runtime.get("worker_credential_env")
+        if (
+            isinstance(worker_credential, str)
+            and worker_credential not in credential_names
+        ):
+            credential_names.append(worker_credential)
+        for name in credential_names:
+            command.extend(["-e", name])
         command.extend(
             [
-                "-e",
-                credential_env,
                 container_id,
                 "sh",
                 "-lc",
@@ -1698,8 +1716,20 @@ def _goal_plus_closeout(
     for name, value in environment.items():
         command.extend(["-e", f"{name}={value}"])
     if uses_pi_workers:
-        credential_env = runtime.get("worker_credential_env", runtime.get("credential_env"))
-        command.extend(["-e", str(credential_env)])
+        credential_names = []
+        if is_pi_main:
+            credential_names.append(runtime.get("credential_env"))
+        credential_names.append(
+            runtime.get("worker_credential_env", runtime.get("credential_env"))
+        )
+        for credential_env in dict.fromkeys(credential_names):
+            if isinstance(credential_env, str) and credential_env:
+                command.extend(["-e", credential_env])
+    if is_pi_main and runtime.get("bridge_host"):
+        no_proxy = f"127.0.0.1,localhost,::1,{runtime['bridge_host']}"
+        command.extend(
+            ["-e", f"NO_PROXY={no_proxy}", "-e", f"no_proxy={no_proxy}"]
+        )
     if profile.get("agent_provider") is not None and not is_pi_main:
         command.extend(["-e", str(runtime["api_key_env"])])
         if runtime.get("bridge_host"):
@@ -2013,10 +2043,16 @@ def _run_agent(
                 or profile.get("container_network") == "internal-provider-proxy"
             ):
                 runtime = resources.enter_context(
-                    routed_pi_runtime(
+                    routed_goal_plus_pi_runtime(
                         profile,
                         cell_dir,
-                        goal_plus=method == "goal-plus-pi",
+                        bridge_listen_host=bridge_listen_host,
+                        bridge_host=bridge_host,
+                    )
+                    if method == "goal-plus-pi"
+                    else routed_pi_runtime(
+                        profile,
+                        cell_dir,
                         bridge_listen_host=bridge_listen_host,
                         bridge_host=bridge_host,
                     )
@@ -2035,7 +2071,7 @@ def _run_agent(
                     host_probe = None
             else:
                 runtime = (
-                    resolve_goal_plus_runtime(profile)
+                    resolve_goal_plus_pi_runtime(profile)
                     if method == "goal-plus-pi"
                     else resolve_pi_runtime(profile)
                 )
@@ -2222,6 +2258,17 @@ def _run_agent(
                         ),
                     }
                 )
+                if has_pi_worker_override(profile):
+                    runtime_public["worker"] = {
+                        "host": "pi-rpc",
+                        "model": profile["goal_plus"]["worker_model"],
+                        "reasoning_effort": profile["goal_plus"][
+                            "worker_reasoning_effort"
+                        ],
+                        "provider": runtime["worker_provider"],
+                        "credential_env": runtime["worker_credential_env"],
+                        "provider_proxy": runtime.get("provider_proxy"),
+                    }
         runtime_public["agent_network"] = network
         runtime_public["container_network"] = (
             {

@@ -112,6 +112,13 @@ campaign-owned internal Docker network and reach only the selected provider thro
 ephemeral host allowlist proxy. The official evaluator still runs with Docker network
 mode `none`.
 
+Use `swe-bench-verified-indices-39-goal-plus-pi-sol-deepseek-k4-c2` for the pure Pi form of the
+same campaign. The outer MainAgent and independent ViewAgent run through Pi with
+`bench-openai/gpt-5.6-sol` at medium reasoning; the four bound worker sessions run through Pi with
+`deepseek/deepseek-v4-flash` at medium reasoning. Supplemental evaluation is required and Global
+Evidence is `auto`; `T=1800,K=4,C=2,R=1` is profile-frozen. This profile does not depend on a
+`share_dir` option.
+
 Supplemental evaluation sets both `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED=1` and
 `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1`, so a requested post-settlement evaluation cannot
 silently degrade into OFF. The official SWE-bench `resolved` result remains the sole hard score.

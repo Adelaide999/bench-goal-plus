@@ -778,7 +778,7 @@ def resolve_goal_plus_codex_runtime(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def pi_worker_profile(profile: dict[str, Any]) -> dict[str, Any]:
-    """Project a mixed Codex/Pi profile onto the Pi worker runtime contract."""
+    """Project a role-separated Goal Plus profile onto the Pi worker contract."""
     goal_plus = profile["goal_plus"]
     worker = dict(profile)
     worker["methods"] = ["plain-pi"]
@@ -786,6 +786,14 @@ def pi_worker_profile(profile: dict[str, Any]) -> dict[str, Any]:
     worker["reasoning_effort"] = str(goal_plus["worker_reasoning_effort"])
     worker.pop("agent_provider", None)
     return worker
+
+
+def has_pi_worker_override(profile: dict[str, Any]) -> bool:
+    goal_plus = profile.get("goal_plus")
+    return isinstance(goal_plus, dict) and {
+        "worker_model",
+        "worker_reasoning_effort",
+    }.issubset(goal_plus)
 
 
 def _merge_pi_worker_runtime(
@@ -813,6 +821,15 @@ def _merge_pi_worker_runtime(
 def resolve_goal_plus_codex_pi_runtime(profile: dict[str, Any]) -> dict[str, Any]:
     runtime = resolve_goal_plus_codex_runtime(profile)
     return _merge_pi_worker_runtime(runtime, resolve_pi_runtime(pi_worker_profile(profile)))
+
+
+def resolve_goal_plus_pi_runtime(profile: dict[str, Any]) -> dict[str, Any]:
+    runtime = resolve_goal_plus_runtime(profile)
+    if not has_pi_worker_override(profile):
+        return runtime
+    return _merge_pi_worker_runtime(
+        runtime, resolve_pi_runtime(pi_worker_profile(profile))
+    )
 
 
 @contextmanager
@@ -849,6 +866,34 @@ def routed_goal_plus_codex_pi_runtime(
             destination,
             bridge_listen_host=bridge_listen_host,
             bridge_host=bridge_listen_host,
+        ) as worker_runtime:
+            runtime = dict(main_runtime)
+            yield _merge_pi_worker_runtime(runtime, worker_runtime)
+
+
+@contextmanager
+def routed_goal_plus_pi_runtime(
+    profile: dict[str, Any],
+    destination: Path,
+    *,
+    bridge_listen_host: str | None = None,
+    bridge_host: str | None = None,
+) -> Iterator[dict[str, Any]]:
+    with routed_pi_runtime(
+        profile,
+        destination,
+        goal_plus=True,
+        bridge_listen_host=bridge_listen_host,
+        bridge_host=bridge_host,
+    ) as main_runtime:
+        if not has_pi_worker_override(profile):
+            yield main_runtime
+            return
+        with routed_pi_runtime(
+            pi_worker_profile(profile),
+            destination,
+            bridge_listen_host=bridge_listen_host,
+            bridge_host=bridge_host,
         ) as worker_runtime:
             runtime = dict(main_runtime)
             yield _merge_pi_worker_runtime(runtime, worker_runtime)
@@ -1390,7 +1435,57 @@ def _goal_plus_codex_container_probe(
 
 def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
     method = profile["methods"][0]
+    if method == "goal-plus-pi" and has_pi_worker_override(profile):
+        annotator = profile["goal_plus"]["evidence_annotator"]
+        main_profile = dict(profile)
+        main_goal_plus = dict(profile["goal_plus"])
+        main_goal_plus.pop("worker_model", None)
+        main_goal_plus.pop("worker_reasoning_effort", None)
+        main_profile["goal_plus"] = main_goal_plus
+        main_profile["concurrency"] = 1
+        main_profile["cell_concurrency"] = 1
+        main_profile["container_network"] = "internal-api-only"
+
+        worker_profile = pi_worker_profile(profile)
+        worker_profile["methods"] = ["goal-plus-pi"]
+        worker_goal_plus = dict(profile["goal_plus"])
+        worker_goal_plus.pop("worker_model", None)
+        worker_goal_plus.pop("worker_reasoning_effort", None)
+        worker_goal_plus["evidence_annotator"] = "disabled"
+        worker_goal_plus["supplemental_evaluation_enabled"] = False
+        worker_profile["goal_plus"] = worker_goal_plus
+        worker_profile["concurrency"] = 1
+        worker_profile["cell_concurrency"] = 1
+
+        main = doctor_payload(main_profile)
+        worker = doctor_payload(worker_profile)
+        checks = [
+            {**item, "name": f"main:{item['name']}"} for item in main["checks"]
+        ] + [
+            {**item, "name": f"worker:{item['name']}"}
+            for item in worker["checks"]
+        ]
+        return {
+            "schema_version": 1,
+            "benchmark_id": "swe-bench-verified",
+            "profile": profile["id"],
+            "method": method,
+            "model": profile["model"],
+            "worker_model": profile["goal_plus"]["worker_model"],
+            "view_model": (
+                annotator.get("model") if isinstance(annotator, dict) else None
+            ),
+            "ok": main["ok"] and worker["ok"],
+            "checks": checks,
+            "inventory": main["inventory"],
+            "packages": main["packages"],
+            "swebench_commit": main["swebench_commit"],
+            "components": {"main": main, "worker": worker},
+            "checked_at": utc_now(),
+        }
+
     if method == "goal-plus-codex-pi":
+        annotator = profile["goal_plus"]["evidence_annotator"]
         main_profile = dict(profile)
         main_profile["methods"] = ["goal-plus-codex"]
         main_profile["concurrency"] = 1
@@ -1420,7 +1515,9 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             "method": method,
             "model": profile["model"],
             "worker_model": profile["goal_plus"]["worker_model"],
-            "view_model": profile["goal_plus"]["evidence_annotator"]["model"],
+            "view_model": (
+                annotator.get("model") if isinstance(annotator, dict) else None
+            ),
             "ok": main["ok"] and worker["ok"],
             "checks": checks,
             "inventory": main["inventory"],

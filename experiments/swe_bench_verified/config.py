@@ -275,15 +275,12 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             f"{profile_id}: internal-api-only is proven only for custom-provider Goal Plus + Pi"
         )
     if network_policy == "internal-provider-proxy":
-        worker_model = (
-            (profile.get("goal_plus") or {}).get("worker_model")
-            if methods[0] == "goal-plus-codex-pi"
-            else profile.get("model", "")
+        worker_model = (profile.get("goal_plus") or {}).get(
+            "worker_model", profile.get("model", "")
         )
         provider = str(worker_model).partition("/")[0]
         if (
             methods[0] not in scalable_goal_plus_methods
-            or (methods[0] == "goal-plus-pi" and profile.get("agent_provider") is not None)
             or provider != "deepseek"
         ):
             raise SweBenchContractError(
@@ -423,9 +420,28 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 raise SweBenchContractError(
                     f"{profile_id}: goal_plus.worker_min_verifier_runs must be positive"
                 )
-        if methods[0] == "goal-plus-codex-pi":
+        worker_fields = {"worker_model", "worker_reasoning_effort"}
+        worker_fields_present = worker_fields.intersection(goal_plus)
+        if worker_fields_present and worker_fields_present != worker_fields:
+            raise SweBenchContractError(
+                f"{profile_id}: Goal Plus worker model fields must be configured together"
+            )
+        if (
+            methods[0] == "goal-plus-codex-pi"
+            and worker_fields_present != worker_fields
+        ):
+            raise SweBenchContractError(
+                f"{profile_id}: mixed Codex/Pi requires worker model fields"
+            )
+        if worker_fields_present == worker_fields:
+            if methods[0] not in {"goal-plus-codex-pi", "goal-plus-pi"}:
+                raise SweBenchContractError(
+                    f"{profile_id}: worker model fields require a Pi-worker Goal Plus method"
+                )
             worker_model = goal_plus.get("worker_model")
-            worker_provider, separator, worker_model_id = str(worker_model).partition("/")
+            worker_provider, separator, worker_model_id = str(worker_model).partition(
+                "/"
+            )
             if not separator or not worker_provider or not worker_model_id:
                 raise SweBenchContractError(
                     f"{profile_id}: goal_plus.worker_model must be PROVIDER/MODEL"
@@ -434,14 +450,11 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 raise SweBenchContractError(
                     f"{profile_id}: unsupported goal_plus.worker_reasoning_effort"
                 )
+        if methods[0] == "goal-plus-codex-pi":
             if profile.get("agent_provider") is None:
                 raise SweBenchContractError(
                     f"{profile_id}: mixed Codex MainAgent requires agent_provider"
                 )
-        elif "worker_model" in goal_plus or "worker_reasoning_effort" in goal_plus:
-            raise SweBenchContractError(
-                f"{profile_id}: worker model fields require goal-plus-codex-pi"
-            )
         if (
             not isinstance(verifier_timeout, int)
             or isinstance(verifier_timeout, bool)

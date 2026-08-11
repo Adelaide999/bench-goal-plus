@@ -144,6 +144,165 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         )
         self.assertEqual(spec.concurrency(), {"T": 1800, "K": 4, "C": 2, "R": 1})
 
+    def test_verified_indices_39_pure_pi_profile_freezes_all_agent_roles(self) -> None:
+        profile = self.profile(
+            "verified-indices-39-goal-plus-pi-sol-deepseek-k4-c2"
+        )
+        mixed = self.profile(
+            "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2"
+        )
+        self.assertEqual(profile["task_ids"], mixed["task_ids"])
+        self.assertEqual(len(profile["task_ids"]), 39)
+        self.assertEqual(profile["methods"], ["goal-plus-pi"])
+        self.assertEqual(profile["model"], "bench-openai/gpt-5.6-sol")
+        self.assertEqual(profile["reasoning_effort"], "medium")
+        self.assertEqual(profile["concurrency"], 4)
+        self.assertEqual(profile["cell_concurrency"], 2)
+        self.assertEqual(profile["wall_time_seconds"], 1800)
+        self.assertEqual(
+            profile["goal_plus"]["worker_model"], "deepseek/deepseek-v4-flash"
+        )
+        self.assertEqual(profile["goal_plus"]["worker_reasoning_effort"], "medium")
+        self.assertEqual(
+            profile["goal_plus"]["evidence_annotator"],
+            {
+                "kind": "pi",
+                "model": "bench-openai/gpt-5.6-sol",
+                "reasoning_effort": "medium",
+                "timeout_seconds": 300,
+            },
+        )
+        self.assertEqual(profile["goal_plus"]["global_evidence_mode"], "auto")
+        self.assertTrue(profile["goal_plus"]["supplemental_evaluation_enabled"])
+        self.assertNotIn("share_dir", profile)
+        self.assertNotIn("share_dir", profile["goal_plus"])
+
+        prompt = runtime.build_goal_plus_prompt(
+            {"problem_statement": "issue"}, profile
+        )
+        self.assertIn("strategy.worker_host=pi-rpc", prompt)
+        self.assertIn(
+            "strategy.worker_launch.model=deepseek/deepseek-v4-flash", prompt
+        )
+        self.assertIn("strategy.evidence_annotator.host=pi-rpc", prompt)
+        self.assertIn("strategy.config.global_evidence_mode=auto", prompt)
+        self.assertIn("budget.max_parallel=4", prompt)
+
+        spec = BenchmarkAgent(catalog=Catalog()).resolve_spec(
+            preset_id="swe-bench-verified-indices-39-goal-plus-pi-sol-deepseek-k4-c2"
+        )
+        self.assertEqual(spec.methods, ("goal-plus-pi",))
+        self.assertEqual(spec.concurrency(), {"T": 1800, "K": 4, "C": 2, "R": 1})
+
+    def test_pure_pi_role_separation_requires_complete_worker_contract(self) -> None:
+        profile = self.profile(
+            "verified-indices-39-goal-plus-pi-sol-deepseek-k4-c2"
+        )
+        incomplete = json.loads(json.dumps(profile))
+        incomplete["goal_plus"].pop("worker_reasoning_effort")
+        with self.assertRaisesRegex(SweBenchContractError, "configured together"):
+            validate_profile(str(incomplete["id"]), incomplete)
+
+        invalid_model = json.loads(json.dumps(profile))
+        invalid_model["goal_plus"]["worker_model"] = "deepseek-v4-flash"
+        invalid_model["container_network"] = "default"
+        with self.assertRaisesRegex(SweBenchContractError, "PROVIDER/MODEL"):
+            validate_profile(str(invalid_model["id"]), invalid_model)
+
+    def test_pure_pi_role_separation_routes_main_worker_and_closeout(self) -> None:
+        profile = self.profile(
+            "verified-indices-39-goal-plus-pi-sol-deepseek-k4-c2"
+        )
+        values = {
+            "OPENAI_BASE_URL": "http://127.0.0.1:8080/v1",
+            "OPENAI_API_KEY": "main-secret",
+            "DEEPSEEK_API_KEY": "worker-secret",
+        }
+        with mock.patch.dict(os.environ, values, clear=False):
+            resolved = environment.resolve_goal_plus_pi_runtime(profile)
+        self.assertEqual(resolved["provider"], "bench-openai")
+        self.assertEqual(resolved["model_id"], "gpt-5.6-sol")
+        self.assertEqual(resolved["credential_env"], "OPENAI_API_KEY")
+        self.assertEqual(resolved["worker_provider"], "deepseek")
+        self.assertEqual(resolved["worker_model_id"], "deepseek-v4-flash")
+        self.assertEqual(resolved["worker_credential_env"], "DEEPSEEK_API_KEY")
+
+        runtime_info = {
+            **resolved,
+            "runtime_api_base_url": "http://192.0.2.10:8080/v1",
+            "bridge_host": "192.0.2.10",
+            "provider_proxy_url": "http://192.0.2.10:3128",
+            "outer_deadline_at": "2026-08-11T12:00:00+00:00",
+            "main_session_id": "pure-pi-main",
+            "goal_prompt": runtime.build_goal_plus_prompt(
+                {"problem_statement": "issue"}, profile
+            ),
+        }
+        command = runtime._agent_command("container-id", profile, runtime_info)
+        joined = " ".join(command)
+        self.assertIn("GOAL_PLUS_PI_MODEL=deepseek/deepseek-v4-flash", command)
+        self.assertIn(
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL=bench-openai/gpt-5.6-sol",
+            command,
+        )
+        self.assertIn("GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1", command)
+        self.assertIn("OPENAI_API_KEY", command)
+        self.assertIn("DEEPSEEK_API_KEY", command)
+        self.assertIn("--provider bench-openai", joined)
+        self.assertIn("--model bench-openai/gpt-5.6-sol", joined)
+        self.assertNotIn("/opt/codex/", joined)
+
+        completed = subprocess.CompletedProcess(
+            ["docker", "exec"], 0, '{"completed": true}\n', ""
+        )
+        with mock.patch.object(runtime, "_run", return_value=completed) as capture:
+            closeout = runtime._goal_plus_closeout(
+                "container-id", profile, runtime_info
+            )
+        closeout_command = capture.call_args.args[0]
+        self.assertTrue(closeout["completed"])
+        self.assertIn("OPENAI_API_KEY", closeout_command)
+        self.assertIn("DEEPSEEK_API_KEY", closeout_command)
+        self.assertIn(
+            "NO_PROXY=127.0.0.1,localhost,::1,192.0.2.10", closeout_command
+        )
+        self.assertFalse(any("main-secret" in item for item in closeout_command))
+        self.assertFalse(any("worker-secret" in item for item in closeout_command))
+
+    def test_pure_pi_role_separation_doctor_checks_both_roles(self) -> None:
+        profile = self.profile(
+            "verified-indices-39-goal-plus-pi-sol-deepseek-k4-c2"
+        )
+        component = {
+            "ok": True,
+            "checks": [{"name": "runtime", "passed": True}],
+            "inventory": {"ok": True},
+            "packages": {},
+            "swebench_commit": "a" * 40,
+        }
+        doctor = environment.doctor_payload
+        with mock.patch.object(
+            environment, "doctor_payload", side_effect=[component, component]
+        ) as recursive:
+            payload = doctor(profile)
+
+        main_profile = recursive.call_args_list[0].args[0]
+        worker_profile = recursive.call_args_list[1].args[0]
+        self.assertNotIn("worker_model", main_profile["goal_plus"])
+        self.assertEqual(main_profile["model"], "bench-openai/gpt-5.6-sol")
+        self.assertEqual(main_profile["container_network"], "internal-api-only")
+        self.assertEqual(worker_profile["model"], "deepseek/deepseek-v4-flash")
+        self.assertEqual(
+            worker_profile["goal_plus"]["evidence_annotator"], "disabled"
+        )
+        self.assertEqual(payload["method"], "goal-plus-pi")
+        self.assertEqual(payload["worker_model"], "deepseek/deepseek-v4-flash")
+        self.assertEqual(payload["view_model"], "bench-openai/gpt-5.6-sol")
+        self.assertEqual(
+            [check["name"] for check in payload["checks"]],
+            ["main:runtime", "worker:runtime"],
+        )
+
     def test_allowlisted_connect_proxy_relays_only_exact_target(self) -> None:
         class EchoHandler(socketserver.BaseRequestHandler):
             def handle(self) -> None:
@@ -2906,7 +3065,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
             with (
                 mock.patch.object(
-                    runtime, "resolve_goal_plus_runtime", return_value=runtime_info
+                    runtime, "resolve_goal_plus_pi_runtime", return_value=runtime_info
                 ),
                 mock.patch.object(
                     runtime,
