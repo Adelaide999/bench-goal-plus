@@ -593,11 +593,11 @@
       }
     },
     {
-      "id": "swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2",
-      "description": "The 39 workbook-selected SWE-bench Verified tasks with a GPT Sol Codex MainAgent, DeepSeek Pi workers, a GPT Sol ViewAgent, T=1800, K=4, C=2, R=1, and an internal Agent network.",
+      "id": "swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-k1-c2",
+      "description": "The 39 workbook-selected SWE-bench Verified tasks with a GPT Sol Codex MainAgent, one DeepSeek Pi worker, a GPT Sol ViewAgent, T=1800, K=1, C=2, R=1, and an internal Agent network.",
       "benchmarks": ["swe-bench-verified"],
-      "profile": "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2",
-      "campaign_id_template": "swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-30m-k4-c2-r1-{timestamp}",
+      "profile": "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k1-c2",
+      "campaign_id_template": "swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-30m-k1-c2-r1-{timestamp}",
       "expected_profile": {
         "task_count": 39,
         "methods": ["goal-plus-codex-pi"],
@@ -605,7 +605,7 @@
         "reasoning_effort": "medium",
         "supplemental_evaluation_enabled": true,
         "wall_time_seconds": 1800,
-        "concurrency": 4,
+        "concurrency": 1,
         "cell_concurrency": 2
       }
     }
