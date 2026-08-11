@@ -190,6 +190,7 @@
       "reasoning_effort": "medium",
       "timeout_seconds": 300
     },
+    "global_evidence_mode": "auto",
     "supplemental_evaluation_enabled": true
   }
 }

@@ -578,6 +578,7 @@ def collect_goal_plus_state(
     expected_supplemental_evaluation_enabled: bool = False,
     expected_evidence_annotator_enabled: bool = False,
     expected_worker_host: str = "pi-rpc",
+    expected_global_evidence_mode: str = "manual",
 ) -> dict[str, Any]:
     goal_records = []
     for path in sorted((root / "goal-plus").glob("gp_*/goal.json")):
@@ -1024,6 +1025,23 @@ def collect_goal_plus_state(
                 selected_run
                 and selected_run.get("worker_host") == expected_worker_host
                 and selected_run.get("orchestration_mode") == "parallel_loops"
+            ),
+        ),
+        "global_evidence_mode": _check(
+            expected_global_evidence_mode,
+            (
+                selected_run.get("strategy_config", {}).get(
+                    "global_evidence_mode", "manual"
+                )
+                if selected_run
+                else None
+            ),
+            bool(
+                selected_run
+                and selected_run.get("strategy_config", {}).get(
+                    "global_evidence_mode", "manual"
+                )
+                == expected_global_evidence_mode
             ),
         ),
         "worker_runtime": _check(

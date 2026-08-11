@@ -1164,6 +1164,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         worker_instruction = (
             "Continue the same bound Pi worker session; do not create replacement lanes."
         )
+    global_evidence_mode = str(goal_plus.get("global_evidence_mode", "manual"))
     minimum_budget_instruction = ""
     if "worker_min_runtime_seconds" in goal_plus:
         minimum_budget_instruction = (
@@ -1188,7 +1189,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
             f"Use exactly {profile['concurrency']} fixed initial candidates with "
             "distinct public-evidence-based hypotheses. Start them together in one "
             "batch and bind exactly one worker session to each candidate; do not "
-            "serialize or create replacement lanes. After both candidates have "
+            "serialize or create replacement lanes. After at least two candidates have "
             "settled Evidence, keep searching so at least one worker reads a completed "
             "peer supplemental View before its next verifier attempt. "
         )
@@ -1210,7 +1211,8 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "Set "
         "strategy.config.closeout_reserve_seconds="
         f"{goal_plus['closeout_reserve_seconds']} and strategy.config.seed="
-        f"{profile.get('seed', 1)}. {candidate_instruction}"
+        f"{profile.get('seed', 1)} and strategy.config.global_evidence_mode="
+        f"{global_evidence_mode}. {candidate_instruction}"
         "Set strategy.evidence_annotator.host=codex and "
         "strategy.evidence_annotator.timeout_seconds="
         f"{annotator_timeout}; "
@@ -1279,6 +1281,9 @@ def _goal_plus_supplemental_evaluation_environment(
     return {
         "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED": "1" if enabled else "0",
         "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED": "1" if enabled else "0",
+        "GOAL_PLUS_GLOBAL_EVIDENCE_MODE": str(
+            profile["goal_plus"].get("global_evidence_mode", "manual")
+        ),
     }
 
 
@@ -1790,6 +1795,9 @@ def _export_goal_plus_state(
         expected_evidence_annotator_enabled=isinstance(
             profile["goal_plus"]["evidence_annotator"], dict
         ),
+        expected_global_evidence_mode=profile["goal_plus"].get(
+            "global_evidence_mode", "manual"
+        ),
         expected_worker_host=(
             "codex" if profile["methods"][0] == "goal-plus-codex" else "pi-rpc"
         ),
@@ -2079,6 +2087,9 @@ def _run_agent(
                 "controller": str(runtime["goal_plus_controller"]),
                 "pip_cache": str(runtime["goal_plus_pip_cache"]),
                 "evidence_annotator": _goal_plus_evidence_annotator_public(profile),
+                "global_evidence_mode": profile["goal_plus"].get(
+                    "global_evidence_mode", "manual"
+                ),
                 "credentials_persisted": False,
             }
             if profile.get("agent_provider") is not None:
@@ -2175,6 +2186,9 @@ def _run_agent(
                         "pip_cache": str(runtime["goal_plus_pip_cache"]),
                         "evidence_annotator": _goal_plus_evidence_annotator_public(
                             profile
+                        ),
+                        "global_evidence_mode": profile["goal_plus"].get(
+                            "global_evidence_mode", "manual"
                         ),
                         "codex_archive": (
                             str(runtime["goal_plus_codex_archive"])

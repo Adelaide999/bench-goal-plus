@@ -122,6 +122,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(
             profile["goal_plus"]["evidence_annotator"]["model"], "gpt-5.6-sol"
         )
+        self.assertEqual(profile["goal_plus"]["global_evidence_mode"], "auto")
         self.assertTrue(profile["goal_plus"]["supplemental_evaluation_enabled"])
         prompt = runtime.build_goal_plus_prompt(
             {"problem_statement": "issue"}, profile
@@ -131,6 +132,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "strategy.worker_launch.model=deepseek/deepseek-v4-flash", prompt
         )
         self.assertIn("strategy.worker_launch.reasoning_effort=medium", prompt)
+        self.assertIn("strategy.config.global_evidence_mode=auto", prompt)
         self.assertIn("budget.max_parallel=4", prompt)
         self.assertNotIn(
             "budget.max_candidates=",
@@ -255,6 +257,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("DEEPSEEK_API_KEY", command)
             self.assertIn("OPENAI_API_KEY", command)
             self.assertIn("GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL=gpt-5.6-sol", command)
+            self.assertIn("GOAL_PLUS_GLOBAL_EVIDENCE_MODE=auto", command)
 
     def test_execute_campaign_observes_two_active_task_cells(self) -> None:
         with self.temporary_directory() as temporary:
@@ -434,6 +437,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         worker_min_verifier_runs: int | None = None,
         candidate_count: int = 1,
         peer_comparison: bool = False,
+        global_evidence_mode: str = "manual",
     ) -> None:
         run_id = "run_test"
         candidate_ids = [f"c{index + 1:03d}" for index in range(candidate_count)]
@@ -476,7 +480,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                         else {}
                     ),
                 },
-                "config": {"closeout_reserve_seconds": 300},
+                "config": {
+                    "closeout_reserve_seconds": 300,
+                    "global_evidence_mode": global_evidence_mode,
+                },
                 **(
                     {
                         "evidence_annotator": {
@@ -1214,6 +1221,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             {
                 "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED": "0",
                 "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED": "0",
+                "GOAL_PLUS_GLOBAL_EVIDENCE_MODE": "manual",
             },
         )
 
@@ -1223,11 +1231,18 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             {
                 "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED": "1",
                 "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED": "1",
+                "GOAL_PLUS_GLOBAL_EVIDENCE_MODE": "manual",
             },
         )
         invalid = json.loads(json.dumps(enabled))
         invalid["goal_plus"]["supplemental_evaluation_enabled"] = "yes"
         with self.assertRaisesRegex(SweBenchContractError, "must be boolean"):
+            validate_profile(str(invalid["id"]), invalid)
+
+        invalid = json.loads(json.dumps(enabled))
+        invalid["goal_plus"]["supplemental_evaluation_enabled"] = False
+        invalid["goal_plus"]["global_evidence_mode"] = "sometimes"
+        with self.assertRaisesRegex(SweBenchContractError, "global_evidence_mode"):
             validate_profile(str(invalid["id"]), invalid)
 
     def test_k2_profile_contract_supports_peer_comparison(self) -> None:
@@ -1956,6 +1971,22 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertTrue(visible["promotion"]["passed"])
             self.assertEqual(
                 visible["promotion"]["verifiers"][0]["role"], "promotion_gate"
+            )
+
+            auto = Path(temporary) / "auto-evidence"
+            self.write_goal_plus_state(auto, global_evidence_mode="auto")
+            auto_state = goal_plus_evidence.collect_goal_plus_state(
+                auto,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_global_evidence_mode="auto",
+            )
+            self.assertTrue(
+                auto_state["completion"]["checks"]["global_evidence_mode"][
+                    "passed"
+                ]
             )
 
             mismatched = Path(temporary) / "mismatched"
