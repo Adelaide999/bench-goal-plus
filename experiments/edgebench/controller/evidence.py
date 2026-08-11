@@ -16,8 +16,8 @@ from bench_goal_plus.agent_events import parse_codex_event_file
 from bench_runtime_paths import configure_temp_environment
 
 from . import io
+from .asset_issues import asset_issue_matches_revision, known_asset_issues
 from .context import current_paths
-from .environment import asset_issue_matches_revision, known_asset_issues
 from .profiles import GOAL_PLUS_METHODS, LEGACY_PAPER_PROTOCOL_ISSUES
 
 

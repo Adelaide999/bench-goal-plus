@@ -12,6 +12,11 @@
   },
   "scope": {
     "profile": "experiments/edgebench/profiles/full-codex-2h.json",
+    "profile_role": "Current runnable campaign subset; the paper reference below retains the complete official public set.",
+    "profile_task_count": 50,
+    "excluded_from_campaigns": [
+      "order_addition_permutation_optimization"
+    ],
     "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
     "task_count": 51
   },

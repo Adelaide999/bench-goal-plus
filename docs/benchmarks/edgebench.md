@@ -12,7 +12,7 @@ best-seen 搜索能力，而不只是 Pass@K。
 
 | 项目 | 内容 |
 |---|---|
-| 公开范围 | 51 题；本项目先冻结 8–12 个 gradient cases |
+| 公开范围 | 官方集合 51 题；当前可运行集合 50 题，本项目先冻结 8–12 个 gradient cases |
 | Docker | **必需**；SForge 为每题启动 work container 与独立 hidden judge |
 | Docker 空间 | VLIW 代表 case 的 work + judge 逻辑合计 `2.23 GB`；单 case 建议预留 `5 GB`，多题需 provision 后按 digest 实测 |
 | 无 Docker 环境 | 不能运行或评分官方 EdgeBench；可运行仓内 VLIW local replica 做诊断 |
@@ -96,11 +96,15 @@ profile 的 `protocol_source=edgebench-official-codex` 是协议资源来源标�
 与 K 个 internal workers。独立的 `cell_concurrency` 控制同时运行的不同题，默认
 为 1，避免和题内 K 无意相乘。
 
-`experiments/edgebench/profiles/full-codex-2h.json` 覆盖全部 51 个公开任务，固定
+`experiments/edgebench/profiles/full-codex-2h.json` 覆盖当前 50 个可运行的公开任务，固定
 Plain Codex、`gpt-5.6-sol/medium`、每题 `T=7200s`、题内 `K=1`、跨题
 `cell_concurrency=2`，并由 detached controller 同时执行两道不同题。Linux
 rootless Docker 上的宿主 loopback API 和 Judge 通过 campaign-owned 随机端口桥
 提供给容器；桥随 controller 生命周期关闭，API 密钥不落盘。
+
+官方公开集合仍为 51 题，但 `order_addition_permutation_optimization` 当前 pinned
+Judge 的 private score-helper SHA 与自检期望不一致。已知坏 revision 会在 profile
+加载阶段被拒绝，该题不再测试；等待上游的新 Judge tag 与 dataset revision 后再恢复。
 
 两小时 run 的普通任务可从原生 auto-eval 历史批量提取 1 小时等中间点，无需
 重跑模型或 verifier：
@@ -165,11 +169,13 @@ VLIW smoke 为：
 
 | Task | Opus-GPT @2h | Opus-GPT @12h | 12h 运行间波动 | Judge timeout | 选择理由 |
 |---|---:|---:|---|---:|---|
-| `order_addition_permutation_optimization` | +5.9 | +13.1 | 1-SD bands 不重叠 | 600s | 黑盒连续优化、搜索方向多、低成本复评 |
 | `schemathesis_datagen_pipeline` | +13.4 | +13.5 | 1-SD bands 不重叠 | 1800s | 结构化软件任务、可分解、反馈密集 |
 | `ad_placement_optimization` | +21.2 | +4.8 | 12h 差距收窄 | 600s | 特别适合检验 Goal Plus 是否提升 2h 学习速度 |
 | `apple_incremental_game` | +16.1 | +17.0 | 波动较大 | 600s | 低成本策略搜索，但必须重复验证 |
 | `molecular_self_assembly` | +2.2 | +14.0 | 1-SD bands 不重叠 | 600s | 明显的晚期提升；先复现已有 `REVIEW_HIGH` 异常 |
+
+`order_addition_permutation_optimization` 的历史 headroom 数据仍保留在 51 题论文参考中，
+但因上述 Judge 资产缺陷不属于当前可运行候选，不能用于新 campaign。
 
 `smt_solver` 和 `nethack_dungeon_agent` 的 12h gap 也较强，但单次 Judge timeout
 分别为 7200s 和 3600s，不适合作为第一轮低成本筛选。`openttd_transport_ai`、

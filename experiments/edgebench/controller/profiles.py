@@ -8,6 +8,7 @@ from typing import Any, Iterable
 import yaml
 
 from . import io
+from .asset_issues import excluded_task_issues
 from .context import current_paths
 
 
@@ -199,6 +200,19 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
     ):
         if key not in profile:
             raise ValueError(f"EdgeBench profile is missing {key!r}")
+    excluded = excluded_task_issues(
+        profile["task_ids"], str(profile["dataset_revision"])
+    )
+    if excluded:
+        details = "; ".join(
+            f"{issue['task_id']} ({issue['id']}, "
+            f"disposition={issue['disposition']}: {issue['reason']})"
+            for issue in excluded
+        )
+        raise ValueError(
+            "EdgeBench profile schedules task(s) excluded from campaigns for "
+            f"dataset revision {profile['dataset_revision']}: {details}"
+        )
     unknown = set(profile["methods"]) - set(METHODS)
     if unknown:
         raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))

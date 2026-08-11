@@ -48,6 +48,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         for module in (
             "cli.py",
             "context.py",
+            "asset_issues.py",
             "environment.py",
             "evidence.py",
             "io.py",
@@ -473,11 +474,18 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             )
         )
 
-    def test_full_codex_profile_covers_all_public_tasks(self) -> None:
+    def test_full_codex_profile_covers_all_runnable_public_tasks(self) -> None:
         _, profile = EDGE.load_profile("full-codex-2h")
+        _, terra_profile = EDGE.load_profile(
+            "full-codex-terra-high-2h-k1-c4"
+        )
 
-        self.assertEqual(len(profile["task_ids"]), 51)
-        self.assertEqual(len(set(profile["task_ids"])), 51)
+        self.assertEqual(len(profile["task_ids"]), 50)
+        self.assertEqual(len(set(profile["task_ids"])), 50)
+        self.assertEqual(set(terra_profile["task_ids"]), set(profile["task_ids"]))
+        self.assertNotIn(
+            "order_addition_permutation_optimization", profile["task_ids"]
+        )
         self.assertEqual(profile["methods"], ["plain-codex"])
         self.assertEqual(profile["model"], "gpt-5.6-sol")
         self.assertEqual(profile["reasoning_effort"], "medium")
@@ -486,6 +494,25 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(profile["cell_concurrency"], 2)
         self.assertNotIn("work_cpu_limit", profile)
         self.assertNotIn("judge_cpu_limit", profile)
+
+    def test_profile_rejects_campaign_exclusion_for_affected_revision(self) -> None:
+        _, profile = EDGE.load_profile("vliw-smoke")
+        profile["task_ids"] = ["order_addition_permutation_optimization"]
+        path = self.temp / "excluded-task.json"
+        path.write_text(json.dumps(profile), encoding="utf-8")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "order_addition_permutation_optimization.*excluded_from_campaigns",
+        ):
+            EDGE.load_profile(path)
+
+        profile["dataset_revision"] = "future-corrected-dataset-revision"
+        path.write_text(json.dumps(profile), encoding="utf-8")
+        _, loaded = EDGE.load_profile(path)
+        self.assertEqual(
+            loaded["task_ids"], ["order_addition_permutation_optimization"]
+        )
 
     def test_vliw_codex_local_smoke_is_explicit_and_reproducible(self) -> None:
         _, profile = EDGE.load_profile("vliw-codex-sol-medium-local-smoke")
@@ -675,7 +702,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         _, full_profile = EDGE.load_profile("full-codex-2h")
 
         self.assertEqual(len(protocol["tasks"]), 51)
-        self.assertEqual(set(protocol["tasks"]), set(full_profile["task_ids"]))
+        self.assertEqual(
+            set(protocol["tasks"]) - {"order_addition_permutation_optimization"},
+            set(full_profile["task_ids"]),
+        )
         self.assertEqual(protocol["official_model"], "gpt-5.5")
         self.assertEqual(protocol["stagger_seconds"], 600)
         self.assertEqual(
@@ -868,7 +898,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         _, profile = EDGE.load_profile("full-codex-2h")
         paper = EDGE.load_paper_reference()
 
-        self.assertEqual(set(paper["tasks"]), set(profile["task_ids"]))
+        self.assertEqual(
+            set(paper["tasks"]) - {"order_addition_permutation_optimization"},
+            set(profile["task_ids"]),
+        )
         self.assertEqual(paper["reference"]["agent"], "Codex")
         self.assertEqual(paper["reference"]["model"], "GPT-5.5")
         self.assertEqual(paper["reference"]["budget_hours"], 12)
@@ -883,7 +916,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "8193aeb41a3474690a40fac82e2ecbd53e651ab6b4759984b4c6845c04fbfd29",
         )
 
-    def test_paper_opus_headroom_reference_partitions_public_profile(self) -> None:
+    def test_paper_opus_headroom_reference_keeps_official_public_set(self) -> None:
         _, profile = EDGE.load_profile("full-codex-2h")
         reference_path = (
             ROOT
@@ -904,7 +937,17 @@ class EdgeBenchExperimentTest(unittest.TestCase):
 
         self.assertEqual(len(partition), 51)
         self.assertEqual(len(partition), len(set(partition)))
-        self.assertEqual(set(partition), set(profile["task_ids"]))
+        self.assertEqual(reference["scope"]["task_count"], 51)
+        self.assertEqual(reference["scope"]["profile_task_count"], 50)
+        self.assertEqual(
+            reference["scope"]["excluded_from_campaigns"],
+            ["order_addition_permutation_optimization"],
+        )
+        self.assertEqual(set(partition), set(EDGE.load_paper_reference()["tasks"]))
+        self.assertEqual(
+            set(partition) - {"order_addition_permutation_optimization"},
+            set(profile["task_ids"]),
+        )
         self.assertEqual(set(material), set(reference["candidates"]))
         self.assertEqual(reference["summary"]["material_at_2h_or_12h"], 20)
         self.assertEqual(reference["summary"]["material_at_both_2h_and_12h"], 8)

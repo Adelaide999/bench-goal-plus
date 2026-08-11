@@ -90,16 +90,17 @@ profiled `check` 会把精确 task revision、Work/Judge tag、image ID 与
 
 `order_addition_permutation_optimization` 的 Judge tag `f6f385925889` 已确认存在发布时的
 score-helper SHA 自检不一致。恢复正式测评需要上游发布新的 Judge tag，并由新的 task dataset
-revision 引用它；只修改本地 test 常量最多是诊断验证，不构成 official evaluator 修复。
+revision 引用它；只修改本地 test 常量最多是诊断验证，不构成 official evaluator 修复。当前两个
+已知坏 dataset revision 已将该题标为 `excluded_from_campaigns`，profile 加载阶段即拒绝调度。
 
-## 完整 Codex campaign
+## 可运行公开集 Codex campaign
 
 ```bash
 python3 scripts/bench.py plan --preset edgebench-codex-2h
 python3 scripts/bench.py launch --preset edgebench-codex-2h
 ```
 
-该 preset 固定 51 tasks、Plain Codex、`gpt-5.6-sol`、`medium`、
+该 preset 固定 50 个当前可运行的公开任务（官方集合仍为 51 题）、Plain Codex、`gpt-5.6-sol`、`medium`、
 `T=7200,K=1,C=2,R=1`。`C=2` 表示两个 task cells 并发，不是两个 candidate。
 
 ## Controller 日志边界

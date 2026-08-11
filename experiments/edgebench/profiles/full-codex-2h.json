@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "full-codex-2h",
-  "description": "All 51 public EdgeBench tasks, two concurrent Plain Codex cells, two hours per task.",
+  "description": "The 50 runnable public EdgeBench tasks, excluding the known-broken order-addition Judge asset; two concurrent Plain Codex cells, two hours per task.",
   "protocol_source": "edgebench-official-codex",
   "backend": "docker",
   "dataset_repository": "ByteDance-Seed/EdgeBench",
@@ -30,7 +30,6 @@
     "grid_turing_robot",
     "jagua_nesting_optimization",
     "molecular_self_assembly",
-    "order_addition_permutation_optimization",
     "smt_solver",
     "treant_forest",
     "tree_block_partitioning",

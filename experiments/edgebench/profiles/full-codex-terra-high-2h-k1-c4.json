@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "full-codex-terra-high-2h-k1-c4",
-  "description": "All 51 public EdgeBench tasks, one Plain Codex replica per task, four concurrent task cells, two hours per trajectory, using gpt-5.6-terra at high reasoning effort.",
+  "description": "The 50 runnable public EdgeBench tasks, excluding the known-broken order-addition Judge asset; one Plain Codex replica per task, four concurrent task cells, two hours per trajectory, using gpt-5.6-terra at high reasoning effort.",
   "protocol_source": "edgebench-official-codex",
   "backend": "docker",
   "dataset_repository": "ByteDance-Seed/EdgeBench",
@@ -30,7 +30,6 @@
     "grid_turing_robot",
     "jagua_nesting_optimization",
     "molecular_self_assembly",
-    "order_addition_permutation_optimization",
     "smt_solver",
     "treant_forest",
     "tree_block_partitioning",

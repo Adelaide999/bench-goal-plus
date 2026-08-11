@@ -13,9 +13,10 @@
       "image_id": "sha256:97b871cd558d3e7eacc22f5a85ac50a85ffe2e7333512de8cfdf3fc2cadd4f09",
       "repo_digest": "docker.jiaxin.site/seededge/edgebench.judge.order_addition_permutation_optimization@sha256:6d1a1506f52a5cc7c95680c6df7cd72cb95f81fa236b9794aa507490b947fbd8",
       "severity": "blocking",
+      "disposition": "excluded_from_campaigns",
       "expected_score_helper_sha256": "3023b9a449119e862d4ca86d3ab45599e2496e182be82959a642522f915dbbac",
       "actual_score_helper_sha256": "337837af7067b3dae8d4ef068d26d8dd8ff779f9a627d95451af2ca411c99630",
-      "reason": "The immutable Judge image fails its own private score-helper integrity test. A new upstream Judge tag and task dataset revision are required; do not retag a patched image as this reference."
+      "reason": "The immutable Judge image fails its own private score-helper integrity test. Exclude this task from campaigns until a new upstream Judge tag and task dataset revision are published; do not retag a patched image as this reference."
     }
   ]
 }

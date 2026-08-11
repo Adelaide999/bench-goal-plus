@@ -127,7 +127,7 @@ python3 scripts/bench.py plan \
 macOS/OrbStack 与 Linux/Docker 使用同一 adapter；provider registry 中的 `api`
 可以是 Pi 支持的 Anthropic 或 OpenAI wire API，控制面不按 wire API 分叉 method。
 
-完整 51 题 Codex-only 固定协议是通用 dispatcher 中的一个 preset：
+当前 50 个可运行公开任务的 Codex-only 固定协议是通用 dispatcher 中的一个 preset：
 
 ```bash
 python3 scripts/bench.py start \
@@ -226,7 +226,7 @@ python3 scripts/bench.py start \
   --campaign-id <campaign-id>
 ```
 
-完整 51 题 Plain Codex 两小时 campaign 使用：
+当前 50 个可运行公开任务的 Plain Codex 两小时 campaign 使用：
 
 ```bash
 python3 scripts/bench.py start --preset edgebench-codex-2h
@@ -237,6 +237,10 @@ trajectory、同时跑两道不同题。它仍继承官方每题 CPU/memory quot
 联网策略；不支持 CFS quota 或无法执行 SForge iptables isolation 的 Docker 主机
 会令 `doctor` 失败，不能继续作为协议对齐实验。此时应修复 cgroup delegation 与
 passwordless iptables、改用能执行这些限制的 Docker，或使用官方 K8s backend。
+
+官方公开集合仍是 51 题。`order_addition_permutation_optimization` 因 pinned Judge
+的 private score-helper SHA 不一致，被标记为 `excluded_from_campaigns`，不进入上述
+50 题 profile；只有上游发布新 Judge tag 和引用它的新 dataset revision 后才重新纳入。
 
 ## 监控、停止与恢复
 

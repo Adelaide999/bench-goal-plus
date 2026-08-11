@@ -401,12 +401,12 @@
     },
     {
       "id": "edgebench-codex-2h",
-      "description": "Example full 51-task Plain Codex campaign; not a benchmark-run default.",
+      "description": "Example 50-task runnable-public-set Plain Codex campaign; the known-broken order-addition Judge asset is excluded.",
       "benchmarks": ["edgebench"],
       "profile": "full-codex-2h",
-      "campaign_id_template": "edgebench-51-codex-gpt-5-6-sol-medium-2h-k1-c2-{timestamp}",
+      "campaign_id_template": "edgebench-50-codex-gpt-5-6-sol-medium-2h-k1-c2-{timestamp}",
       "expected_profile": {
-        "task_count": 51,
+        "task_count": 50,
         "methods": ["plain-codex"],
         "model": "gpt-5.6-sol",
         "reasoning_effort": "medium",
