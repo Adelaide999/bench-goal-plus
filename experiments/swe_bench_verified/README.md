@@ -10,7 +10,7 @@ repository lifecycle through `python3 scripts/bench.py`.
 | Dataset | `SWE-bench/SWE-bench_Verified` at `91aa3ed51b709be6457e12d00300a6a596d4c6a3` |
 | Instance | `sympy__sympy-16886` |
 | Image | `swebench/sweb.eval.x86_64.sympy_1776_sympy-16886:latest` |
-| Methods | `plain-codex`, `plain-pi`, `goal-plus-codex`, `goal-plus-pi` |
+| Methods | `plain-codex`, `plain-pi`, `goal-plus-codex`, `goal-plus-codex-pi`, `goal-plus-pi` |
 | Standard budget | `T=1800`, `K=1`, `C=1`, `R=1` |
 | Metric | official `resolved`, maximize |
 | Codex auth | `OPENAI_BASE_URL` + `OPENAI_API_KEY`, OpenAI-compatible Responses |
@@ -101,6 +101,13 @@ profile-frozen `bench-openai/gpt-5.6-luna` Responses provider and high reasoning
 Use `swe-bench-verified-sympy-16886-goal-plus-codex-smoke` for a five-minute native
 Codex host check. It uses the host Codex ChatGPT login and therefore requires outbound access to
 `chatgpt.com`; connectivity failure is a campaign partial, never a verifier result.
+
+The `swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2` preset covers the 39
+workbook-selected tasks with a GPT Sol Codex MainAgent, DeepSeek Pi workers, a GPT Sol
+ViewAgent, and `T=1800,K=4,C=2,R=1`. Its Agent containers share a
+campaign-owned internal Docker network and reach only the selected provider through an
+ephemeral host allowlist proxy. The official evaluator still runs with Docker network
+mode `none`.
 
 Supplemental evaluation sets both `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED=1` and
 `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1`, so a requested post-settlement evaluation cannot

@@ -45,27 +45,44 @@
         "plain-codex",
         "plain-pi",
         "goal-plus-codex",
+        "goal-plus-codex-pi",
         "goal-plus-pi"
       ],
       "method_contracts": {
+        "plain-codex": {
+          "max_live_search_concurrency": 1,
+          "max_cell_concurrency": 1
+        },
         "plain-pi": {
-          "model_format": "provider/model"
+          "model_format": "provider/model",
+          "max_live_search_concurrency": 1,
+          "max_cell_concurrency": 1
+        },
+        "goal-plus-codex": {
+          "max_live_search_concurrency": 1,
+          "max_cell_concurrency": 1
+        },
+        "goal-plus-codex-pi": {
+          "max_live_search_concurrency": 4,
+          "max_cell_concurrency": 2
         },
         "goal-plus-pi": {
-          "model_format": "provider/model"
+          "model_format": "provider/model",
+          "max_live_search_concurrency": 4,
+          "max_cell_concurrency": 2
         }
       },
       "capabilities": {
         "provision": false,
-        "detach": false,
+        "detach": true,
         "stop": false,
         "resume": false,
         "repeat_seeds": false,
-        "cell_concurrency": false,
+        "cell_concurrency": true,
         "retain_containers": true,
         "official_evaluator": true,
         "attempt_seed": true,
-        "resume_semantics": "initial acceptance supports one non-resumable task attempt; retry uses a new campaign"
+        "resume_semantics": "detached multi-task campaigns are non-resumable; retry uses a new campaign"
       }
     },
     {
@@ -573,6 +590,23 @@
         "wall_time_seconds": 1800,
         "concurrency": 1,
         "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2",
+      "description": "The 39 workbook-selected SWE-bench Verified tasks with a GPT Sol Codex MainAgent, DeepSeek Pi workers, a GPT Sol ViewAgent, T=1800, K=4, C=2, R=1, and an internal Agent network.",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2",
+      "campaign_id_template": "swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-30m-k4-c2-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 39,
+        "methods": ["goal-plus-codex-pi"],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "supplemental_evaluation_enabled": true,
+        "wall_time_seconds": 1800,
+        "concurrency": 4,
+        "cell_concurrency": 2
       }
     }
   ]
