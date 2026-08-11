@@ -1651,6 +1651,26 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(len(loaded), 1)
             self.assertEqual(loaded[0]["instance_id"], instance["instance_id"])
 
+    def test_validate_instance_image_uses_official_remote_image_key(self) -> None:
+        instance = {
+            "instance_id": "django__django-12325",
+            "repo": "django/django",
+            "base_commit": "a" * 40,
+        }
+        task = {
+            "repo": "django/django",
+            "base_commit": "a" * 40,
+            "image": "swebench/sweb.eval.x86_64.django_1776_django-12325:latest",
+        }
+
+        runtime._validate_instance_image(instance, task)
+
+        task["image"] = "swebench/sweb.eval.x86_64.django_1776_django-99999:latest"
+        with self.assertRaisesRegex(
+            SweBenchContractError, "official harness image key"
+        ):
+            runtime._validate_instance_image(instance, task)
+
     def test_prompt_rejects_hidden_fields(self) -> None:
         with self.assertRaisesRegex(SweBenchContractError, "hidden fields"):
             runtime.build_agent_prompt(

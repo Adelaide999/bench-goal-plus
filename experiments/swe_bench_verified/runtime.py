@@ -134,19 +134,20 @@ def _load_pinned_instance(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_instance_image(instance: dict[str, Any], task: dict[str, Any]) -> None:
-    from swebench.harness.test_spec.test_spec import make_test_spec
-
     if instance.get("repo") != task["repo"]:
         raise SweBenchContractError("dataset repo does not match the pinned profile")
     if instance.get("base_commit") != task["base_commit"]:
         raise SweBenchContractError(
             "dataset base_commit does not match the pinned profile"
         )
-    spec = make_test_spec(instance, namespace="swebench")
-    if spec.instance_image_key != task["image"]:
+    instance_id = str(instance["instance_id"]).lower()
+    expected_image = (
+        f"swebench/sweb.eval.x86_64.{instance_id}:latest".replace("__", "_1776_")
+    )
+    if expected_image != task["image"]:
         raise SweBenchContractError(
             "official harness image key does not match the local inventory tag: "
-            f"{spec.instance_image_key!r} != {task['image']!r}"
+            f"{expected_image!r} != {task['image']!r}"
         )
 
 
