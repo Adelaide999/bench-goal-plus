@@ -1494,7 +1494,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
         self.assertEqual(
             managed_upstream_branch("goal_plus"),
-            "codex/pi-supplemental-view-adapter",
+            "main",
         )
 
     def test_goal_plus_container_probe_loads_pi_extension_contract(self) -> None:
