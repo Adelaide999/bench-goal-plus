@@ -211,7 +211,7 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
         "method": cell["method"],
         "model": cell["model"],
         "reasoning_effort": cell["reasoning_effort"],
-        "seed": manifest.get("seed", profile.get("seed", 1)),
+        "seed": cell.get("seed", manifest.get("seed", profile.get("seed", 1))),
         "status": "succeeded" if cell["state"] == "completed" else cell["state"],
         "incomplete_reason": cell.get("incomplete_reason") or cell.get("error"),
         "budget": {
@@ -314,13 +314,13 @@ def _markdown(summary: dict[str, Any]) -> str:
         "",
         f"Execution state: `{summary['state']}`.",
         "",
-        "| Task | Method | Model | Resolved | Patch applied | Subagents | Evaluator calls |",
-        "|---|---|---|---:|---:|---:|---:|",
+        "| Task | Seed | Method | Model | Resolved | Patch applied | Subagents | Evaluator calls |",
+        "|---|---:|---|---|---:|---:|---:|---:|",
     ]
     for record in summary["records"]:
         raw = record["score"]["raw_metrics"]
         lines.append(
-            f"| {record['task_id']} | {record['method']} | {record['model']} | "
+            f"| {record['task_id']} | {record['seed']} | {record['method']} | {record['model']} | "
             f"{raw['resolved'] if raw['resolved'] is not None else ''} | "
             f"{raw['patch_applied'] if raw['patch_applied'] is not None else ''} | "
             f"{record['protocol']['goal_plus']['actual_subagent_count'] if record['protocol']['goal_plus']['required'] else ''} | "
@@ -381,7 +381,8 @@ def finalize_campaign(campaign: Path) -> dict[str, Any]:
         "dataset": manifest["dataset"],
         "source": manifest["source"],
         "aggregates": {
-            "task_count": len(records),
+            "task_count": len({record["task_id"] for record in records}),
+            "attempt_count": len(records),
             "evaluated_count": len(evaluated),
             "resolved_count": sum(
                 record["score"]["raw_metrics"]["resolved"] for record in evaluated

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "django-12325-plain-pi-deepseek-v4-flash",
+  "benchmark_id": "swe-bench-verified",
+  "dataset": {
+    "name": "SWE-bench/SWE-bench_Verified",
+    "split": "test",
+    "revision": "03e151cf5560b1af6a4363c6a9d766deaaea6b56"
+  },
+  "task_ids": ["django__django-12325"],
+  "tasks": [
+    {
+      "instance_id": "django__django-12325",
+      "repo": "django/django",
+      "image": "swebench/sweb.eval.x86_64.django_1776_django-12325:latest",
+      "base_commit": "29c126bb349526b5f1cd78facbe9f25906f18563"
+    }
+  ],
+  "methods": ["plain-pi"],
+  "model": "deepseek/deepseek-v4-flash",
+  "reasoning_effort": "medium",
+  "wall_time_seconds": 1800,
+  "concurrency": 1,
+  "cell_concurrency": 1,
+  "retain_containers": false,
+  "evaluator_timeout_seconds": 1800
+}

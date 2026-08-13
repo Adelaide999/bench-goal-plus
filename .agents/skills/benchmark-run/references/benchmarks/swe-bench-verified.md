@@ -9,8 +9,8 @@
 - Methods: `plain-codex`, `plain-pi`, `goal-plus-codex`, `goal-plus-codex-pi`, and `goal-plus-pi`
 - Topology: Plain methods use one isolated outer trajectory. Goal Plus uses one outer main session
   with bound internal workers on the selected Codex or Pi host. Standard acceptance restricts
-  most smoke methods to `K=1,C=1,R=1`; the profile-frozen Pi-worker path supports
-  `K<=4,C<=2,R=1`
+  most smoke methods to `K=1,C=1`; the profile-frozen Pi-worker path supports
+  `K<=4,C<=2`. Repeat seeds expand to isolated task-attempt cells and may run with `R>=1`
 - Final source JSON: `campaign-summary.json`
 
 The official harness owns final scoring in a separate container. The runner has no host-only score,
@@ -78,8 +78,10 @@ attachment and prove the internal network is the container's sole remaining netw
 Responses probe or Agent invocation; persist this setup-egress disposition with the isolation probe.
 The timed Agent process also receives a loopback refusal proxy, with the campaign gateway in
 `NO_PROXY`, so ordinary HTTP/Git lookup attempts fail promptly while the Docker internal network
-remains the fail-closed boundary. One native campaign accepts exactly one positive attempt seed;
-persist it in the profile snapshot, prompt strategy config, campaign manifest, and report.
+remains the fail-closed boundary. A native campaign accepts unique positive attempt seeds and
+expands each task/seed pair into an isolated cell. Persist the selected seed in that cell's profile
+snapshot, prompt strategy config, manifest, and report; call the official evaluator exactly once per
+cell.
 
 The visible-test wrapper is a benchmark-owned read-only bind mount inside `/testbed`. Freeze records
 its exact hash. The ranking verifier directly uses `--ranking-signal`, allowing a completed public

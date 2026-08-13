@@ -182,7 +182,12 @@ def _visible_task(instance: dict[str, Any], task: dict[str, Any]) -> dict[str, A
     return visible
 
 
-def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
+def prepare(
+    campaign_id: str,
+    profile: dict[str, Any],
+    *,
+    seeds: tuple[int, ...] | None = None,
+) -> Path:
     destination = campaign_dir(campaign_id)
     preserved = preserve_conflict(destination)
     destination.mkdir(parents=True, exist_ok=False)
@@ -194,6 +199,18 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
         if len(profile["task_ids"]) == 1
         else _load_pinned_instances(profile)
     )
+    selected_seeds = (
+        seeds if seeds is not None else (int(profile.get("seed", 1)),)
+    )
+    if (
+        not selected_seeds
+        or any(
+            not isinstance(seed, int) or isinstance(seed, bool) or seed < 1
+            for seed in selected_seeds
+        )
+        or len(set(selected_seeds)) != len(selected_seeds)
+    ):
+        raise SweBenchContractError("seeds must be unique positive integers")
 
     source_commit = _git_value(ROOT, "rev-parse", "HEAD")
     swebench_commit = _git_value(SWEBENCH_ROOT, "rev-parse", "HEAD")
@@ -214,21 +231,32 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
     )
     cells = []
     visible_fields: set[str] = set()
-    for index, (task, instance) in enumerate(zip(profile["tasks"], instances, strict=True)):
+    task_instances = tuple(zip(profile["tasks"], instances, strict=True))
+    cell_inputs = tuple(
+        (task, instance, seed)
+        for seed in selected_seeds
+        for task, instance in task_instances
+    )
+    for index, (task, instance, seed) in enumerate(cell_inputs):
         _validate_instance_image(instance, task)
         visible = _visible_task(instance, task)
         visible_fields.update(visible)
         cell_id = f"{profile['methods'][0]}--{instance['instance_id']}"
-        single_task = len(instances) == 1
+        if len(selected_seeds) > 1:
+            cell_id += f"--seed-{seed}"
+        single_cell = len(cell_inputs) == 1
+        cell_suffix = f"{index:02d}-{instance['instance_id']}"
+        if len(selected_seeds) > 1:
+            cell_suffix += f"-seed-{seed}"
         cell_dir = (
             destination / "cells" / profile["methods"][0]
-            if single_task
-            else destination / "cells" / f"{index:02d}-{instance['instance_id']}"
+            if single_cell
+            else destination / "cells" / cell_suffix
         )
         cell_evaluator_dir = (
             evaluator_dir
-            if single_task
-            else evaluator_dir / f"{index:02d}-{instance['instance_id']}"
+            if single_cell
+            else evaluator_dir / cell_suffix
         )
         cell_dir.mkdir(parents=True)
         cell_evaluator_dir.mkdir(parents=True, exist_ok=True)
@@ -254,7 +282,7 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
                 "worker_reasoning_effort": (profile.get("goal_plus") or {}).get(
                     "worker_reasoning_effort"
                 ),
-                "seed": profile.get("seed", 1),
+                "seed": seed,
                 "agent_provider": provider_contract,
                 "supplemental_evaluation_enabled": (
                     profile["goal_plus"]["supplemental_evaluation_enabled"]
@@ -284,13 +312,14 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
         "methods": profile["methods"],
         "model": profile["model"],
         "reasoning_effort": profile["reasoning_effort"],
-        "seed": profile.get("seed", 1),
+        "seed": selected_seeds[0] if len(selected_seeds) == 1 else None,
+        "seeds": list(selected_seeds),
         "agent_provider": provider_contract,
         "budget": {
             "wall_time_seconds": profile["wall_time_seconds"],
             "live_search_concurrency": profile["concurrency"],
             "cell_concurrency": profile["cell_concurrency"],
-            "attempts": 1,
+            "attempts": len(selected_seeds),
         },
         "container_retention": {
             "requested": profile["retain_containers"],
@@ -369,6 +398,7 @@ def _profile_for_cell(profile: dict[str, Any], cell: dict[str, Any]) -> dict[str
     resolved = dict(profile)
     resolved["task_ids"] = [str(task["instance_id"])]
     resolved["tasks"] = [dict(task)]
+    resolved["seed"] = int(cell.get("seed", profile.get("seed", 1)))
     return resolved
 
 
@@ -2578,7 +2608,7 @@ def _official_evaluation(
     )
     run_id = manifest["campaign_id"]
     if len(manifest.get("cells") or []) > 1:
-        run_id += "-" + hashlib.sha256(cell["task_id"].encode()).hexdigest()[:10]
+        run_id += "-" + hashlib.sha256(cell["cell_id"].encode()).hexdigest()[:10]
     command = [
         str(ROOT / ".bench-env" / "venv" / "bin" / "python"),
         "-m",
@@ -2872,6 +2902,7 @@ def status_payload(campaign: Path) -> dict[str, Any]:
             {
                 "cell_id": cell["cell_id"],
                 "task_id": cell["task_id"],
+                "seed": cell.get("seed"),
                 "state": cell["state"],
                 "agent_state": (cell.get("agent") or {}).get("state"),
                 "evaluation_state": (cell.get("evaluation") or {}).get("state"),

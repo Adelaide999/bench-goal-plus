@@ -1819,8 +1819,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn("prepare", prepare[0])
         self.assertIn("--wall-time-seconds", prepare[0])
         self.assertIn("--retain-containers", prepare[0])
-        seed_index = prepare[0].index("--seed")
-        self.assertEqual(prepare[0][seed_index : seed_index + 2], ["--seed", "2"])
+        seed_index = prepare[0].index("--seeds")
+        self.assertEqual(prepare[0][seed_index : seed_index + 2], ["--seeds", "2"])
         self.assertTrue(spec.as_dict()["retain_containers"])
         self.assertEqual(run[-2:], ["--campaign", campaign.campaign_id])
         self.assertNotIn("--detach", run)
@@ -1883,6 +1883,83 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             loaded = load_swebench_dataset(str(evaluator_path), "test")
             self.assertEqual(len(loaded), 1)
             self.assertEqual(loaded[0]["instance_id"], instance["instance_id"])
+
+    def test_prepare_expands_repeat_seeds_into_isolated_cells(self) -> None:
+        profile = self.profile("django-12325-plain-pi-deepseek-v4-flash")
+        instance = {
+            "instance_id": "django__django-12325",
+            "repo": "django/django",
+            "base_commit": profile["tasks"][0]["base_commit"],
+            "problem_statement": "Public issue text",
+            "version": "3.0",
+            "patch": "gold patch",
+            "test_patch": "hidden tests",
+            "FAIL_TO_PASS": ["hidden-fail"],
+            "PASS_TO_PASS": ["hidden-pass"],
+        }
+        with self.temporary_directory() as temporary:
+            campaign = Path(temporary) / "campaign"
+
+            def git_value(_path: Path, *args: str) -> str:
+                return "" if args[:2] == ("status", "--porcelain") else "a" * 40
+
+            with (
+                mock.patch.object(runtime, "campaign_dir", return_value=campaign),
+                mock.patch.object(runtime, "preserve_conflict", return_value=None),
+                mock.patch.object(runtime, "_load_pinned_instance", return_value=instance),
+                mock.patch.object(runtime, "_validate_instance_image"),
+                mock.patch.object(runtime, "_git_value", side_effect=git_value),
+            ):
+                runtime.prepare("repeat-seed-test", profile, seeds=(1, 2, 3, 4))
+
+            manifest = read_json(campaign / "campaign.json")
+
+        self.assertEqual(manifest["seed"], None)
+        self.assertEqual(manifest["seeds"], [1, 2, 3, 4])
+        self.assertEqual(manifest["budget"]["attempts"], 4)
+        self.assertEqual([cell["seed"] for cell in manifest["cells"]], [1, 2, 3, 4])
+        self.assertEqual(len({cell["cell_id"] for cell in manifest["cells"]}), 4)
+        self.assertEqual(len({cell["task_file"] for cell in manifest["cells"]}), 4)
+        self.assertEqual(len({cell["evaluator_dir"] for cell in manifest["cells"]}), 4)
+
+    def test_swe_native_plan_forwards_four_repeat_seeds(self) -> None:
+        agent = BenchmarkAgent(catalog=Catalog())
+        spec = agent.resolve_spec(
+            target_ids=("swe-bench-verified",),
+            profile="django-12325-plain-pi-deepseek-v4-flash",
+            methods=("plain-pi",),
+            model="deepseek/deepseek-v4-flash",
+            seeds=(1, 2, 3, 4),
+        )
+        runner = create_runner(spec.runner)
+        prepare, _ = runner.prepare_commands(spec)
+        seed_index = prepare[0].index("--seeds")
+        self.assertEqual(
+            prepare[0][seed_index : seed_index + 5],
+            ["--seeds", "1", "2", "3", "4"],
+        )
+        self.assertEqual(spec.concurrency(), {"T": "profile", "K": "profile", "C": "profile", "R": 4})
+
+    def test_django_12325_deepseek_profiles_freeze_matched_runtime(self) -> None:
+        goal_plus = self.profile(
+            "django-12325-goal-plus-pi-deepseek-v4-flash"
+        )
+        plain = self.profile("django-12325-plain-pi-deepseek-v4-flash")
+
+        for profile in (goal_plus, plain):
+            self.assertEqual(profile["task_ids"], ["django__django-12325"])
+            self.assertEqual(profile["model"], "deepseek/deepseek-v4-flash")
+            self.assertEqual(profile["reasoning_effort"], "medium")
+            self.assertEqual(profile["wall_time_seconds"], 1800)
+            self.assertEqual(profile["concurrency"], 1)
+            self.assertEqual(profile["cell_concurrency"], 1)
+        self.assertEqual(goal_plus["methods"], ["goal-plus-pi"])
+        self.assertEqual(plain["methods"], ["plain-pi"])
+        self.assertEqual(goal_plus["goal_plus"]["global_evidence_mode"], "auto")
+        self.assertTrue(
+            goal_plus["goal_plus"]["supplemental_evaluation_enabled"]
+        )
+        self.assertNotIn("worker_model", goal_plus["goal_plus"])
 
     def test_validate_instance_image_uses_official_remote_image_key(self) -> None:
         instance = {

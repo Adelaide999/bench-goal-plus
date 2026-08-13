@@ -77,11 +77,11 @@
         "detach": true,
         "stop": false,
         "resume": false,
-        "repeat_seeds": false,
+        "repeat_seeds": true,
         "cell_concurrency": true,
         "retain_containers": true,
         "official_evaluator": true,
-        "attempt_seed": true,
+        "attempt_seed": false,
         "resume_semantics": "detached multi-task campaigns are non-resumable; retry uses a new campaign"
       }
     },

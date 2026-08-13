@@ -21,8 +21,9 @@ Agent 只看到 issue problem statement、仓库名、base commit 和任务镜�
 
 Plain Codex 或 Plain Pi 在精确的 SWE-bench task image 内运行一条隔离 outer trajectory。
 Goal Plus 运行一个 outer 主会话，并由它启动共享同一 Search 状态的内部 worker。标准对比
-固定 `K=1,C=1,R=1`；另有一个 Astropy Goal Plus + Codex 专用机制实验使用
-`K=2,C=1,R=1`，不与 `K=1` 合并为 matched 主结果。
+通常固定 `K=1,C=1`；`R>1` 会把同一道题按 seed 展开为相互隔离、可独立核对的 attempt
+cell。另有一个 Astropy Goal Plus + Codex 专用机制实验使用 `K=2,C=1,R=1`，不与
+`K=1` 合并为 matched 主结果。
 
 ### 期待输出是什么
 
@@ -34,7 +35,7 @@ controller 在 Agent 结束后导出唯一的 `git diff --binary --full-index`�
 
 官方 SWE-bench harness 在单独容器中应用 model patch，并执行该实例的官方测试脚本。
 controller 保留 `resolved`、`patch_successfully_applied`、原始 `report.json` 和 evaluator
-调用次数。同一 campaign 最多尝试一次官方 evaluator；未解决但报告完整仍是有效分数 0，
+调用次数。同一 attempt cell 最多尝试一次官方 evaluator；未解决但报告完整仍是有效分数 0，
 缺报告则是 partial/failed，不会静默写成 0。
 
 ## Docker 与空间
@@ -87,8 +88,8 @@ internal network，把模型 API bridge 绑定到该 network 的 host gateway，
 网络，才允许模型探针和 Agent 启动。
 计时 Agent 还会获得指向容器本地拒绝端口的 HTTP/HTTPS proxy，并将模型 gateway 放入
 `NO_PROXY`，让常见网页与 Git 查询快速失败；Docker internal network 仍是最终隔离边界。
-每个 native campaign 只接受一个正整数 attempt seed，并在 Search strategy、manifest 和报告中
-保持一致。
+native campaign 接受一组互不重复的正整数 attempt seed，为每个 task/seed 组合建立独立
+workspace、evaluator 目录和 run ID，并在 Search strategy、manifest 和报告中保持一致。
 
 Luna Goal Plus + Pi preset 复用同一组 OpenAI-compatible Responses 环境变量，但通过
 campaign-local Pi provider registry 选择 `bench-openai/gpt-5.6-luna`。该 registry 只保存

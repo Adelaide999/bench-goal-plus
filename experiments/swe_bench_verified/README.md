@@ -54,8 +54,9 @@ The pre-Agent container Responses probe retries only transient transport outcome
 authentication, protocol, and model-selection failures remain fail-fast.
 During the timed process, ordinary HTTP and Git clients inherit a loopback refusal proxy while the
 model gateway is exempt through `NO_PROXY`; public lookups fail quickly and the internal network
-still blocks direct-socket bypasses. A campaign accepts one positive attempt seed and records the
-same value in its Search strategy configuration, manifest, and report.
+still blocks direct-socket bypasses. A campaign accepts unique positive attempt seeds, expands them
+into isolated task-attempt cells, and records each cell's seed in its Search strategy configuration,
+manifest, and report.
 
 Goal Plus + Pi starts one outer Pi JSON session through the project extension, then requires one
 candidate-bound `pi-rpc` worker in the shared Search state. Its frozen SearchSpec uses only an

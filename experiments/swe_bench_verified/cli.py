@@ -40,7 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--wall-time-seconds", type=int)
     prepare_parser.add_argument("--concurrency", type=int)
     prepare_parser.add_argument("--cell-concurrency", type=int)
-    prepare_parser.add_argument("--seed", type=int, default=1)
+    seed_group = prepare_parser.add_mutually_exclusive_group()
+    seed_group.add_argument("--seed", type=int)
+    seed_group.add_argument("--seeds", nargs="+", type=int)
     prepare_parser.add_argument("--retain-containers", action="store_true")
 
     for command in ("run", "status", "finalize"):
@@ -58,6 +60,12 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command in {"doctor", "prepare"}:
         _, profile = load_profile(args.profile)
+        selected_seeds = None
+        if args.command == "prepare":
+            selected_seeds = tuple(
+                args.seeds
+                or ([args.seed] if args.seed is not None else [profile.get("seed", 1)])
+            )
         resolved = resolve_profile(
             profile,
             methods=args.method,
@@ -72,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
             cell_concurrency=(
                 args.cell_concurrency if args.command == "prepare" else None
             ),
-            seed=args.seed if args.command == "prepare" else None,
+            seed=selected_seeds[0] if selected_seeds is not None else None,
             retain_containers=(
                 args.retain_containers if args.command == "prepare" else None
             ),
@@ -86,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         from .runtime import prepare
 
-        prepare(args.campaign_id, resolved)
+        prepare(args.campaign_id, resolved, seeds=selected_seeds)
         return 0
 
     destination = campaign_dir(args.campaign)
