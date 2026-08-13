@@ -7,7 +7,7 @@ repository lifecycle through `python3 scripts/bench.py`.
 
 | Contract | Frozen value |
 | --- | --- |
-| Dataset | `SWE-bench/SWE-bench_Verified` at `91aa3ed51b709be6457e12d00300a6a596d4c6a3` |
+| Dataset | `SWE-bench/SWE-bench_Verified` at `03e151cf5560b1af6a4363c6a9d766deaaea6b56` |
 | Instance | `sympy__sympy-16886` |
 | Image | `swebench/sweb.eval.x86_64.sympy_1776_sympy-16886:latest` |
 | Methods | `plain-codex`, `plain-pi`, `goal-plus-codex`, `goal-plus-codex-pi`, `goal-plus-pi` |
@@ -139,12 +139,11 @@ evidence into `evidence/runs/`, bind it to the exact method with registry `stage
 promote the method in the same change. Repository validation rejects a method pass without that
 mapping.
 
-The task image itself is never removed by this controller. The official evaluator is fixed to
-`cache_level=instance`, `clean=false`, and `force_rebuild=false`. To preserve the stopped Agent
-container as well, add `--retain-containers` to both `plan` and `launch`; the resolved spec, manifest,
-status, and final report record the retained Agent container. The official harness still cleans its
-separate evaluation container and preserves its logs. `finish` does not clean up the retained Agent
-container.
+The task image itself is never removed by this controller. The official harness creates a separate
+evaluation container from the exact inventoried image, cleans that container after evaluation, and
+preserves its logs. To preserve the stopped Agent container as well, add `--retain-containers` to
+both `plan` and `launch`; the resolved spec, manifest, status, and final report record it. `finish`
+does not clean up the retained Agent container.
 
 ## Mirrors
 

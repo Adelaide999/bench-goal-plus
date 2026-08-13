@@ -43,8 +43,8 @@ Docker 空间当前按本地精确 task image 的逻辑大小约 `2.56 GB` 记�
 官方 evaluator 容器和测试日志预留空间。无 Docker 环境只能读取 task/manifest，不能运行
 Agent 容器，也不能产生官方 `resolved` 分数。
 
-task image 始终保留：controller 固定使用官方 harness 的 `cache_level=instance`、
-`clean=false` 和 `force_rebuild=false`，不会调用 `docker rmi`。需要检查 Agent 修改后的
+task image 始终保留：当前官方 harness 使用已有的精确镜像，只清理独立的 evaluator
+container；controller 不会调用 `docker rmi`。需要检查 Agent 修改后的
 `/testbed` 时，在 `plan` 和 `launch` 中同时增加 `--retain-containers`。runner 会停止而不是
 删除 Agent 容器，并将 name/ID 写入 status 和最终报告；`finish` 不会自动清理它。当前开关
 只保留 Agent 容器；官方 harness 仍清理独立 evaluator 容器，但其报告和日志会完整保留。

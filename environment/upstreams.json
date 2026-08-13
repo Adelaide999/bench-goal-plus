@@ -32,7 +32,7 @@
       "tracking_branch": "main",
       "editable": true,
       "dataset_repository": "SWE-bench/SWE-bench_Verified",
-      "dataset_revision": "91aa3ed51b709be6457e12d00300a6a596d4c6a3"
+      "dataset_revision": "03e151cf5560b1af6a4363c6a9d766deaaea6b56"
     },
     "ale_bench": {
       "repository": "https://github.com/ck0123/ALE-Bench.git",

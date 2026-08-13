@@ -1889,6 +1889,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "instance_id": "django__django-12325",
             "repo": "django/django",
             "base_commit": "a" * 40,
+            "image": "swebench/sweb.eval.x86_64.django_1776_django-12325:latest",
+            "eval_script": "#!/bin/bash\ntrue\n",
+            "log_parser": "parse_log_django",
+            "eval_type": "pass_and_fail",
         }
         task = {
             "repo": "django/django",
@@ -1898,10 +1902,22 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
         runtime._validate_instance_image(instance, task)
 
+        del instance["eval_script"]
+        with self.assertRaisesRegex(
+            SweBenchContractError, "missing evaluator fields: eval_script"
+        ):
+            runtime._validate_instance_image(instance, task)
+        instance["eval_script"] = "#!/bin/bash\ntrue\n"
+
         task["image"] = "swebench/sweb.eval.x86_64.django_1776_django-99999:latest"
         with self.assertRaisesRegex(
             SweBenchContractError, "official harness image key"
         ):
+            runtime._validate_instance_image(instance, task)
+
+        task["image"] = "swebench/sweb.eval.x86_64.django_1776_django-12325:latest"
+        instance["image"] = "different-image:latest"
+        with self.assertRaisesRegex(SweBenchContractError, "dataset image"):
             runtime._validate_instance_image(instance, task)
 
     def test_prompt_rejects_hidden_fields(self) -> None:
@@ -3432,17 +3448,16 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertTrue(result["patch_applied"])
             self.assertFalse(result["resolved"])
             self.assertIn("swebench.harness.run_evaluation", result["command"])
+            for legacy_option in (
+                "--namespace",
+                "--cache_level",
+                "--clean",
+                "--force_rebuild",
+            ):
+                self.assertNotIn(legacy_option, result["command"])
             self.assertEqual(
-                result["command"][result["command"].index("--cache_level") + 1],
-                "instance",
-            )
-            self.assertEqual(
-                result["command"][result["command"].index("--clean") + 1],
-                "false",
-            )
-            self.assertEqual(
-                result["command"][result["command"].index("--force_rebuild") + 1],
-                "false",
+                result["command"][result["command"].index("--report_dir") + 1],
+                str(evaluator),
             )
             evaluator_environment = run_command.call_args.kwargs["environment"]
             self.assertIn(

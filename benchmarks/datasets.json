@@ -153,7 +153,7 @@
       "source": {
         "repository": "https://github.com/SWE-bench/SWE-bench",
         "data": "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
-        "revision": "91aa3ed51b709be6457e12d00300a6a596d4c6a3",
+        "revision": "03e151cf5560b1af6a4363c6a9d766deaaea6b56",
         "revision_policy": "Use this exact Hugging Face revision only for harness smoke or regression."
       },
       "evaluator": {

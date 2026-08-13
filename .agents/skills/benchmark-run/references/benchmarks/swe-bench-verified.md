@@ -131,9 +131,9 @@ raw score.
 
 ## Debug container retention
 
-The exact task image is always retained: the controller invokes the official harness with
-`cache_level=instance`, `clean=false`, and `force_rebuild=false`, and it never calls `docker rmi`.
-Normal campaigns remove the Agent container after exporting the patch. For an inspectable Agent
+The exact task image is always retained: the current official harness evaluates with the existing
+exact image and cleans only its separate evaluation container; the controller never calls
+`docker rmi`. Normal campaigns remove the Agent container after exporting the patch. For an inspectable Agent
 filesystem, pass the same option to both plan and launch:
 
 ```bash

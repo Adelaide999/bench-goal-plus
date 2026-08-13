@@ -59,6 +59,7 @@ HIDDEN_INSTANCE_FIELDS = {
     "FAIL_TO_PASS",
     "PASS_TO_PASS",
 }
+EVALUATOR_INSTANCE_FIELDS = {"image", "eval_script", "log_parser", "eval_type"}
 ISOLATED_CONTAINER_NETWORK_POLICIES = {
     "internal-api-only",
     "internal-provider-proxy",
@@ -135,6 +136,16 @@ def _load_pinned_instance(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_instance_image(instance: dict[str, Any], task: dict[str, Any]) -> None:
+    missing = sorted(
+        field
+        for field in EVALUATOR_INSTANCE_FIELDS
+        if not isinstance(instance.get(field), str) or not instance[field]
+    )
+    if missing:
+        raise SweBenchContractError(
+            "pinned dataset is incompatible with the official harness; "
+            "missing evaluator fields: " + ", ".join(missing)
+        )
     if instance.get("repo") != task["repo"]:
         raise SweBenchContractError("dataset repo does not match the pinned profile")
     if instance.get("base_commit") != task["base_commit"]:
@@ -149,6 +160,11 @@ def _validate_instance_image(instance: dict[str, Any], task: dict[str, Any]) -> 
         raise SweBenchContractError(
             "official harness image key does not match the local inventory tag: "
             f"{expected_image!r} != {task['image']!r}"
+        )
+    if instance["image"] != task["image"]:
+        raise SweBenchContractError(
+            "dataset image does not match the pinned profile: "
+            f"{instance['image']!r} != {task['image']!r}"
         )
 
 
@@ -2589,14 +2605,6 @@ def _official_evaluation(
         run_id,
         "--timeout",
         str(profile["evaluator_timeout_seconds"]),
-        "--namespace",
-        "swebench",
-        "--cache_level",
-        "instance",
-        "--clean",
-        "false",
-        "--force_rebuild",
-        "false",
         "--report_dir",
         str(evaluator_dir),
     ]
