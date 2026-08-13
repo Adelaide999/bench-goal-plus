@@ -97,6 +97,9 @@ def _revalidate_goal_plus_cell(
             expected_global_evidence_mode=goal_plus_profile.get(
                 "global_evidence_mode", "manual"
             ),
+            expected_shared_dir_enabled=goal_plus_profile.get(
+                "shared_dir_enabled", False
+            ),
         )
     except (KeyError, TypeError, ValueError):
         return False

@@ -597,6 +597,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         candidate_count: int = 1,
         peer_comparison: bool = False,
         global_evidence_mode: str = "manual",
+        shared_dir_enabled: bool = False,
     ) -> None:
         run_id = "run_test"
         candidate_ids = [f"c{index + 1:03d}" for index in range(candidate_count)]
@@ -691,6 +692,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     ],
                 }
             ],
+            "shared_dir": {"enabled": shared_dir_enabled},
         }
         write_json(
             root / "specs/spec_test/frozen_spec.json",
@@ -1959,7 +1961,44 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertTrue(
             goal_plus["goal_plus"]["supplemental_evaluation_enabled"]
         )
+        self.assertTrue(goal_plus["goal_plus"]["shared_dir_enabled"])
         self.assertNotIn("worker_model", goal_plus["goal_plus"])
+        prompt = runtime.build_goal_plus_prompt(
+            {"problem_statement": "Public issue text"}, goal_plus
+        )
+        self.assertIn("Set shared_dir.enabled=true", prompt)
+
+    def test_goal_plus_completion_checks_shared_dir_contract(self) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary) / "enabled"
+            self.write_goal_plus_state(root, shared_dir_enabled=True)
+            enabled = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_shared_dir_enabled=True,
+            )
+
+            disabled_root = Path(temporary) / "disabled"
+            self.write_goal_plus_state(disabled_root)
+            disabled = goal_plus_evidence.collect_goal_plus_state(
+                disabled_root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_shared_dir_enabled=True,
+            )
+
+        self.assertTrue(
+            enabled["completion"]["checks"]["shared_dir_enabled"]["passed"]
+        )
+        self.assertFalse(disabled["completion"]["passed"])
+        self.assertFalse(
+            disabled["completion"]["checks"]["shared_dir_enabled"]["passed"]
+        )
 
     def test_validate_instance_image_uses_official_remote_image_key(self) -> None:
         instance = {

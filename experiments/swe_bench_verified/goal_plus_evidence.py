@@ -636,6 +636,7 @@ def collect_goal_plus_state(
     expected_evidence_annotator_enabled: bool = False,
     expected_worker_host: str = "pi-rpc",
     expected_global_evidence_mode: str = "manual",
+    expected_shared_dir_enabled: bool = False,
 ) -> dict[str, Any]:
     goal_records = []
     for path in sorted((root / "goal-plus").glob("gp_*/goal.json")):
@@ -679,6 +680,9 @@ def collect_goal_plus_state(
         )
         strategy_config = (
             strategy.get("config") if isinstance(strategy.get("config"), dict) else {}
+        )
+        shared_dir = (
+            spec.get("shared_dir") if isinstance(spec.get("shared_dir"), dict) else {}
         )
         process_verifiers = _visible_verifier_contract(
             spec.get("process_verifiers"),
@@ -789,6 +793,7 @@ def collect_goal_plus_state(
                 "orchestration_mode": strategy.get("orchestration_mode"),
                 "worker_budget": worker_budget,
                 "strategy_config": strategy_config,
+                "shared_dir": shared_dir,
                 "legacy_acceptance_view_contract": legacy_acceptance_contract,
                 "evidence_annotator_spec": evidence_annotator_spec,
                 "evidence_annotations": annotations,
@@ -1110,6 +1115,20 @@ def collect_goal_plus_state(
                     "global_evidence_mode", "manual"
                 )
                 == expected_global_evidence_mode
+            ),
+        ),
+        "shared_dir_enabled": _check(
+            expected_shared_dir_enabled,
+            bool(
+                selected_run
+                and selected_run.get("shared_dir", {}).get("enabled", False)
+            ),
+            bool(
+                selected_run
+                and bool(
+                    selected_run.get("shared_dir", {}).get("enabled", False)
+                )
+                == expected_shared_dir_enabled
             ),
         ),
         "worker_runtime": _check(

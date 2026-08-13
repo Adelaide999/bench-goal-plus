@@ -1250,6 +1250,11 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
             "strategy.worker_launch.reasoning_effort="
             f"{goal_plus['worker_reasoning_effort']}. "
         )
+    shared_dir_instruction = (
+        "Set shared_dir.enabled=true. "
+        if goal_plus.get("shared_dir_enabled", False)
+        else ""
+    )
     if profile["concurrency"] == 1:
         candidate_instruction = "Use one fixed initial candidate. "
     else:
@@ -1276,6 +1281,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         f"{goal_plus['worker_runtime_seconds']}. "
         f"{minimum_budget_instruction}"
         f"{worker_launch_instruction}"
+        f"{shared_dir_instruction}"
         "Set "
         "strategy.config.closeout_reserve_seconds="
         f"{goal_plus['closeout_reserve_seconds']} and strategy.config.seed="
@@ -1894,6 +1900,9 @@ def _export_goal_plus_state(
         ),
         expected_global_evidence_mode=profile["goal_plus"].get(
             "global_evidence_mode", "manual"
+        ),
+        expected_shared_dir_enabled=profile["goal_plus"].get(
+            "shared_dir_enabled", False
         ),
         expected_worker_host=(
             "codex" if profile["methods"][0] == "goal-plus-codex" else "pi-rpc"

@@ -359,6 +359,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             "worker_min_runtime_seconds",
             "worker_min_verifier_runs",
             "supplemental_evaluation_enabled",
+            "shared_dir_enabled",
             "worker_model",
             "worker_reasoning_effort",
         }
@@ -540,6 +541,10 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         if supplemental_evaluation_enabled and annotator == "disabled":
             raise SweBenchContractError(
                 f"{profile_id}: supplemental evaluation requires the Evidence annotator"
+            )
+        if not isinstance(goal_plus.get("shared_dir_enabled", False), bool):
+            raise SweBenchContractError(
+                f"{profile_id}: goal_plus.shared_dir_enabled must be boolean"
             )
         global_evidence_mode = goal_plus.get("global_evidence_mode", "manual")
         if global_evidence_mode not in {"manual", "auto", "independent"}:

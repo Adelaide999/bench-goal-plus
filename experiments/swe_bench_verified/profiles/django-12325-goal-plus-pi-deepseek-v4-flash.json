@@ -36,6 +36,7 @@
       "timeout_seconds": 300
     },
     "global_evidence_mode": "auto",
+    "shared_dir_enabled": true,
     "supplemental_evaluation_enabled": true
   }
 }
