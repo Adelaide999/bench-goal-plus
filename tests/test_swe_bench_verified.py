@@ -2011,6 +2011,45 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         )
         self.assertIn("Set shared_dir.enabled=true", prompt)
 
+    def test_django_12325_pure_pi_role_separated_profile(self) -> None:
+        profile = self.profile("django-12325-goal-plus-pi-sol-deepseek-view")
+
+        self.assertEqual(profile["task_ids"], ["django__django-12325"])
+        self.assertEqual(profile["methods"], ["goal-plus-pi"])
+        self.assertEqual(profile["model"], "bench-openai/gpt-5.6-sol")
+        self.assertEqual(profile["reasoning_effort"], "medium")
+        self.assertEqual(profile["wall_time_seconds"], 1800)
+        self.assertEqual(profile["concurrency"], 1)
+        self.assertEqual(profile["cell_concurrency"], 1)
+        self.assertEqual(
+            profile["goal_plus"]["worker_model"],
+            "deepseek/deepseek-v4-flash",
+        )
+        self.assertEqual(profile["goal_plus"]["worker_reasoning_effort"], "medium")
+        self.assertEqual(
+            profile["goal_plus"]["evidence_annotator"],
+            {
+                "kind": "pi",
+                "model": "bench-openai/gpt-5.6-sol",
+                "reasoning_effort": "medium",
+                "timeout_seconds": 300,
+            },
+        )
+        self.assertEqual(profile["goal_plus"]["global_evidence_mode"], "auto")
+        self.assertTrue(profile["goal_plus"]["shared_dir_enabled"])
+        self.assertTrue(profile["goal_plus"]["supplemental_evaluation_enabled"])
+
+        prompt = runtime.build_goal_plus_prompt(
+            {"problem_statement": "Public issue text"}, profile
+        )
+        self.assertIn(
+            "strategy.worker_launch.model=deepseek/deepseek-v4-flash", prompt
+        )
+        self.assertIn("strategy.evidence_annotator.host=pi-rpc", prompt)
+        self.assertIn("strategy.config.global_evidence_mode=auto", prompt)
+        self.assertIn("Set shared_dir.enabled=true", prompt)
+        self.assertIn("budget.max_parallel=1", prompt)
+
     def test_goal_plus_completion_checks_shared_dir_contract(self) -> None:
         with self.temporary_directory() as temporary:
             root = Path(temporary) / "enabled"
