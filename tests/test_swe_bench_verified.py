@@ -1941,6 +1941,35 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         )
         self.assertIn("Set shared_dir.enabled=false", prompt)
 
+    def test_django_12325_role_separated_pi_profile_disables_shared_dir(self) -> None:
+        profile = self.profile(
+            "django-12325-goal-plus-pi-sol-deepseek-share-off"
+        )
+
+        self.assertEqual(profile["task_ids"], ["django__django-12325"])
+        self.assertEqual(profile["methods"], ["goal-plus-pi"])
+        self.assertEqual(profile["model"], "bench-openai/gpt-5.6-sol")
+        self.assertEqual(profile["reasoning_effort"], "medium")
+        self.assertEqual(profile["wall_time_seconds"], 1800)
+        self.assertEqual(profile["concurrency"], 1)
+        self.assertEqual(profile["cell_concurrency"], 1)
+        goal_plus = profile["goal_plus"]
+        self.assertEqual(
+            goal_plus["worker_model"], "deepseek/deepseek-v4-flash"
+        )
+        self.assertEqual(
+            goal_plus["evidence_annotator"]["model"],
+            "bench-openai/gpt-5.6-sol",
+        )
+        self.assertFalse(goal_plus["shared_dir_enabled"])
+        self.assertEqual(goal_plus["global_evidence_mode"], "auto")
+        self.assertTrue(goal_plus["supplemental_evaluation_enabled"])
+        prompt = runtime.build_goal_plus_prompt(
+            {"problem_statement": "Public issue text"}, profile
+        )
+        self.assertIn("strategy.worker_host=pi-rpc", prompt)
+        self.assertIn("Set shared_dir.enabled=false", prompt)
+
     def test_goal_plus_completion_checks_shared_dir_contract(self) -> None:
         with self.temporary_directory() as temporary:
             root = Path(temporary) / "enabled"
