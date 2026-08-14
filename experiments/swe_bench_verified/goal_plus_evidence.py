@@ -314,10 +314,17 @@ def _evidence_annotations(run_dir: Path, expected_iterations: int) -> dict[str, 
                 "supplemental_evaluation_enabled": task.get(
                     "supplemental_evaluation_enabled"
                 ),
-                "comparison_basis": (
-                    task.get("comparison_basis")
-                    if isinstance(task.get("comparison_basis"), list)
-                    else None
+                "legacy_peer_comparison_present": bool(
+                    "comparison_basis" in task
+                    or (
+                        isinstance(view, dict)
+                        and "comparison_basis" in view
+                    )
+                    or (
+                        isinstance(view, dict)
+                        and isinstance(view.get("supplemental_evaluation"), dict)
+                        and "comparisons" in view["supplemental_evaluation"]
+                    )
                 ),
                 "view": view,
                 "last_error": task.get("last_error"),
@@ -338,7 +345,7 @@ def _evidence_annotations(run_dir: Path, expected_iterations: int) -> dict[str, 
         "usage": {
             **dict(sorted(usage.items())),
             "tasks": len(entries),
-            "coverage": "persisted Codex Evidence annotator usage",
+            "coverage": "persisted Evidence annotator usage",
         },
         "all_completed": bool(
             expected_iterations > 0
@@ -634,6 +641,7 @@ def collect_goal_plus_state(
     expected_worker_min_verifier_runs: int | None = None,
     expected_supplemental_evaluation_enabled: bool = False,
     expected_evidence_annotator_enabled: bool = False,
+    expected_evidence_annotator_host: str = "codex",
     expected_worker_host: str = "pi-rpc",
     expected_global_evidence_mode: str = "manual",
     expected_shared_dir_enabled: bool = False,
@@ -860,12 +868,6 @@ def collect_goal_plus_state(
         if selected_run
         else []
     )
-    candidate_ids = {
-        candidate.get("candidate_id")
-        for candidate in selected_candidate_records
-        if isinstance(candidate.get("candidate_id"), str)
-        and candidate.get("candidate_id")
-    }
     settled_refs = {
         (
             candidate.get("candidate_id"),
@@ -877,14 +879,6 @@ def collect_goal_plus_state(
         if isinstance(iteration, dict)
         and isinstance(iteration.get("git_head"), str)
         and iteration.get("git_head")
-    }
-
-    allowed_relations = {
-        "similar",
-        "different",
-        "tradeoff",
-        "complementary",
-        "unknown",
     }
 
     def reference_tuple(value: Any) -> tuple[str, int, str] | None:
@@ -914,34 +908,22 @@ def collect_goal_plus_state(
             )
 
         view = entry.get("view") if isinstance(entry.get("view"), dict) else {}
-        basis = entry.get("comparison_basis")
-        if not isinstance(basis, list) or len(basis) > 8:
-            return False
-        basis_refs = [reference_tuple(item) for item in basis]
-        if any(item is None for item in basis_refs):
-            return False
-        if any(item not in settled_refs for item in basis_refs):
-            return False
-        candidate_ids = [item[0] for item in basis_refs if item is not None]
         if (
-            len(candidate_ids) != len(set(candidate_ids))
-            or entry.get("candidate_id") in candidate_ids
+            entry.get("legacy_peer_comparison_present") is not False
             or view.get("acceptance_view") is not None
-            or view.get("comparison_basis") != basis
         ):
             return False
         evaluation = view.get("supplemental_evaluation")
         if not expected_supplemental_evaluation_enabled:
             return (
                 entry.get("supplemental_evaluation_enabled") is False
-                and basis == []
                 and evaluation is None
             )
         if (
             entry.get("supplemental_evaluation_enabled") is not True
             or not isinstance(evaluation, dict)
             or set(evaluation)
-            != {"summary", "dimensions", "comparisons", "limitations"}
+            != {"summary", "dimensions", "limitations"}
             or not isinstance(evaluation.get("summary"), str)
             or not evaluation["summary"].strip()
         ):
@@ -963,29 +945,6 @@ def collect_goal_plus_state(
             )
         ):
             return False
-        comparisons = evaluation.get("comparisons")
-        if (
-            not isinstance(comparisons, list)
-            or [reference_tuple(item) for item in comparisons] != basis_refs
-            or any(
-                not isinstance(item, dict)
-                or set(item)
-                != {
-                    "candidate_id",
-                    "iteration",
-                    "commit",
-                    "relation",
-                    "rationale",
-                    "evidence",
-                }
-                or item.get("relation") not in allowed_relations
-                or not isinstance(item.get("rationale"), str)
-                or not item["rationale"].strip()
-                or not evidence_list_valid(item.get("evidence"))
-                for item in comparisons
-            )
-        ):
-            return False
         limitations = evaluation.get("limitations")
         return isinstance(limitations, list) and all(
             isinstance(item, str) and item.strip() for item in limitations
@@ -997,7 +956,7 @@ def collect_goal_plus_state(
             annotations.get("all_completed") is True
             and annotation_entries
             and all(
-                entry.get("annotator_host") == "codex"
+                entry.get("annotator_host") == expected_evidence_annotator_host
                 for entry in annotation_entries
             )
             and all(
@@ -1018,28 +977,9 @@ def collect_goal_plus_state(
             )
         )
     )
-    dynamic_peer_required = bool(
+    peer_view_influence_required = bool(
         expected_k > 1 and expected_supplemental_evaluation_enabled
     )
-    peer_comparison_entries = []
-    for entry in annotation_entries:
-        if entry.get("state") != "completed" or not supplemental_entry_valid(entry):
-            continue
-        basis_refs = [
-            reference_tuple(item) for item in entry.get("comparison_basis") or []
-        ]
-        expected_peer_ids = candidate_ids - {entry.get("candidate_id")}
-        actual_peer_ids = {
-            item[0] for item in basis_refs if item is not None
-        }
-        if expected_peer_ids and actual_peer_ids == expected_peer_ids:
-            peer_comparison_entries.append(
-                {
-                    "candidate_id": entry.get("candidate_id"),
-                    "iteration": entry.get("iteration"),
-                    "comparison_basis": entry.get("comparison_basis"),
-                }
-            )
     read_receipts = (
         selected_run.get("global_evidence_read_receipts", {})
         if selected_run
@@ -1327,26 +1267,31 @@ def collect_goal_plus_state(
                 )
             ),
         ),
-        "dynamic_peer_comparison": _check(
-            (
-                "at least one complete comparison against every peer incumbent"
-                if dynamic_peer_required
-                else "not required"
+        "legacy_peer_comparison_absent": _check(
+            True,
+            not any(
+                entry.get("legacy_peer_comparison_present") is True
+                for entry in annotation_entries
             ),
-            peer_comparison_entries,
-            bool(not dynamic_peer_required or peer_comparison_entries),
+            not any(
+                entry.get("legacy_peer_comparison_present") is True
+                for entry in annotation_entries
+            ),
         ),
         "peer_view_influence": _check(
             (
                 "a worker reads a completed peer View before its next verifier"
-                if dynamic_peer_required
+                if peer_view_influence_required
                 else "not required"
             ),
             {
                 **read_receipts,
                 "valid_peer_influence_windows": valid_peer_influence_windows,
             },
-            bool(not dynamic_peer_required or valid_peer_influence_windows),
+            bool(
+                not peer_view_influence_required
+                or valid_peer_influence_windows
+            ),
         ),
         "live_worker_overlap": _check(
             (
@@ -1359,7 +1304,7 @@ def collect_goal_plus_state(
         ),
         "view_agent_contract": _check(
             (
-                "independent codex host"
+                expected_evidence_annotator_host
                 if expected_evidence_annotator_enabled
                 else "disabled"
             ),
@@ -1372,7 +1317,7 @@ def collect_goal_plus_state(
                         selected_run.get("evidence_annotator_spec"), dict
                     )
                     and selected_run["evidence_annotator_spec"].get("host")
-                    == "codex"
+                    == expected_evidence_annotator_host
                 )
             ),
         ),

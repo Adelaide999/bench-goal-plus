@@ -1253,7 +1253,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
     shared_dir_instruction = (
         "Set shared_dir.enabled=true. "
         if goal_plus.get("shared_dir_enabled", False)
-        else ""
+        else "Set shared_dir.enabled=false. "
     )
     if profile["concurrency"] == 1:
         candidate_instruction = "Use one fixed initial candidate. "
@@ -1295,8 +1295,8 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "Do not add acceptance_view, a soft rubric, or predefined evaluation dimensions "
         "to SearchSpec. The harness may enable an independent ViewAgent after each "
         "verifier-settled Evidence commit; it derives open-ended, task-specific observations "
-        "from the actual cumulative diff and an immutable snapshot of other candidates' "
-        "settled hard-score incumbents. Those observations are non-gating, do not choose a "
+        "from the actual cumulative diff and immutable public task context. Those observations "
+        "are non-gating, do not choose a "
         "winner, and never change candidate settlement or the official binary result.\n\n"
         "Choose a focused visible test command using only the public issue and repository. "
         "Before freeze, inspect the repository's native test instructions and confirm the "
@@ -1415,6 +1415,13 @@ def _goal_plus_evidence_annotator_public(profile: dict[str, Any]) -> Any:
             }
         )
     return result
+
+
+def _goal_plus_evidence_annotator_host(profile: dict[str, Any]) -> str:
+    annotator = profile["goal_plus"]["evidence_annotator"]
+    if not isinstance(annotator, dict):
+        raise SweBenchContractError("Goal Plus evidence annotator is disabled")
+    return "codex" if annotator["kind"] == "codex" else "pi-rpc"
 
 
 def _agent_command(
@@ -1897,6 +1904,11 @@ def _export_goal_plus_state(
         ),
         expected_evidence_annotator_enabled=isinstance(
             profile["goal_plus"]["evidence_annotator"], dict
+        ),
+        expected_evidence_annotator_host=(
+            _goal_plus_evidence_annotator_host(profile)
+            if isinstance(profile["goal_plus"]["evidence_annotator"], dict)
+            else "codex"
         ),
         expected_global_evidence_mode=profile["goal_plus"].get(
             "global_evidence_mode", "manual"

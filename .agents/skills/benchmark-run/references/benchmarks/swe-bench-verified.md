@@ -45,8 +45,7 @@ profile does not require a `share_dir` option.
 
 Supplemental ViewAgent evaluation is an optional run condition. The baseline publishes only the
 candidate evidence description. When enabled, the same independent ViewAgent also publishes fresh
-open-ended dimensions from the immutable public task context and current cumulative diff, plus
-non-directional comparisons to other candidates' settled hard-score incumbents. FrozenSpec never
+open-ended dimensions from the immutable public task context and current cumulative diff. FrozenSpec never
 contains a soft rubric, and official `resolved` remains the sole hard result. A missing or malformed
 enabled output, disabled-condition output leakage, or incomplete ViewAgent task makes Goal Plus
 evidence incomplete and therefore the campaign `partial`, while preserving a valid official raw
@@ -58,12 +57,15 @@ does not mount OAuth. Matched baseline/enabled prompts, task, evaluator, model, 
 Keep task/model-specific experiment profiles in ignored campaign evidence rather than the tracked
 runner catalog. Promote a profile into the catalog only when it is a reusable lifecycle smoke.
 
-At `K>1`, dynamic peer comparison is a mechanism experiment, not a matched `K=1` quality result.
+At `K>1`, shared Global Evidence influence is a mechanism experiment, not a matched `K=1` quality result.
 MainAgent must create exactly `K` distinct initial candidates in one batch and bind one worker to
-each. Completion additionally requires overlapping runtime lease intervals, at least one ViewAgent
-output whose comparison basis contains another candidate's settled incumbent, and a persisted
-Global Evidence read showing a worker consumed a completed peer View before its next verifier
+each. Completion additionally requires overlapping runtime lease intervals and a persisted Global
+Evidence read showing a worker consumed a completed peer View before its next verifier
 attempt. Merely recording `budget.max_parallel=K` is incomplete evidence.
+
+The Django 12325 Goal Plus + Pi DeepSeek experiment freezes `shared_dir.enabled=false`. Global
+Evidence and supplemental ViewAgent evaluation remain enabled; shared-tool staging, publication,
+copying, and toolization decisions must be absent.
 
 When a profile freezes `agent_network_policy=public-egress-blocked`, the runner
 creates a campaign-owned Docker `--internal` bridge, binds the fixed loopback provider proxy to its
@@ -125,9 +127,9 @@ the registered visible-test wrapper with the benchmark-owned frozen hash, a pass
 `visible_test_score=1.0`, and no active Pi pool job. When the profile enables the
 ViewAgent, every candidate iteration must
 have a completed Global Evidence description and an immutable original-task context snapshot. ON
-additionally requires 1–8 open dimensions and peer comparisons exactly matching the task snapshot;
-OFF requires supplemental output to be absent. Both require FrozenSpec to contain no legacy soft
-rubric. The controller exports `/testbed/.gp` before container disposal.
+additionally requires 1–8 open dimensions; OFF requires supplemental output to be absent. Both
+require FrozenSpec to contain no legacy soft rubric and annotation output to contain no legacy
+`comparison_basis` or `comparisons`. The controller exports `/testbed/.gp` before container disposal.
 Missing Goal Plus evidence downgrades the cell to `partial` while preserving any complete official
 raw score.
 

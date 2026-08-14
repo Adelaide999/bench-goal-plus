@@ -595,7 +595,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         worker_min_runtime_seconds: int | None = None,
         worker_min_verifier_runs: int | None = None,
         candidate_count: int = 1,
-        peer_comparison: bool = False,
+        peer_view_read: bool = False,
+        evidence_annotator_host: str = "codex",
         global_evidence_mode: str = "manual",
         shared_dir_enabled: bool = False,
     ) -> None:
@@ -647,7 +648,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 **(
                     {
                         "evidence_annotator": {
-                            "host": "codex",
+                            "host": evidence_annotator_host,
                             "model": None,
                             "reasoning_effort": None,
                             "timeout_seconds": 300,
@@ -716,7 +717,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "git_head": candidate_commits[current_candidate_id],
                 }
             ]
-            if peer_comparison and index == 0:
+            if peer_view_read and index == 0:
                 iterations.append(
                     {
                         "iteration": 2,
@@ -747,30 +748,6 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
         if evidence_annotations:
             for current_candidate_id, iterations in candidate_iterations.items():
-                peer_ids = [
-                    peer for peer in candidate_ids if peer != current_candidate_id
-                ]
-                comparison_basis = (
-                    [
-                        {
-                            "candidate_id": peer,
-                            "iteration": 1,
-                            "commit": candidate_commits[peer],
-                        }
-                        for peer in peer_ids
-                    ]
-                    if peer_comparison
-                    else []
-                )
-                comparisons = [
-                    {
-                        **reference,
-                        "relation": "different",
-                        "rationale": "The candidates implement distinct public hypotheses.",
-                        "evidence": ["The cumulative diffs use different branches."],
-                    }
-                    for reference in comparison_basis
-                ]
                 evaluation = (
                     {
                         "summary": "The implementation changes the requested behavior.",
@@ -782,7 +759,6 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                                 "evidence": ["Persisted test evidence."],
                             }
                         ],
-                        "comparisons": comparisons,
                         "limitations": ["No hidden test evidence is available."],
                     }
                     if supplemental_evaluation
@@ -800,7 +776,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                             "candidate_id": current_candidate_id,
                             "iteration": iteration["iteration"],
                             "state": "completed",
-                            "profile": {"host": "codex"},
+                            "profile": {"host": evidence_annotator_host},
                             "task_context_source": "goal_plus_raw_goal",
                             "task_context_ref": "goal_plus:gp_test:revision:1",
                             "task_context_sha256": hashlib.sha256(
@@ -809,14 +785,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                             "supplemental_evaluation_enabled": (
                                 supplemental_evaluation
                             ),
-                            "comparison_basis": comparison_basis,
                             "usage": {"input_tokens": 40, "output_tokens": 10},
                             "view": {
                                 "description": (
                                     "Independent description of candidate evidence."
                                 ),
                                 "supplemental_evaluation": evaluation,
-                                "comparison_basis": comparison_basis,
                                 "acceptance_view": None,
                             },
                         },
@@ -833,7 +807,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "supplemental_evaluation_present": supplemental_evaluation,
                 }
                 for current_candidate_id in (
-                    candidate_ids if peer_comparison else [session_candidate_id]
+                    candidate_ids if peer_view_read else [session_candidate_id]
                 )
             ]
             write_json(
@@ -920,7 +894,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "codex/parallel_loops",
         )
 
-    def test_goal_plus_k2_requires_peer_comparison_and_search_influence(self) -> None:
+    def test_goal_plus_k2_requires_peer_view_search_influence(self) -> None:
         with self.temporary_directory() as temporary:
             root = Path(temporary) / "passing"
             self.write_goal_plus_state(
@@ -934,7 +908,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 worker_min_runtime_seconds=600,
                 worker_min_verifier_runs=2,
                 candidate_count=2,
-                peer_comparison=True,
+                peer_view_read=True,
             )
             state = goal_plus_evidence.collect_goal_plus_state(
                 root,
@@ -952,9 +926,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertTrue(state["completion"]["passed"])
             self.assertEqual(state["actual_subagent_count"], 2)
             self.assertTrue(
-                state["completion"]["checks"]["dynamic_peer_comparison"][
-                    "passed"
-                ]
+                state["completion"]["checks"][
+                    "legacy_peer_comparison_absent"
+                ]["passed"]
             )
             influence = state["completion"]["checks"]["peer_view_influence"]
             self.assertTrue(influence["passed"])
@@ -1019,7 +993,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             )
             self.assertTrue(
                 tampered_state["completion"]["checks"][
-                    "dynamic_peer_comparison"
+                    "legacy_peer_comparison_absent"
                 ]["passed"]
             )
             self.assertFalse(
@@ -1055,9 +1029,6 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             )
             self.assertFalse(missing_state["completion"]["passed"])
             self.assertIn(
-                "dynamic_peer_comparison", missing_state["completion"]["reason"]
-            )
-            self.assertIn(
                 "peer_view_influence", missing_state["completion"]["reason"]
             )
 
@@ -1075,7 +1046,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 worker_min_runtime_seconds=600,
                 worker_min_verifier_runs=2,
                 candidate_count=2,
-                peer_comparison=True,
+                peer_view_read=True,
+                evidence_annotator_host="pi-rpc",
             )
             state = goal_plus_evidence.collect_goal_plus_state(
                 root,
@@ -1087,6 +1059,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
                 expected_evidence_annotator_enabled=True,
+                expected_evidence_annotator_host="pi-rpc",
                 expected_worker_host="pi-rpc",
             )
 
@@ -1450,7 +1423,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         with self.assertRaisesRegex(SweBenchContractError, "global_evidence_mode"):
             validate_profile(str(invalid["id"]), invalid)
 
-    def test_k2_profile_contract_supports_peer_comparison(self) -> None:
+    def test_k2_profile_contract_supports_peer_view_influence(self) -> None:
         k2 = self.k2_goal_plus_codex_profile()
         self.assertEqual(k2["concurrency"], 2)
         self.assertEqual(k2["cell_concurrency"], 1)
@@ -1496,7 +1469,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
         self.assertEqual(
             managed_upstream_branch("goal_plus"),
-            "main",
+            "codex/bounded-ge-pr24-share-dir-off",
         )
 
     def test_goal_plus_container_probe_loads_pi_extension_contract(self) -> None:
@@ -1961,12 +1934,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertTrue(
             goal_plus["goal_plus"]["supplemental_evaluation_enabled"]
         )
-        self.assertTrue(goal_plus["goal_plus"]["shared_dir_enabled"])
+        self.assertFalse(goal_plus["goal_plus"]["shared_dir_enabled"])
         self.assertNotIn("worker_model", goal_plus["goal_plus"])
         prompt = runtime.build_goal_plus_prompt(
             {"problem_statement": "Public issue text"}, goal_plus
         )
-        self.assertIn("Set shared_dir.enabled=true", prompt)
+        self.assertIn("Set shared_dir.enabled=false", prompt)
 
     def test_goal_plus_completion_checks_shared_dir_contract(self) -> None:
         with self.temporary_directory() as temporary:
@@ -2382,6 +2355,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "timeout_seconds": 300,
             },
         )
+        self.assertEqual(
+            runtime._goal_plus_evidence_annotator_host(profile), "pi-rpc"
+        )
 
         with self.temporary_directory() as temporary:
             assets = Path(temporary)
@@ -2522,6 +2498,30 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 1,
             )
             self.assertEqual(state["evidence_annotator_usage"]["input_tokens"], 40)
+
+            annotation_path = (
+                root
+                / "runs/run_test/candidates/c001/evidence-annotations/"
+                "iteration-0001.json"
+            )
+            legacy_annotation = read_json(annotation_path)
+            legacy_annotation["comparison_basis"] = []
+            write_json(annotation_path, legacy_annotation)
+            legacy_state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator_enabled=True,
+            )
+            self.assertFalse(legacy_state["completion"]["passed"])
+            self.assertFalse(
+                legacy_state["completion"]["checks"][
+                    "legacy_peer_comparison_absent"
+                ]["passed"]
+            )
 
             missing = Path(temporary) / "acceptance-missing"
             self.write_goal_plus_state(missing)

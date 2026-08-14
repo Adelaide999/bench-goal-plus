@@ -11,6 +11,7 @@ from .goal_plus_evidence import collect_goal_plus_state, record_completion_check
 from .runtime import (
     MANIFEST,
     TERMINAL_STATES,
+    _goal_plus_evidence_annotator_host,
     _goal_plus_evidence_annotator_public,
 )
 
@@ -93,6 +94,11 @@ def _revalidate_goal_plus_cell(
             ),
             expected_evidence_annotator_enabled=isinstance(
                 goal_plus_profile["evidence_annotator"], dict
+            ),
+            expected_evidence_annotator_host=(
+                _goal_plus_evidence_annotator_host(profile)
+                if isinstance(goal_plus_profile["evidence_annotator"], dict)
+                else "codex"
             ),
             expected_global_evidence_mode=goal_plus_profile.get(
                 "global_evidence_mode", "manual"
