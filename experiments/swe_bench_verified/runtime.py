@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tarfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,7 +16,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from bench_goal_plus.codex_provider import codex_responses_provider_args
-from bench_runtime_paths import configure_temp_environment, ensure_temp_root
+from bench_runtime_paths import (
+    configure_temp_environment,
+    ensure_temp_root,
+    temporary_directory,
+)
 
 from .config import (
     GOAL_PLUS_ROOT,
@@ -1857,21 +1862,44 @@ def _export_goal_plus_state(
     destination.mkdir(parents=True, exist_ok=False)
     command = [
         "docker",
-        "cp",
-        f"{container_id}:/testbed/.gp/.",
-        str(destination),
+        "exec",
+        container_id,
+        "tar",
+        "-C",
+        "/testbed/.gp",
+        "-cf",
+        "-",
+        ".",
     ]
     try:
-        completed = _run(command, timeout=180)
-        exported = completed.returncode == 0
-        error = (
-            None
-            if exported
-            else completed.stderr.strip()
-            or completed.stdout.strip()
-            or "docker cp failed"
-        )
-    except (OSError, subprocess.TimeoutExpired) as caught:
+        with temporary_directory(
+            prefix="goal-plus-export-",
+            namespace="swe-bench-verified",
+        ) as temporary:
+            archive_path = temporary / "goal-plus-state.tar"
+            with archive_path.open("wb") as archive_output:
+                completed = subprocess.run(
+                    command,
+                    cwd=ROOT,
+                    stdout=archive_output,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    timeout=180,
+                )
+            exported = completed.returncode == 0
+            error = (
+                None
+                if exported
+                else completed.stderr.decode("utf-8", errors="replace").strip()
+                or "Goal Plus state archive failed"
+            )
+            if exported:
+                with tarfile.open(archive_path, "r") as archive:
+                    archive.extractall(
+                        destination,
+                        filter=_writable_goal_plus_export_member,
+                    )
+    except (OSError, subprocess.TimeoutExpired, tarfile.TarError) as caught:
         exported = False
         error = f"{type(caught).__name__}: {caught}"
     state = collect_goal_plus_state(
@@ -1925,6 +1953,17 @@ def _export_goal_plus_state(
             "error": error,
         },
     }
+
+
+def _writable_goal_plus_export_member(
+    member: tarfile.TarInfo,
+    destination: str,
+) -> tarfile.TarInfo | None:
+    if member.isdir():
+        member.mode |= 0o700
+    elif member.isfile():
+        member.mode |= 0o600
+    return tarfile.data_filter(member, destination)
 
 
 def _container_responses_probe_with_retry(

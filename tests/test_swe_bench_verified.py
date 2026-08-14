@@ -8,6 +8,7 @@ import socketserver
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -46,6 +47,48 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
     def profile(self, profile_id: str) -> dict:
         return load_profile(profile_id)[1]
+
+    def test_goal_plus_state_export_handles_read_only_shared_tools(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-smoke")
+        with self.temporary_directory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            snapshot = source / "runs/run-1/shared/tools/sha256/ab/digest"
+            snapshot.mkdir(parents=True)
+            manifest = snapshot / "manifest.json"
+            manifest.write_text('{"name": "probe"}\n', encoding="utf-8")
+            manifest.chmod(0o444)
+            snapshot.chmod(0o555)
+            destination = root / "export"
+            commands: list[list[str]] = []
+
+            def archive_state(command: list[str], **kwargs):
+                commands.append(command)
+                with tarfile.open(fileobj=kwargs["stdout"], mode="w") as archive:
+                    archive.add(source, arcname=".")
+                return subprocess.CompletedProcess(command, 0, b"", b"")
+
+            with (
+                mock.patch.object(subprocess, "run", side_effect=archive_state),
+                mock.patch.object(runtime, "collect_goal_plus_state", return_value={}),
+            ):
+                state = runtime._export_goal_plus_state(
+                    "container-id", destination, profile
+                )
+
+            exported_manifest = (
+                destination
+                / "runs/run-1/shared/tools/sha256/ab/digest/manifest.json"
+            )
+            self.assertTrue(state["export"]["completed"])
+            self.assertEqual(commands[0][:4], ["docker", "exec", "container-id", "tar"])
+            self.assertTrue(exported_manifest.is_file())
+            self.assertTrue(snapshot.stat().st_mode & stat.S_IWUSR == 0)
+            self.assertTrue(exported_manifest.parent.stat().st_mode & stat.S_IWUSR)
+            self.assertTrue(exported_manifest.stat().st_mode & stat.S_IWUSR)
+
+            snapshot.chmod(0o755)
+            manifest.chmod(0o644)
 
     def k2_goal_plus_codex_profile(self) -> dict:
         profile = self.profile("sympy-16886-goal-plus-codex-smoke")
