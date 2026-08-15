@@ -281,7 +281,6 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(resolved["worker_provider"], "deepseek")
         self.assertEqual(resolved["worker_model_id"], "deepseek-v4-flash")
         self.assertEqual(resolved["worker_credential_env"], "DEEPSEEK_API_KEY")
-
         runtime_info = {
             **resolved,
             "runtime_api_base_url": "http://192.0.2.10:8080/v1",
@@ -2194,6 +2193,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "model_id": "glm-5.2",
             "node_root": Path("/opt/node-host"),
             "package_root": Path("/opt/pi-host"),
+            "node_modules_root": Path("/opt/pi-install/node_modules"),
         }
         with mock.patch.dict(os.environ, {"ZAI_API_KEY": secret}, clear=False):
             command = runtime._agent_command("container-id", profile, runtime_info)
@@ -2209,8 +2209,40 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn("ZAI_API_KEY", probe)
         self.assertFalse(any(secret in argument for argument in probe))
         self.assertIn(
+            "src=/opt/pi-install/node_modules,dst=/opt/node_modules,readonly",
+            " ".join(probe),
+        )
+        self.assertIn(
             ["--network", "none"],
             [probe[index : index + 2] for index in range(len(probe) - 1)],
+        )
+
+    def test_pi_runtime_resolves_the_npm_dependency_root(self) -> None:
+        profile = self.profile("sympy-16886-pi-smoke")
+        with self.temporary_directory() as temporary:
+            install_root = Path(temporary)
+            node = install_root / "node/bin/node"
+            cli = (
+                install_root
+                / "pi-host/node_modules/@mariozechner/pi-coding-agent/dist/cli.js"
+            )
+            pi = install_root / "pi-host/node_modules/.bin/pi"
+            node.parent.mkdir(parents=True)
+            cli.parent.mkdir(parents=True)
+            pi.parent.mkdir(parents=True)
+            node.touch()
+            cli.touch()
+            pi.symlink_to(Path("../@mariozechner/pi-coding-agent/dist/cli.js"))
+
+            def which(command: str) -> str:
+                return str(node if command == "node" else pi)
+
+            with mock.patch.object(environment.shutil, "which", side_effect=which):
+                runtime_info = environment.resolve_pi_runtime(profile)
+
+        self.assertEqual(
+            runtime_info["node_modules_root"],
+            install_root / "pi-host/node_modules",
         )
 
     def test_custom_pi_container_probe_mounts_generated_provider_config(self) -> None:

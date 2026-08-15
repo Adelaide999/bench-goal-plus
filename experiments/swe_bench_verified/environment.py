@@ -486,6 +486,14 @@ def resolve_pi_runtime(profile: dict[str, Any]) -> dict[str, Any]:
     pi_cli = Path(pi_command).resolve() if pi_command else None
     node_root = node_binary.parent.parent if node_binary else None
     package_root = pi_cli.parent.parent if pi_cli else None
+    node_modules_root = (
+        next(
+            (parent for parent in package_root.parents if parent.name == "node_modules"),
+            None,
+        )
+        if package_root
+        else None
+    )
     model = str(profile["model"])
     provider, _, model_id = model.partition("/")
     provider_contract = profile.get("agent_provider")
@@ -504,6 +512,7 @@ def resolve_pi_runtime(profile: dict[str, Any]) -> dict[str, Any]:
         "node_root": node_root,
         "node_binary": node_binary,
         "package_root": package_root,
+        "node_modules_root": node_modules_root,
         "pi_cli": pi_cli,
         "provider": provider,
         "model_id": model_id,
@@ -527,6 +536,13 @@ def resolve_pi_runtime(profile: dict[str, Any]) -> dict[str, Any]:
             }
         )
     return runtime
+
+
+def pi_node_modules_root(runtime: dict[str, Any]) -> Path:
+    root = runtime.get("node_modules_root")
+    if isinstance(root, Path):
+        return root
+    return Path(runtime["package_root"])
 
 
 def write_pi_models_config(
@@ -804,6 +820,7 @@ def _merge_pi_worker_runtime(
             "node_root": worker["node_root"],
             "node_binary": worker["node_binary"],
             "package_root": worker["package_root"],
+            "node_modules_root": worker["node_modules_root"],
             "pi_cli": worker["pi_cli"],
             "worker_provider": worker["provider"],
             "worker_model_id": worker["model_id"],
@@ -1222,6 +1239,11 @@ def _pi_container_probe(
         f"type=bind,src={runtime['node_root']},dst=/opt/node,readonly",
         "--mount",
         f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
+        "--mount",
+        (
+            f"type=bind,src={pi_node_modules_root(runtime)},"
+            "dst=/opt/node_modules,readonly"
+        ),
     ]
     if runtime.get("bridge_host"):
         command.extend(
@@ -1323,6 +1345,11 @@ def _goal_plus_container_probe(
             f"type=bind,src={runtime['node_root']},dst=/opt/node,readonly",
             "--mount",
             f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
+            "--mount",
+            (
+                f"type=bind,src={pi_node_modules_root(runtime)},"
+                "dst=/opt/node_modules,readonly"
+            ),
             "--mount",
             "type=bind,"
             f"src={runtime['goal_plus_root']},dst=/opt/goal-plus,readonly",

@@ -41,6 +41,7 @@ from .environment import (
     goal_plus_runtime_environment,
     has_pi_worker_override,
     openai_responses_probe,
+    pi_node_modules_root,
     pi_provider_proxy_environment,
     resolve_codex_runtime,
     resolve_goal_plus_codex_runtime,
@@ -839,6 +840,11 @@ def _create_agent_container(
                     f"type=bind,src={runtime['node_root']},dst=/opt/node,readonly",
                     "--mount",
                     f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
+                    "--mount",
+                    (
+                        f"type=bind,src={pi_node_modules_root(runtime)},"
+                        "dst=/opt/node_modules,readonly"
+                    ),
                 ]
             )
     else:
@@ -869,6 +875,11 @@ def _create_agent_container(
                 f"type=bind,src={runtime['node_root']},dst=/opt/node,readonly",
                 "--mount",
                 f"type=bind,src={runtime['package_root']},dst=/opt/pi,readonly",
+                "--mount",
+                (
+                    f"type=bind,src={pi_node_modules_root(runtime)},"
+                    "dst=/opt/node_modules,readonly"
+                ),
             ]
         )
         models_file = runtime.get("models_file")
