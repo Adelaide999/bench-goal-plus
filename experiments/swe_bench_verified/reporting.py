@@ -91,8 +91,10 @@ def _revalidate_goal_plus_cell(
             expected_supplemental_evaluation_enabled=bool(
                 goal_plus_profile.get("supplemental_evaluation_enabled", False)
             ),
-            expected_evidence_annotator_enabled=isinstance(
-                goal_plus_profile["evidence_annotator"], dict
+            expected_evidence_annotator=(
+                _goal_plus_evidence_annotator_public(profile)
+                if isinstance(goal_plus_profile["evidence_annotator"], dict)
+                else None
             ),
             expected_global_evidence_mode=goal_plus_profile.get(
                 "global_evidence_mode", "manual"

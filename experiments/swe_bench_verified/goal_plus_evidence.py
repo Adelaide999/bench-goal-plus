@@ -284,6 +284,46 @@ def _usage_from_sessions(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _public_annotator_profile(profile: dict[str, Any]) -> dict[str, Any] | None:
+    host = profile.get("host")
+    if host not in {"codex", "pi-rpc"}:
+        return None
+    provider = profile.get("provider")
+    provider = provider if isinstance(provider, dict) else {}
+    return {
+        "kind": "pi" if host == "pi-rpc" else "codex",
+        "host": host,
+        "model": profile.get("model"),
+        "pi_provider": profile.get("pi_provider"),
+        "reasoning_effort": profile.get("reasoning_effort"),
+        "timeout_seconds": profile.get("timeout_seconds"),
+        "provider_id": provider.get("provider_id"),
+        "wire_api": provider.get("wire_api"),
+    }
+
+
+def _expected_annotator_profile(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(config, dict):
+        return None
+    kind = config.get("kind")
+    if kind not in {"codex", "pi"}:
+        return None
+    model = config.get("model")
+    pi_provider = None
+    if kind == "pi" and isinstance(model, str) and "/" in model:
+        pi_provider = model.partition("/")[0] or None
+    return {
+        "kind": kind,
+        "host": "pi-rpc" if kind == "pi" else "codex",
+        "model": model,
+        "pi_provider": pi_provider,
+        "reasoning_effort": config.get("reasoning_effort"),
+        "timeout_seconds": config.get("timeout_seconds"),
+        "provider_id": config.get("provider_id") if kind == "codex" else None,
+        "wire_api": config.get("wire_api") if kind == "codex" else None,
+    }
+
+
 def _evidence_annotations(run_dir: Path, expected_iterations: int) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     states: dict[str, int] = {}
@@ -302,12 +342,14 @@ def _evidence_annotations(run_dir: Path, expected_iterations: int) -> dict[str, 
                 usage[name] = usage.get(name, 0) + value
         view = task.get("view") if isinstance(task.get("view"), dict) else None
         profile = task.get("profile") if isinstance(task.get("profile"), dict) else {}
+        public_profile = _public_annotator_profile(profile)
         entries.append(
             {
                 "candidate_id": task.get("candidate_id"),
                 "iteration": task.get("iteration"),
                 "state": state,
                 "annotator_host": profile.get("host"),
+                "annotator": public_profile,
                 "task_context_source": task.get("task_context_source"),
                 "task_context_ref": task.get("task_context_ref"),
                 "task_context_sha256": task.get("task_context_sha256"),
@@ -338,7 +380,7 @@ def _evidence_annotations(run_dir: Path, expected_iterations: int) -> dict[str, 
         "usage": {
             **dict(sorted(usage.items())),
             "tasks": len(entries),
-            "coverage": "persisted Codex Evidence annotator usage",
+            "coverage": "persisted Evidence annotator usage",
         },
         "all_completed": bool(
             expected_iterations > 0
@@ -633,11 +675,13 @@ def collect_goal_plus_state(
     expected_worker_min_runtime_seconds: int | None = None,
     expected_worker_min_verifier_runs: int | None = None,
     expected_supplemental_evaluation_enabled: bool = False,
-    expected_evidence_annotator_enabled: bool = False,
+    expected_evidence_annotator: dict[str, Any] | None = None,
     expected_worker_host: str = "pi-rpc",
     expected_global_evidence_mode: str = "manual",
     expected_shared_dir_enabled: bool = False,
 ) -> dict[str, Any]:
+    expected_annotator = _expected_annotator_profile(expected_evidence_annotator)
+    expected_evidence_annotator_enabled = expected_annotator is not None
     goal_records = []
     for path in sorted((root / "goal-plus").glob("gp_*/goal.json")):
         payload = _read_object(path)
@@ -997,7 +1041,7 @@ def collect_goal_plus_state(
             annotations.get("all_completed") is True
             and annotation_entries
             and all(
-                entry.get("annotator_host") == "codex"
+                entry.get("annotator") == expected_annotator
                 for entry in annotation_entries
             )
             and all(
@@ -1358,21 +1402,20 @@ def collect_goal_plus_state(
             bool(expected_k == 1 or worker_overlap["passed"]),
         ),
         "view_agent_contract": _check(
+            expected_annotator if expected_evidence_annotator_enabled else "disabled",
             (
-                "independent codex host"
+                [entry.get("annotator") for entry in annotation_entries]
                 if expected_evidence_annotator_enabled
                 else "disabled"
             ),
-            selected_run.get("evidence_annotator_spec") if selected_run else None,
             bool(
                 not expected_evidence_annotator_enabled
                 or (
-                    selected_run
-                    and isinstance(
-                        selected_run.get("evidence_annotator_spec"), dict
+                    annotation_entries
+                    and all(
+                        entry.get("annotator") == expected_annotator
+                        for entry in annotation_entries
                     )
-                    and selected_run["evidence_annotator_spec"].get("host")
-                    == "codex"
                 )
             ),
         ),

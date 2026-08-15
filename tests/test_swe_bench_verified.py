@@ -48,6 +48,17 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def profile(self, profile_id: str) -> dict:
         return load_profile(profile_id)[1]
 
+    @staticmethod
+    def codex_annotator_contract() -> dict:
+        return {
+            "kind": "codex",
+            "model": "gpt-5.6-sol",
+            "reasoning_effort": "medium",
+            "timeout_seconds": 300,
+            "provider_id": "bench-openai",
+            "wire_api": "responses",
+        }
+
     def test_goal_plus_state_export_handles_read_only_shared_tools(self) -> None:
         profile = self.profile("sympy-16886-goal-plus-pi-smoke")
         with self.temporary_directory() as temporary:
@@ -228,6 +239,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "strategy.worker_launch.model=deepseek/deepseek-v4-flash", prompt
         )
         self.assertIn("strategy.evidence_annotator.host=pi-rpc", prompt)
+        self.assertIn("pi-rpc is a host and must never be used as pi_provider", prompt)
         self.assertIn("strategy.config.global_evidence_mode=auto", prompt)
         self.assertIn("budget.max_parallel=4", prompt)
 
@@ -641,6 +653,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         peer_comparison: bool = False,
         global_evidence_mode: str = "manual",
         shared_dir_enabled: bool = False,
+        evidence_annotator_profile: dict | None = None,
     ) -> None:
         run_id = "run_test"
         candidate_ids = [f"c{index + 1:03d}" for index in range(candidate_count)]
@@ -667,6 +680,17 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "selected_candidate_id": candidate_id,
             },
         )
+        resolved_annotator_profile = evidence_annotator_profile or {
+            "host": "codex",
+            "model": "gpt-5.6-sol",
+            "pi_provider": None,
+            "reasoning_effort": "medium",
+            "timeout_seconds": 300,
+            "provider": {
+                "provider_id": "bench-openai",
+                "wire_api": "responses",
+            },
+        }
         spec = {
             "budget": {"max_parallel": max_parallel},
             "strategy": {
@@ -689,14 +713,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 },
                 **(
                     {
-                        "evidence_annotator": {
-                            "host": "codex",
-                            "model": None,
-                            "reasoning_effort": None,
-                            "timeout_seconds": 300,
-                            "provider": None,
-                            "pi_provider": None,
-                        }
+                        "evidence_annotator": resolved_annotator_profile
                     }
                     if evidence_annotations
                     else {}
@@ -843,7 +860,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                             "candidate_id": current_candidate_id,
                             "iteration": iteration["iteration"],
                             "state": "completed",
-                            "profile": {"host": "codex"},
+                            "profile": resolved_annotator_profile,
                             "task_context_source": "goal_plus_raw_goal",
                             "task_context_ref": "goal_plus:gp_test:revision:1",
                             "task_context_sha256": hashlib.sha256(
@@ -988,7 +1005,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_runtime_seconds=600,
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
-                expected_evidence_annotator_enabled=True,
+                expected_evidence_annotator=self.codex_annotator_contract(),
                 expected_worker_host="codex",
             )
 
@@ -1026,7 +1043,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_runtime_seconds=600,
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
-                expected_evidence_annotator_enabled=True,
+                expected_evidence_annotator=self.codex_annotator_contract(),
                 expected_worker_host="codex",
             )
             self.assertFalse(
@@ -1057,7 +1074,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_runtime_seconds=600,
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
-                expected_evidence_annotator_enabled=True,
+                expected_evidence_annotator=self.codex_annotator_contract(),
                 expected_worker_host="codex",
             )
             self.assertTrue(
@@ -1093,7 +1110,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_runtime_seconds=600,
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
-                expected_evidence_annotator_enabled=True,
+                expected_evidence_annotator=self.codex_annotator_contract(),
                 expected_worker_host="codex",
             )
             self.assertFalse(missing_state["completion"]["passed"])
@@ -1129,7 +1146,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_runtime_seconds=600,
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
-                expected_evidence_annotator_enabled=True,
+                expected_evidence_annotator=self.codex_annotator_contract(),
                 expected_worker_host="pi-rpc",
             )
 
@@ -1257,6 +1274,17 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 supplemental_evaluation=True,
                 evidence_annotations=True,
                 worker_host="codex",
+                evidence_annotator_profile={
+                    "host": "codex",
+                    "model": "gpt-5.6-sol",
+                    "pi_provider": None,
+                    "reasoning_effort": "low",
+                    "timeout_seconds": 120,
+                    "provider": {
+                        "provider_id": "chatgpt",
+                        "wire_api": "native-codex",
+                    },
+                },
             )
             patch_file = campaign / "cells/goal-plus-codex/model.patch"
             patch_file.write_text("diff --git a/a b/a\n", encoding="utf-8")
@@ -2580,7 +2608,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
                 expected_supplemental_evaluation_enabled=True,
-                expected_evidence_annotator_enabled=True,
+                expected_evidence_annotator=self.codex_annotator_contract(),
             )
 
             self.assertTrue(state["completion"]["passed"])
@@ -2604,6 +2632,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 1,
             )
             self.assertEqual(state["evidence_annotator_usage"]["input_tokens"], 40)
+            self.assertEqual(
+                state["evidence_annotator_usage"]["coverage"],
+                "persisted Evidence annotator usage",
+            )
 
             missing = Path(temporary) / "acceptance-missing"
             self.write_goal_plus_state(missing)
@@ -2614,7 +2646,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
                 expected_supplemental_evaluation_enabled=True,
-                expected_evidence_annotator_enabled=True,
+                expected_evidence_annotator=self.codex_annotator_contract(),
             )
             self.assertFalse(missing_state["completion"]["passed"])
             self.assertIn(
@@ -2634,9 +2666,77 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
                 expected_supplemental_evaluation_enabled=False,
-                expected_evidence_annotator_enabled=True,
+                expected_evidence_annotator=self.codex_annotator_contract(),
             )
             self.assertTrue(off_state["completion"]["passed"])
+
+    def test_goal_plus_pi_view_contract_uses_profile_model_and_provider(self) -> None:
+        expected = {
+            "kind": "pi",
+            "model": "bench-openai/gpt-5.6-sol",
+            "reasoning_effort": "medium",
+            "timeout_seconds": 300,
+        }
+        actual = {
+            "host": "pi-rpc",
+            "model": "bench-openai/gpt-5.6-sol",
+            "pi_provider": "bench-openai",
+            "reasoning_effort": "medium",
+            "timeout_seconds": 300,
+            "provider": None,
+        }
+        with self.temporary_directory() as temporary:
+            root = Path(temporary)
+            self.write_goal_plus_state(
+                root,
+                supplemental_evaluation=True,
+                evidence_annotations=True,
+                worker_host="pi-rpc",
+                evidence_annotator_profile=actual,
+            )
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator=expected,
+            )
+            self.assertTrue(state["completion"]["passed"])
+            view_contract = state["completion"]["checks"]["view_agent_contract"]
+            self.assertEqual(view_contract["expected"]["host"], "pi-rpc")
+            self.assertEqual(
+                view_contract["actual"][0]["model"],
+                "bench-openai/gpt-5.6-sol",
+            )
+
+            annotation_path = root / (
+                "runs/run_test/candidates/c001/evidence-annotations/"
+                "iteration-0001.json"
+            )
+            annotation = read_json(annotation_path)
+            annotation["profile"].update(
+                {
+                    "model": "deepseek/deepseek-v4-flash",
+                    "pi_provider": "deepseek",
+                }
+            )
+            write_json(annotation_path, annotation)
+            mismatch = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=1,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator=expected,
+            )
+            self.assertFalse(
+                mismatch["completion"]["checks"]["view_agent_contract"][
+                    "passed"
+                ]
+            )
 
     def test_global_evidence_receipt_precedes_next_verifier(self) -> None:
         receipts = goal_plus_evidence._global_evidence_read_receipts(
@@ -3753,6 +3853,17 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 state_root,
                 supplemental_evaluation=True,
                 evidence_annotations=True,
+                evidence_annotator_profile={
+                    "host": "codex",
+                    "model": "gpt-5.6-luna",
+                    "pi_provider": None,
+                    "reasoning_effort": "high",
+                    "timeout_seconds": 300,
+                    "provider": {
+                        "provider_id": "bench-openai",
+                        "wire_api": "responses",
+                    },
+                },
             )
             patch_file = campaign / "cells/goal-plus-pi/model.patch"
             patch_file.write_text("diff --git a/a b/a\n", encoding="utf-8")

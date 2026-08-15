@@ -1295,7 +1295,8 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         f"Set strategy.evidence_annotator.host={annotator_host} and "
         "strategy.evidence_annotator.timeout_seconds="
         f"{annotator_timeout}; "
-        "leave its model and provider unset because the harness supplies the ViewAgent. "
+        "leave its model, provider, and pi_provider unset because the harness supplies "
+        "the ViewAgent; pi-rpc is a host and must never be used as pi_provider. "
         f"{worker_instruction}\n\n"
         "Do not add acceptance_view, a soft rubric, or predefined evaluation dimensions "
         "to SearchSpec. The harness may enable an independent ViewAgent after each "
@@ -1923,8 +1924,10 @@ def _export_goal_plus_state(
         expected_supplemental_evaluation_enabled=profile["goal_plus"].get(
             "supplemental_evaluation_enabled", False
         ),
-        expected_evidence_annotator_enabled=isinstance(
-            profile["goal_plus"]["evidence_annotator"], dict
+        expected_evidence_annotator=(
+            _goal_plus_evidence_annotator_public(profile)
+            if isinstance(profile["goal_plus"]["evidence_annotator"], dict)
+            else None
         ),
         expected_global_evidence_mode=profile["goal_plus"].get(
             "global_evidence_mode", "manual"

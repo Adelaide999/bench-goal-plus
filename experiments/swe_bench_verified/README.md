@@ -66,8 +66,10 @@ controller closes Pi pools, performs idempotent select/promote/apply closeout, e
 campaign, and only then disposes the Agent container. The separate official harness remains the sole
 owner of `resolved`.
 
-Goal Plus profiles may also run an independent Codex ViewAgent for every verifier-settled
-candidate iteration. It always writes a concise evidence description into Global Evidence View.
+Goal Plus profiles may also run an independent Codex or Pi ViewAgent for every verifier-settled
+candidate iteration. The profile freezes its host, model, reasoning, and timeout, and the resolved
+annotation task records the actual provider. It always writes a concise evidence description into
+Global Evidence View.
 The supplemental-evaluation ON condition additionally gives ViewAgent the immutable public task
 context, current cumulative diff, verifier evidence, and at most one hard-score incumbent snapshot
 per peer candidate. ViewAgent derives fresh open-ended dimensions for that commit and records only
