@@ -12,7 +12,7 @@
       "editable": true
     },
     "goal_plus": {
-      "repository": "file:///data/l00939996/bench-goal-plus-dev/local-remotes/goal-plus.git",
+      "repository": "https://github.com/ck0123/goal-plus.git",
       "checkout_dir": "goal-plus",
       "tracking_branch": "codex/pi-view-provider-fix",
       "always": true,
