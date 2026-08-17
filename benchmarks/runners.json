@@ -670,6 +670,25 @@
       }
     },
     {
+      "id": "swe-bench-verified-django-12325-goal-plus-pi-sol-deepseek-view-shared-dir-off-r4",
+      "description": "One-instance SWE-bench Verified pure Pi Goal Plus experiment with a GPT Sol MainAgent, one DeepSeek worker, a GPT Sol ViewAgent, required supplemental evaluation, shared_dir disabled, T=1800, K=1, C=1, and seeds 1-4 (R=4).",
+      "benchmarks": ["swe-bench-verified"],
+      "profile": "django-12325-goal-plus-pi-sol-deepseek-view-shared-dir-off",
+      "campaign_id_template": "swe-bench-verified-django-12325-goal-plus-pi-sol-deepseek-view-v2-shared-dir-off-30m-k1-c1-r4-{timestamp}",
+      "seeds": [1, 2, 3, 4],
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-pi"],
+        "model": "bench-openai/gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "supplemental_evaluation_enabled": true,
+        "shared_dir_enabled": false,
+        "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
       "id": "swe-bench-verified-indices-39-goal-plus-codex-pi-sol-deepseek-k4-c2",
       "description": "The 39 workbook-selected SWE-bench Verified tasks with a GPT Sol Codex MainAgent, four DeepSeek Pi workers, a GPT Sol ViewAgent, T=1800, K=4, C=2, R=1, and an internal Agent network.",
       "benchmarks": ["swe-bench-verified"],

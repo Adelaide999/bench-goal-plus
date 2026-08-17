@@ -127,6 +127,11 @@ repeat-seed experiment. It keeps the same 39 tasks and role models, freezes seed
 `T=1800,K=1,C=2,R=4`, enables `shared_dir`, and expands to 156 isolated task-attempt cells under
 one detached campaign controller.
 
+Use `swe-bench-verified-django-12325-goal-plus-pi-sol-deepseek-view-shared-dir-off-r4` for the
+single-task repeat experiment. It freezes `django__django-12325`, seeds `1,2,3,4`,
+`T=1800,K=1,C=1,R=4`, the same Pi Main/worker/View role models, required supplemental evaluation,
+Global Evidence `auto`, and `shared_dir` disabled.
+
 Supplemental evaluation sets both `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED=1` and
 `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1`, so a requested post-settlement evaluation cannot
 silently degrade into OFF. The official SWE-bench `resolved` result remains the sole hard score.
