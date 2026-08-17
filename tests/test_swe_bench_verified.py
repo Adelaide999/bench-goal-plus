@@ -1123,6 +1123,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_pi_uses_session_metrics_for_live_worker_overlap(self) -> None:
         with self.temporary_directory() as temporary:
             root = Path(temporary)
+
             self.write_goal_plus_state(
                 root,
                 max_parallel=2,
@@ -1157,6 +1158,116 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             {item["source"] for item in overlap["actual"]["intervals"]},
             {"pi_session_metrics"},
         )
+
+    def test_goal_plus_v2_observations_use_independent_comparison_receipts(
+        self,
+    ) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary) / "v2-comparison"
+            self.write_goal_plus_state(
+                root,
+                max_parallel=2,
+                session_count=2,
+                verifier_runs=2,
+                supplemental_evaluation=True,
+                evidence_annotations=True,
+                worker_host="codex",
+                worker_min_runtime_seconds=600,
+                worker_min_verifier_runs=2,
+                candidate_count=2,
+                peer_comparison=True,
+            )
+            commits = {}
+            for candidate_path in root.glob(
+                "runs/run_test/candidates/*/candidate.json"
+            ):
+                candidate = read_json(candidate_path)
+                for iteration in candidate["iterations"]:
+                    commits[(candidate["candidate_id"], iteration["iteration"])] = (
+                        iteration["git_head"]
+                    )
+            for annotation_path in root.glob(
+                "runs/run_test/candidates/*/evidence-annotations/*.json"
+            ):
+                annotation = read_json(annotation_path)
+                annotation.pop("comparison_basis", None)
+                view = annotation["view"]
+                view.pop("comparison_basis", None)
+                view.pop("acceptance_view", None)
+                view["schema_version"] = 2
+                view["attempt_commit"] = commits[
+                    (annotation["candidate_id"], annotation["iteration"])
+                ]
+                view["supplemental_evaluation"] = {
+                    "observations": [
+                        {
+                            "state": "supported",
+                            "label": "Behavioral implementation",
+                            "text": "The cumulative diff changes the target behavior.",
+                            "evidence": [
+                                {
+                                    "source": "verifier_result",
+                                    "locator": "visible verifier",
+                                    "excerpt": "The visible verifier passed.",
+                                }
+                            ],
+                        }
+                    ]
+                }
+                write_json(annotation_path, annotation)
+
+            session_path = root / "runs/run_test/agent_sessions/agent_0.json"
+            session = read_json(session_path)
+            session["global_evidence_comparisons"] = [
+                {
+                    "compared_at": "2026-08-06T12:01:30Z",
+                    "selection_mode": "explicit",
+                    "topic_id": None,
+                    "observation_refs": [
+                        {
+                            "candidate_id": "c001",
+                            "iteration": 2,
+                            "commit": commits[("c001", 2)],
+                            "observation_ordinal": 1,
+                        },
+                        {
+                            "candidate_id": "c002",
+                            "iteration": 1,
+                            "commit": commits[("c002", 1)],
+                            "observation_ordinal": 1,
+                        },
+                    ],
+                    "selected_count": 2,
+                    "candidate_cursor": None,
+                    "next_candidate_cursor": None,
+                    "remaining": 0,
+                }
+            ]
+            write_json(session_path, session)
+
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=2,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator=self.codex_annotator_contract(),
+                expected_worker_host="codex",
+            )
+
+            self.assertTrue(state["completion"]["passed"])
+            self.assertTrue(
+                state["completion"]["checks"]["dynamic_peer_comparison"][
+                    "passed"
+                ]
+            )
+            receipts = state["completion"]["checks"][
+                "global_evidence_read_receipts"
+            ]["actual"]
+            self.assertEqual(receipts["valid_comparison_count"], 1)
 
     def test_goal_plus_codex_completion_enforces_worker_minimums(self) -> None:
         with self.temporary_directory() as temporary:
