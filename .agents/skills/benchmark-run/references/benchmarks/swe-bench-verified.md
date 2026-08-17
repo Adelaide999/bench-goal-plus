@@ -26,6 +26,7 @@ profile-frozen cross-cell concurrency up to `C=2`.
 | `swe-bench-verified-sympy-16886-goal-plus-pi-smoke` | `zai/glm-5.2`, medium | `1800/1/1/1` | inherited `ZAI_API_KEY` |
 | `swe-bench-verified-sympy-16886-goal-plus-pi-luna-high-smoke` | `bench-openai/gpt-5.6-luna`, high | `1800/1/1/1` | profile-frozen `OPENAI_BASE_URL` + `OPENAI_API_KEY`, Responses |
 | `swe-bench-verified-indices-39-goal-plus-pi-sol-deepseek-k4-c2` | Pi Main/View `bench-openai/gpt-5.6-sol`, Pi workers `deepseek/deepseek-v4-flash`, medium | `1800/4/2/1` | `OPENAI_BASE_URL` + `OPENAI_API_KEY`; inherited `DEEPSEEK_API_KEY` |
+| `swe-bench-verified-indices-39-goal-plus-pi-sol-deepseek-k1-c2-r4` | Pi Main/View `bench-openai/gpt-5.6-sol`, Pi worker `deepseek/deepseek-v4-flash`, medium | `1800/1/2/4` | same two credential environment names; seeds `1,2,3,4` |
 | `swe-bench-verified-sympy-16886-goal-plus-codex-smoke` | `gpt-5.6-sol`, low | `300/1/1/1` | native Codex lifecycle smoke |
 
 The Pi credential value is never serialized. Docker receives only the selected environment variable
@@ -43,10 +44,15 @@ built-in-provider proxy. Launch and closeout receive both credential environment
 serializing either value. Supplemental evaluation is required, Global Evidence is `auto`, and the
 profile does not require a `share_dir` option.
 
+The `K=1,C=2,R=4` View v2 preset keeps the same 39-task panel, explicitly enables `shared_dir`,
+and expands its four frozen seeds into 156 isolated task-attempt cells. One detached controller
+schedules at most two cells concurrently; each cell has one Pi-bound Goal Plus worker.
+
 Supplemental ViewAgent evaluation is an optional run condition. The baseline publishes only the
-candidate evidence description. When enabled, the same independent ViewAgent also publishes fresh
-open-ended dimensions from the immutable public task context and current cumulative diff, plus
-non-directional comparisons to other candidates' settled hard-score incumbents. FrozenSpec never
+candidate evidence description. When enabled, the same independent ViewAgent publishes atomic
+supported/unresolved observations from the immutable public task context, current cumulative diff,
+and visible evidence. Workers may select observations for an independent receipt-backed comparison,
+which does not rank candidates or affect promotion. FrozenSpec never
 contains a soft rubric, and official `resolved` remains the sole hard result. A missing or malformed
 enabled output, disabled-condition output leakage, or incomplete ViewAgent task makes Goal Plus
 evidence incomplete and therefore the campaign `partial`, while preserving a valid official raw

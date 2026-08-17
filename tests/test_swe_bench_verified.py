@@ -249,6 +249,63 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(spec.methods, ("goal-plus-pi",))
         self.assertEqual(spec.concurrency(), {"T": 1800, "K": 4, "C": 2, "R": 1})
 
+    def test_verified_indices_39_pure_pi_k1_r4_plan_is_frozen(self) -> None:
+        profile = self.profile(
+            "verified-indices-39-goal-plus-pi-sol-deepseek-k1-c2"
+        )
+        k4 = self.profile(
+            "verified-indices-39-goal-plus-pi-sol-deepseek-k4-c2"
+        )
+        self.assertEqual(profile["task_ids"], k4["task_ids"])
+        self.assertEqual(profile["tasks"], k4["tasks"])
+        self.assertEqual(len(profile["task_ids"]), 39)
+        self.assertEqual(profile["methods"], ["goal-plus-pi"])
+        self.assertEqual(profile["model"], "bench-openai/gpt-5.6-sol")
+        self.assertEqual(profile["reasoning_effort"], "medium")
+        self.assertEqual(profile["wall_time_seconds"], 1800)
+        self.assertEqual(profile["concurrency"], 1)
+        self.assertEqual(profile["cell_concurrency"], 2)
+        self.assertEqual(
+            profile["goal_plus"]["worker_model"],
+            "deepseek/deepseek-v4-flash",
+        )
+        self.assertEqual(profile["goal_plus"]["worker_reasoning_effort"], "medium")
+        self.assertEqual(profile["goal_plus"]["evidence_annotator"]["kind"], "pi")
+        self.assertEqual(
+            profile["goal_plus"]["evidence_annotator"]["model"],
+            "bench-openai/gpt-5.6-sol",
+        )
+        self.assertEqual(profile["goal_plus"]["global_evidence_mode"], "auto")
+        self.assertTrue(profile["goal_plus"]["shared_dir_enabled"])
+        self.assertTrue(profile["goal_plus"]["supplemental_evaluation_enabled"])
+
+        agent = BenchmarkAgent(catalog=Catalog())
+        spec = agent.resolve_spec(
+            preset_id=(
+                "swe-bench-verified-indices-39-goal-plus-pi-"
+                "sol-deepseek-k1-c2-r4"
+            ),
+        )
+        self.assertEqual(spec.concurrency(), {"T": 1800, "K": 1, "C": 2, "R": 4})
+        self.assertEqual(spec.seeds, (1, 2, 3, 4))
+        self.assertEqual(len(profile["task_ids"]) * len(spec.seeds), 156)
+        runner = create_runner(spec.runner)
+        prepare, _ = runner.prepare_commands(spec)
+        seed_index = prepare[0].index("--seeds")
+        self.assertEqual(
+            prepare[0][seed_index : seed_index + 5],
+            ["--seeds", "1", "2", "3", "4"],
+        )
+
+        with self.assertRaisesRegex(ContractError, "preset .* is frozen"):
+            agent.resolve_spec(
+                preset_id=(
+                    "swe-bench-verified-indices-39-goal-plus-pi-"
+                    "sol-deepseek-k1-c2-r4"
+                ),
+                seeds=(7, 8, 9, 10),
+            )
+
     def test_pure_pi_role_separation_requires_complete_worker_contract(self) -> None:
         profile = self.profile(
             "verified-indices-39-goal-plus-pi-sol-deepseek-k4-c2"
@@ -1677,7 +1734,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_checkout_branch_comes_from_managed_upstream(self) -> None:
         self.assertEqual(
             managed_upstream_branch("goal_plus"),
-            "codex/pi-view-provider-fix",
+            "codex/bounded-ge-pr24-share-dir-off",
         )
 
     def test_goal_plus_container_probe_loads_pi_extension_contract(self) -> None:

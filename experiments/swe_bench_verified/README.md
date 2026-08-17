@@ -122,10 +122,17 @@ same campaign. The outer MainAgent and independent ViewAgent run through Pi with
 Evidence is `auto`; `T=1800,K=4,C=2,R=1` is profile-frozen. This profile does not depend on a
 `share_dir` option.
 
+Use `swe-bench-verified-indices-39-goal-plus-pi-sol-deepseek-k1-c2-r4` for the View v2
+repeat-seed experiment. It keeps the same 39 tasks and role models, freezes seeds `1,2,3,4`, sets
+`T=1800,K=1,C=2,R=4`, enables `shared_dir`, and expands to 156 isolated task-attempt cells under
+one detached campaign controller.
+
 Supplemental evaluation sets both `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED=1` and
 `GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1`, so a requested post-settlement evaluation cannot
 silently degrade into OFF. The official SWE-bench `resolved` result remains the sole hard score.
-Reports preserve per-iteration Global Evidence, immutable comparison bases, ViewAgent token usage,
+View v2 publishes atomic supported/unresolved observations with structured visible evidence. Worker
+comparison is an independent, receipt-backed Global Evidence read and never ranks candidates or
+changes promotion. Reports preserve per-iteration Global Evidence, comparison receipts, ViewAgent token usage,
 and completion checks proving that FrozenSpec contained no legacy soft rubric. Goal Plus also
 persists every Global Evidence read with the completed View commit references visible at that time;
 the report distinguishes a supplemental evaluation read before a later verifier from one published

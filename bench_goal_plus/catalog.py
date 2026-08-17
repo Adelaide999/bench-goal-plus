@@ -325,6 +325,20 @@ class Catalog:
             expected = entry.get("expected_profile") or {}
             if not isinstance(expected, dict):
                 raise ContractError(f"{preset_id}: expected_profile must be an object")
+            seeds = entry.get("seeds") or []
+            if (
+                not isinstance(seeds, list)
+                or any(
+                    not isinstance(seed, int)
+                    or isinstance(seed, bool)
+                    or seed < 1
+                    for seed in seeds
+                )
+                or len(set(seeds)) != len(seeds)
+            ):
+                raise ContractError(
+                    f"{preset_id}: seeds must be unique positive integers"
+                )
             self.presets[preset_id] = PresetDefinition(
                 preset_id=preset_id,
                 description=str(entry.get("description") or ""),
@@ -335,6 +349,7 @@ class Catalog:
                     if entry.get("campaign_id_template")
                     else None
                 ),
+                seeds=tuple(seeds),
                 expected_profile=expected,
             )
 

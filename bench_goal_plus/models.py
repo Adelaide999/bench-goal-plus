@@ -109,6 +109,7 @@ class PresetDefinition:
     benchmarks: tuple[str, ...]
     profile: str | None
     campaign_id_template: str | None
+    seeds: tuple[int, ...]
     expected_profile: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
@@ -118,6 +119,7 @@ class PresetDefinition:
             "benchmarks": list(self.benchmarks),
             "profile": self.profile,
             "campaign_id_template": self.campaign_id_template,
+            "seeds": list(self.seeds),
             "expected_profile": self.expected_profile,
         }
 

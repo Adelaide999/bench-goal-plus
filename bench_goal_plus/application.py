@@ -123,7 +123,8 @@ class BenchmarkAgent:
             raise ContractError("native-profile campaigns accept exactly one benchmark")
         selected_profile = profile or (preset.profile if preset else None)
         selected_methods = tuple(methods)
-        selected_seeds = tuple(seeds) or (1,)
+        requested_seeds = tuple(seeds)
+        selected_seeds = requested_seeds or (preset.seeds if preset else ()) or (1,)
         selected_conditions = tuple(conditions)
         values = (
             wall_time_seconds,
@@ -162,6 +163,11 @@ class BenchmarkAgent:
                 drift["methods"] = {
                     "expected": expected.get("methods"),
                     "requested": list(selected_methods),
+                }
+            if preset.seeds and requested_seeds and requested_seeds != preset.seeds:
+                drift["seeds"] = {
+                    "expected": list(preset.seeds),
+                    "requested": list(requested_seeds),
                 }
             if drift:
                 raise ContractError(
@@ -885,6 +891,10 @@ class BenchmarkAgent:
                 (profile.get("goal_plus") or {}).get(
                     "supplemental_evaluation_enabled"
                 )
+            )
+        if "shared_dir_enabled" in preset.expected_profile:
+            observed["shared_dir_enabled"] = (
+                (profile.get("goal_plus") or {}).get("shared_dir_enabled")
             )
         if observed != preset.expected_profile:
             raise ContractError(
