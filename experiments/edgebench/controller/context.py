@@ -6,6 +6,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from bench_goal_plus.upstreams import registered_upstream_source_path
+
 
 @dataclass(frozen=True)
 class EdgeBenchPaths:
@@ -31,7 +33,10 @@ class EdgeBenchPaths:
         return cls(
             root=resolved,
             edge_root=edge_root,
-            goal_plus_root=resolved / "third_party" / "goal-plus",
+            goal_plus_root=registered_upstream_source_path(
+                "goal_plus",
+                repository_root=resolved,
+            ),
             tasks_dir=edge_root / "tasks",
             profile_dir=resolved / "experiments" / "edgebench" / "profiles",
             official_codex_protocol_path=(

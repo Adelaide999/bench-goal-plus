@@ -12,9 +12,10 @@
       "editable": true
     },
     "goal_plus": {
-      "repository": "https://github.com/ck0123/goal-plus.git",
-      "checkout_dir": "goal-plus",
-      "tracking_branch": "main",
+      "repository": "git@gitcode.com:yiyanzhi_akane1/muyuan.git",
+      "checkout_dir": "muyuan",
+      "source_subdir": "plugins/goal-plus",
+      "tracking_branch": "master",
       "always": true,
       "editable": true
     },

@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 
 from bench_artifacts import read_json as load_json  # noqa: E402
 from bench_artifacts import utc_now, write_json  # noqa: E402
+from bench_goal_plus.upstreams import upstream_source_path  # noqa: E402
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.registry import (  # noqa: E402
     adapter_modules,
@@ -270,14 +271,22 @@ def prepare(args: argparse.Namespace) -> int:
     environment = load_json(args.environment_manifest)
     upstreams = environment["upstreams"]
     checkout_root = args.checkout_root.expanduser().absolute()
-    goal_plus_root = checkout_root / upstreams["goal_plus"]["checkout_dir"]
+    goal_plus_root = upstream_source_path(
+        checkout_root,
+        upstreams["goal_plus"],
+        upstream_key="goal_plus",
+    )
     managed_checkouts = [("goal_plus", goal_plus_root)]
     skydiscover_root = None
     if is_sky:
         skydiscover_root = checkout_root / upstreams["skydiscover"]["checkout_dir"]
         managed_checkouts.append(("skydiscover", skydiscover_root))
     if LOCAL_SOURCE_RELATIVE is None:
-        benchmark_root = checkout_root / upstreams[UPSTREAM_KEY]["checkout_dir"]
+        benchmark_root = upstream_source_path(
+            checkout_root,
+            upstreams[UPSTREAM_KEY],
+            upstream_key=UPSTREAM_KEY,
+        )
         managed_checkouts.insert(0, (UPSTREAM_KEY, benchmark_root))
         source_kind = "managed_upstream"
     else:

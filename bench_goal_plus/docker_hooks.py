@@ -12,6 +12,7 @@ from adapters.registry import load_adapter
 from .catalog import Catalog, read_json
 from .errors import ContractError
 from .paths import ROOT, UPSTREAM_REGISTRY
+from .upstreams import upstream_source_path
 
 
 HOOKS = {
@@ -26,7 +27,11 @@ def upstream_root(upstream_key: str) -> Path:
     entry = manifest.get("upstreams", {}).get(upstream_key)
     if not isinstance(entry, dict):
         raise ContractError(f"unknown upstream key: {upstream_key}")
-    return ROOT / "third_party" / str(entry["checkout_dir"])
+    return upstream_source_path(
+        ROOT / "third_party",
+        entry,
+        upstream_key=upstream_key,
+    )
 
 
 def invoke(

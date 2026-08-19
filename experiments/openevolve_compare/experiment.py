@@ -26,6 +26,7 @@ from bench_artifacts import utc_now, write_json  # noqa: E402
 from bench_goal_plus.codex_provider import (  # noqa: E402
     codex_responses_provider_args,
 )
+from bench_goal_plus.upstreams import upstream_source_path  # noqa: E402
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
     describe_task,
@@ -526,9 +527,21 @@ def prepare(args: argparse.Namespace) -> int:
     environment = load_json(args.environment_manifest)
     checkout_root = args.checkout_root.expanduser().absolute()
     upstreams = environment["upstreams"]
-    openevolve_root = checkout_root / upstreams["openevolve"]["checkout_dir"]
-    goal_plus_root = checkout_root / upstreams["goal_plus"]["checkout_dir"]
-    skydiscover_root = checkout_root / upstreams["skydiscover"]["checkout_dir"]
+    openevolve_root = upstream_source_path(
+        checkout_root,
+        upstreams["openevolve"],
+        upstream_key="openevolve",
+    )
+    goal_plus_root = upstream_source_path(
+        checkout_root,
+        upstreams["goal_plus"],
+        upstream_key="goal_plus",
+    )
+    skydiscover_root = upstream_source_path(
+        checkout_root,
+        upstreams["skydiscover"],
+        upstream_key="skydiscover",
+    )
     managed_checkouts = [
         ("openevolve", openevolve_root),
         ("goal_plus", goal_plus_root),

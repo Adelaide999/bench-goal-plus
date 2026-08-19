@@ -47,8 +47,9 @@ Q = 1 task
 
 ## Goal Plus 当前已有能力与必须整改项
 
-当前跟踪 `ck0123/goal-plus@main`；具体实验会把当次 resolved commit 写入
-manifest。该 branch 已有 Codex/Pi `parallel_loops`、单一 `max_parallel`、
+当前跟踪 Muyuan `master` 的 `plugins/goal-plus`；具体实验会把当次 Muyuan root
+resolved commit 和 Goal Plus source path 写入 manifest。该 branch 已有 Codex/Pi
+`parallel_loops`、单一 `max_parallel`、
 同 native worker continuation、verifier-backed best、Search Evidence/Schema、
 worker min/max runtime 和 usage report；benchmark-specific fixture 已从 runtime 仓迁出。
 

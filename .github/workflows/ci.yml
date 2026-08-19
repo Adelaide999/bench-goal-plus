@@ -23,7 +23,7 @@ jobs:
       - name: Materialize branch-tracked upstreams used by unit tests
         run: |
           git clone --depth 1 --branch bench-goal-plus https://github.com/ck0123/openevolve.git third_party/openevolve
-          git clone --depth 1 --branch main https://github.com/ck0123/goal-plus.git third_party/goal-plus
+          git clone --depth 1 --branch master https://gitcode.com/yiyanzhi_akane1/muyuan.git third_party/muyuan
           git clone --depth 1 --branch mac https://github.com/ck0123/EdgeBench.git third_party/edgebench
 
       - name: Create the locked test environment
@@ -32,7 +32,7 @@ jobs:
           uv pip install --python .bench-env/venv/bin/python -r environment/requirements.lock
           uv pip install --python .bench-env/venv/bin/python --no-build-isolation --no-deps \
             -e third_party/openevolve \
-            -e third_party/goal-plus \
+            -e third_party/muyuan/plugins/goal-plus \
             -e third_party/edgebench
 
       - name: Validate registries and documentation contracts

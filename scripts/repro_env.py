@@ -27,6 +27,10 @@ from bench_runtime_paths import (  # noqa: E402
     configure_temp_environment,
     ensure_temp_root,
 )
+from bench_goal_plus.upstreams import (  # noqa: E402
+    upstream_checkout_path,
+    upstream_source_path,
+)
 
 
 DEFAULT_MANIFEST = ROOT / "environment/upstreams.json"
@@ -68,6 +72,10 @@ def load_manifest(path: Path) -> dict[str, Any]:
             raise RuntimeError(f"{name}: unsafe tracking_branch {branch!r}")
         if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch) is None:
             raise RuntimeError(f"{name}: invalid tracking_branch {branch!r}")
+        try:
+            upstream_source_path(Path("."), entry, upstream_key=name)
+        except ValueError as error:
+            raise RuntimeError(str(error)) from error
     return payload
 
 
@@ -107,7 +115,22 @@ def checkout_paths(
     include_always: bool = True,
 ) -> dict[str, Path]:
     return {
-        name: checkout_root / entry["checkout_dir"]
+        name: upstream_checkout_path(checkout_root, entry, upstream_key=name)
+        for name, entry in selected_upstreams(
+            manifest, only, include_always=include_always
+        ).items()
+    }
+
+
+def source_paths(
+    manifest: dict[str, Any],
+    checkout_root: Path,
+    only: list[str] | None = None,
+    *,
+    include_always: bool = True,
+) -> dict[str, Path]:
+    return {
+        name: upstream_source_path(checkout_root, entry, upstream_key=name)
         for name, entry in selected_upstreams(
             manifest, only, include_always=include_always
         ).items()
@@ -590,7 +613,11 @@ def collect_repository_updates(
     chosen = selected_upstreams(manifest, only)
     for name, entry in chosen.items():
         sources.append(
-            (name, checkout_root / entry["checkout_dir"], entry)
+            (
+                name,
+                upstream_checkout_path(checkout_root, entry, upstream_key=name),
+                entry,
+            )
         )
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=min(8, max(1, len(sources)))
@@ -853,6 +880,9 @@ def collect_doctor(
     paths = checkout_paths(
         manifest, checkout_root, only, include_always=include_always
     )
+    sources = source_paths(
+        manifest, checkout_root, only, include_always=include_always
+    )
     checks: list[dict[str, Any]] = []
     checks.append(
         {
@@ -870,6 +900,7 @@ def collect_doctor(
     for name, entry in chosen.items():
         branch = entry["tracking_branch"]
         state = git_state(paths[name], branch)
+        source_exists = sources[name].is_dir()
         checkout_matches = bool(
             state["is_git"]
             and state["branch"] == branch
@@ -878,6 +909,7 @@ def collect_doctor(
             and normalize_repository(state["origin_url"])
             == normalize_repository(entry["repository"])
             and state["dirty"] is False
+            and source_exists
         )
         required = only is None or name in set(only)
         checks.append(
@@ -888,6 +920,8 @@ def collect_doctor(
                 "checkout_matches": checkout_matches,
                 "expected_branch": branch,
                 "expected_repository": entry["repository"],
+                "source_path": str(sources[name]),
+                "source_exists": source_exists,
                 **state,
                 "origin_url": redact_git_text(state["origin_url"]),
             }
@@ -996,10 +1030,17 @@ def bootstrap_environment(args: argparse.Namespace) -> dict[str, Any]:
         manifest, args.only, include_always=include_always
     )
     for name, entry in chosen.items():
-        ensure_checkout(checkout_root / entry["checkout_dir"], entry)
+        ensure_checkout(
+            upstream_checkout_path(checkout_root, entry, upstream_key=name),
+            entry,
+        )
     if "edgebench" in chosen:
         ensure_edgebench_rust_runtime(
-            checkout_root / chosen["edgebench"]["checkout_dir"]
+            upstream_checkout_path(
+                checkout_root,
+                chosen["edgebench"],
+                upstream_key="edgebench",
+            )
         )
 
     uv = shutil.which(args.uv)
@@ -1023,7 +1064,7 @@ def bootstrap_environment(args: argparse.Namespace) -> dict[str, Any]:
             [uv, "pip", "install", "--python", str(python), "-r", str(args.lock)],
             capture=False,
         )
-        paths = checkout_paths(
+        paths = source_paths(
             manifest, checkout_root, args.only, include_always=include_always
         )
         editable_paths = [

@@ -503,7 +503,7 @@ def start_campaign_cell(
                 ],
                 "temp": ".tmp",
                 "goal_plus_source": (
-                    "third_party/goal-plus"
+                    io.portable_path(current_paths().goal_plus_root)
                     if cell["method"] in GOAL_PLUS_METHODS
                     else None
                 ),

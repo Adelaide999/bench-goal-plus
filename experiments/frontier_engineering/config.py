@@ -8,12 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from bench_goal_plus.upstreams import registered_upstream_source_path
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIR = Path(__file__).resolve().parent / "profiles"
 RUNS_ROOT = ROOT / "runs" / "frontier-engineering"
 UPSTREAM_ROOT = ROOT / "third_party" / "frontier-engineering"
-GOAL_PLUS_ROOT = ROOT / "third_party" / "goal-plus"
+GOAL_PLUS_ROOT = registered_upstream_source_path(
+    "goal_plus",
+    repository_root=ROOT,
+)
 SAFE_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
 SUPPORTED_METHODS = {
     "openevolve",

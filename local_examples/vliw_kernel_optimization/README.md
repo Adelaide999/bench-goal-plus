@@ -17,7 +17,8 @@ starter solution 应在 public 和 held-out case 上都通过，主 workload 为
 
 ## 标准 Plain Codex / Goal Plus 入口
 
-先按根目录 `AGENTS.md` 建立 `.bench-env` 和 `third_party/goal-plus`，然后：
+先按根目录 `AGENTS.md` 建立 `.bench-env` 和受管
+`third_party/muyuan/plugins/goal-plus` source，然后：
 
 ```bash
 .bench-env/venv/bin/python experiments/benchmark_compare/experiment.py prepare \

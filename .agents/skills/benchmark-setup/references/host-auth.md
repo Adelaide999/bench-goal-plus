@@ -19,7 +19,7 @@
 | 宿主 loopback API | 当前 EdgeBench controller 不支持把 `127.0.0.1` API 从 Mac 桥入容器；使用容器可达的非 loopback URL | 需要 `ip`、`systemd-socket-activate` 和 `systemd-socket-proxyd` |
 | API-only Agent 网络 | Docker VM 无法满足 SForge host `iptables` gate 时不得启动 EdgeBench Agent 测评 | 需要 SForge 可使用 passwordless `sudo iptables` 完成 Judge + LLM API allowlist |
 | Codex container runtime | 需要 Linux x64 Codex runtime cache | 同样需要 Linux x64 Codex runtime cache |
-| Goal Plus container runtime | controller 会把受管 Goal Plus checkout 复制进容器；不能复制 macOS Python/venv | 可选复制兼容目标镜像的 Linux x64 便携 Python；普通 host venv 不能直接复用 |
+| Goal Plus container runtime | controller 会把受管 Goal Plus source directory 复制进容器；不能复制 macOS Python/venv | 可选复制兼容目标镜像的 Linux x64 便携 Python；普通 host venv 不能直接复用 |
 
 两种 host 都必须通过 benchmark-native doctor。macOS 能跑 local smoke 不等于官方
 offline/network-isolated protocol 已满足；正式 Linux 运行也不能跳过 bridge、resource limit
@@ -149,7 +149,7 @@ URL 必须通过 Linux socket bridge，并依次通过 host Responses、task-con
 容器内 `pi --offline --list-models bench-openai`。任一失败都不得回退到 `chatgpt.com`、OAuth
 或 Z.AI provider。
 
-Goal Plus + Pi 的 host Node、Pi package 和受管 Goal Plus checkout 只读挂载进精确 task
+Goal Plus + Pi 的 host Node、Pi package 和受管 Goal Plus source directory 只读挂载进精确 task
 image。Python 依赖来自 `environment/swe-bench-goal-plus-requirements.lock`，安装到一次性
 容器的 `/opt/goal-plus-runtime` tmpfs；唯一持久可写依赖缓存是仓库内
 `.tmp/swe-bench-verified/goal-plus-pip-cache`。doctor 必须同时验证 Pi 精确 model、Goal Plus
@@ -290,8 +290,8 @@ model 和 credential source；它不会把 Pi provider 错配为 `openai-codex`�
 不需要 Skill 在容器里手工
 拼安装命令。当前真实路径是：
 
-- controller 设置 `SFORGE_GOAL_PLUS_SOURCE_DIR`，`prepare_container` 把受管
-  Goal Plus checkout 复制到 `/opt/goal-plus`，因此不会在每个任务里重新 clone；
+- controller 设置 `SFORGE_GOAL_PLUS_SOURCE_DIR`，`prepare_container` 把 Muyuan 受管
+  checkout 中的 `plugins/goal-plus` source directory 复制到 `/opt/goal-plus`，因此不会在每个任务里重新 clone；
 - SForge 接受 `SFORGE_GOAL_PLUS_PYTHON_DIR`，把 Linux Python 3.10+ runtime
   复制到 `/opt/sforge-python`；该目录必须与 Work container 的平台兼容，macOS
   Python 或 macOS venv 不能使用；

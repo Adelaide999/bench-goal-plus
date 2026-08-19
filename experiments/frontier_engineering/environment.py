@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from bench_runtime_paths import configure_temp_environment
+from bench_goal_plus.upstreams import registered_upstream_branch
 
 from .config import (
     GOAL_PLUS_ROOT,
@@ -573,7 +574,13 @@ def doctor(
         checks.append(_openevolve_config_check(profile))
     managed_checkouts = [("frontier_engineering", UPSTREAM_ROOT, "main")]
     if any(method.startswith("goal-plus-") for method in profile["methods"]):
-        managed_checkouts.append(("goal_plus", GOAL_PLUS_ROOT, "main"))
+        managed_checkouts.append(
+            (
+                "goal_plus",
+                GOAL_PLUS_ROOT,
+                registered_upstream_branch("goal_plus", repository_root=ROOT),
+            )
+        )
     for name, root, expected_branch in managed_checkouts:
         branch = git_value(root, "symbolic-ref", "--short", "HEAD")
         dirty = git_value(root, "status", "--porcelain")

@@ -15,7 +15,8 @@ bench-goal-plus/
 ├── .bench-env/venv/        可重建的本机 Python runtime，Git ignored
 ├── third_party/            所有 branch-tracked 上游 checkout，Git ignored
 │   ├── openevolve/
-│   ├── goal-plus/
+│   ├── muyuan/
+│   │   └── plugins/goal-plus/  Goal Plus source_subdir
 │   ├── heurigym/
 │   └── ...                 其他 benchmark/search backend
 └── runs/.../workspace/     每次实验的独立 Git workspace，Git ignored
@@ -61,7 +62,7 @@ Git 探测。单 target 的 `check --benchmark ... --profile ...` 仍然严格�
 
 1. 把当前进程和所有子进程的 `TMPDIR`、`TMP`、`TEMP` 固定到本仓 `.tmp/`，不依赖 `/tmp`、`/private/tmp` 或 `/var/tmp`；
 2. 读取 `environment/upstreams.json`；
-3. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，checkout 到 manifest 指定 branch，并对 clean checkout 做 fast-forward-only 更新；
+3. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，checkout 到 manifest 指定 branch，并对 clean checkout 做 fast-forward-only 更新；声明 `source_subdir` 的 monorepo 只把对应子目录交给 editable install 和 runner；
 4. 选中 EdgeBench 时，依次尝试 rsproxy、SJTU mirror 和官方源，把 Rust 1.88.0 Linux x64 distribution 下载到宿主机 `~/.cache/sforge/rust/` 并核对官方固定 SHA256，供 Rust Work/Judge 镜像缺少工具链时离线注入；
 5. 创建 `.bench-env/venv` 的 Python 3.12 环境；
 6. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的 OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
@@ -103,8 +104,12 @@ Frontier-Engineering、HeuriGym、Frontier-CS 和 OpenEvolve worker 分别使用
 ```text
 third_party/{ale-bench,autolab,frontier-cs,frontier-engineering,
              edgebench,heurigym,swarmresearch,swarmresearch-paper-reproduce,
-             skydiscover,openevolve,goal-plus}
+             skydiscover,openevolve,muyuan}
 ```
+
+`goal_plus` upstream 的 Git checkout 是 `third_party/muyuan`，其唯一运行时 source
+是 registry 声明的 `third_party/muyuan/plugins/goal-plus`。Git branch、origin、dirty
+state 和 resolved commit 在 Muyuan root 核对；安装、容器复制和只读挂载只使用插件子目录。
 
 runner 不再依赖 `code/` 下的旁路 checkout。`environment/upstreams.json` 是
 目录名、fork 和 tracking branch 的唯一安装清单；出现失败的 staging checkout 时脚本
@@ -177,7 +182,7 @@ ALE 使用官方 `ale-bench:cpp20-202301` 镜像。首次 evaluator 会构建 Ru
 
 这一步复用当次 branch snapshot 的 OpenEvolve evaluator，不调用模型。Goal Plus
 的 project `.codex` assets 会从 managed checkout 复制到 run-local workspace；
-该 OpenEvolve/Goal Plus commit 会写入 manifest。prepare 完成时 `.gp/` 尚不存在，
+该 OpenEvolve/Muyuan root commit 和 Goal Plus source path 会写入 manifest。prepare 完成时 `.gp/` 尚不存在，
 只有真正发送自然 `/goal-plus` prompt 后才会在该 workspace 内生成。脚本不会自动删除 run directory。
 
 ## 跑四条路径

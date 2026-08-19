@@ -41,8 +41,8 @@ class ReproEnvironmentTest(unittest.TestCase):
         checkout = {
             **root_check,
             "name": "goal_plus",
-            "path": str(ROOT / "third_party/goal-plus"),
-            "repository": "https://example.invalid/goal-plus.git",
+            "path": str(ROOT / "third_party/muyuan"),
+            "repository": "https://example.invalid/muyuan.git",
         }
         if not current:
             checkout.update(
@@ -87,9 +87,31 @@ class ReproEnvironmentTest(unittest.TestCase):
                 upstream["tracking_branch"], r"^[A-Za-z0-9][A-Za-z0-9._/-]*$"
             )
             self.assertNotIn("pinned_commit", upstream)
-            self.assertTrue(upstream["repository"].startswith("https://github.com/"))
             self.assertNotIn("/Users/", upstream["checkout_dir"])
             self.assertEqual(Path(upstream["checkout_dir"]).parent, Path("."))
+        goal_plus = manifest["upstreams"]["goal_plus"]
+        self.assertEqual(
+            goal_plus["repository"],
+            "git@gitcode.com:yiyanzhi_akane1/muyuan.git",
+        )
+        self.assertEqual(goal_plus["checkout_dir"], "muyuan")
+        self.assertEqual(goal_plus["source_subdir"], "plugins/goal-plus")
+        self.assertEqual(goal_plus["tracking_branch"], "master")
+        self.assertTrue(
+            all(
+                upstream["repository"].startswith("https://github.com/")
+                for name, upstream in manifest["upstreams"].items()
+                if name != "goal_plus"
+            )
+        )
+        self.assertEqual(
+            repro_env.checkout_paths(manifest, ROOT / "third_party")["goal_plus"],
+            ROOT / "third_party" / "muyuan",
+        )
+        self.assertEqual(
+            repro_env.source_paths(manifest, ROOT / "third_party")["goal_plus"],
+            ROOT / "third_party" / "muyuan" / "plugins" / "goal-plus",
+        )
         selected = repro_env.selected_upstreams(manifest, ["heurigym"])
         self.assertEqual(set(selected), {"openevolve", "goal_plus", "heurigym"})
         exact = repro_env.selected_upstreams(
@@ -113,6 +135,28 @@ class ReproEnvironmentTest(unittest.TestCase):
             manifest["upstreams"]["openevolve"]["tracking_branch"],
             task_catalog["upstream"]["tracking_branch"],
         )
+
+    def test_manifest_rejects_escaping_source_subdirectory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "upstreams.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "upstreams": {
+                            "goal_plus": {
+                                "repository": "https://example.invalid/muyuan.git",
+                                "checkout_dir": "muyuan",
+                                "source_subdir": "../goal-plus",
+                                "tracking_branch": "master",
+                            }
+                        },
+                    }
+                )
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "unsafe source_subdir"):
+                repro_env.load_manifest(manifest_path)
 
     def test_checkout_follows_branch_and_fast_forwards(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

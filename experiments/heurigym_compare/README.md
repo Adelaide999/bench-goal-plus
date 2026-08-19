@@ -23,7 +23,8 @@ python3 scripts/repro_env.py doctor --only heurigym
 ```
 
 The resulting checkouts are `third_party/openevolve`,
-`third_party/goal-plus`, and `third_party/heurigym`. Do not copy `.bench-env`
+`third_party/muyuan`, and `third_party/heurigym`; Goal Plus is resolved from
+`third_party/muyuan/plugins/goal-plus`. Do not copy `.bench-env`
 or `third_party` to another machine; rerun bootstrap there.
 
 ## Prepare and run

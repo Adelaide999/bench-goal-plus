@@ -8,12 +8,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from bench_goal_plus.upstreams import registered_upstream_source_path
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIR = Path(__file__).resolve().parent / "profiles"
 RUNS_ROOT = ROOT / "runs" / "swe-bench-verified"
 SWEBENCH_ROOT = ROOT / "third_party" / "swebench"
-GOAL_PLUS_ROOT = ROOT / "third_party" / "goal-plus"
+GOAL_PLUS_ROOT = registered_upstream_source_path(
+    "goal_plus",
+    repository_root=ROOT,
+)
 UPSTREAM_MANIFEST = ROOT / "environment" / "upstreams.json"
 SUPPORTED_METHODS = {
     "plain-codex",
