@@ -65,6 +65,22 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if payload.get("schema_version") != 2:
         raise RuntimeError("unsupported environment manifest schema")
     for name, entry in payload.get("upstreams", {}).items():
+        repository = entry.get("repository")
+        if not isinstance(repository, str) or not repository:
+            raise RuntimeError(f"{name}: repository is required")
+        repository_fallbacks = entry.get("repository_fallbacks", [])
+        if not isinstance(repository_fallbacks, list) or any(
+            not isinstance(value, str) or not value
+            for value in repository_fallbacks
+        ):
+            raise RuntimeError(f"{name}: repository_fallbacks must be a list of URLs")
+        if any(
+            normalize_repository(value) != normalize_repository(repository)
+            for value in repository_fallbacks
+        ):
+            raise RuntimeError(
+                f"{name}: repository_fallbacks must identify the same repository"
+            )
         branch = entry.get("tracking_branch")
         if not isinstance(branch, str) or not branch:
             raise RuntimeError(f"{name}: tracking_branch is required")
@@ -157,6 +173,39 @@ def repository_transport_url(value: str) -> str:
     return normalized
 
 
+def repository_transport_urls(entry: dict[str, Any]) -> list[str]:
+    urls = [entry["repository"], *entry.get("repository_fallbacks", [])]
+    derived_transport = repository_transport_url(entry["repository"])
+    if derived_transport not in urls:
+        urls.append(derived_transport)
+    return list(dict.fromkeys(urls))
+
+
+def repository_matches(entry: dict[str, Any], value: str | None) -> bool:
+    normalized = normalize_repository(value)
+    return normalized is not None and any(
+        normalized == normalize_repository(repository)
+        for repository in repository_transport_urls(entry)
+    )
+
+
+def repository_fallback_commands(
+    command: list[str],
+    entry: dict[str, Any],
+    *,
+    configured_url: str | None,
+) -> list[list[str]]:
+    configured = configured_url.rstrip("/") if configured_url else None
+    commands: list[list[str]] = []
+    for repository in repository_transport_urls(entry):
+        if configured is not None and repository.rstrip("/") == configured:
+            continue
+        fallback = list(command)
+        fallback[fallback.index("origin")] = repository
+        commands.append(fallback)
+    return commands
+
+
 def redact_git_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -174,15 +223,22 @@ def _git_network_environment(*, ignore_global_config: bool) -> dict[str, str]:
 
 def run_remote_git(
     primary: list[str],
-    fallback: list[str],
+    fallbacks: list[list[str]],
     *,
     check: bool,
     timeout: int,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     failures: list[str] = []
-    attempts = (
-        (primary, False, "configured-remote"),
-        (fallback, True, "manifest-repository"),
+    attempts = [(primary, False, "configured-remote")]
+    attempts.extend(
+        (
+            command,
+            True,
+            "manifest-repository"
+            if index == 0
+            else f"manifest-repository-{index + 1}",
+        )
+        for index, command in enumerate(fallbacks)
     )
     for command, ignore_global_config, transport in attempts:
         try:
@@ -300,13 +356,14 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
                 f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
             ]
         )
-        fallback_fetch = list(fetch_command)
-        fallback_fetch[fallback_fetch.index("origin")] = repository_transport_url(
-            entry["repository"]
+        fallback_fetches = repository_fallback_commands(
+            fetch_command,
+            entry,
+            configured_url=entry["repository"],
         )
         run_remote_git(
             fetch_command,
-            fallback_fetch,
+            fallback_fetches,
             check=True,
             timeout=300,
         )
@@ -342,9 +399,7 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
         raise RuntimeError(f"existing checkout path is not a Git repository: {path}")
     if state["dirty"]:
         raise RuntimeError(f"checkout has local changes and will not be used: {path}")
-    if normalize_repository(state["origin_url"]) != normalize_repository(
-        entry["repository"]
-    ):
+    if not repository_matches(entry, state["origin_url"]):
         raise RuntimeError(
             f"origin mismatch for {path}: expected {entry['repository']}, "
             f"got {redact_git_text(state['origin_url'])}; use a separate checkout root"
@@ -358,13 +413,14 @@ def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
             f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
         ]
     )
-    fallback_fetch = list(fetch_command)
-    fallback_fetch[fallback_fetch.index("origin")] = repository_transport_url(
-        entry["repository"]
+    fallback_fetches = repository_fallback_commands(
+        fetch_command,
+        entry,
+        configured_url=state["origin_url"],
     )
     run_remote_git(
         fetch_command,
-        fallback_fetch,
+        fallback_fetches,
         check=True,
         timeout=300,
     )
@@ -468,16 +524,13 @@ def advertised_remote_head(
     branch = entry["tracking_branch"]
     reference = f"refs/heads/{branch}"
     primary = ["git", "-C", str(path), "ls-remote", "--exit-code", "origin", reference]
-    fallback = [
-        "git",
-        "ls-remote",
-        "--exit-code",
-        repository_transport_url(entry["repository"]),
-        reference,
+    fallbacks = [
+        ["git", "ls-remote", "--exit-code", repository, reference]
+        for repository in repository_transport_urls(entry)
     ]
     result, transport = run_remote_git(
         primary,
-        fallback,
+        fallbacks,
         check=False,
         timeout=30,
     )
@@ -515,9 +568,7 @@ def repository_update_check(
         blockers.append("checkout path is not a Git repository")
     if state["dirty"]:
         blockers.append("checkout has local changes")
-    if state["origin_url"] and normalize_repository(
-        state["origin_url"]
-    ) != normalize_repository(entry["repository"]):
+    if state["origin_url"] and not repository_matches(entry, state["origin_url"]):
         blockers.append("origin does not match the registered repository")
     if state["branch"] not in (None, branch):
         blockers.append(
@@ -545,6 +596,10 @@ def repository_update_check(
         "path": str(path),
         "branch": branch,
         "repository": redact_git_text(entry["repository"]),
+        "repository_fallbacks": [
+            redact_git_text(value)
+            for value in entry.get("repository_fallbacks", [])
+        ],
         "passed": passed,
         "current_head": state["head"],
         "advertised_head": remote["head"],
@@ -906,8 +961,7 @@ def collect_doctor(
             and state["branch"] == branch
             and state["upstream"] == f"origin/{branch}"
             and state["head"] == state["remote_head"]
-            and normalize_repository(state["origin_url"])
-            == normalize_repository(entry["repository"])
+            and repository_matches(entry, state["origin_url"])
             and state["dirty"] is False
             and source_exists
         )
@@ -920,6 +974,7 @@ def collect_doctor(
                 "checkout_matches": checkout_matches,
                 "expected_branch": branch,
                 "expected_repository": entry["repository"],
+                "expected_repositories": repository_transport_urls(entry),
                 "source_path": str(sources[name]),
                 "source_exists": source_exists,
                 **state,

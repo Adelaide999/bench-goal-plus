@@ -92,7 +92,24 @@ class ReproEnvironmentTest(unittest.TestCase):
         goal_plus = manifest["upstreams"]["goal_plus"]
         self.assertEqual(
             goal_plus["repository"],
-            "git@gitcode.com:yiyanzhi_akane1/muyuan.git",
+            "https://gitcode.com/yiyanzhi_akane1/muyuan.git",
+        )
+        self.assertEqual(
+            goal_plus["repository_fallbacks"],
+            ["git@gitcode.com:yiyanzhi_akane1/muyuan.git"],
+        )
+        self.assertEqual(
+            repro_env.repository_transport_urls(goal_plus),
+            [
+                "https://gitcode.com/yiyanzhi_akane1/muyuan.git",
+                "git@gitcode.com:yiyanzhi_akane1/muyuan.git",
+            ],
+        )
+        self.assertEqual(
+            repro_env.normalize_repository(goal_plus["repository"]),
+            repro_env.normalize_repository(
+                "git@gitcode.com:yiyanzhi_akane1/muyuan.git"
+            ),
         )
         self.assertEqual(goal_plus["checkout_dir"], "muyuan")
         self.assertEqual(goal_plus["source_subdir"], "plugins/goal-plus")
@@ -156,6 +173,30 @@ class ReproEnvironmentTest(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(RuntimeError, "unsafe source_subdir"):
+                repro_env.load_manifest(manifest_path)
+
+    def test_manifest_rejects_fallback_for_a_different_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "upstreams.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "upstreams": {
+                            "goal_plus": {
+                                "repository": "https://gitcode.com/org/muyuan.git",
+                                "repository_fallbacks": [
+                                    "git@gitcode.com:other/muyuan.git"
+                                ],
+                                "checkout_dir": "muyuan",
+                                "tracking_branch": "master",
+                            }
+                        },
+                    }
+                )
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "same repository"):
                 repro_env.load_manifest(manifest_path)
 
     def test_checkout_follows_branch_and_fast_forwards(self) -> None:
@@ -578,6 +619,18 @@ class ReproEnvironmentTest(unittest.TestCase):
             "https://github.com/example/project.git",
         )
         self.assertEqual(
+            repro_env.normalize_repository(
+                "git@gitcode.com:yiyanzhi_akane1/muyuan.git"
+            ),
+            "https://gitcode.com/yiyanzhi_akane1/muyuan",
+        )
+        self.assertEqual(
+            repro_env.repository_transport_url(
+                "git@gitcode.com:yiyanzhi_akane1/muyuan.git"
+            ),
+            "https://gitcode.com/yiyanzhi_akane1/muyuan.git",
+        )
+        self.assertEqual(
             repro_env.repository_transport_url("/tmp/project.git"),
             "/tmp/project.git",
         )
@@ -586,6 +639,33 @@ class ReproEnvironmentTest(unittest.TestCase):
                 "fatal: https://user:secret@example.invalid/project.git"
             ),
             "fatal: https://<redacted>@example.invalid/project.git",
+        )
+
+    def test_remote_git_tries_every_registered_transport(self) -> None:
+        primary = ["git", "fetch", "origin"]
+        https_fallback = ["git", "fetch", "https://example.invalid/repo.git"]
+        ssh_fallback = ["git", "fetch", "git@example.invalid:repo.git"]
+        responses = [
+            subprocess.CompletedProcess(primary, 1, "", "origin failed"),
+            subprocess.CompletedProcess(
+                https_fallback, 1, "", "https failed"
+            ),
+            subprocess.CompletedProcess(ssh_fallback, 0, "fetched", ""),
+        ]
+
+        with patch.object(repro_env, "run", side_effect=responses) as run:
+            result, transport = repro_env.run_remote_git(
+                primary,
+                [https_fallback, ssh_fallback],
+                check=True,
+                timeout=30,
+            )
+
+        self.assertEqual(result.stdout, "fetched")
+        self.assertEqual(transport, "manifest-repository-2")
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [primary, https_fallback, ssh_fallback],
         )
 
     def test_edgebench_rust_runtime_download_is_pinned_and_atomic(self) -> None:

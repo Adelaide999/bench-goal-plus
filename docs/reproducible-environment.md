@@ -68,6 +68,14 @@ Git 探测。单 target 的 `check --benchmark ... --profile ...` 仍然严格�
 6. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的 OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
 7. 写入 ignored 的 `.bench-env/state.json` 并运行同一套 doctor 检查。
 
+Goal Plus 所在的 Muyuan 仓库默认使用 HTTPS 拉取，因此没有配置 GitCode SSH key
+的机器也能直接 bootstrap。已有 checkout 若使用
+`git@gitcode.com:yiyanzhi_akane1/muyuan.git` 作为 origin 仍会被识别为同一个仓库；
+manifest 通过 `repository` 与 `repository_fallbacks` 同时登记 HTTPS 和 SSH 地址。
+脚本先使用已配置的 origin，再依次尝试另一种已登记协议：新环境默认走 HTTPS，HTTPS
+不可用但已配置 SSH key 时可以回退到 SSH；已有 SSH origin 失败时也可以回退到 HTTPS。
+脚本不会强制改写现有 origin。
+
 如果 checkout dirty、origin/branch 不符、包含未 push commit 或无法
 fast-forward，脚本会停止并显示差异，不会 reset 或删除用户工作；正常落后于
 远端 branch 时会自动 fast-forward。clone 先写入精确的
