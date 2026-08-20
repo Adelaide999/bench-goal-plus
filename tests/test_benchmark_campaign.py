@@ -29,6 +29,8 @@ class BenchmarkConditionTest(unittest.TestCase):
                 "frontier-engineering-malloclab",
                 "heurigym",
                 "local-vliw",
+                "zsoft-detect",
+                "zsoft-l1",
             },
         )
         loaded = load_adapter("local-vliw")
@@ -36,6 +38,16 @@ class BenchmarkConditionTest(unittest.TestCase):
         self.assertEqual(
             loaded.manifest_contract()["verification_owner"],
             "benchmark controller",
+        )
+
+    def test_zsoft_adapter_uses_managed_upstream_subdirectory(self) -> None:
+        self.addCleanup(standalone.configure_adapter, "heurigym")
+        standalone.configure_adapter("zsoft-detect")
+
+        self.assertIsNone(standalone.LOCAL_SOURCE_RELATIVE)
+        self.assertEqual(
+            standalone.UPSTREAM_SUBDIR,
+            "benchmarks/vulnerability/zsoft-detect",
         )
 
     def test_condition_resolution_uses_real_runtime_boundaries(self) -> None:
@@ -108,6 +120,19 @@ class BenchmarkConditionTest(unittest.TestCase):
             ),
         )
 
+    def test_copy_artifact_preserves_directory_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "submission"
+            source.mkdir()
+            (source / "finding.json").write_text("{}\n")
+            destination = root / "saved-submission"
+
+            standalone.copy_artifact(source, destination)
+
+            self.assertTrue(destination.is_dir())
+            self.assertEqual((destination / "finding.json").read_text(), "{}\n")
+
 
 class BenchmarkCampaignTest(unittest.TestCase):
     def test_markdown_explains_incomplete_cells(self) -> None:
@@ -176,6 +201,30 @@ class BenchmarkCampaignTest(unittest.TestCase):
             self.assertEqual(payload["conditions"], [])
             self.assertEqual(payload["cells"][0]["method"], "goal-plus-codex")
             self.assertIsNone(payload["cells"][0]["condition"])
+
+    def test_prepare_passes_single_benchmark_task_selector(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = campaign.build_parser().parse_args(
+                [
+                    "prepare",
+                    "--campaign-dir",
+                    str(root / "campaign"),
+                    "--benchmarks",
+                    "zsoft-detect",
+                    "--task-id",
+                    "libxml2-detect",
+                    "--methods",
+                    "goal-plus-pi",
+                ]
+            )
+            with mock.patch.object(standalone, "prepare", return_value=0) as prepared:
+                self.assertEqual(campaign.prepare_campaign(args), 0)
+
+            prepared_args = prepared.call_args.args[0]
+            self.assertEqual(prepared_args.task_id, "libxml2-detect")
+            payload = json.loads((root / "campaign/campaign.json").read_text())
+            self.assertEqual(payload["task_id"], "libxml2-detect")
 
     def test_prepare_expands_paired_condition_seed_matrix(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
