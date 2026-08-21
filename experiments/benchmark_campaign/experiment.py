@@ -78,11 +78,15 @@ def prepare_cell_config(
     return standalone.PrepareConfig(
         benchmark=benchmark_id,
         method=method,
+        task_id=args.task_id,
         condition=condition_id,
         coordination_variant=(
             condition.coordination_variant if condition is not None else None
         ),
         model=args.model,
+        pi_provider_id=args.pi_provider_id,
+        pi_api=args.pi_api,
+        pi_api_key_env=args.pi_api_key_env,
         wall_time_seconds=args.wall_time_seconds,
         concurrency=concurrency,
         soft_closeout_seconds=args.soft_closeout_seconds,
@@ -104,6 +108,8 @@ def prepare_campaign(args: argparse.Namespace) -> int:
         raise ValueError(f"unknown benchmark adapters: {', '.join(sorted(unknown))}")
     if len(set(args.benchmarks)) != len(args.benchmarks):
         raise ValueError("benchmark ids must be unique")
+    if args.task_id is not None and len(args.benchmarks) != 1:
+        raise ValueError("--task-id requires exactly one benchmark")
     if len(set(args.conditions)) != len(args.conditions):
         raise ValueError("conditions must be unique")
     if len(set(args.methods)) != len(args.methods):
@@ -139,6 +145,7 @@ def prepare_campaign(args: argparse.Namespace) -> int:
         "state": "preparing",
         "prepared_at": utc_now(),
         "benchmarks": args.benchmarks,
+        "task_id": args.task_id,
         "conditions": list(selected_conditions),
         "methods": args.methods,
         "seeds": args.seeds,
@@ -276,6 +283,9 @@ def run_campaign(args: argparse.Namespace) -> int:
                 model=args.model,
                 codex_bin=args.codex_bin,
                 api_base=api_base,
+                pi_provider_id=args.pi_provider_id,
+                pi_api=args.pi_api,
+                pi_api_key_env=args.pi_api_key_env,
             ).to_namespace()
             try:
                 returncode = standalone.execute(run_args)
@@ -781,6 +791,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--benchmarks", nargs="+", choices=tuple(adapter_modules()), required=True
     )
     prepare_parser.add_argument(
+        "--task-id",
+        help="adapter-specific task selector; requires exactly one benchmark",
+    )
+    prepare_parser.add_argument(
         "--conditions", nargs="+", choices=tuple(CONDITIONS), default=[]
     )
     prepare_parser.add_argument(
@@ -797,6 +811,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--model", default=standalone.DEFAULT_MODEL)
     run_parser.add_argument("--codex-bin", default="codex")
     run_parser.add_argument("--api-base")
+    run_parser.add_argument("--pi-provider-id", default=standalone.PI_PROVIDER_ID)
+    run_parser.add_argument(
+        "--pi-api", choices=standalone.PI_APIS, default="openai-responses"
+    )
+    run_parser.add_argument(
+        "--pi-api-key-env", default=standalone.PI_API_KEY_ENV
+    )
     run_parser.add_argument("--conditions", nargs="+", choices=tuple(CONDITIONS))
     run_parser.add_argument("--fail-fast", action="store_true")
 

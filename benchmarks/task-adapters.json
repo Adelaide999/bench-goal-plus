@@ -24,6 +24,14 @@
     {
       "id": "local-vliw",
       "module": "adapters.local_vliw.adapter"
+    },
+    {
+      "id": "zsoft-l1",
+      "module": "adapters.zsoft_l1.adapter"
+    },
+    {
+      "id": "zsoft-detect",
+      "module": "adapters.zsoft_detect.adapter"
     }
   ]
 }

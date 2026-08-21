@@ -87,6 +87,11 @@ class ReproEnvironmentTest(unittest.TestCase):
                 upstream["tracking_branch"], r"^[A-Za-z0-9][A-Za-z0-9._/-]*$"
             )
             self.assertNotIn("pinned_commit", upstream)
+            self.assertTrue(
+                upstream["repository"].startswith(
+                    ("https://github.com/", "https://gitcode.com/")
+                )
+            )
             self.assertNotIn("/Users/", upstream["checkout_dir"])
             self.assertEqual(Path(upstream["checkout_dir"]).parent, Path("."))
         goal_plus = manifest["upstreams"]["goal_plus"]
@@ -114,13 +119,6 @@ class ReproEnvironmentTest(unittest.TestCase):
         self.assertEqual(goal_plus["checkout_dir"], "muyuan")
         self.assertEqual(goal_plus["source_subdir"], "plugins/goal-plus")
         self.assertEqual(goal_plus["tracking_branch"], "master")
-        self.assertTrue(
-            all(
-                upstream["repository"].startswith("https://github.com/")
-                for name, upstream in manifest["upstreams"].items()
-                if name != "goal_plus"
-            )
-        )
         self.assertEqual(
             repro_env.checkout_paths(manifest, ROOT / "third_party")["goal_plus"],
             ROOT / "third_party" / "muyuan",
@@ -145,6 +143,17 @@ class ReproEnvironmentTest(unittest.TestCase):
             set(selected_sky), {"openevolve", "goal_plus", "skydiscover"}
         )
         self.assertTrue(selected_sky["skydiscover"]["editable"])
+        selected_zsoft = repro_env.selected_upstreams(manifest, ["zsoft_l1"])
+        self.assertEqual(
+            set(selected_zsoft), {"openevolve", "goal_plus", "zsoft_l1"}
+        )
+        self.assertEqual(
+            selected_zsoft["zsoft_l1"]["sparse_paths"],
+            [
+                "/benchmarks/vulnerability/zsoft-l1/",
+                "/benchmarks/vulnerability/zsoft-detect/",
+            ],
+        )
         task_catalog = json.loads(
             (ROOT / "adapters/openevolve_examples/tasks.json").read_text()
         )

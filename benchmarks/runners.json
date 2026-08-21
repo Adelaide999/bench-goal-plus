@@ -284,6 +284,32 @@
         "provision_mode": "none",
         "scope": "The screened cpu_portable task set runs in the locked NumPy/SciPy environment without Docker."
       }
+    },
+    {
+      "id": "zsoft-l1",
+      "runner": "common-matrix",
+      "adapter": "zsoft-l1",
+      "bootstrap_targets": ["zsoft_l1", "goal_plus"],
+      "local_asset_inventory": false,
+      "docker": {
+        "requirement": "required",
+        "owner": "adapter",
+        "provision_mode": "lazy",
+        "scope": "The benchmark-owned zsoft-poc evaluator builds vulnerable and fixed images with Docker Compose per evaluation."
+      }
+    },
+    {
+      "id": "zsoft-detect",
+      "runner": "common-matrix",
+      "adapter": "zsoft-detect",
+      "bootstrap_targets": ["zsoft_l1", "goal_plus"],
+      "local_asset_inventory": false,
+      "docker": {
+        "requirement": "not_required",
+        "owner": "adapter",
+        "provision_mode": "none",
+        "scope": "The benchmark-owned deterministic submission scorer runs on the host."
+      }
     }
   ],
   "presets": [

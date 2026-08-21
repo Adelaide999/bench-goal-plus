@@ -89,6 +89,7 @@ class LoadedAdapter:
             "artifact_name": self.module.ARTIFACT_NAME,
             "primary_metric": self.module.PRIMARY_METRIC,
             "direction": self.module.DIRECTION,
+            "upstream_subdir": getattr(self.module, "UPSTREAM_SUBDIR", None),
             "workspace_isolation": "one Git workspace per long-lived lane",
             "verification_owner": "benchmark controller",
         }

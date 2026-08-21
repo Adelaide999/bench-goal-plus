@@ -569,6 +569,79 @@
         "The OpenAI-compatible client returns only response text and does not persist token/cost usage.",
         "No real-model native OpenEvolve versus Goal Plus pair has been archived yet; the new runner is implemented but remains unverified beyond model-free smoke."
       ]
+    },
+    {
+      "id": "zsoft-l1",
+      "display_name": "ZSoft L1 PoC",
+      "kind": "benchmark",
+      "gate_set": "benchmark_methods",
+      "priority": 6,
+      "repositories": [
+        {
+          "role": "benchmark",
+          "upstream_url": "https://gitcode.com/openeuler/muyuan.git",
+          "subdirectory": "benchmarks/vulnerability/zsoft-l1",
+          "tracking_branch": "pr-3",
+          "license": "NOASSERTION"
+        }
+      ],
+      "local_path": "third_party/zsoft-bench/benchmarks/vulnerability/zsoft-l1",
+      "docker_requirement": "required",
+      "docker_scope": "The official zsoft-poc evaluator builds vulnerable and fixed images with Docker Compose and accepts a PoC only when the differential judge succeeds.",
+      "stages": {
+        "source_forked": "pass",
+        "environment": "pass",
+        "official_verifier": "partial",
+        "native_baseline": "n/a",
+        "plain_codex": "todo",
+        "goal_plus_codex": "todo",
+        "plain_pi": "todo",
+        "goal_plus_pi": "todo",
+        "matched_baseline": "todo",
+        "campaign_ready": "partial"
+      },
+      "evidence": [],
+      "next_action": "Archive one official sample-asan-crash Goal Plus campaign, then expand coverage across pinned formal tasks with matched budgets.",
+      "blockers": [
+        "Docker and Docker Compose are required for every official evaluation.",
+        "Tasks whose source archives are not cached require network access during benchmark preparation."
+      ]
+    },
+    {
+      "id": "zsoft-detect",
+      "display_name": "ZSoft Detect",
+      "kind": "benchmark",
+      "gate_set": "benchmark_methods",
+      "priority": 6,
+      "repositories": [
+        {
+          "role": "benchmark",
+          "upstream_url": "https://gitcode.com/openeuler/muyuan.git",
+          "subdirectory": "benchmarks/vulnerability/zsoft-detect",
+          "tracking_branch": "pr-3",
+          "license": "NOASSERTION"
+        }
+      ],
+      "local_path": "third_party/zsoft-bench/benchmarks/vulnerability/zsoft-detect",
+      "docker_requirement": "not_required",
+      "docker_scope": "The common adapter calls the benchmark-owned deterministic submission scorer on the host; the separate native OpenCode baseline has its own sandbox requirements.",
+      "stages": {
+        "source_forked": "pass",
+        "environment": "pass",
+        "official_verifier": "partial",
+        "native_baseline": "n/a",
+        "plain_codex": "todo",
+        "goal_plus_codex": "todo",
+        "plain_pi": "todo",
+        "goal_plus_pi": "todo",
+        "matched_baseline": "todo",
+        "campaign_ready": "partial"
+      },
+      "evidence": [],
+      "next_action": "Archive one civetweb-detect Goal Plus campaign with F1 and TP/FP/FN telemetry, then run matched-method comparisons across the five pinned projects.",
+      "blockers": [
+        "A clean source checkout for the pinned project revision must be available or fetched during preparation."
+      ]
     }
   ]
 }

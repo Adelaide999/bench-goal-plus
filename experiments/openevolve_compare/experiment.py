@@ -68,6 +68,8 @@ REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 CODEX_SANDBOX = "danger-full-access"
 CODEX_PROVIDER_ID = "bench_proxy"
 PI_PROVIDER_ID = "bench-openai"
+PI_APIS = ("openai-responses", "openai-completions", "anthropic-messages")
+PI_API_KEY_ENV = "OPENAI_API_KEY"
 ANNOTATOR_PROVIDER_ID = "bench_evidence"
 
 
@@ -229,6 +231,7 @@ def render_goal(
     concurrency: int,
     worker_host: str,
     worker_model: str,
+    artifact_is_directory: bool = False,
     reasoning_effort: str = DEFAULT_REASONING_EFFORT,
     worker_runtime_seconds: int | None = None,
     worker_min_runtime_seconds: int | None = None,
@@ -279,10 +282,32 @@ def render_goal(
         if worker_host == "pi-rpc"
         else "SubagentStop blocks an early worker return"
     )
+    initial_launch_contract = (
+        "- After the one initial `search_plan_next` call, call `search_start_batch` "
+        "once, then open exactly one `pi_search_pool_open` for the returned launch "
+        "payloads. Treat the pool's persisted jobs and native session ids as the "
+        "only evidence that workers started; use `pi_search_pool_wait_any`, continue "
+        "ready candidates while useful, and close the pool before selection.\n"
+        if worker_host == "pi-rpc"
+        else "- A successful `search_start_agent_session` only allocates a durable "
+        "Goal Plus session and returns a launch payload; it does not start a Codex "
+        "worker. For every initial candidate, immediately map that payload to an "
+        "actual `spawn_agent` call. Only bind the handle returned by the successful "
+        "spawn. Do not claim workers are running or call `wait_agent` until all "
+        "initial spawn calls have returned real agent handles. If a spawn is "
+        "unavailable or fails, leave the run incomplete and report the launch "
+        "failure instead of simulating worker progress.\n"
+    )
     common_prompt = render_common_task_prompt(
         task_text,
         wall_seconds,
         closeout_seconds,
+    )
+    edit_surface_limit = (
+        "omit `max_file_changes` because this artifact is a directory and multiple "
+        "changed files inside it are allowed.\n"
+        if artifact_is_directory
+        else "allow at most one changed file.\n"
     )
     return (
         "/goal-plus mode=autonomous\n\n"
@@ -307,13 +332,7 @@ def render_goal(
         )
         + f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
         f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
-        "- A successful `search_start_agent_session` only allocates a durable Goal Plus "
-        "session and returns a launch payload; it does not start a Codex worker. For every "
-        "initial candidate, immediately map that payload to an actual `spawn_agent` call. "
-        "Only bind the handle returned by the successful spawn. Do not claim workers are "
-        "running or call `wait_agent` until all initial spawn calls have returned real agent "
-        "handles. If a spawn is unavailable or fails, leave the run incomplete and report "
-        "the launch failure instead of simulating worker progress.\n"
+        f"{initial_launch_contract}"
         f"{coordination_text}"
         f"- Metric: `{metric_name}` with direction `{metric_direction}`.\n"
         "- Process verifier: `python3 .goal-plus-verifiers/primary_metric.py`, role "
@@ -328,7 +347,7 @@ def render_goal(
         "promotion verifier perform the final gate.\n"
         f"- Edit surface: allow only `{artifact_name}`; deny `evaluate.py`, "
         "`.goal-plus-verifiers/**`, `task.json`, `TASK.md`, `AGENTS.md`, and `GOAL.md`; "
-        "allow at most one changed file.\n"
+        f"{edit_surface_limit}"
         "- Workspace: use `source_path=\".\"` and `workspace.backend=\"git_worktree\"`.\n"
         "- Constraints: no network; preserve the artifact's controller-checked fixed regions.\n"
         f"- `strategy.config.closeout_reserve_seconds={closeout_seconds}` so host "
@@ -448,40 +467,51 @@ def write_pi_models_config(
     api_base: str,
     model: str,
     reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+    provider_id: str = PI_PROVIDER_ID,
+    api: str = "openai-responses",
+    api_key_env: str = PI_API_KEY_ENV,
 ) -> None:
+    if not provider_id or "/" in provider_id:
+        raise ValueError("Pi provider id must be non-empty and cannot contain '/'")
+    if api not in PI_APIS:
+        raise ValueError(f"unsupported Pi API: {api}")
+    if not api_key_env or not api_key_env.replace("_", "A").isalnum():
+        raise ValueError("Pi API key environment variable name is invalid")
     target.mkdir(parents=True, exist_ok=True)
+    model_config = {
+        "id": model,
+        "name": f"{model} benchmark proxy",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 200000 if api == "anthropic-messages" else 272000,
+        "maxTokens": 131072 if api == "anthropic-messages" else 32000,
+        "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+        },
+    }
+    if api != "anthropic-messages":
+        model_config["thinkingLevelMap"] = {reasoning_effort: reasoning_effort}
+        model_config["compat"] = {
+            "supportsDeveloperRole": True,
+            "supportsReasoningEffort": True,
+        }
     payload = {
         "providers": {
-            PI_PROVIDER_ID: {
+            provider_id: {
                 "baseUrl": api_base,
-                "api": "openai-responses",
-                "apiKey": "$OPENAI_API_KEY",
+                "api": api,
+                "apiKey": f"${api_key_env}",
                 "authHeader": True,
-                "models": [
-                    {
-                        "id": model,
-                        "name": f"{model} benchmark proxy",
-                        "reasoning": True,
-                        "thinkingLevelMap": {reasoning_effort: reasoning_effort},
-                        "input": ["text"],
-                        "contextWindow": 272000,
-                        "maxTokens": 32000,
-                        "cost": {
-                            "input": 0,
-                            "output": 0,
-                            "cacheRead": 0,
-                            "cacheWrite": 0,
-                        },
-                        "compat": {
-                            "supportsDeveloperRole": True,
-                            "supportsReasoningEffort": True,
-                        },
-                    }
-                ],
+                "models": [model_config],
             }
         }
     }
-    (target / "models.json").write_text(json.dumps(payload, indent=2) + "\n")
+    models_path = target / "models.json"
+    models_path.write_text(json.dumps(payload, indent=2) + "\n")
+    models_path.chmod(0o600)
 
 
 def write_openevolve_config(

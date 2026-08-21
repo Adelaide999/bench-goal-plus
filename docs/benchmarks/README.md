@@ -30,6 +30,7 @@ Plain Codex / Goal Plus 入口，而不是“仓库能下载”或“代码看�
 | HeuriGym | `operator_scheduling` | pinned Python + 已 bootstrap 数据 | 已完成真实 E2E | 已完成真实 E2E | 其余 8 题待接 |
 | Frontier-Engineering v1-lite | 默认 9 个 CPU task；完整 10 题需 CUDA opt-in | 3 个受管 uv runtime，约 12 GiB | 旧 MallocLab E2E 与 EnergyStorage Plain Codex native smoke 已完成 | Plain Codex 单题已验收；Goal Plus 待跑 | GPU 主机曾 10/10；默认不测 RobotArm |
 | AutoLab | `toy_isa_opt` host adapter | C 编译器 + `make` | 已完成真实 E2E | 已完成真实 E2E | 完整 CPU/Harbor 路径仍含 task containers |
+| ZSoft Detect | `civetweb-detect` | pinned source + official host scorer | 已接入 | 已接入 | 其余 4 个 pinned project 待 campaign |
 
 这三题是当前没有 Docker 时最稳妥的正式 benchmark 起点。统一入口和建议
 `T/K` 见
@@ -43,6 +44,7 @@ Plain Codex / Goal Plus 入口，而不是“仓库能下载”或“代码看�
 | Frontier-CS | `problem-0` | pinned judge image、Plain Codex、Goal Plus + Codex 已完成真实 E2E | 其余题尚未 materialize |
 | EdgeBench | VLIW Kernel Optimization | SForge work/judge、Plain Codex、Goal Plus lifecycle E2E 已通 | 8–12 个 gradient subset 尚未冻结 |
 | SWE-bench Verified | `sympy__sympy-16886` | Plain Codex/Pi 与 Goal Plus + Pi native lifecycle 已接线，真实 E2E 验收中 | 当前只声明单题 Linux/amd64 smoke |
+| ZSoft L1 | `sample-asan-crash` | official Docker vuln/fix differential judge 已接入 | 其余正式任务待 campaign |
 
 这些任务可以在当前有 Docker 的 Mac 上跑，但不是 host-only 路径。启动前必须
 确认 `docker info` 成功，并保留镜像、冷启动和 evaluator 时间。
@@ -87,6 +89,8 @@ EvoX 的 runtime。
 | Frontier-CS | **需要** | 共用 judge `1.27 GB`；建议 `2 GB` | 当前 problem-0 评分需要 pinned judge image |
 | EdgeBench | **需要** | VLIW work + judge 逻辑 `2.23 GB`；单 case 建议 `5 GB` | SForge 需要 work container 和独立 hidden judge |
 | SWE-bench Verified | **需要** | 当前 SymPy task image 逻辑约 `2.56 GB` | Agent 与官方 harness 都要求精确 task image |
+| ZSoft L1 | **需要** | 依任务基础镜像和源码缓存而定 | official differential judge 必须使用 Docker Compose |
+| ZSoft Detect | 不需要 | `0 GB` Docker；需要 pinned source checkout | common adapter 直接调用官方确定性 scorer |
 | PERFOPT-Bench | 无法判定 | 未知 | executable artifact 不可访问；不是“不需要 Docker” |
 
 `local_examples/vliw_kernel_optimization` 可在无 Docker 主机运行 public 和
@@ -130,6 +134,7 @@ Goal Plus 的逐项接入改造、`K/E/Q` 三层并发和 matched-budget baselin
 | [Frontier-CS Algorithmic](frontier-cs-algorithmic.md) | 面向开放算法研究问题生成可执行程序，并从连续 partial score 改进 | Polyomino Packing |
 | [EdgeBench](edgebench.md) | 在真实隔离 artifact + hidden judge 上利用连续 feedback 持续优化 | VLIW Kernel Optimization |
 | [SWE-bench Verified](swe-bench-verified.md) | 根据真实 issue 修复代码，并通过官方隐藏回归测试 | `sympy__sympy-16886` |
+| [ZSoft](zsoft.md) | 静态漏洞发现的 F1，或 PoC 在 vuln/fix 构建间的差分成功 | `civetweb-detect` / `sample-asan-crash` |
 
 PERFOPT-Bench 因缺少可执行公开 artifact 继续挂起，不进入本文档集。
 SkyDiscover 是 runtime，EvoX/OpenEvolve 是搜索方法，因此不作为 benchmark

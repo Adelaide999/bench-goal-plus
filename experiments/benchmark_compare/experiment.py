@@ -22,7 +22,10 @@ sys.path.insert(0, str(ROOT))
 
 from bench_artifacts import read_json as load_json  # noqa: E402
 from bench_artifacts import utc_now, write_json  # noqa: E402
-from bench_goal_plus.upstreams import upstream_source_path  # noqa: E402
+from bench_goal_plus.upstreams import (  # noqa: E402
+    upstream_checkout_path,
+    upstream_source_path,
+)
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.registry import (  # noqa: E402
     adapter_modules,
@@ -37,6 +40,8 @@ from experiments.benchmark_compare.conditions import (  # noqa: E402
 )
 from experiments.openevolve_compare.experiment import (  # noqa: E402
     DEFAULT_REASONING_EFFORT,
+    PI_APIS,
+    PI_API_KEY_ENV,
     PI_PROVIDER_ID,
     append_unique_lines,
     close_pi_pools,
@@ -103,6 +108,9 @@ class PrepareConfig:
     condition: str | None = None
     coordination_variant: str | None = None
     model: str = DEFAULT_MODEL
+    pi_provider_id: str = PI_PROVIDER_ID
+    pi_api: str = "openai-responses"
+    pi_api_key_env: str = PI_API_KEY_ENV
     wall_time_seconds: int = DEFAULT_WALL_TIME_SECONDS
     concurrency: int = DEFAULT_CONCURRENCY
     soft_closeout_seconds: int = DEFAULT_SOFT_CLOSEOUT_SECONDS
@@ -129,6 +137,9 @@ class RunConfig:
     codex_bin: str = "codex"
     pi_bin: str = "pi"
     api_base: str | None = None
+    pi_provider_id: str = PI_PROVIDER_ID
+    pi_api: str = "openai-responses"
+    pi_api_key_env: str = PI_API_KEY_ENV
 
     def to_namespace(self) -> argparse.Namespace:
         return argparse.Namespace(command="run", **vars(self))
@@ -140,6 +151,9 @@ def add_runtime_prepare_arguments(
     reasoning_choices: tuple[str, ...] | None = None,
 ) -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--pi-provider-id", default=PI_PROVIDER_ID)
+    parser.add_argument("--pi-api", choices=PI_APIS, default="openai-responses")
+    parser.add_argument("--pi-api-key-env", default=PI_API_KEY_ENV)
     parser.add_argument(
         "--reasoning-effort",
         choices=reasoning_choices,
@@ -185,7 +199,7 @@ def configure_adapter(
     global ARTIFACT_NAME, BENCHMARK_NAME, CASE_SET_DESCRIPTION
     global CODEX_SANDBOX, DIRECTION
     global PRIMARY_METRIC, TASK_ID, UPSTREAM_KEY
-    global LOCAL_SOURCE_RELATIVE
+    global LOCAL_SOURCE_RELATIVE, UPSTREAM_SUBDIR
     global OFFICIAL_BENCHMARK_COMPARABLE
     global VERIFIER_TIMEOUT_SECONDS
     global evaluate_workspace, git_commit, materialize_workspace
@@ -198,6 +212,7 @@ def configure_adapter(
     TASK_ID = module.TASK_ID
     UPSTREAM_KEY = module.UPSTREAM_KEY
     LOCAL_SOURCE_RELATIVE = getattr(module, "LOCAL_SOURCE_RELATIVE", None)
+    UPSTREAM_SUBDIR = getattr(module, "UPSTREAM_SUBDIR", None)
     OFFICIAL_BENCHMARK_COMPARABLE = getattr(
         module, "OFFICIAL_BENCHMARK_COMPARABLE", True
     )
@@ -271,26 +286,54 @@ def prepare(args: argparse.Namespace) -> int:
     environment = load_json(args.environment_manifest)
     upstreams = environment["upstreams"]
     checkout_root = args.checkout_root.expanduser().absolute()
-    goal_plus_root = upstream_source_path(
+    goal_plus_entry = upstreams["goal_plus"]
+    goal_plus_checkout = upstream_checkout_path(
         checkout_root,
-        upstreams["goal_plus"],
+        goal_plus_entry,
         upstream_key="goal_plus",
     )
-    managed_checkouts = [("goal_plus", goal_plus_root)]
+    goal_plus_root = upstream_source_path(
+        checkout_root,
+        goal_plus_entry,
+        upstream_key="goal_plus",
+    )
+    managed_checkouts = [("goal_plus", goal_plus_checkout)]
     skydiscover_root = None
     if is_sky:
         skydiscover_root = checkout_root / upstreams["skydiscover"]["checkout_dir"]
         managed_checkouts.append(("skydiscover", skydiscover_root))
     if LOCAL_SOURCE_RELATIVE is None:
-        benchmark_root = upstream_source_path(
+        benchmark_entry = upstreams[UPSTREAM_KEY]
+        benchmark_checkout = upstream_checkout_path(
             checkout_root,
-            upstreams[UPSTREAM_KEY],
+            benchmark_entry,
             upstream_key=UPSTREAM_KEY,
         )
-        managed_checkouts.insert(0, (UPSTREAM_KEY, benchmark_root))
+        benchmark_root = upstream_source_path(
+            checkout_root,
+            benchmark_entry,
+            upstream_key=UPSTREAM_KEY,
+        )
+        managed_checkouts.insert(0, (UPSTREAM_KEY, benchmark_checkout))
+        if UPSTREAM_SUBDIR is not None:
+            subdir = Path(UPSTREAM_SUBDIR)
+            if subdir.is_absolute() or ".." in subdir.parts:
+                raise ValueError(f"unsafe adapter upstream subdirectory: {subdir}")
+            benchmark_root = (benchmark_root / subdir).resolve()
+            try:
+                benchmark_root.relative_to(benchmark_checkout.resolve())
+            except ValueError as error:
+                raise ValueError(
+                    f"adapter upstream subdirectory escapes checkout: {subdir}"
+                ) from error
+            if not benchmark_root.is_dir():
+                raise FileNotFoundError(
+                    f"adapter upstream subdirectory is missing: {benchmark_root}"
+                )
         source_kind = "managed_upstream"
     else:
         benchmark_root = (ROOT / LOCAL_SOURCE_RELATIVE).resolve()
+        benchmark_checkout = benchmark_root
         try:
             benchmark_root.relative_to(ROOT)
         except ValueError as error:
@@ -357,11 +400,12 @@ def prepare(args: argparse.Namespace) -> int:
             copy_goal_plus_pi_assets(goal_plus_root, workspace)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
             worker_host = "pi-rpc"
-            worker_model = f"{PI_PROVIDER_ID}/{args.model}"
+            worker_model = f"{args.pi_provider_id}/{args.model}"
         task_text = (workspace / "TASK.md").read_text()
         goal_prompt = render_goal(
             task_text=task_text,
             artifact_name=ARTIFACT_NAME,
+            artifact_is_directory=(workspace / ARTIFACT_NAME).is_dir(),
             metric_name=PRIMARY_METRIC,
             metric_direction=DIRECTION,
             wall_seconds=args.wall_time_seconds,
@@ -372,6 +416,7 @@ def prepare(args: argparse.Namespace) -> int:
             reasoning_effort=args.reasoning_effort,
             worker_runtime_seconds=args.worker_runtime_seconds,
             worker_min_runtime_seconds=args.worker_min_runtime_seconds,
+            verifier_timeout_seconds=VERIFIER_TIMEOUT_SECONDS,
             coordination_condition=condition.condition_id if condition else None,
             search_space_mode=condition.search_space_mode if condition else None,
         )
@@ -397,6 +442,7 @@ def prepare(args: argparse.Namespace) -> int:
             "metric_name": PRIMARY_METRIC,
             "metric_direction": DIRECTION,
             "artifact_name": ARTIFACT_NAME,
+            "artifact_is_directory": (workspace / ARTIFACT_NAME).is_dir(),
             "state_at_t0": "absent; natural prompt creates all Goal Plus state inside T",
             "condition": condition.as_manifest() if condition else None,
             "coordination_reviewer": (
@@ -477,6 +523,15 @@ def prepare(args: argparse.Namespace) -> int:
         "benchmark_name": BENCHMARK_NAME,
         "task_id": TASK_ID,
         "model": args.model,
+        "pi_provider": (
+            {
+                "id": args.pi_provider_id,
+                "api": args.pi_api,
+                "api_key_env": args.pi_api_key_env,
+            }
+            if args.method in {"plain-pi", "goal-plus-pi"}
+            else None
+        ),
         "reasoning_effort": args.reasoning_effort,
         "seed": args.seed,
         "budget": {
@@ -499,7 +554,7 @@ def prepare(args: argparse.Namespace) -> int:
                 if LOCAL_SOURCE_RELATIVE is None
                 else None
             ),
-            "upstream_commit": git_commit(benchmark_root),
+            "upstream_commit": git_commit(benchmark_checkout),
             "case_set": CASE_SET_DESCRIPTION,
             "source_kind": source_kind,
             "official_benchmark_comparable": OFFICIAL_BENCHMARK_COMPARABLE,
@@ -523,8 +578,9 @@ def prepare(args: argparse.Namespace) -> int:
             "manifest": str(args.environment_manifest.absolute()),
             "checkout_root": str(checkout_root),
             "benchmark_root": str(benchmark_root),
-            "benchmark_branch": checkout_branch(benchmark_root),
-            "benchmark_commit": git_commit(benchmark_root),
+            "benchmark_checkout": str(benchmark_checkout),
+            "benchmark_branch": checkout_branch(benchmark_checkout),
+            "benchmark_commit": git_commit(benchmark_checkout),
             "benchmark_tracking_branch": (
                 upstreams[UPSTREAM_KEY]["tracking_branch"]
                 if LOCAL_SOURCE_RELATIVE is None
@@ -613,6 +669,18 @@ def controller_subprocess_environment(
 def score_order_key(evaluation: dict[str, Any]) -> float:
     value = primary_score(evaluation)
     return value if DIRECTION == "minimize" else -value
+
+
+def copy_artifact(source: Path, destination: Path) -> None:
+    """Copy one adapter artifact while preserving file or directory shape."""
+    if source.is_dir():
+        if destination.is_dir():
+            shutil.rmtree(destination)
+        elif destination.exists():
+            destination.unlink()
+        shutil.copytree(source, destination)
+        return
+    shutil.copy2(source, destination)
 
 
 def condition_incomplete_reason(
@@ -715,6 +783,15 @@ def command_for_manifest(command: list[str], api_base: str | None) -> list[str]:
     return [part.replace(api_base, "<provider-url>") for part in command]
 
 
+def pi_provider_config(args: argparse.Namespace) -> tuple[str, str, str]:
+    """Keep direct helper callers compatible with the historical Pi defaults."""
+    return (
+        getattr(args, "pi_provider_id", PI_PROVIDER_ID),
+        getattr(args, "pi_api", "openai-responses"),
+        getattr(args, "pi_api_key_env", PI_API_KEY_ENV),
+    )
+
+
 def execute_plain(
     manifest: dict[str, Any],
     run_dir: Path,
@@ -723,6 +800,7 @@ def execute_plain(
 ) -> dict[str, Any]:
     budget = manifest["budget"]
     is_pi = manifest["method"] == "plain-pi"
+    pi_provider_id, pi_api, pi_api_key_env = pi_provider_config(args)
     workspaces = [Path(path) for path in manifest["workspaces"]]
     lanes_root = run_dir / "lanes"
     lanes_root.mkdir()
@@ -745,13 +823,16 @@ def execute_plain(
         (lane_dir / "prompt.md").write_text(prompt)
         lane_environment = environment.copy()
         if is_pi:
-            qualified_model = f"{PI_PROVIDER_ID}/{args.model}"
+            qualified_model = f"{pi_provider_id}/{args.model}"
             pi_home = lane_dir / "pi-home"
             write_pi_models_config(
                 pi_home,
                 api_base=args.api_base,
                 model=args.model,
                 reasoning_effort=manifest["reasoning_effort"],
+                provider_id=pi_provider_id,
+                api=pi_api,
+                api_key_env=pi_api_key_env,
             )
             lane_environment["PI_CODING_AGENT_DIR"] = str(pi_home)
             command = [
@@ -759,7 +840,7 @@ def execute_plain(
                 "--mode",
                 "json",
                 "--provider",
-                PI_PROVIDER_ID,
+                pi_provider_id,
                 "--model",
                 qualified_model,
                 "--thinking",
@@ -817,7 +898,7 @@ def execute_plain(
         final = evaluate(workspace, "final")
         write_json(lane_dir / "final-eval.json", final)
         candidate = lane_dir / ARTIFACT_NAME
-        shutil.copy2(workspace / ARTIFACT_NAME, candidate)
+        copy_artifact(workspace / ARTIFACT_NAME, candidate)
         lane_results.append(
             {
                 "lane": lane_name,
@@ -841,7 +922,7 @@ def execute_plain(
     )
     write_json(run_dir / "lane-results.json", {"lanes": lane_results})
     write_json(run_dir / "final-eval.json", selected["evaluation"])
-    shutil.copy2(selected["candidate"], run_dir / ARTIFACT_NAME)
+    copy_artifact(Path(selected["candidate"]), run_dir / ARTIFACT_NAME)
     control["selected_lane"] = selected["lane"]
     control["selected_score"] = primary_score(selected["evaluation"])
     agent_key = "pi" if is_pi else "codex"
@@ -883,6 +964,7 @@ def execute_goal_plus(
     budget = manifest["budget"]
     workspace = Path(manifest["workspace"])
     is_pi = manifest.get("method", "goal-plus-codex") == "goal-plus-pi"
+    pi_provider_id, pi_api, pi_api_key_env = pi_provider_config(args)
     if (workspace / ".gp").exists():
         raise RuntimeError("standard Goal Plus run must start without .gp")
     seed = evaluate_with_controller_runtime(
@@ -902,22 +984,25 @@ def execute_goal_plus(
     configure_isolated_codex_home(environment, run_dir)
     configure_evidence_annotator_environment(
         environment,
-        model=args.model,
+        model=(
+            f"{pi_provider_id}/{args.model}" if is_pi else args.model
+        ),
         reasoning_effort=manifest.get(
             "reasoning_effort", DEFAULT_REASONING_EFFORT
         ),
-        api_base=args.api_base,
+        api_base=None if is_pi else args.api_base,
     )
     prompt = render_goal(
         task_text=(workspace / "TASK.md").read_text(),
         artifact_name=ARTIFACT_NAME,
+        artifact_is_directory=(workspace / ARTIFACT_NAME).is_dir(),
         metric_name=PRIMARY_METRIC,
         metric_direction=DIRECTION,
         wall_seconds=budget["wall_time_seconds"],
         closeout_seconds=budget["soft_closeout_seconds"],
         concurrency=budget["concurrency"],
         worker_host="pi-rpc" if is_pi else "codex",
-        worker_model=f"{PI_PROVIDER_ID}/{args.model}" if is_pi else args.model,
+        worker_model=f"{pi_provider_id}/{args.model}" if is_pi else args.model,
         reasoning_effort=manifest.get(
             "reasoning_effort", DEFAULT_REASONING_EFFORT
         ),
@@ -930,13 +1015,16 @@ def execute_goal_plus(
     (run_dir / "prompt.md").write_text(prompt)
     reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)
     if is_pi:
-        qualified_model = f"{PI_PROVIDER_ID}/{args.model}"
+        qualified_model = f"{pi_provider_id}/{args.model}"
         pi_home = run_dir / "pi-home"
         write_pi_models_config(
             pi_home,
             api_base=args.api_base,
             model=args.model,
             reasoning_effort=reasoning_effort,
+            provider_id=pi_provider_id,
+            api=pi_api,
+            api_key_env=pi_api_key_env,
         )
         environment["PI_CODING_AGENT_DIR"] = str(pi_home)
         environment["GOAL_PLUS_PI_MODEL"] = qualified_model
@@ -945,7 +1033,7 @@ def execute_goal_plus(
             "--mode",
             "json",
             "--provider",
-            PI_PROVIDER_ID,
+            pi_provider_id,
             "--model",
             qualified_model,
             "--thinking",
@@ -1008,7 +1096,7 @@ def execute_goal_plus(
         run_dir / "controller-runtime/final",
     )
     write_json(run_dir / "final-eval.json", final)
-    shutil.copy2(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
+    copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
     if is_pi:
         control["pi"] = parse_pi_events(run_dir / "events.jsonl")
     else:
@@ -1211,13 +1299,32 @@ def execute(args: argparse.Namespace) -> int:
         raise RuntimeError(f"run is not prepared: {manifest['status']}")
     if args.model != manifest["model"]:
         raise ValueError(f"model mismatch: prepared {manifest['model']}, got {args.model}")
+    is_pi = manifest["method"] in {"plain-pi", "goal-plus-pi"}
+    pi_provider_id, pi_api, pi_api_key_env = pi_provider_config(args)
+    if is_pi:
+        prepared_provider = manifest.get("pi_provider") or {
+            "id": PI_PROVIDER_ID,
+            "api": "openai-responses",
+            "api_key_env": PI_API_KEY_ENV,
+        }
+        runtime_provider = {
+            "id": pi_provider_id,
+            "api": pi_api,
+            "api_key_env": pi_api_key_env,
+        }
+        if runtime_provider != prepared_provider:
+            raise ValueError(
+                "Pi provider mismatch: prepared "
+                f"{prepared_provider}, got {runtime_provider}"
+            )
     if (
         sky_backend.is_method(manifest["method"])
         or manifest["method"] in {"plain-pi", "goal-plus-pi"}
     ) and not args.api_base:
         raise ValueError(f"--api-base is required for {manifest['method']}")
-    if args.api_base and not os.environ.get("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY is required with --api-base")
+    credential_env = pi_api_key_env if is_pi else "OPENAI_API_KEY"
+    if args.api_base and not os.environ.get(credential_env):
+        raise RuntimeError(f"{credential_env} is required with --api-base")
     environment = configure_temp_environment(os.environ.copy())
     bin_dir = Path(manifest["environment"]["runtime_bin"])
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
@@ -1330,7 +1437,7 @@ def repair_closeout(args: argparse.Namespace) -> int:
         run_dir / "controller-runtime/final",
     )
     write_json(run_dir / "final-eval.json", final)
-    shutil.copy2(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
+    copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
     control["goal_plus"] = collect_goal_plus_state(workspace)
     control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
         workspace
@@ -1403,6 +1510,10 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument(
         "--benchmark", choices=tuple(BENCHMARK_ADAPTERS), default="heurigym"
     )
+    prepare_parser.add_argument(
+        "--task-id",
+        help="adapter-specific task selector; persisted in the experiment manifest",
+    )
     prepare_parser.add_argument("--method", choices=METHODS, required=True)
     prepare_parser.add_argument(
         "--condition",
@@ -1426,6 +1537,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--pi-bin", default="pi")
     run_parser.add_argument("--model", default=DEFAULT_MODEL)
     run_parser.add_argument("--api-base")
+    run_parser.add_argument("--pi-provider-id", default=PI_PROVIDER_ID)
+    run_parser.add_argument("--pi-api", choices=PI_APIS, default="openai-responses")
+    run_parser.add_argument("--pi-api-key-env", default=PI_API_KEY_ENV)
 
     smoke_parser = subparsers.add_parser("seed-smoke")
     smoke_parser.add_argument("--run-dir", type=Path, required=True)

@@ -88,6 +88,15 @@
       "checkout_dir": "skydiscover",
       "tracking_branch": "main",
       "editable": true
+    },
+    "zsoft_l1": {
+      "repository": "https://gitcode.com/openeuler/muyuan.git",
+      "checkout_dir": "zsoft-bench",
+      "tracking_branch": "pr-3",
+      "sparse_paths": [
+        "/benchmarks/vulnerability/zsoft-l1/",
+        "/benchmarks/vulnerability/zsoft-detect/"
+      ]
     }
   }
 }

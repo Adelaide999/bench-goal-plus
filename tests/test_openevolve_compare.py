@@ -220,9 +220,10 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("do not run a duplicate parent-side process verification", prompt)
         self.assertIn("allow only `candidate.py`", prompt)
         self.assertNotIn("goal_plus_id=", prompt)
-        self.assertIn("search_start_agent_session", prompt)
-        self.assertIn("actual `spawn_agent` call", prompt)
-        self.assertIn("Do not claim workers are running", prompt)
+        self.assertIn("search_start_batch", prompt)
+        self.assertIn("pi_search_pool_open", prompt)
+        self.assertIn("pi_search_pool_wait_any", prompt)
+        self.assertNotIn("actual `spawn_agent` call", prompt)
 
     def test_pi_goal_prompt_names_pool_supervisor_minimum_lease(self) -> None:
         prompt = experiment.render_goal(
@@ -573,6 +574,41 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("strategy.worker_budget.max_runtime_seconds=60", prompt)
         self.assertIn("total budget, not a success criterion", prompt)
 
+    def test_goal_plus_directory_artifact_allows_multiple_changed_files(self) -> None:
+        prompt = experiment.render_goal(
+            task_text="# Objective\nFind issues.",
+            artifact_name="submission",
+            artifact_is_directory=True,
+            metric_name="f1",
+            metric_direction="maximize",
+            wall_seconds=1800,
+            closeout_seconds=60,
+            concurrency=4,
+            worker_host="codex",
+            worker_model="gpt-5.6-sol",
+        )
+        self.assertIn("allow only `submission`", prompt)
+        self.assertIn("omit `max_file_changes`", prompt)
+        self.assertIn("multiple changed files inside it are allowed", prompt)
+        self.assertNotIn("allow at most one changed file", prompt)
+
+    def test_goal_plus_pi_prompt_uses_native_pool_launch_contract(self) -> None:
+        prompt = experiment.render_goal(
+            task_text="# Objective\nImprove it.",
+            artifact_name="candidate.py",
+            metric_name="score",
+            metric_direction="maximize",
+            wall_seconds=300,
+            closeout_seconds=60,
+            concurrency=4,
+            worker_host="pi-rpc",
+            worker_model="provider/model",
+        )
+
+        self.assertIn("`pi_search_pool_open`", prompt)
+        self.assertIn("`pi_search_pool_wait_any`", prompt)
+        self.assertNotIn("`spawn_agent`", prompt)
+
     def test_promotion_patch_is_applied_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir) / "workspace"
@@ -802,6 +838,28 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 provider["models"][0]["thinkingLevelMap"], {"high": "high"}
             )
             self.assertNotRegex(raw, r"\bsk-[A-Za-z0-9_-]{16,}\b")
+
+    def test_pi_model_config_supports_anthropic_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir)
+            experiment.write_pi_models_config(
+                target,
+                api_base="https://anthropic-proxy.example",
+                model="glm-5.3",
+                reasoning_effort="medium",
+                provider_id="zai-anthropic",
+                api="anthropic-messages",
+                api_key_env="ZAI_API_KEY",
+            )
+            models_path = target / "models.json"
+            raw = models_path.read_text()
+            provider = json.loads(raw)["providers"]["zai-anthropic"]
+
+            self.assertEqual(provider["api"], "anthropic-messages")
+            self.assertEqual(provider["apiKey"], "$ZAI_API_KEY")
+            self.assertEqual(provider["models"][0]["id"], "glm-5.3")
+            self.assertNotIn("thinkingLevelMap", provider["models"][0])
+            self.assertEqual(models_path.stat().st_mode & 0o777, 0o600)
 
     def test_codex_provider_args_select_responses(self) -> None:
         args = experiment.codex_provider_args("http://proxy.example/v1")
