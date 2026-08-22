@@ -2616,6 +2616,98 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertTrue(result["patch_exists"])
             self.assertEqual(result["goal_plus"]["actual_subagent_count"], 1)
 
+    def test_goal_plus_pi_timeout_preserves_runtime_for_closeout(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-smoke")
+        runtime_info = {
+            "credential_env": "ZAI_API_KEY",
+            "provider": "zai",
+            "node_root": Path("/node"),
+            "package_root": Path("/pi"),
+            "goal_plus_root": Path("/goal-plus"),
+            "goal_plus_dependency_lock": Path("/requirements.lock"),
+            "goal_plus_visible_verifier": Path("/visible.py"),
+            "goal_plus_controller": Path("/controller.py"),
+            "goal_plus_pip_cache": Path("/pip-cache"),
+        }
+        with self.temporary_directory() as temporary:
+            campaign = Path(temporary)
+            cell_dir = campaign / "cells/goal-plus-pi"
+            cell_dir.mkdir(parents=True)
+            write_json(cell_dir / "task.json", {"problem_statement": "issue"})
+            cell = {
+                "task_file": "cells/goal-plus-pi/task.json",
+                "patch_file": "cells/goal-plus-pi/model.patch",
+                "method": "goal-plus-pi",
+                "model": profile["model"],
+            }
+            manifest = {
+                "campaign_id": "goal-plus-timeout-test",
+                "profile_snapshot": profile,
+                "source": {"goal_plus_commit": "a" * 40},
+            }
+            docker_commands: list[list[str]] = []
+
+            def docker_checked(command: list[str], *, timeout: int = 120) -> str:
+                del timeout
+                docker_commands.append(command)
+                return ""
+
+            def run_command(command: list[str], **_kwargs):
+                raise subprocess.TimeoutExpired(command, 300, output="")
+
+            with (
+                mock.patch.object(
+                    runtime,
+                    "_create_agent_container",
+                    return_value=("container-id", runtime_info),
+                ),
+                mock.patch.object(runtime, "_initialize_agent_container"),
+                mock.patch.object(runtime, "_agent_command", return_value=["outer"]),
+                mock.patch.object(runtime, "_run", side_effect=run_command),
+                mock.patch.object(runtime, "_docker_checked", side_effect=docker_checked),
+                mock.patch.object(
+                    runtime,
+                    "_goal_plus_closeout",
+                    return_value={"completed": True},
+                ) as closeout,
+                mock.patch.object(
+                    runtime,
+                    "_export_goal_plus_state",
+                    return_value={
+                        "actual_subagent_count": 0,
+                        "completion": {"passed": False, "reason": "incomplete"},
+                        "worker_usage": {"coverage": "unavailable"},
+                    },
+                ),
+                mock.patch.object(
+                    runtime,
+                    "_dispose_agent_container",
+                    return_value={
+                        "attempted": True,
+                        "removed": True,
+                        "retained": False,
+                        "stopped": None,
+                    },
+                ),
+            ):
+                result = runtime._run_agent(campaign, manifest, cell)
+
+        closeout.assert_called_once()
+        self.assertTrue(result["timed_out"])
+        self.assertTrue(
+            any(
+                command[:4] == ["docker", "exec", "container-id", "sh"]
+                and "pkill -TERM -x node" in command[-1]
+                for command in docker_commands
+            )
+        )
+        self.assertFalse(
+            any(command[:2] == ["docker", "stop"] for command in docker_commands)
+        )
+        self.assertFalse(
+            any(command[:2] == ["docker", "start"] for command in docker_commands)
+        )
+
     def test_unconfirmed_agent_cleanup_blocks_official_evaluator(self) -> None:
         with self.temporary_directory() as temporary:
             campaign = Path(temporary)

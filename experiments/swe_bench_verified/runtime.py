@@ -2005,6 +2005,18 @@ def _run_agent(
                     ],
                     timeout=30,
                 )
+            elif method == "goal-plus-pi":
+                _docker_checked(
+                    [
+                        "docker",
+                        "exec",
+                        container_id,
+                        "sh",
+                        "-lc",
+                        "pkill -TERM -x node 2>/dev/null || true",
+                    ],
+                    timeout=30,
+                )
             else:
                 _docker_checked(
                     ["docker", "stop", "--time", "10", container_id], timeout=30
