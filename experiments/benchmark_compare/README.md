@@ -16,6 +16,8 @@ Codex/Pi launch, Goal Plus launch, wall deadline, concurrency, and evidence.
 | `frontier-engineering-malloclab` | `mm.c` | `combined_score` maximize | 不需要 | `0 GB` | C compiler and `make` |
 | `heurigym` | `solver.py` | `total_cost` minimize | 不需要 | `0 GB` | Python only after dataset bootstrap |
 | `local-vliw` | `solution.py` | `cycles` minimize | 不需要 | `0 GB` | Python standard library；local replica，非官方 EdgeBench |
+| `zsoft-detect` | `submission/` | `f1` maximize | 不需要 | `0 GB` | pinned project source + benchmark-owned deterministic scorer |
+| `zsoft-l1` | `poc` | `success` maximize | **必需** | 依任务镜像和源码缓存而定 | official Docker Compose vulnerable/fixed differential judge |
 
 Every upstream checkout lives in the ignored `third_party/` directory. Run a
 task-specific bootstrap instead of cloning beside the repository:
@@ -26,8 +28,8 @@ python3 scripts/repro_env.py doctor --only autolab
 ```
 
 The upstream keys are `ale_bench`, `autolab`, `frontier_cs`,
-`frontier_engineering`, and `heurigym`. OpenEvolve and Goal Plus are always
-included because they are always-managed shared runtimes.
+`frontier_engineering`, `heurigym`, and `zsoft_l1`. OpenEvolve and Goal Plus
+are always included because they are always-managed shared runtimes.
 
 `local-vliw` 不使用 `third_party/` benchmark checkout；它从仓内
 `local_examples/vliw_kernel_optimization` materialize。Goal Plus runtime 仍
@@ -76,7 +78,8 @@ B0/B1/B3/B4 matrix.
 
 Preparation prints a new ignored run directory. For Goal Plus, confirm that
 `workspace/.gp` is absent before `run`; Goal Plus state is created only by the
-timed natural `/goal-plus` prompt. Seed evaluation uses a controller runtime
+timed host-native prompt (`$goal-plus` for Codex, `/goal-plus` for Pi). Seed
+evaluation uses a controller runtime
 outside that workspace, so `.bench-runtime/` is not copied into Goal Plus
 candidate Git histories. A model-free evaluator check is available:
 

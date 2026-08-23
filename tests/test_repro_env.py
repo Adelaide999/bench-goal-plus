@@ -148,6 +148,18 @@ class ReproEnvironmentTest(unittest.TestCase):
             set(selected_zsoft), {"openevolve", "goal_plus", "zsoft_l1"}
         )
         self.assertEqual(
+            selected_zsoft["zsoft_l1"]["repository"],
+            "https://gitcode.com/linmalin/muyuan-sec.git",
+        )
+        self.assertEqual(
+            selected_zsoft["zsoft_l1"]["repository_fallbacks"],
+            ["git@gitcode.com:linmalin/muyuan-sec.git"],
+        )
+        self.assertEqual(
+            selected_zsoft["zsoft_l1"]["tracking_branch"],
+            "linmalin-zsoft-benchmarks-mr",
+        )
+        self.assertEqual(
             selected_zsoft["zsoft_l1"]["sparse_paths"],
             [
                 "/benchmarks/vulnerability/zsoft-l1/",

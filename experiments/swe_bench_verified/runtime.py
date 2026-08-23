@@ -282,6 +282,27 @@ def _container_name(campaign_id: str, method: str) -> str:
     return f"bgp-swe-agent-{digest}"
 
 
+def goal_plus_codex_project_asset_script() -> str:
+    """Materialize the managed plugin's project-local Codex fallback assets."""
+    return (
+        "mkdir -p /testbed/.codex && "
+        "test ! -e /testbed/.codex/skills && "
+        "test ! -e /testbed/.codex/config.toml && "
+        "test ! -e /testbed/.codex/hooks.json && "
+        "cp -a /opt/goal-plus/.codex/skills /testbed/.codex/skills && "
+        "(if test -d /opt/goal-plus/.codex/agents; then "
+        "test ! -e /testbed/.codex/agents && "
+        "cp -a /opt/goal-plus/.codex/agents /testbed/.codex/agents; fi) && "
+        "cp /opt/goal-plus/.codex/config.example.toml "
+        "/testbed/.codex/config.toml && "
+        "(if test -f /opt/goal-plus/.codex/hooks.example.json; then "
+        "cp /opt/goal-plus/.codex/hooks.example.json /testbed/.codex/hooks.json; "
+        "elif test -f /opt/goal-plus/.codex/hooks.json; then "
+        "cp /opt/goal-plus/.codex/hooks.json /testbed/.codex/hooks.json; "
+        "else echo 'managed Goal Plus Codex hooks are missing' >&2; exit 1; fi) && "
+    )
+
+
 def _network_name(campaign_id: str) -> str:
     digest = hashlib.sha256(campaign_id.encode()).hexdigest()[:16]
     return f"bgp-swe-net-{digest}"
@@ -929,7 +950,7 @@ def _initialize_agent_container(
         )
         _docker_checked(install_command, timeout=600)
         asset_copy = (
-            "cp -a /opt/goal-plus/.codex /testbed/.codex && "
+            goal_plus_codex_project_asset_script()
             if method == "goal-plus-codex"
             else ""
         )
@@ -1001,6 +1022,9 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
     )
     codex_host = profile["methods"][0] == "goal-plus-codex"
     worker_host = "codex" if codex_host else "pi-rpc"
+    entrypoint = (
+        "$goal-plus mode=autonomous" if codex_host else "/goal-plus mode=autonomous"
+    )
     if codex_host and profile["concurrency"] > 1:
         worker_instruction = (
             "Keep each candidate on its existing bound Codex worker session; "
@@ -1035,7 +1059,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
             "peer supplemental View before its next verifier attempt. "
         )
     return (
-        "/goal-plus mode=autonomous Solve the public repository issue below in "
+        f"{entrypoint} Solve the public repository issue below in "
         "/testbed. Treat this as verifier-guided code repair and enter Search Mode. "
         "Do not inspect benchmark metadata, hidden tests, dataset rows, reports, or "
         "answer patches. The official SWE-bench harness remains hidden and runs only "

@@ -56,7 +56,7 @@ class AdapterContractTest(unittest.TestCase):
 
     def test_git_commit_supports_shared_runtime_checkouts(self) -> None:
         self.assertRegex(
-            adapter.git_commit(ROOT / "third_party" / "goal-plus"),
+            adapter.git_commit(ROOT / "third_party" / "muyuan"),
             r"^[0-9a-f]{40}$",
         )
         self.assertRegex(adapter.git_commit(adapter.ZSOFT_ROOT), r"^[0-9a-f]{40}$")

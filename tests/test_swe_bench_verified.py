@@ -176,6 +176,18 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertNotIn("/opt/pi/dist", codex_script)
         self.assertNotIn("/opt/goal-plus-bin/pi", codex_script)
 
+    def test_goal_plus_codex_project_assets_follow_latest_muyuan_layout(self) -> None:
+        script = runtime.goal_plus_codex_project_asset_script()
+
+        self.assertIn(".codex/config.example.toml", script)
+        self.assertIn(".codex/hooks.example.json", script)
+        self.assertIn(".codex/hooks.json", script)
+        self.assertLess(
+            script.index(".codex/hooks.example.json"),
+            script.rindex(".codex/hooks.json"),
+        )
+        self.assertNotIn("cp -a /opt/goal-plus/.codex /testbed/.codex", script)
+
     def test_goal_plus_codex_profile_uses_native_auth_and_codex_workers(self) -> None:
         profile = self.profile("sympy-16886-goal-plus-codex-smoke")
         self.assertEqual(profile["methods"], ["goal-plus-codex"])
@@ -190,6 +202,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             {"outer_deadline_at": "2026-08-04T12:00:00+00:00"},
         )
         joined = " ".join(command)
+        self.assertTrue(prompt.startswith("$goal-plus mode=autonomous"))
         self.assertIn("strategy.worker_host=codex", prompt)
         self.assertIn("strategy.config.seed=1", prompt)
         self.assertIn("GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=0", command)

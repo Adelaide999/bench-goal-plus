@@ -2,7 +2,8 @@
 
 Wraps the cybergym-zsoft-detect static detection benchmark checked out at
 `third_party/zsoft-bench/benchmarks/vulnerability/zsoft-detect`
-(sparse checkout of `gitcode.com/openeuler/muyuan.git` branch `pr-3`,
+(sparse checkout of `gitcode.com/linmalin/muyuan-sec.git` branch
+`linmalin-zsoft-benchmarks-mr`,
 framework 1.1.0).
 
 The adapter:
@@ -27,8 +28,10 @@ Constants:
   workspace records the independently pinned audited-source revision as
   `source_revision`.
 
-The benchmark's bwrap/OpenCode runner remains available as a separate native
-baseline; it is not used to score Goal Plus candidates.
+The benchmark's native runner remains separate from Goal Plus candidate
+scoring. Its pinned SWE-agent profile is exposed only through the dedicated
+`zsoft-detect-swe-agent` target and `zsoft-swe-agent` method; OpenCode and xiaoO
+are not registered methods.
 
 The reproducible-environment bootstrap owns the default sparse checkout.
 `BENCH_GOAL_PLUS_ZSOFT_ROOT` may select another clean checkout for controlled

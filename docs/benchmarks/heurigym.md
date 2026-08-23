@@ -88,7 +88,7 @@ HeuriGym 最有价值的观测不是最终 cost 一项，而是 Goal Plus 是否
 
 标准入口已经不是“给 HeuriGym 内部再塞一个 Codex provider”，而是让
 benchmark controller materialize 相同 workspace：Plain Codex 直接接收 common
-task prompt；Goal Plus + Codex 仅增加 `/goal-plus` 与完整条件约束。两边都调用
+task prompt；Goal Plus + Codex 仅增加 `$goal-plus` 与完整条件约束。两边都调用
 同一个 HeuriGym verifier/evaluator。
 
 首轮真实 smoke 使用 `gpt-5.6-sol/high`、`T=300s`、`K=2`：Plain Codex 从

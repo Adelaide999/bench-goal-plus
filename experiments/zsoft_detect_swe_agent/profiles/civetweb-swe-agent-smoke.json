@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "civetweb-swe-agent-smoke",
+  "benchmark_id": "zsoft-detect-swe-agent",
+  "projects": [
+    "civetweb"
+  ],
+  "task_ids": [
+    "civetweb-detect"
+  ],
+  "methods": [
+    "zsoft-swe-agent"
+  ],
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "medium",
+  "agent_provider": {
+    "id": "zsoft-openai-compatible",
+    "name": "ZSoft metered OpenAI-compatible proxy",
+    "auth_mode": "openai-compatible",
+    "base_url_env": "OPENAI_COMPAT_BASE_URL",
+    "api_key_env": "OPENAI_COMPAT_API_KEY",
+    "wire_api": "chat_completions"
+  },
+  "wall_time_seconds": 300,
+  "concurrency": 1,
+  "cell_concurrency": 1,
+  "seeds": [
+    1
+  ],
+  "max_calls": 75,
+  "max_input_tokens": 128000,
+  "release": "0.1.0",
+  "track": "tp"
+}

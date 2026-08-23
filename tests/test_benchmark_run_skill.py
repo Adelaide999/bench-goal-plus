@@ -73,7 +73,7 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertIn("skydiscover-cpu-evaluators", self.catalog.asset_packs)
         self.assertIn("openevolve-cpu-portable", self.catalog.targets)
         self.assertIn("swe-bench-verified", self.catalog.targets)
-        self.assertEqual(len(self.catalog.runners), 5)
+        self.assertEqual(len(self.catalog.runners), 6)
         self.assertEqual(
             self.catalog.targets["frontier-engineering"].runner_id,
             "frontier-engineering-native",
@@ -319,6 +319,7 @@ class BenchmarkAgentContractTest(unittest.TestCase):
                 "ale-bench-lite",
                 "frontier-cs-problem-0",
                 "frontier-engineering",
+                "zsoft-detect-swe-agent",
                 "skydiscover-cpu-evaluators",
             ],
         )

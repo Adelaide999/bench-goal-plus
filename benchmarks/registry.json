@@ -579,9 +579,9 @@
       "repositories": [
         {
           "role": "benchmark",
-          "upstream_url": "https://gitcode.com/openeuler/muyuan.git",
+          "upstream_url": "https://gitcode.com/linmalin/muyuan-sec.git",
           "subdirectory": "benchmarks/vulnerability/zsoft-l1",
-          "tracking_branch": "pr-3",
+          "tracking_branch": "linmalin-zsoft-benchmarks-mr",
           "license": "NOASSERTION"
         }
       ],
@@ -616,20 +616,20 @@
       "repositories": [
         {
           "role": "benchmark",
-          "upstream_url": "https://gitcode.com/openeuler/muyuan.git",
+          "upstream_url": "https://gitcode.com/linmalin/muyuan-sec.git",
           "subdirectory": "benchmarks/vulnerability/zsoft-detect",
-          "tracking_branch": "pr-3",
+          "tracking_branch": "linmalin-zsoft-benchmarks-mr",
           "license": "NOASSERTION"
         }
       ],
       "local_path": "third_party/zsoft-bench/benchmarks/vulnerability/zsoft-detect",
       "docker_requirement": "not_required",
-      "docker_scope": "The common adapter calls the benchmark-owned deterministic submission scorer on the host; the separate native OpenCode baseline has its own sandbox requirements.",
+      "docker_scope": "The common adapter calls the benchmark-owned deterministic submission scorer on the host. The dedicated zsoft-detect-swe-agent target preserves the upstream Linux Bubblewrap launcher and does not use Docker.",
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
         "official_verifier": "partial",
-        "native_baseline": "n/a",
+        "native_baseline": "partial",
         "plain_codex": "todo",
         "goal_plus_codex": "todo",
         "plain_pi": "todo",
@@ -638,9 +638,11 @@
         "campaign_ready": "partial"
       },
       "evidence": [],
-      "next_action": "Archive one civetweb-detect Goal Plus campaign with F1 and TP/FP/FN telemetry, then run matched-method comparisons across the five pinned projects.",
+      "next_action": "Run the zsoft-detect-civetweb-swe-agent-smoke preset on a Linux+bwrap host, archive exact provider usage plus official F1 evidence, then run matched Goal Plus comparisons across the five pinned projects.",
       "blockers": [
-        "A clean source checkout for the pinned project revision must be available or fetched during preparation."
+        "The native SWE-agent acceptance path still lacks a real-model Linux+bwrap campaign; macOS OrbStack is not the upstream native host.",
+        "The upstream SWE-agent launcher does not expose an explicit reasoning-effort control, so its results are not yet eligible for reasoning-matched method comparisons.",
+        "A clean source checkout for the pinned project revision and the clean pinned SWE-agent 1.0.1 checkout must be locally inventoried before execution."
       ]
     }
   ]

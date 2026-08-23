@@ -55,6 +55,7 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     copy_goal_plus_assets,
     copy_goal_plus_pi_assets,
     finalize_goal_plus_search,
+    goal_plus_entrypoint,
     goal_plus_incomplete_reason,
     parse_codex_events,
     parse_pi_events,
@@ -431,12 +432,15 @@ def prepare(args: argparse.Namespace) -> int:
         prompt_contract = {
             "mode": "natural_goal_plus_entry",
             "common_prompt_sha256": sha256_text(common_prompt),
-            "transform": "/goal-plus prefix plus aligned Goal Plus constraints",
+            "transform": (
+                f"{goal_plus_entrypoint(worker_host).split()[0]} prefix plus aligned "
+                "Goal Plus constraints"
+            ),
             "goal_prompt_sha256": sha256_text(goal_prompt),
         }
         workspace_value = str(workspace)
         goal_plus_config = {
-            "entrypoint": "/goal-plus mode=autonomous",
+            "entrypoint": goal_plus_entrypoint(worker_host),
             "worker_host": worker_host,
             "worker_model": worker_model,
             "metric_name": PRIMARY_METRIC,

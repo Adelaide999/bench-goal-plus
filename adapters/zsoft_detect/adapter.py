@@ -13,8 +13,9 @@ Wraps the benchmark's own scripts through the vendored copy at
   vendored copy is not a Git checkout); the scored source ref is pinned in
   each workspace's `task.json` as `upstream_commit`.
 
-The upstream OpenCode runner remains a separate native baseline and is not an
-evaluator for Goal Plus candidates.
+The upstream native runner remains separate from this adapter and is not an
+evaluator for Goal Plus candidates. Its SWE-agent profile is exposed by the
+dedicated ``zsoft-detect-swe-agent`` native target.
 """
 
 from __future__ import annotations
@@ -187,7 +188,7 @@ def materialize_workspace(
 
     source_checkout = workspace.parent / f"{workspace.name}-source"
     if not source_checkout.exists():
-        _fetch_source(project, commit, source_checkout)
+        fetch_source_checkout(project, commit, source_checkout)
 
     if workspace.exists():
         raise FileExistsError(workspace)
@@ -249,7 +250,7 @@ def materialize_workspace(
     }
 
 
-def _fetch_source(project: str, commit: str, destination: Path) -> None:
+def fetch_source_checkout(project: str, commit: str, destination: Path) -> None:
     """Materialize the clean source checkout the runner requires."""
     from adapters.zsoft_l1.adapter import BENCHMARK_ROOT as L1_ROOT
 

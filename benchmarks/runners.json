@@ -99,6 +99,27 @@
       }
     },
     {
+      "id": "zsoft-detect-native",
+      "kind": "native-profile",
+      "controller": "experiments/zsoft_detect_swe_agent/experiment.py",
+      "evidence_filename": "campaign-summary.json",
+      "supported_methods": [
+        "zsoft-swe-agent"
+      ],
+      "capabilities": {
+        "provision": true,
+        "detach": false,
+        "stop": false,
+        "resume": false,
+        "repeat_seeds": true,
+        "cell_concurrency": false,
+        "retain_containers": false,
+        "official_evaluator": true,
+        "attempt_seed": false,
+        "resume_semantics": "native SWE-agent cells are non-resumable; retry uses a new campaign"
+      }
+    },
+    {
       "id": "common-matrix",
       "kind": "common-matrix",
       "controller": "experiments/benchmark_campaign/experiment.py",
@@ -309,6 +330,20 @@
         "owner": "adapter",
         "provision_mode": "none",
         "scope": "The benchmark-owned deterministic submission scorer runs on the host."
+      }
+    },
+    {
+      "id": "zsoft-detect-swe-agent",
+      "runner": "zsoft-detect-native",
+      "adapter": null,
+      "bootstrap_targets": ["zsoft_l1"],
+      "local_asset_inventory": true,
+      "default_inventory_profile": "civetweb-swe-agent-smoke",
+      "docker": {
+        "requirement": "not_required",
+        "owner": "host",
+        "provision_mode": "none",
+        "scope": "The benchmark-owned SWE-agent launcher runs natively on a Linux host inside Bubblewrap and calls the deterministic host scorer; Docker and OrbStack are not execution substitutes."
       }
     }
   ],
@@ -597,6 +632,34 @@
           "wire_api": "responses"
         },
         "wall_time_seconds": 1800,
+        "concurrency": 1,
+        "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "zsoft-detect-civetweb-swe-agent-smoke",
+      "description": "One-project ZSoft Detect native SWE-agent smoke using the upstream Bubblewrap launcher and exact provider usage, with T=300, K=1, C=1, R=1.",
+      "benchmarks": [
+        "zsoft-detect-swe-agent"
+      ],
+      "profile": "civetweb-swe-agent-smoke",
+      "campaign_id_template": "zsoft-detect-civetweb-swe-agent-gpt-5-6-sol-medium-5m-k1-c1-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": [
+          "zsoft-swe-agent"
+        ],
+        "model": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "agent_provider": {
+          "id": "zsoft-openai-compatible",
+          "name": "ZSoft metered OpenAI-compatible proxy",
+          "auth_mode": "openai-compatible",
+          "base_url_env": "OPENAI_COMPAT_BASE_URL",
+          "api_key_env": "OPENAI_COMPAT_API_KEY",
+          "wire_api": "chat_completions"
+        },
+        "wall_time_seconds": 300,
         "concurrency": 1,
         "cell_concurrency": 1
       }

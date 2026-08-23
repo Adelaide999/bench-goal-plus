@@ -27,7 +27,7 @@ Goal Plus 位于 controller 层：选择父候选、创建独立 workspace、启
 - `--output-last-message` 单独保存最终消息。
 - `codex exec resume <thread-id>` 可续接既有 session。
 - Plain Codex 使用 `--ignore-user-config`，避免个人 `config.toml` 影响可复现实验；项目 `AGENTS.md` 仍用于任务约束。
-- Goal Plus + Codex 使用 run 内独立的 `CODEX_HOME`，不继承个人配置，同时保留项目 `.codex/config.toml` 和 `.codex/hooks.json`；`--ignore-user-config` 会连项目 Hook 一起跳过，因此该模式不得使用。
+- Goal Plus + Codex 使用 run 内独立的 `CODEX_HOME`，不继承个人配置；prepare 从最新 Muyuan 的 `.codex/config.example.toml` 和 `.codex/hooks.example.json` 物化项目 `.codex/config.toml` 与 `.codex/hooks.json`（并兼容旧版 `hooks.json`）。`--ignore-user-config` 会连项目 Hook 一起跳过，因此该模式不得使用。
 
 中央 runner 的初始命令形态：
 

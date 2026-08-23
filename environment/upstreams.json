@@ -90,9 +90,12 @@
       "editable": true
     },
     "zsoft_l1": {
-      "repository": "https://gitcode.com/openeuler/muyuan.git",
+      "repository": "https://gitcode.com/linmalin/muyuan-sec.git",
+      "repository_fallbacks": [
+        "git@gitcode.com:linmalin/muyuan-sec.git"
+      ],
       "checkout_dir": "zsoft-bench",
-      "tracking_branch": "pr-3",
+      "tracking_branch": "linmalin-zsoft-benchmarks-mr",
       "sparse_paths": [
         "/benchmarks/vulnerability/zsoft-l1/",
         "/benchmarks/vulnerability/zsoft-detect/"

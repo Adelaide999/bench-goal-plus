@@ -16,6 +16,8 @@ benchmark 依赖和命令路由。macOS/Linux、OAuth/direct API、agent/provide
 | Frontier-CS | `frontier_cs` | required | eager adapter hook builds the pinned judge image and creates its preserved container |
 | SkyDiscover/EvoX | `skydiscover` | mixed | only registry-approved host/image subset |
 | OpenEvolve examples | `openevolve` | not required | `cpu_portable` locked NumPy/SciPy set |
+| ZSoft L1 | `zsoft_l1` | required | branch-managed sparse checkout; Docker Compose vulnerable/fixed differential judge |
+| ZSoft Detect | `zsoft_l1` | not required | common target uses the deterministic host scorer; dedicated `zsoft-detect-swe-agent` target additionally requires native Linux+bwrap, a clean pinned SWE-agent 1.0.1 checkout, and `OPENAI_COMPAT_*` auth |
 | PerfOpt-Bench | none | unavailable | no executable public artifact; do not claim runnable |
 
 ## Global gate

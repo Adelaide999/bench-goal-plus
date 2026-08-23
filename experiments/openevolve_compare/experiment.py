@@ -143,21 +143,27 @@ def canonical_method(method: str) -> str:
 
 def copy_goal_plus_assets(goal_plus_root: Path, workspace: Path) -> None:
     source = goal_plus_root / ".codex"
-    required = (
-        source / "agents",
-        source / "skills",
-        source / "hooks.json",
-        source / "config.example.toml",
-    )
+    required = (source / "skills", source / "config.example.toml")
     for path in required:
         if not path.exists():
             raise FileNotFoundError(path)
+    hook_source = next(
+        (
+            path
+            for path in (source / "hooks.example.json", source / "hooks.json")
+            if path.is_file()
+        ),
+        None,
+    )
+    if hook_source is None:
+        raise FileNotFoundError(source / "hooks.example.json")
 
     target = workspace / ".codex"
     target.mkdir()
-    shutil.copytree(source / "agents", target / "agents")
+    if (source / "agents").is_dir():
+        shutil.copytree(source / "agents", target / "agents")
     shutil.copytree(source / "skills", target / "skills")
-    shutil.copy2(source / "hooks.json", target / "hooks.json")
+    shutil.copy2(hook_source, target / "hooks.json")
     shutil.copy2(source / "config.example.toml", target / "config.toml")
 
 
@@ -220,6 +226,14 @@ def render_common_task_prompt(
     )
 
 
+def goal_plus_entrypoint(worker_host: str) -> str:
+    if worker_host == "codex":
+        return "$goal-plus mode=autonomous"
+    if worker_host == "pi-rpc":
+        return "/goal-plus mode=autonomous"
+    raise ValueError(f"unsupported Goal Plus worker host: {worker_host}")
+
+
 def render_goal(
     *,
     task_text: str,
@@ -239,7 +253,7 @@ def render_goal(
     coordination_condition: str | None = None,
     search_space_mode: str | None = None,
 ) -> str:
-    """Add the natural Goal Plus entrypoint and config to the common Codex prompt."""
+    """Add the host-native Goal Plus entrypoint and config to the common prompt."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
     dispatch_seconds = (
         worker_runtime_seconds
@@ -310,7 +324,7 @@ def render_goal(
         else "allow at most one changed file.\n"
     )
     return (
-        "/goal-plus mode=autonomous\n\n"
+        f"{goal_plus_entrypoint(worker_host)}\n\n"
         f"{common_prompt.rstrip()}\n\n"
         "# Goal Plus configuration\n\n"
         "Use the current workspace and construct the verifier-backed Goal Plus search from "
@@ -686,11 +700,14 @@ def prepare(args: argparse.Namespace) -> int:
         prompt_contract = {
             "mode": "natural_goal_plus_entry",
             "common_prompt_sha256": sha256_text(common_prompt),
-            "transform": "/goal-plus prefix plus Goal Plus configuration suffix",
+            "transform": (
+                f"{goal_plus_entrypoint(worker_host).split()[0]} prefix plus "
+                "Goal Plus configuration suffix"
+            ),
             "goal_prompt_sha256": sha256_text(goal),
         }
         goal_plus_config = {
-            "entrypoint": "/goal-plus mode=autonomous",
+            "entrypoint": goal_plus_entrypoint(worker_host),
             "worker_host": worker_host,
             "worker_model": worker_model,
             "base_model": args.model,

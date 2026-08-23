@@ -2,7 +2,8 @@
 
 Wraps the CyberGym ZSoft L1 PoC framework vendored at
 `third_party/zsoft-bench/benchmarks/vulnerability/zsoft-l1`
-(sparse checkout of `gitcode.com/openeuler/muyuan.git` branch `pr-3`,
+(sparse checkout of `gitcode.com/linmalin/muyuan-sec.git` branch
+`linmalin-zsoft-benchmarks-mr`,
 framework version 0.1.0).
 
 The adapter:

@@ -169,6 +169,42 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 "\n".join(p.read_text() for p in target.rglob("*.*")),
             )
 
+    def test_goal_plus_assets_materialize_latest_example_hooks_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            goal_plus = temp / "goal-plus"
+            codex = goal_plus / ".codex"
+            (codex / "skills/demo").mkdir(parents=True)
+            (codex / "skills/demo/SKILL.md").write_text("# demo\n")
+            (codex / "hooks.example.json").write_text('{"version": 1}\n')
+            (codex / "config.example.toml").write_text(
+                "[mcp_servers.goal-plus]\n"
+            )
+            workspace = temp / "workspace"
+            workspace.mkdir()
+
+            experiment.copy_goal_plus_assets(goal_plus, workspace)
+
+            target = workspace / ".codex"
+            self.assertFalse((target / "agents").exists())
+            self.assertEqual((target / "hooks.json").read_text(), '{"version": 1}\n')
+            self.assertEqual(
+                (target / "config.toml").read_text(),
+                "[mcp_servers.goal-plus]\n",
+            )
+
+    def test_goal_plus_entrypoint_matches_worker_host(self) -> None:
+        self.assertEqual(
+            experiment.goal_plus_entrypoint("codex"),
+            "$goal-plus mode=autonomous",
+        )
+        self.assertEqual(
+            experiment.goal_plus_entrypoint("pi-rpc"),
+            "/goal-plus mode=autonomous",
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported Goal Plus worker host"):
+            experiment.goal_plus_entrypoint("unknown")
+
     def test_goal_plus_pi_assets_copy_only_project_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
@@ -261,7 +297,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         )
         self.assertTrue(
             prompt.startswith(
-                "/goal-plus mode=autonomous\n\n"
+                "$goal-plus mode=autonomous\n\n"
                 + common.rstrip()
                 + "\n\n# Goal Plus configuration"
             )

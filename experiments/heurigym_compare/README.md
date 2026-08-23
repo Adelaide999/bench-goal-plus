@@ -7,7 +7,7 @@ wall-clock cap `T`, and concurrency `K`:
 - Plain Codex starts `K` isolated Codex lanes and selects the lowest valid
   `total_cost`.
 - Goal Plus + Codex starts from the same ordinary Codex task prompt with only
-  the `/goal-plus` prefix and aligned Goal Plus configuration appended.
+  the `$goal-plus` prefix and aligned Goal Plus configuration appended.
 
 Goal, frozen spec, Search run, candidates, sessions, and `.gp/` state are all
 created after the timed invocation starts.

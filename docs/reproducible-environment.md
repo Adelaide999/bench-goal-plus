@@ -191,7 +191,8 @@ ALE 使用官方 `ale-bench:cpp20-202301` 镜像。首次 evaluator 会构建 Ru
 这一步复用当次 branch snapshot 的 OpenEvolve evaluator，不调用模型。Goal Plus
 的 project `.codex` assets 会从 managed checkout 复制到 run-local workspace；
 该 OpenEvolve/Muyuan root commit 和 Goal Plus source path 会写入 manifest。prepare 完成时 `.gp/` 尚不存在，
-只有真正发送自然 `/goal-plus` prompt 后才会在该 workspace 内生成。脚本不会自动删除 run directory。
+只有真正发送 host-native Goal Plus prompt（Codex 为 `$goal-plus`，Pi 为
+`/goal-plus`）后才会在该 workspace 内生成。脚本不会自动删除 run directory。
 
 ## 跑四条路径
 
@@ -229,7 +230,7 @@ export OPENAI_API_KEY='<secret>'
   --api-base https://api.example.com/v1
 ```
 
-Plain Codex 使用 `K` 个 ephemeral lane。每个 lane 接收同一份 common task prompt；Goal Plus + Codex 接收该 prompt 的严格超集：只在开头增加 `/goal-plus mode=autonomous`，并在末尾附加完整的 Goal Plus 并发、host/model、metric/verifier、edit surface 和预算配置。Goal Plus + Codex 保留原生 session provenance；Goal Plus + Pi 写入 ignored 的 run-local `pi-home/models.json`，其中只引用 `$OPENAI_API_KEY`。Codex 的自定义 provider、Responses wire API、Goal Plus MCP 注册及 headless tool approval 全由命令行显式注入，不依赖另一台机器上的个人 `config.toml`。
+Plain Codex 使用 `K` 个 ephemeral lane。每个 lane 接收同一份 common task prompt；Goal Plus + Codex 接收该 prompt 的严格超集：只在开头增加 `$goal-plus mode=autonomous`，并在末尾附加完整的 Goal Plus 并发、host/model、metric/verifier、edit surface 和预算配置。Goal Plus + Codex 保留原生 session provenance；Goal Plus + Pi 使用 `/goal-plus mode=autonomous`，并写入 ignored 的 run-local `pi-home/models.json`，其中只引用 `$OPENAI_API_KEY`。Codex 的自定义 provider、Responses wire API、Goal Plus MCP 注册及 headless tool approval 全由命令行显式注入，不依赖另一台机器上的个人 `config.toml`。
 
 Goal Plus 配置还明确 process-verifier 的所有权：每个 candidate worker 提交自己的最终 process result；parent 等全部 workers 返回后直接 selection，由 promotion verifier 做最终 gate。不要让 parent 在 worker closeout 同时重复 process verification，否则会制造无意义的 evaluator call，并可能与 runtime-owned `results.tsv` 提交竞争。
 
@@ -244,7 +245,7 @@ run manifest 只记录 model/api base 和 credential policy，不记录任何环
 
 ### 为什么 Goal Plus 必须从自然 prompt 开始
 
-这套主协议比较完整系统，而不是只比较预构建后的 search stage。`prepare` 对所有方法只完成 task/config/workspace materialization；Goal Plus 不预创建 goal、triage、frozen spec、Search run、candidate 或 session。计时开始后，Codex 收到 `/goal-plus + common task prompt + Goal Plus configuration`，由 Goal Plus 自己完成 intake、spec discovery/freeze、并发 worker 启动和最终选择。
+这套主协议比较完整系统，而不是只比较预构建后的 search stage。`prepare` 对所有方法只完成 task/config/workspace materialization；Goal Plus 不预创建 goal、triage、frozen spec、Search run、candidate 或 session。计时开始后，Codex 收到 `$goal-plus + common task prompt + Goal Plus configuration`，由 Goal Plus 自己完成 intake、spec discovery/freeze、并发 worker 启动和最终选择；Pi 对应使用 `/goal-plus`。
 
 这样 Plain Codex 与 Codex + Goal Plus 的任务正文保持一致，唯一实验干预就是 Goal Plus。Goal Plus 的控制开销也属于完整系统成本，必须计入 `T`；如果后续需要排除 intake/spec discovery 开销，应另做明确标注的 engine-only 消融，而不是改变主实验入口。
 

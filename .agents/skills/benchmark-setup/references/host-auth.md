@@ -42,7 +42,29 @@ loopback bridge 失败都不能触发开放公网回退。安装依赖发生在 
 | Common/OpenEvolve 的 Codex 路径 | Codex native login，或显式 OpenAI-compatible endpoint | 省略 `--api-base` 使用 native login；显式 endpoint 使用 `OPENAI_API_KEY` | custom provider 使用 Responses wire API |
 | SWE-bench Verified Plain/Goal Plus Codex | profile 固定的 OpenAI-compatible API | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | 只使用 Responses；不读取 OAuth；Linux loopback endpoint 必须桥入 task container |
 | SWE-bench Verified Plain/Goal Plus Pi | Pi built-in provider API，或 profile-frozen OpenAI-compatible provider | profile 中的 `PROVIDER/MODEL` + provider 标准 key env，或 `OPENAI_BASE_URL` + `OPENAI_API_KEY` | Z.AI profile 使用 `zai/glm-5.2`；Luna profile 使用 `bench-openai/gpt-5.6-luna` + Responses；均不读取 EdgeBench Pi OAuth |
+| ZSoft Detect native SWE-agent | benchmark-owned metered OpenAI-compatible proxy | `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_API_KEY`，optional `OPENAI_COMPAT_HEADERS_JSON` | only `zsoft-detect-swe-agent`; native Linux+bwrap; SWE-agent uses Chat Completions through the host meter; no OAuth or `OPENAI_*` fallback |
 | Common/OpenEvolve 的 Pi、native OpenEvolve、SkyDiscover | OpenAI-compatible API | `--api-base` + `OPENAI_API_KEY` | 不是 Codex OAuth 路径 |
+
+### ZSoft Detect native SWE-agent API
+
+The dedicated ZSoft target preserves the upstream variable names exactly:
+
+```text
+OPENAI_COMPAT_BASE_URL
+OPENAI_COMPAT_API_KEY
+OPENAI_COMPAT_HEADERS_JSON  # optional JSON object
+```
+
+The real key remains in the host-side metering proxy. Bubblewrap receives only
+a dummy key and loopback proxy URL. The full doctor validates presence and
+header JSON shape without serializing values; the profiled local-asset check
+does not inspect credentials. This method does not read Codex OAuth,
+`OPENAI_API_KEY`, `OPENAI_BASE_URL`, or EdgeBench `SFORGE_AGENT_*` fallbacks.
+
+This runner is native Linux-only. A healthy OrbStack daemon on macOS proves
+Docker availability for Docker-owned benchmarks, not Bubblewrap availability
+for ZSoft. Do not add an unreviewed container wrapper around the upstream
+launcher.
 
 ### Codex OAuth
 
