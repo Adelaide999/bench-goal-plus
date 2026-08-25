@@ -369,6 +369,46 @@
       ]
     },
     {
+      "id": "torchbench",
+      "display_name": "TorchBench model optimization",
+      "kind": "benchmark",
+      "gate_set": "benchmark_methods",
+      "priority": 8,
+      "repositories": [
+        {
+          "role": "benchmark-harness",
+          "upstream_url": "https://github.com/pytorch/benchmark",
+          "fork_url": null,
+          "tracking_branch": "main",
+          "license": "BSD-3-Clause"
+        }
+      ],
+      "data_url": "https://github.com/pytorch/benchmark/tree/main/torchbenchmark/models",
+      "local_path": "third_party/torchbench",
+      "docker_requirement": "not_required",
+      "docker_scope": "The initial eval-only adapter uses one or more host CUDA devices and a separately installed TorchBench Python environment. Docker is not part of this path.",
+      "stages": {
+        "source_forked": "n/a",
+        "environment": "partial",
+        "official_verifier": "partial",
+        "native_baseline": "todo",
+        "plain_codex": "todo",
+        "goal_plus_codex": "todo",
+        "plain_pi": "todo",
+        "goal_plus_pi": "todo",
+        "matched_baseline": "todo",
+        "campaign_ready": "partial"
+      },
+      "evidence": [],
+      "next_action": "Run and archive one Goal Plus AlexNet campaign through the unified lifecycle before promoting Goal Plus readiness.",
+      "blockers": [
+        "The initial catalog covers eval-mode alexnet, BERT_pytorch, resnet18, mobilenet_v2, and squeezenet1_1 only; train/backward and the full TorchBench model set are not claimed.",
+        "The synchronized latency metric is adapter-owned and uses upstream TorchBench workload APIs, but it is not an official TorchBench leaderboard score.",
+        "The Codex path requires danger-full-access to expose host CUDA and must run on an isolated benchmark host or VM; Pi uses host CUDA directly.",
+        "A compatible CUDA TorchBench Python environment and any model assets must already exist on the host."
+      ]
+    },
+    {
       "id": "swe-bench-verified",
       "display_name": "SWE-bench Verified smoke integration",
       "kind": "benchmark",

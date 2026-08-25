@@ -17,6 +17,7 @@ adapter 负责 materialize 和 evaluate；matrix controller 负责 method/seed/c
 必须显式解析：
 
 - target；
+- adapter 可选的 `--task-id`；不传时使用该 adapter 的默认 task；
 - method 或 B0-B4 condition（二者不能混用）；
 - model、reasoning、`T`、`K`、seed；
 - adapter 的 Docker、artifact 和 evaluator contract。
@@ -37,6 +38,10 @@ python3 scripts/bench.py plan \
 
 python3 scripts/bench.py launch <same-selection>
 ```
+
+adapter 提供 task catalog 时，在 `--benchmark <id>` 后增加 `--task-id <task>`。
+Goal Plus method 需要共享工具目录时增加 `--shared-dir`；Plain method 和 condition
+campaign 不接受该选项。
 
 common runner 当前不声明 detached controller。长任务应在受管理的 Agent/session 中运行，
 不能自行拼 `nohup` 或多个 controller。

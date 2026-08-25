@@ -129,6 +129,8 @@ class CampaignSpec:
     runner: RunnerDefinition
     preset_id: str | None = None
     profile: str | None = None
+    task_id: str | None = None
+    shared_dir: bool = False
     methods: tuple[str, ...] = ()
     conditions: tuple[str, ...] = ()
     seeds: tuple[int, ...] = (1,)
@@ -166,6 +168,8 @@ class CampaignSpec:
             "runner_kind": self.runner.kind,
             "preset": self.preset_id,
             "profile": self.profile,
+            "task_id": self.task_id,
+            "shared_dir": self.shared_dir,
             "methods": list(self.methods),
             "conditions": list(self.conditions),
             "seeds": list(self.seeds),

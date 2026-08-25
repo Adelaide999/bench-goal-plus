@@ -105,6 +105,7 @@ class PrepareConfig:
     benchmark: str
     method: str
     task_id: str | None = None
+    shared_dir: bool = False
     adapter_module: str | None = None
     condition: str | None = None
     coordination_variant: str | None = None
@@ -155,6 +156,7 @@ def add_runtime_prepare_arguments(
     parser.add_argument("--pi-provider-id", default=PI_PROVIDER_ID)
     parser.add_argument("--pi-api", choices=PI_APIS, default="openai-responses")
     parser.add_argument("--pi-api-key-env", default=PI_API_KEY_ENV)
+    parser.add_argument("--shared-dir", action="store_true")
     parser.add_argument(
         "--reasoning-effort",
         choices=reasoning_choices,
@@ -198,7 +200,7 @@ def configure_adapter(
     module = loaded.module
     global ADAPTER_CONTRACT
     global ARTIFACT_NAME, BENCHMARK_NAME, CASE_SET_DESCRIPTION
-    global CODEX_SANDBOX, DIRECTION
+    global CODEX_SANDBOX, DIRECTION, GOAL_PLUS_MCP_ENV_VARS
     global PRIMARY_METRIC, TASK_ID, UPSTREAM_KEY
     global LOCAL_SOURCE_RELATIVE, UPSTREAM_SUBDIR
     global OFFICIAL_BENCHMARK_COMPARABLE
@@ -208,6 +210,7 @@ def configure_adapter(
     BENCHMARK_NAME = module.BENCHMARK_NAME
     CASE_SET_DESCRIPTION = module.CASE_SET_DESCRIPTION
     CODEX_SANDBOX = module.CODEX_SANDBOX
+    GOAL_PLUS_MCP_ENV_VARS = tuple(getattr(module, "GOAL_PLUS_MCP_ENV_VARS", ()))
     DIRECTION = module.DIRECTION
     PRIMARY_METRIC = module.PRIMARY_METRIC
     TASK_ID = module.TASK_ID
@@ -273,6 +276,11 @@ def prepare(args: argparse.Namespace) -> int:
         raise ValueError("wall time must exceed the closeout reserve")
     if args.concurrency < 1:
         raise ValueError("concurrency must be positive")
+    if getattr(args, "shared_dir", False) and args.method not in {
+        "goal-plus-codex",
+        "goal-plus-pi",
+    }:
+        raise ValueError("--shared-dir requires a Goal Plus method")
     if args.iterations_ceiling < 1:
         raise ValueError("iterations ceiling must be positive")
     if args.llm_max_tokens < 1:
@@ -420,6 +428,7 @@ def prepare(args: argparse.Namespace) -> int:
             verifier_timeout_seconds=VERIFIER_TIMEOUT_SECONDS,
             coordination_condition=condition.condition_id if condition else None,
             search_space_mode=condition.search_space_mode if condition else None,
+            shared_dir_enabled=getattr(args, "shared_dir", False),
         )
         (workspace / "GOAL.md").write_text(goal_prompt)
         workspaces.append(workspace)
@@ -447,6 +456,7 @@ def prepare(args: argparse.Namespace) -> int:
             "metric_direction": DIRECTION,
             "artifact_name": ARTIFACT_NAME,
             "artifact_is_directory": (workspace / ARTIFACT_NAME).is_dir(),
+            "shared_dir_enabled": getattr(args, "shared_dir", False),
             "state_at_t0": "absent; natural prompt creates all Goal Plus state inside T",
             "condition": condition.as_manifest() if condition else None,
             "coordination_reviewer": (
@@ -774,7 +784,7 @@ def codex_command(
                 "agents.max_concurrent_threads_per_session="
                 f"{max_concurrent_threads_per_session}",
                 "--dangerously-bypass-hook-trust",
-                *codex_goal_plus_mcp_args(),
+                *codex_goal_plus_mcp_args(GOAL_PLUS_MCP_ENV_VARS),
             ]
         )
     command.extend(["--model", model, "-"])
@@ -1015,6 +1025,9 @@ def execute_goal_plus(
         verifier_timeout_seconds=VERIFIER_TIMEOUT_SECONDS,
         coordination_condition=(manifest.get("condition") or {}).get("id"),
         search_space_mode=(manifest.get("condition") or {}).get("search_space_mode"),
+        shared_dir_enabled=bool(
+            (manifest.get("goal_plus_config") or {}).get("shared_dir_enabled")
+        ),
     )
     (run_dir / "prompt.md").write_text(prompt)
     reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)

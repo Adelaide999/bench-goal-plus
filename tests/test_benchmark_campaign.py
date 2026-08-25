@@ -29,6 +29,7 @@ class BenchmarkConditionTest(unittest.TestCase):
                 "frontier-engineering-malloclab",
                 "heurigym",
                 "local-vliw",
+                "torchbench",
                 "zsoft-detect",
                 "zsoft-l1",
             },
@@ -94,10 +95,12 @@ class BenchmarkConditionTest(unittest.TestCase):
             worker_model="test-model",
             coordination_condition="B3",
             search_space_mode="observe",
+            shared_dir_enabled=True,
         )
         self.assertIn("Ablation condition: `B3`", prompt)
         self.assertIn('`mode="observe"`', prompt)
         self.assertIn("must not block a candidate", prompt)
+        self.assertIn("`shared_dir.enabled=true`", prompt)
 
     def test_condition_completion_requires_the_frozen_mode(self) -> None:
         state = {

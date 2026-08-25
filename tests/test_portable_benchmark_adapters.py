@@ -349,13 +349,49 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
         self.assertFalse(any(provider_url in part for part in recorded))
         self.assertTrue(any(provider_url in part for part in command))
 
-    def test_docker_backed_tasks_use_host_capable_codex_sandbox(self) -> None:
+    def test_host_resource_tasks_use_host_capable_codex_sandbox(self) -> None:
         experiment.configure_adapter("ale-bench-lite")
         self.assertEqual(experiment.CODEX_SANDBOX, "danger-full-access")
         experiment.configure_adapter("frontier-cs-problem-0")
         self.assertEqual(experiment.CODEX_SANDBOX, "danger-full-access")
+        experiment.configure_adapter("torchbench")
+        self.assertEqual(experiment.CODEX_SANDBOX, "danger-full-access")
+        command = experiment.codex_command(
+            codex_bin="codex",
+            workspace=Path("workspace"),
+            output_last_message=Path("final-message.txt"),
+            model="test-model",
+            reasoning_effort="high",
+            api_base=None,
+            sandbox=experiment.CODEX_SANDBOX,
+            goal_plus=True,
+            ephemeral=False,
+        )
+        joined = "\n".join(command)
+        for variable in (
+            "BENCH_GOAL_PLUS_TORCHBENCH_PYTHON",
+            "BENCH_GOAL_PLUS_TORCHBENCH_GPUS",
+            "BENCH_GOAL_PLUS_TORCH_HOME",
+        ):
+            self.assertIn(variable, joined)
         experiment.configure_adapter("autolab-toy-isa")
         self.assertEqual(experiment.CODEX_SANDBOX, "workspace-write")
+        self.assertNotIn(
+            "BENCH_GOAL_PLUS_TORCHBENCH_PYTHON",
+            "\n".join(
+                experiment.codex_command(
+                    codex_bin="codex",
+                    workspace=Path("workspace"),
+                    output_last_message=Path("final-message.txt"),
+                    model="test-model",
+                    reasoning_effort="high",
+                    api_base=None,
+                    sandbox=experiment.CODEX_SANDBOX,
+                    goal_plus=True,
+                    ephemeral=False,
+                )
+            ),
+        )
         experiment.configure_adapter("local-vliw")
         self.assertEqual(experiment.CODEX_SANDBOX, "workspace-write")
         self.assertFalse(experiment.OFFICIAL_BENCHMARK_COMPARABLE)

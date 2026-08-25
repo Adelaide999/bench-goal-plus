@@ -21,6 +21,15 @@ def add_selection(parser: argparse.ArgumentParser) -> None:
 
 def add_start_arguments(parser: argparse.ArgumentParser) -> None:
     add_selection(parser)
+    parser.add_argument(
+        "--task-id",
+        help="select one task from a common adapter that exposes a task catalog",
+    )
+    parser.add_argument(
+        "--shared-dir",
+        action="store_true",
+        help="enable Goal Plus shared_dir for a common-matrix Goal Plus run",
+    )
     parser.add_argument("--campaign-id")
     parser.add_argument("--campaign-dir", type=Path)
     parser.add_argument("--method", action="append", default=[])
@@ -107,6 +116,8 @@ def spec_from_args(agent: BenchmarkAgent, args: argparse.Namespace):
         target_ids=args.benchmark,
         preset_id=args.preset,
         profile=args.profile,
+        task_id=args.task_id,
+        shared_dir=args.shared_dir,
         campaign_id=args.campaign_id,
         campaign_dir=args.campaign_dir,
         methods=args.method,

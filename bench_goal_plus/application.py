@@ -100,6 +100,8 @@ class BenchmarkAgent:
         target_ids: Iterable[str] = (),
         preset_id: str | None = None,
         profile: str | None = None,
+        task_id: str | None = None,
+        shared_dir: bool = False,
         campaign_id: str | None = None,
         campaign_dir: Path | None = None,
         methods: Iterable[str] = (),
@@ -121,10 +123,31 @@ class BenchmarkAgent:
         runner_definition = self.catalog.runners[next(iter(runners))]
         if runner_definition.kind == "native-profile" and len(targets) != 1:
             raise ContractError("native-profile campaigns accept exactly one benchmark")
+        if task_id is not None:
+            if runner_definition.kind != "common-matrix" or len(targets) != 1:
+                raise ContractError("--task-id requires exactly one common-matrix benchmark")
+            adapter_id = targets[0].adapter_id
+            if adapter_id is None:
+                raise ContractError(f"target {targets[0].target_id} has no task adapter")
+            loaded = load_adapter(adapter_id)
+            try:
+                loaded.configure_task(task_id)
+            except (KeyError, RuntimeError, ValueError) as error:
+                raise ContractError(str(error)) from error
+            finally:
+                loaded.configure_task(None)
         selected_profile = profile or (preset.profile if preset else None)
         selected_methods = tuple(methods)
         selected_seeds = tuple(seeds) or (1,)
         selected_conditions = tuple(conditions)
+        if shared_dir and (
+            runner_definition.kind != "common-matrix"
+            or not selected_methods
+            or any(not method.startswith("goal-plus-") for method in selected_methods)
+        ):
+            raise ContractError(
+                "--shared-dir requires an explicit common-matrix Goal Plus method"
+            )
         values = (
             wall_time_seconds,
             live_search_concurrency,
@@ -305,6 +328,8 @@ class BenchmarkAgent:
             runner=runner_definition,
             preset_id=preset.preset_id if preset else None,
             profile=selected_profile,
+            task_id=task_id,
+            shared_dir=shared_dir,
             methods=selected_methods,
             conditions=selected_conditions,
             seeds=selected_seeds,

@@ -307,6 +307,19 @@
       }
     },
     {
+      "id": "torchbench",
+      "runner": "common-matrix",
+      "adapter": "torchbench",
+      "bootstrap_targets": ["torchbench", "goal_plus"],
+      "local_asset_inventory": false,
+      "docker": {
+        "requirement": "not_required",
+        "owner": "host",
+        "provision_mode": "none",
+        "scope": "The adapter runs TorchBench eval workloads in a user-supplied CUDA Python environment on the host; it does not use Docker or modify the managed upstream checkout."
+      }
+    },
+    {
       "id": "zsoft-l1",
       "runner": "common-matrix",
       "adapter": "zsoft-l1",
