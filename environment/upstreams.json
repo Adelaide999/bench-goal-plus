@@ -30,6 +30,11 @@
       "dataset_repository": "ByteDance-Seed/EdgeBench",
       "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9"
     },
+    "torchbench": {
+      "repository": "https://github.com/pytorch/benchmark.git",
+      "checkout_dir": "torchbench",
+      "tracking_branch": "main"
+    },
     "swebench": {
       "repository": "https://github.com/SWE-bench/SWE-bench.git",
       "checkout_dir": "swebench",

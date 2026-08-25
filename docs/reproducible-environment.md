@@ -112,7 +112,7 @@ Frontier-Engineering、HeuriGym、Frontier-CS 和 OpenEvolve worker 分别使用
 ```text
 third_party/{ale-bench,autolab,frontier-cs,frontier-engineering,
              edgebench,heurigym,swarmresearch,swarmresearch-paper-reproduce,
-             skydiscover,openevolve,muyuan}
+             skydiscover,openevolve,muyuan,swebench,torchbench,zsoft-bench}
 ```
 
 `goal_plus` upstream 的 Git checkout 是 `third_party/muyuan`，其唯一运行时 source
@@ -126,7 +126,7 @@ runner 不再依赖 `code/` 下的旁路 checkout。`environment/upstreams.json`
 [`full doctor`](../evidence/environment/2026-07-23-unified-third-party-doctor.json)；
 新增 EdgeBench 由独立
 [`profile doctor`](../evidence/environment/2026-07-23-edgebench-vliw-doctor.json)
-验证。下一次全量环境冻结时应生成包含 11 个 checkout 的新 full-doctor
+验证。下一次全量环境冻结时应生成覆盖当前 manifest 全部 checkout 的新 full-doctor
 evidence。
 
 ## Standalone benchmark 统一入口
@@ -159,11 +159,11 @@ docker build \
   third_party/frontier-cs/algorithmic
 ```
 
-ALE 与 Frontier-CS 的 `evaluate.py` 都需要访问 host Docker socket，因此统一
-runner 会仅对这两个 adapter 显式使用 Codex `danger-full-access`，并把该选择写入
-run manifest；其他 adapter 仍使用 `workspace-write`。这两个 Docker case 应只在
-隔离的 benchmark 主机上运行，不能把 `workspace-write` 下的“missing image”当成
-真实环境缺失。
+ALE 与 Frontier-CS 的 `evaluate.py` 需要访问 host Docker socket，TorchBench 需要访问
+host GPU；因此统一 runner 仅对这三个 adapter 显式使用 Codex
+`danger-full-access`，并把该选择写入 run manifest；其他 adapter 仍使用
+`workspace-write`。这些 host-resource case 应只在隔离的 benchmark 主机或 VM 上运行，
+不能把 `workspace-write` 下的“missing image”或“no visible CUDA device”当成真实环境缺失。
 
 ALE 使用官方 `ale-bench:cpp20-202301` 镜像。首次 evaluator 会构建 Rust
 `gen/tester/vis`，controller 将二进制缓存到 `.bench-env/cache/ale-bench/`；

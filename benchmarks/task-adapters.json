@@ -26,6 +26,10 @@
       "module": "adapters.local_vliw.adapter"
     },
     {
+      "id": "torchbench",
+      "module": "adapters.torchbench.adapter"
+    },
+    {
       "id": "zsoft-l1",
       "module": "adapters.zsoft_l1.adapter"
     },

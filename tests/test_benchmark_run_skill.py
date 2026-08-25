@@ -440,6 +440,61 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertIn("--worker-min-runtime-seconds", command[0])
         self.assertIn("60", command[0])
 
+    def test_common_matrix_exposes_adapter_task_selection(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "plan",
+                "--benchmark",
+                "zsoft-detect",
+                "--task-id",
+                "libxml2-detect",
+                "--method",
+                "goal-plus-pi",
+                "--model",
+                "test-model",
+                "--reasoning-effort",
+                "medium",
+                "--wall-time-seconds",
+                "180",
+                "--live-search-concurrency",
+                "1",
+                "--shared-dir",
+            ]
+        )
+        spec = self.agent.resolve_spec(
+            target_ids=args.benchmark,
+            task_id=args.task_id,
+            shared_dir=args.shared_dir,
+            methods=args.method,
+            model=args.model,
+            reasoning_effort=args.reasoning_effort,
+            wall_time_seconds=args.wall_time_seconds,
+            live_search_concurrency=args.live_search_concurrency,
+        )
+
+        command, _ = create_runner(spec.runner).prepare_commands(spec)
+        self.assertEqual(spec.task_id, "libxml2-detect")
+        self.assertIn("--task-id", command[0])
+        self.assertIn("libxml2-detect", command[0])
+        self.assertIn("--shared-dir", command[0])
+        self.assertEqual(load_adapter("zsoft-detect").module.TASK_ID, "civetweb-detect")
+
+    def test_common_matrix_rejects_shared_dir_for_plain_method(self) -> None:
+        with self.assertRaisesRegex(
+            ContractError,
+            "--shared-dir requires an explicit common-matrix Goal Plus method",
+        ):
+            self.agent.resolve_spec(
+                target_ids=("torchbench",),
+                task_id="alexnet",
+                shared_dir=True,
+                methods=("plain-pi",),
+                model="test-model",
+                reasoning_effort="medium",
+                wall_time_seconds=180,
+                live_search_concurrency=1,
+            )
+
     def test_unproven_common_cell_concurrency_fails_closed(self) -> None:
         with self.assertRaisesRegex(ContractError, "use C=1"):
             self.agent.resolve_spec(

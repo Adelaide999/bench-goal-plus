@@ -489,6 +489,16 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 **kwargs,
             )
         )
+        self.assertIsNone(
+            experiment.goal_plus_incomplete_reason(
+                base_state,
+                codex_events={
+                    "spawned_agent_thread_count": 0,
+                    "goal_plus": {"bound_worker_handle_count": 2},
+                },
+                **kwargs,
+            )
+        )
 
         missing_worker_evidence = json.loads(json.dumps(base_state))
         missing_worker_evidence["runs"][0]["worker_verified_candidate_count"] = 1
@@ -985,6 +995,13 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL",
         ):
             self.assertIn(variable, joined)
+
+    def test_codex_goal_plus_mcp_args_merge_adapter_environment(self) -> None:
+        joined = "\n".join(
+            experiment.codex_goal_plus_mcp_args(("TASK_RUNTIME", "OPENAI_API_KEY"))
+        )
+        self.assertIn("TASK_RUNTIME", joined)
+        self.assertEqual(joined.count("OPENAI_API_KEY"), 1)
 
     def test_codex_execution_args_use_unrestricted_noninteractive_mode(self) -> None:
         args = experiment.codex_execution_args()

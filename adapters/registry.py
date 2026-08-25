@@ -81,11 +81,13 @@ class LoadedAdapter:
         return self.definition.module_name
 
     def manifest_contract(self) -> dict[str, Any]:
+        list_task_ids = getattr(self.module, "list_task_ids", None)
         return {
             "adapter_id": self.adapter_id,
             "module": self.module_name,
             "benchmark_name": self.module.BENCHMARK_NAME,
             "task_id": self.module.TASK_ID,
+            "task_ids": list(list_task_ids()) if callable(list_task_ids) else None,
             "artifact_name": self.module.ARTIFACT_NAME,
             "primary_metric": self.module.PRIMARY_METRIC,
             "direction": self.module.DIRECTION,
@@ -96,9 +98,9 @@ class LoadedAdapter:
 
     def configure_task(self, task_id: str | None) -> None:
         configure = getattr(self.module, "configure_task", None)
-        if task_id is None:
-            return
         if not callable(configure):
+            if task_id is None:
+                return
             raise AdapterContractError(
                 f"adapter {self.adapter_id} does not support task selection"
             )

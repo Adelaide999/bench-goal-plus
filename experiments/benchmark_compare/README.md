@@ -37,12 +37,12 @@ are always included because they are always-managed shared runtimes.
 `source_kind=local_example` 和 `official_benchmark_comparable=false`；
 workspace evaluator report 另保留 `official_edgebench_comparable=false`。
 
-The two Docker-backed adapters (`ale-bench-lite` and
-`frontier-cs-problem-0`) launch Codex with `danger-full-access` and explicit
-`approval_policy=never`: a workspace sandbox cannot access the host Docker
-socket, so otherwise `evaluate.py` would falsely report a missing image. The
-other three adapters keep `workspace-write`. This sandbox choice is written to
-the run manifest; use these Docker cases only on an isolated benchmark host.
+The Docker-backed adapters (`ale-bench-lite` and `frontier-cs-problem-0`) and
+the host-CUDA `torchbench` adapter launch Codex with `danger-full-access` and
+explicit `approval_policy=never`: a workspace sandbox cannot access the host
+Docker socket or GPU devices. Other adapters keep `workspace-write`. This
+sandbox choice is written to the run manifest; use these host-resource cases
+only on an isolated benchmark host or VM.
 
 ## Prepare, inspect, and run
 

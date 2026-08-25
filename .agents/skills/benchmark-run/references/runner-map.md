@@ -32,6 +32,7 @@ Common runner 统一 campaign lifecycle，但 task、artifact、evaluator、Dock
 | Frontier-CS | [docs/benchmarks/frontier-cs-algorithmic.md](../../../../docs/benchmarks/frontier-cs-algorithmic.md) |
 | SWE-bench Verified | [docs/benchmarks/swe-bench-verified.md](../../../../docs/benchmarks/swe-bench-verified.md) |
 | SkyDiscover task packs | [docs/benchmarks/skydiscover-task-packs.md](../../../../docs/benchmarks/skydiscover-task-packs.md) |
+| TorchBench | [adapters/torchbench/README.md](../../../../adapters/torchbench/README.md) |
 | ZSoft Detect common/native SWE-agent | [docs/benchmarks/zsoft.md](../../../../docs/benchmarks/zsoft.md) |
 
 存在 benchmark reference 只说明契约和当前状态被记录；是否可运行仍以 catalog、doctor、

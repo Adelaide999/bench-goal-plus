@@ -252,6 +252,7 @@ def render_goal(
     verifier_timeout_seconds: int = 60,
     coordination_condition: str | None = None,
     search_space_mode: str | None = None,
+    shared_dir_enabled: bool = False,
 ) -> str:
     """Add the host-native Goal Plus entrypoint and config to the common prompt."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
@@ -333,7 +334,12 @@ def render_goal(
         f"- `budget.max_parallel={concurrency}`; omit deprecated `budget.max_candidates`.\n"
         f"- `strategy.name=\"agent_guided\"`, `strategy.worker_host=\"{worker_host}\"`, "
         "and `strategy.orchestration_mode=\"parallel_loops\"`.\n"
-        f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
+        + (
+            "- Set top-level `shared_dir.enabled=true`.\n"
+            if shared_dir_enabled
+            else ""
+        )
+        + f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
         "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "
         "lineages while useful work and outer time remain.\n"
         + (
@@ -413,9 +419,9 @@ def codex_execution_args() -> list[str]:
     ]
 
 
-def codex_goal_plus_mcp_args() -> list[str]:
+def codex_goal_plus_mcp_args(extra_env_vars: tuple[str, ...] = ()) -> list[str]:
     """Register and non-interactively approve Goal Plus for `codex exec`."""
-    env_vars = [
+    default_env_vars = (
         "CODEX_HOME",
         "OPENAI_API_KEY",
         "SFORGE_AGENT_API_KEY",
@@ -427,7 +433,8 @@ def codex_goal_plus_mcp_args() -> list[str]:
         "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME",
         "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV",
         "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API",
-    ]
+    )
+    env_vars = list(dict.fromkeys((*default_env_vars, *extra_env_vars)))
     return [
         "--config",
         'mcp_servers.goal-plus.command="goal-plus"',
@@ -1517,10 +1524,17 @@ def goal_plus_incomplete_reason(
             spawned_workers = int(
                 codex_events.get("spawned_agent_thread_count") or 0
             )
-            if spawned_workers < expected_concurrency:
+            bound_workers = int(
+                (codex_events.get("goal_plus") or {}).get(
+                    "bound_worker_handle_count"
+                )
+                or 0
+            )
+            if max(spawned_workers, bound_workers) < expected_concurrency:
                 return (
                     "Codex recorded "
                     f"{spawned_workers} distinct spawned worker threads; "
+                    f"Goal Plus recorded {bound_workers} distinct bound worker handles; "
                     "expected at least "
                     f"{expected_concurrency} actual workers"
                 )
