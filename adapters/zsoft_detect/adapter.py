@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -52,7 +53,22 @@ CASE_SET_DESCRIPTION = (
     " scored as precision/recall/F1 on the deterministic tp track"
 )
 CODEX_SANDBOX = "workspace-write"
+PI_WORKER_SANDBOX = {
+    "engine": "bubblewrap",
+    "workspace_access": "read_only",
+    "read_only_workspace_paths": ["source", "schemas"],
+    "writable_workspace_paths": [ARTIFACT_NAME],
+    "pass_env": [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+    ],
+}
 VERIFIER_TIMEOUT_SECONDS = 600
+SOURCE_CACHE_ENV = "BENCH_GOAL_PLUS_ZSOFT_DETECT_SOURCE_CACHE"
 
 # project -> bench commit (from projects/<p>/versions/*)
 PROJECT_COMMITS: dict[str, str] = {
@@ -179,28 +195,66 @@ def materialize_workspace(
     source_root: Path,
     workspace: Path,
 ) -> dict[str, Any]:
-    global ACTIVE_PROJECT
     benchmark_root = _resolve_benchmark_root(source_root)
     workspace = Path(workspace).expanduser().absolute()
+    if workspace.exists() or workspace.is_symlink():
+        raise FileExistsError(workspace)
     project = ACTIVE_PROJECT
     commit = project_commit(project)
     contract = bench_contract(project, benchmark_root)
 
-    source_checkout = workspace.parent / f"{workspace.name}-source"
-    if not source_checkout.exists():
-        fetch_source_checkout(project, commit, source_checkout)
+    source_checkout = validated_source_cache(project, commit)
+    source_materialization = "validated_local_cache_copy"
+    if source_checkout is None:
+        source_checkout = workspace.parent / f"{workspace.name}-source"
+        if source_checkout.exists() or source_checkout.is_symlink():
+            source_checkout = validate_source_checkout(
+                source_checkout,
+                project,
+                commit,
+                label="campaign-local source checkout",
+            )
+        else:
+            fetch_source_checkout(project, commit, source_checkout)
+            source_checkout = validate_source_checkout(
+                source_checkout,
+                project,
+                commit,
+                label="fetched campaign-local source checkout",
+            )
+        source_materialization = "campaign_local_copy"
 
-    if workspace.exists():
-        raise FileExistsError(workspace)
+    _require_disjoint_paths(
+        workspace=workspace,
+        source_checkout=source_checkout,
+        benchmark_root=benchmark_root,
+    )
     workspace.mkdir(parents=True)
-    shutil.copytree(
+    from adapters.portable import copytree_confined
+
+    copytree_confined(
         source_checkout,
         workspace / "source",
+        label="ZSoft detect source checkout",
         ignore=shutil.ignore_patterns(".git"),
     )
     (workspace / "bench-contract.json").write_text(
         json.dumps(contract, indent=2) + "\n"
     )
+    schema_relative = _submission_schema_path(contract)
+    schema_source = (benchmark_root / schema_relative).resolve(strict=True)
+    resolved_benchmark_root = benchmark_root.resolve(strict=True)
+    if (
+        schema_source == resolved_benchmark_root
+        or resolved_benchmark_root not in schema_source.parents
+        or not schema_source.is_file()
+    ):
+        raise AdapterError(
+            f"public submission schema escapes the benchmark root: {schema_relative}"
+        )
+    schema_destination = workspace / schema_relative
+    schema_destination.parent.mkdir(parents=True)
+    shutil.copy2(schema_source, schema_destination, follow_symlinks=False)
     (workspace / ARTIFACT_NAME).mkdir()
     (workspace / ARTIFACT_NAME / ".gitkeep").write_text("")
     (workspace / "TASK.md").write_text(task_text(project, contract))
@@ -209,6 +263,7 @@ def materialize_workspace(
         "- Audit only the tree under `source/`.\n"
         f"- Write finding JSON files into `{ARTIFACT_NAME}/`; nothing else is graded.\n"
         "- The bench contract in `bench-contract.json` is read-only reference.\n"
+        "- Ground truth, benchmark cases, scorer sources, and other run directories are forbidden.\n"
     )
     from adapters.portable import render_evaluate_wrapper, render_goal_plus_verifier
 
@@ -234,6 +289,7 @@ def materialize_workspace(
         "upstream_root": str(benchmark_root),
         "upstream_commit": commit,
         "source_revision": commit,
+        "source_materialization": source_materialization,
         "framework_version": _framework_version(benchmark_root),
         "primary_metric": PRIMARY_METRIC,
         "direction": DIRECTION,
@@ -248,6 +304,90 @@ def materialize_workspace(
         "workspace_commit": workspace_commit,
         "upstream_commit": commit,
     }
+
+
+def validated_source_cache(project: str, commit: str) -> Path | None:
+    """Return an explicitly configured, clean checkout at the pinned commit."""
+    configured = os.environ.get(SOURCE_CACHE_ENV)
+    if not configured:
+        return None
+    source = Path(configured).expanduser().resolve()
+    return validate_source_checkout(
+        source,
+        project,
+        commit,
+        label=SOURCE_CACHE_ENV,
+    )
+
+
+def validate_source_checkout(
+    source: Path,
+    project: str,
+    commit: str,
+    *,
+    label: str,
+) -> Path:
+    """Require one exact, clean Git top level before it can be copied."""
+    source = Path(source).expanduser().resolve()
+    if not source.is_dir():
+        raise AdapterError(f"{label} is not a directory: {source}")
+    top_level = _run(
+        ["git", "-C", str(source), "rev-parse", "--show-toplevel"],
+        cwd=source,
+    )
+    head = _run(["git", "-C", str(source), "rev-parse", "HEAD"], cwd=source)
+    status = _run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ],
+        cwd=source,
+    )
+    if top_level.returncode != 0 or Path(top_level.stdout.strip()).resolve() != source:
+        raise AdapterError(f"{label} is not its Git top level: {source}")
+    if head.returncode != 0 or head.stdout.strip() != commit:
+        actual = head.stdout.strip() or "unavailable"
+        raise AdapterError(
+            f"{label} has wrong commit for {project}: expected {commit}, got {actual}"
+        )
+    if status.returncode != 0 or status.stdout.strip():
+        raise AdapterError(f"{label} is not clean: {source}")
+    return source
+
+
+def _submission_schema_path(contract: dict[str, Any]) -> Path:
+    value = contract.get("submission_schema")
+    if not isinstance(value, str) or not value:
+        raise AdapterError("bench contract does not declare a submission schema")
+    relative = Path(value)
+    if relative.is_absolute() or value == "." or ".." in relative.parts:
+        raise AdapterError(f"invalid public submission schema path: {value!r}")
+    return relative
+
+
+def _require_disjoint_paths(
+    *,
+    workspace: Path,
+    source_checkout: Path,
+    benchmark_root: Path,
+) -> None:
+    resolved = {
+        "workspace": workspace.resolve(strict=False),
+        "source checkout": source_checkout.resolve(strict=False),
+        "benchmark root": benchmark_root.resolve(strict=True),
+    }
+    items = list(resolved.items())
+    for index, (left_name, left) in enumerate(items):
+        for right_name, right in items[index + 1 :]:
+            if left == right or left in right.parents or right in left.parents:
+                raise AdapterError(
+                    f"materialization paths overlap: {left_name}={left} and "
+                    f"{right_name}={right}"
+                )
 
 
 def fetch_source_checkout(project: str, commit: str, destination: Path) -> None:
@@ -345,33 +485,46 @@ def evaluate_workspace(
     commit = metadata["commit"]
     runtime_dir, budget = claim_evaluator_call(workspace, mode)
     submission = workspace / ARTIFACT_NAME
-    valid = submission.is_dir()
+    valid = submission.is_dir() and not submission.is_symlink()
     score_payload: dict[str, Any] | None = None
     message = "ok" if valid else f"candidate artifact {ARTIFACT_NAME} is missing"
     if valid:
-        scored = _run(
-            [
-                sys.executable,
-                "scripts/score_submission.py",
-                str(submission),
-                "--project",
-                project,
-                "--commit",
-                commit,
-                "--release",
-                "0.1.0",
-                "--track",
-                "tp",
-            ],
-            cwd=benchmark_root,
-        )
-        (runtime_dir / "score.stdout").write_text(scored.stdout, encoding="utf-8")
-        (runtime_dir / "score.stderr").write_text(scored.stderr, encoding="utf-8")
-        if scored.returncode != 0:
+        try:
+            scored_submission = _snapshot_submission(
+                submission,
+                runtime_dir / f"submission-{budget['total_claimed']:06d}",
+            )
+        except (AdapterError, OSError) as exc:
             valid = False
-            message = f"scoring failed: {scored.stderr[-300:]}"
+            message = f"candidate artifact is unsafe: {exc}"
         else:
-            score_payload = json.loads(scored.stdout)
+            scored = _run(
+                [
+                    sys.executable,
+                    "scripts/score_submission.py",
+                    str(scored_submission),
+                    "--project",
+                    project,
+                    "--commit",
+                    commit,
+                    "--release",
+                    "0.1.0",
+                    "--track",
+                    "tp",
+                ],
+                cwd=benchmark_root,
+            )
+            (runtime_dir / "score.stdout").write_text(
+                scored.stdout, encoding="utf-8"
+            )
+            (runtime_dir / "score.stderr").write_text(
+                scored.stderr, encoding="utf-8"
+            )
+            if scored.returncode != 0:
+                valid = False
+                message = f"scoring failed: {scored.stderr[-300:]}"
+            else:
+                score_payload = json.loads(scored.stdout)
 
     f1 = float(score_payload.get("f1", 0.0)) if score_payload else 0.0
     report = {
@@ -391,6 +544,35 @@ def evaluate_workspace(
     }
     append_history(runtime_dir, report)
     return report
+
+
+def _snapshot_submission(source: Path, destination: Path) -> Path:
+    """Copy direct regular files without following worker-created links."""
+    destination.mkdir(mode=0o700, exist_ok=False)
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise AdapterError("submission snapshots require O_NOFOLLOW support")
+    with os.scandir(source) as entries:
+        for entry in entries:
+            entry_path = Path(entry.path)
+            if entry.is_symlink():
+                raise AdapterError(f"submission entry is a symlink: {entry.name}")
+            if not entry.is_file(follow_symlinks=False):
+                raise AdapterError(
+                    f"submission entry is not a regular file: {entry.name}"
+                )
+            descriptor = os.open(entry_path, os.O_RDONLY | nofollow)
+            try:
+                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    raise AdapterError(
+                        f"submission entry changed type while reading: {entry.name}"
+                    )
+                with os.fdopen(descriptor, "rb", closefd=False) as candidate:
+                    payload = candidate.read()
+            finally:
+                os.close(descriptor)
+            (destination / entry.name).write_bytes(payload)
+    return destination
 
 
 def _framework_version(benchmark_root: Path) -> str:

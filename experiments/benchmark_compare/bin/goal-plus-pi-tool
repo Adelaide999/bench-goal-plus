@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Forward the existing Goal Plus Pi CLI contract to the host proxy."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import socket
+import sys
+
+TOOL_SOCKET_ENV = "BENCH_GOAL_PLUS_PI_TOOL_SOCKET"
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root")
+    parser.add_argument("--args-json", required=True)
+    parser.add_argument("--pretty", action="store_true")
+    parser.add_argument("tool")
+    args = parser.parse_args(argv)
+    try:
+        tool_args = json.loads(args.args_json)
+        if not isinstance(tool_args, dict):
+            raise TypeError("tool arguments must be a JSON object")
+        socket_path = os.environ.get(TOOL_SOCKET_ENV)
+        if not socket_path:
+            raise RuntimeError(f"{TOOL_SOCKET_ENV} is required")
+        request = json.dumps(
+            {"tool": args.tool, "args": tool_args},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.connect(socket_path)
+            client.sendall(request)
+            client.shutdown(socket.SHUT_WR)
+            response_file = client.makefile("rb")
+            raw = response_file.readline(MAX_RESPONSE_BYTES + 1)
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise RuntimeError("host tool proxy response is too large")
+        response = json.loads(raw.decode("utf-8"))
+        if not isinstance(response, dict):
+            raise TypeError("host tool proxy response must be a JSON object")
+        if response.get("ok") is not True:
+            print(json.dumps(response, ensure_ascii=False), file=sys.stderr)
+            return 1
+        print(
+            json.dumps(
+                response.get("result"),
+                ensure_ascii=False,
+                indent=2 if args.pretty else None,
+            )
+        )
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(
+            json.dumps(
+                {"ok": False, "error": str(exc), "tool": args.tool},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

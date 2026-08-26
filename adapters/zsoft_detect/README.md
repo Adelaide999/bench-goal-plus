@@ -16,6 +16,9 @@ The adapter:
   contract, and `TASK.md`;
 - evaluates the candidate's `submission/` directory directly with
   `scripts/score_submission.py --release 0.1.0 --track tp`;
+- requires Goal Plus Pi workers to use the adapter-declared Bubblewrap policy:
+  only the candidate workspace is mounted, with `source/` read-only, while
+  scorer and ground-truth directories remain host-only;
 - reports `f1`, maximize; the full score payload (precision/recall/TP/FP/FN)
   is preserved under `zsoft_score` and in `.bench-runtime/history.jsonl`.
 
@@ -36,6 +39,11 @@ are not registered methods.
 The reproducible-environment bootstrap owns the default sparse checkout.
 `BENCH_GOAL_PLUS_ZSOFT_ROOT` may select another clean checkout for controlled
 experiments; the path must remain under this repository.
+For projects without a public source URL,
+`BENCH_GOAL_PLUS_ZSOFT_DETECT_SOURCE_CACHE` may point to an explicitly managed,
+clean Git checkout at the pinned project commit. The adapter validates it and
+copies its tracked tree into a real workspace `source/` directory without
+`.git`; the cache path is not exposed to Pi workers.
 
 ## Smoke
 

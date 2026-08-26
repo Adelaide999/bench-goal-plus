@@ -23,6 +23,19 @@ Detect uses a directory artifact, so the common runner permits multiple changed
 files inside `submission/`. The benchmark repository commit and audited project
 revision are recorded separately.
 
+The benchmark harness delegates Goal Plus Pi workers to its own fail-closed
+Bubblewrap launcher through `GOAL_PLUS_PI_WORKER_LAUNCHER`. The candidate
+workspace is mounted read-only; only the adapter-declared `submission/` artifact
+and launcher-owned `.tmp/` are writable, while `source/` and `schemas/` are
+explicitly validated and kept read-only. The benchmark repository, cases,
+scorer source, sibling runs, `.gp` state, and the rest of the host home directory
+are not mounted. A bench-owned CLI shim sends worker Goal Plus calls over a
+session-bound host socket, so official verifier execution remains outside the
+sandbox. The policy and environment-variable names, but never their values, are
+recorded in the experiment manifest.
+Declared read-only workspace entries must be real directories; symlinked source
+or public bundles fail closed before worker startup.
+
 ### Native SWE-agent path
 
 `zsoft-detect-swe-agent` is a separate executable target backed by runner
@@ -52,6 +65,11 @@ The representative task is `sample-asan-crash`. Preparation exports the public
 task bundle and a single `poc` artifact. The benchmark-owned Docker differential
 judge evaluates the same submission against vulnerable and fixed builds. The
 native metric is binary `success`; it is not averaged with Detect F1.
+L1 has the same host-filesystem risk as Detect: each upstream task directory
+contains private reference PoCs, negative PoCs, judge code, and fix patches.
+Goal Plus Pi therefore uses the same Bubblewrap boundary for L1, exposing only
+the candidate workspace with `public/` remounted read-only; private task and
+judge directories are not mounted.
 
 ## Run
 

@@ -38,6 +38,10 @@ from experiments.benchmark_compare.conditions import (  # noqa: E402
     VARIANT_LIMITATIONS,
     resolve_condition,
 )
+from experiments.benchmark_compare.pi_worker_launcher import (  # noqa: E402
+    GOAL_PLUS_WORKER_LAUNCHER_ENV,
+    SANDBOX_POLICY_ENV,
+)
 from experiments.openevolve_compare.experiment import (  # noqa: E402
     DEFAULT_REASONING_EFFORT,
     PI_APIS,
@@ -98,6 +102,12 @@ each SEARCH block must be a short exact excerpt from the current program, and
 each block must include its closing `>>>>>>> REPLACE` marker.
 """.rstrip()
 BENCHMARK_ADAPTERS = adapter_modules()
+PI_WORKER_LAUNCHER = (
+    ROOT / "experiments" / "benchmark_compare" / "pi_worker_launcher.py"
+)
+PI_TOOL_PROXY = (
+    ROOT / "experiments" / "benchmark_compare" / "bin" / "goal-plus-pi-tool"
+)
 
 
 @dataclass(frozen=True)
@@ -201,6 +211,7 @@ def configure_adapter(
     global ADAPTER_CONTRACT
     global ARTIFACT_NAME, BENCHMARK_NAME, CASE_SET_DESCRIPTION
     global CODEX_SANDBOX, DIRECTION, GOAL_PLUS_MCP_ENV_VARS
+    global PI_WORKER_SANDBOX
     global PRIMARY_METRIC, TASK_ID, UPSTREAM_KEY
     global LOCAL_SOURCE_RELATIVE, UPSTREAM_SUBDIR
     global OFFICIAL_BENCHMARK_COMPARABLE
@@ -211,6 +222,7 @@ def configure_adapter(
     CASE_SET_DESCRIPTION = module.CASE_SET_DESCRIPTION
     CODEX_SANDBOX = module.CODEX_SANDBOX
     GOAL_PLUS_MCP_ENV_VARS = tuple(getattr(module, "GOAL_PLUS_MCP_ENV_VARS", ()))
+    PI_WORKER_SANDBOX = getattr(module, "PI_WORKER_SANDBOX", None)
     DIRECTION = module.DIRECTION
     PRIMARY_METRIC = module.PRIMARY_METRIC
     TASK_ID = module.TASK_ID
@@ -228,6 +240,96 @@ def configure_adapter(
 
 
 configure_adapter("heurigym")
+
+
+def _pi_worker_sandbox_policy(api_key_env: str) -> dict[str, Any] | None:
+    if PI_WORKER_SANDBOX is None:
+        return None
+    policy = json.loads(json.dumps(PI_WORKER_SANDBOX))
+    pass_env = list(policy.get("pass_env", []))
+    for name in (api_key_env, "OPENAI_BASE_URL", "OPENAI_API_BASE_URL"):
+        if name not in pass_env:
+            pass_env.append(name)
+    policy["pass_env"] = pass_env
+    return policy
+
+
+def _require_pi_worker_launcher_source(goal_plus_root: Path) -> None:
+    worker_source = goal_plus_root / "src" / "goal_plus" / "pi_worker.py"
+    if not worker_source.is_file() or GOAL_PLUS_WORKER_LAUNCHER_ENV not in (
+        worker_source.read_text(encoding="utf-8")
+    ):
+        raise RuntimeError(
+            "selected Goal Plus source does not support the required external "
+            "Pi worker launcher protocol"
+        )
+
+
+def _require_pi_worker_launcher_runtime(runtime_bin_dir: Path) -> None:
+    python = runtime_bin_dir / ("python.exe" if os.name == "nt" else "python")
+    completed = subprocess.run(
+        [
+            str(python),
+            "-c",
+            (
+                "from goal_plus.pi_worker import PI_WORKER_LAUNCHER_ENV; "
+                "print(PI_WORKER_LAUNCHER_ENV)"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if (
+        completed.returncode != 0
+        or completed.stdout.strip() != GOAL_PLUS_WORKER_LAUNCHER_ENV
+    ):
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(
+            "benchmark runtime does not support the required external Pi worker "
+            f"launcher protocol: {detail or 'capability probe failed'}"
+        )
+
+
+def _configure_pi_worker_sandbox_environment(
+    manifest: dict[str, Any],
+    environment: dict[str, str],
+    runtime_bin_dir: Path,
+    api_key_env: str,
+) -> None:
+    if manifest["method"] != "goal-plus-pi" or PI_WORKER_SANDBOX is None:
+        return
+    worker_sandbox = (manifest.get("goal_plus_config") or {}).get(
+        "worker_sandbox"
+    )
+    expected_sandbox = _pi_worker_sandbox_policy(api_key_env)
+    if worker_sandbox is None:
+        raise RuntimeError(
+            "this adapter requires a Pi worker sandbox; re-prepare the run "
+            "with a sandbox-capable Goal Plus checkout"
+        )
+    if worker_sandbox != expected_sandbox:
+        raise RuntimeError(
+            "prepared Pi worker sandbox policy does not match the adapter contract"
+        )
+    if shutil.which("bwrap", path=environment.get("PATH")) is None:
+        raise RuntimeError("ZSoft Goal Plus Pi worker sandbox requires bwrap")
+    for executable in (PI_WORKER_LAUNCHER, PI_TOOL_PROXY):
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise RuntimeError(
+                f"ZSoft Pi worker launcher asset is unavailable: {executable}"
+            )
+    _require_pi_worker_launcher_runtime(runtime_bin_dir)
+    environment[GOAL_PLUS_WORKER_LAUNCHER_ENV] = str(PI_WORKER_LAUNCHER)
+    environment[SANDBOX_POLICY_ENV] = json.dumps(
+        worker_sandbox, separators=(",", ":")
+    )
+    manifest["pi_worker_sandbox"] = {
+        **worker_sandbox,
+        "owner": "bench-goal-plus",
+        "launcher_protocol": GOAL_PLUS_WORKER_LAUNCHER_ENV,
+        "environment_values_persisted": False,
+    }
 
 
 def default_run_dir(method: str) -> Path:
@@ -406,6 +508,8 @@ def prepare(args: argparse.Namespace) -> int:
             worker_host = "codex"
             worker_model = args.model
         else:
+            if PI_WORKER_SANDBOX is not None:
+                _require_pi_worker_launcher_source(goal_plus_root)
             copy_goal_plus_pi_assets(goal_plus_root, workspace)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
             worker_host = "pi-rpc"
@@ -457,6 +561,11 @@ def prepare(args: argparse.Namespace) -> int:
             "artifact_name": ARTIFACT_NAME,
             "artifact_is_directory": (workspace / ARTIFACT_NAME).is_dir(),
             "shared_dir_enabled": getattr(args, "shared_dir", False),
+            "worker_sandbox": (
+                _pi_worker_sandbox_policy(args.pi_api_key_env)
+                if worker_host == "pi-rpc"
+                else None
+            ),
             "state_at_t0": "absent; natural prompt creates all Goal Plus state inside T",
             "condition": condition.as_manifest() if condition else None,
             "coordination_reviewer": (
@@ -1345,6 +1454,12 @@ def execute(args: argparse.Namespace) -> int:
     environment = configure_temp_environment(os.environ.copy())
     bin_dir = Path(manifest["environment"]["runtime_bin"])
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
+    _configure_pi_worker_sandbox_environment(
+        manifest,
+        environment,
+        bin_dir,
+        pi_api_key_env,
+    )
     manifest["status"] = "running"
     manifest["execution_started_at"] = utc_now()
     write_json(manifest_path, manifest)

@@ -15,6 +15,9 @@ The adapter:
 - evaluates by running `python3 -m zsoft_poc evaluate <task-id> <file>
   --submission-kind final`, i.e. the benchmark-owned Docker
   vuln/fix differential judge (no submission server involved);
+- requires Goal Plus Pi workers to use Bubblewrap with only the candidate
+  workspace mounted and `public/` read-only; upstream `private/`, judge, and
+  reference-PoC files remain host-only;
 - reports `success` in {0, 1}, maximize; the full EvaluationResult is
   preserved in the report under `zsoft_result` and in
   `.bench-runtime/history.jsonl`.

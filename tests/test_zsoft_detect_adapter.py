@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-import sys
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from adapters.zsoft_detect import adapter  # noqa: E402
+from adapters.zsoft_detect import adapter
 
 
 class AdapterContractTest(unittest.TestCase):
@@ -24,6 +25,15 @@ class AdapterContractTest(unittest.TestCase):
         self.assertEqual(
             adapter.UPSTREAM_SUBDIR,
             "benchmarks/vulnerability/zsoft-detect",
+        )
+        self.assertEqual(adapter.PI_WORKER_SANDBOX["engine"], "bubblewrap")
+        self.assertEqual(adapter.PI_WORKER_SANDBOX["workspace_access"], "read_only")
+        self.assertEqual(
+            adapter.PI_WORKER_SANDBOX["read_only_workspace_paths"],
+            ["source", "schemas"],
+        )
+        self.assertEqual(
+            adapter.PI_WORKER_SANDBOX["writable_workspace_paths"], ["submission"]
         )
 
     def test_project_catalog_is_pinned(self) -> None:
@@ -55,13 +65,46 @@ class AdapterContractTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         workspace = tmp / "workspace"
         source_checkout = tmp / "workspace-source"
-        (source_checkout / ".git").mkdir(parents=True)
-        (source_checkout / ".git" / "HEAD").write_text("nested metadata")
+        source_checkout.mkdir()
+        subprocess.run(["git", "init", "-q", str(source_checkout)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(source_checkout),
+                "config",
+                "user.email",
+                "test@example.com",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(source_checkout), "config", "user.name", "Test"],
+            check=True,
+        )
         (source_checkout / "src").mkdir()
         (source_checkout / "src" / "civetweb.c").write_text("/* fixture */\n")
+        subprocess.run(["git", "-C", str(source_checkout), "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", str(source_checkout), "commit", "-q", "-m", "fixture"],
+            check=True,
+        )
+        commit = subprocess.run(
+            ["git", "-C", str(source_checkout), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        contract = adapter.bench_contract("civetweb")
+        previous_commit = adapter.PROJECT_COMMITS["civetweb"]
+        adapter.PROJECT_COMMITS["civetweb"] = commit
+        self.addCleanup(
+            adapter.PROJECT_COMMITS.__setitem__, "civetweb", previous_commit
+        )
 
         adapter.configure_task(None)
-        adapter.materialize_workspace(adapter.ZSOFT_ROOT, workspace)
+        with mock.patch.object(adapter, "bench_contract", return_value=contract):
+            adapter.materialize_workspace(adapter.ZSOFT_ROOT, workspace)
 
         tracked = subprocess.run(
             ["git", "-C", str(workspace), "ls-files"],
@@ -71,9 +114,110 @@ class AdapterContractTest(unittest.TestCase):
         ).stdout.splitlines()
         self.assertIn("source/src/civetweb.c", tracked)
         self.assertIn("submission/.gitkeep", tracked)
+        self.assertIn("schemas/finding.schema.json", tracked)
         self.assertFalse((workspace / "source" / ".git").exists())
         metadata = json.loads((workspace / "task.json").read_text())
-        self.assertEqual(metadata["source_revision"], adapter.PROJECT_COMMITS["civetweb"])
+        self.assertEqual(metadata["source_revision"], commit)
+
+    def test_materialize_copies_an_explicit_validated_source_cache(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        contract = adapter.bench_contract("civetweb")
+        source = tmp / "source-cache"
+        source.mkdir()
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        subprocess.run(
+            ["git", "-C", str(source), "config", "user.email", "test@example.com"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(source), "config", "user.name", "Test"], check=True
+        )
+        (source / "sample.c").write_text("/* fixture */\n")
+        subprocess.run(["git", "-C", str(source), "add", "sample.c"], check=True)
+        subprocess.run(
+            ["git", "-C", str(source), "commit", "-q", "-m", "fixture"],
+            check=True,
+        )
+        commit = subprocess.run(
+            ["git", "-C", str(source), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        previous_commit = adapter.PROJECT_COMMITS["civetweb"]
+        adapter.PROJECT_COMMITS["civetweb"] = commit
+        self.addCleanup(
+            adapter.PROJECT_COMMITS.__setitem__, "civetweb", previous_commit
+        )
+
+        workspace = tmp / "workspace"
+        adapter.configure_task(None)
+        with (
+            mock.patch.dict(os.environ, {adapter.SOURCE_CACHE_ENV: str(source)}),
+            mock.patch.object(adapter, "bench_contract", return_value=contract),
+        ):
+            adapter.materialize_workspace(adapter.ZSOFT_ROOT, workspace)
+
+        self.assertTrue((workspace / "source").is_dir())
+        self.assertFalse((workspace / "source").is_symlink())
+        self.assertTrue((workspace / "source" / "sample.c").is_file())
+        self.assertFalse((workspace / "source" / ".git").exists())
+        self.assertEqual(
+            json.loads((workspace / "schemas" / "finding.schema.json").read_text()),
+            json.loads(
+                (adapter.BENCHMARK_ROOT / "schemas" / "finding.schema.json").read_text()
+            ),
+        )
+        metadata = json.loads((workspace / "task.json").read_text())
+        self.assertEqual(
+            metadata["source_materialization"], "validated_local_cache_copy"
+        )
+
+    def test_campaign_local_checkout_must_be_exact_and_clean(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        source = tmp / "workspace-source"
+        source.mkdir()
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        (source / "partial.c").write_text("untracked\n")
+
+        adapter.configure_task(None)
+        with self.assertRaisesRegex(adapter.AdapterError, "Git top level|wrong commit"):
+            adapter.materialize_workspace(adapter.ZSOFT_ROOT, tmp / "workspace")
+        self.assertTrue((source / "partial.c").is_file())
+        self.assertFalse((tmp / "workspace").exists())
+
+    def test_source_copy_preserves_internal_symlinks_and_rejects_escape(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        source = tmp / "source"
+        source.mkdir()
+        (source / "target.h").write_text("fixture\n")
+        (source / "internal.h").symlink_to("target.h")
+        destination = tmp / "destination"
+
+        from adapters.portable import copytree_confined
+
+        copytree_confined(source, destination, label="fixture")
+        self.assertTrue((destination / "internal.h").is_symlink())
+        self.assertEqual(os.readlink(destination / "internal.h"), "target.h")
+
+        (source / "escape").symlink_to("../private")
+        with self.assertRaisesRegex(RuntimeError, "symlink escapes"):
+            copytree_confined(source, tmp / "rejected", label="fixture")
+
+    def test_materialization_paths_must_be_disjoint(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        source = root / "source"
+        source.mkdir()
+        with self.assertRaisesRegex(adapter.AdapterError, "paths overlap"):
+            adapter._require_disjoint_paths(
+                workspace=source / "workspace",
+                source_checkout=source,
+                benchmark_root=adapter.BENCHMARK_ROOT,
+            )
 
     def test_evaluate_scores_candidate_submission_without_agent_api(self) -> None:
         tmp = Path(tempfile.mkdtemp())
@@ -90,15 +234,42 @@ class AdapterContractTest(unittest.TestCase):
             )
         )
 
-        report = adapter.evaluate_workspace(
-            workspace, adapter.BENCHMARK_ROOT, "public"
-        )
+        report = adapter.evaluate_workspace(workspace, adapter.BENCHMARK_ROOT, "public")
 
         self.assertTrue(report["valid"])
         self.assertEqual(report[adapter.PRIMARY_METRIC], 0.0)
         self.assertEqual(report["message"], "ok")
         self.assertIsNotNone(report["zsoft_score"])
         self.assertEqual(report["budget"]["total_claimed"], 1)
+
+    def test_evaluate_rejects_submission_symlinks_before_scoring(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        workspace = tmp / "workspace"
+        submission = workspace / adapter.ARTIFACT_NAME
+        submission.mkdir(parents=True)
+        (submission / "finding.json").symlink_to(
+            adapter.BENCHMARK_ROOT / "schemas" / "finding.schema.json"
+        )
+        (workspace / "task.json").write_text(
+            json.dumps(
+                {
+                    "task_id": adapter.TASK_ID,
+                    "project_id": adapter.DEFAULT_PROJECT,
+                    "commit": adapter.project_commit(adapter.DEFAULT_PROJECT),
+                }
+            )
+        )
+
+        with mock.patch.object(adapter, "_run") as scorer:
+            report = adapter.evaluate_workspace(
+                workspace, adapter.BENCHMARK_ROOT, "public"
+            )
+
+        scorer.assert_not_called()
+        self.assertFalse(report["valid"])
+        self.assertEqual(report[adapter.PRIMARY_METRIC], 0.0)
+        self.assertIn("symlink", report["message"])
 
     def test_adapter_cli_evaluates_candidate_submission(self) -> None:
         tmp = Path(tempfile.mkdtemp())
@@ -137,7 +308,7 @@ class AdapterContractTest(unittest.TestCase):
 
     def test_git_commit_supports_shared_runtime_checkouts(self) -> None:
         self.assertRegex(
-            adapter.git_commit(ROOT / "third_party" / "muyuan"),
+            adapter.git_commit(adapter.ZSOFT_ROOT.parent / "muyuan"),
             r"^[0-9a-f]{40}$",
         )
         self.assertRegex(adapter.git_commit(adapter.ZSOFT_ROOT), r"^[0-9a-f]{40}$")
