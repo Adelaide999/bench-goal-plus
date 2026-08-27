@@ -13,14 +13,22 @@ The adapter:
   matching rules stay hidden);
 - materializes an agent workspace with a clean source checkout of the
   exact bench commit (HEAD equality enforced by the runner), the bench
-  contract, and `TASK.md`;
-- evaluates the candidate's `submission/` directory directly with
-  `scripts/score_submission.py --release 0.1.0 --track tp`;
+  contract, `TASK.md`, and a self-contained `public_check.py`;
+- exposes only the `format_valid` public gate, which checks direct regular
+  JSON files and the public finding schema without loading the official scorer
+  or ground truth;
+- selects the lowest candidate id with public `process_passed` evidence and
+  that candidate's latest compliant iteration, then runs
+  `scripts/score_submission.py --release 0.1.0 --track tp` exactly once from
+  the trusted controller after selection, promotion, and Goal Plus closeout;
 - requires Goal Plus Pi workers to use the adapter-declared Bubblewrap policy:
   only the candidate workspace is mounted, with `source/` read-only, while
-  scorer and ground-truth directories remain host-only;
-- reports `f1`, maximize; the full score payload (precision/recall/TP/FP/FN)
-  is preserved under `zsoft_score` and in `.bench-runtime/history.jsonl`.
+  scorer, ground-truth, histories, verifier results, and controller runtime
+  remain host-only;
+- reports the official final `f1`, maximize, only after closeout; the raw
+  precision/recall/TP/FP/FN payload is preserved under `zsoft_score` in the
+  controller-owned final report. A second final claim is rejected before the
+  scorer is invoked.
 
 Constants:
 
@@ -35,6 +43,9 @@ The benchmark's native runner remains separate from Goal Plus candidate
 scoring. Its pinned SWE-agent profile is exposed only through the dedicated
 `zsoft-detect-swe-agent` target and `zsoft-swe-agent` method; OpenCode and xiaoO
 are not registered methods.
+
+Blind Goal Plus runs support only `goal-plus-pi`. `goal-plus-codex` is rejected
+before preparation because it lacks the required Bubblewrap worker boundary.
 
 The reproducible-environment bootstrap owns the default sparse checkout.
 `BENCH_GOAL_PLUS_ZSOFT_ROOT` may select another clean checkout for controlled

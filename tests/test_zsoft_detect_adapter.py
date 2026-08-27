@@ -21,12 +21,18 @@ class AdapterContractTest(unittest.TestCase):
         self.assertIn(adapter.DIRECTION, {"minimize", "maximize"})
         self.assertTrue(adapter.PRIMARY_METRIC)
         self.assertTrue(adapter.ARTIFACT_NAME)
+        self.assertEqual(adapter.EVALUATION_MODE, "blind")
+        self.assertEqual(adapter.PRIMARY_METRIC, "f1")
+        self.assertEqual(adapter.GOAL_PLUS_PROCESS_METRIC, "format_valid")
         self.assertLess(adapter.VERIFIER_TIMEOUT_SECONDS, 1800)
         self.assertEqual(
             adapter.UPSTREAM_SUBDIR,
             "benchmarks/vulnerability/zsoft-detect",
         )
         self.assertEqual(adapter.PI_WORKER_SANDBOX["engine"], "bubblewrap")
+        self.assertEqual(
+            adapter.PI_WORKER_SANDBOX["evaluation_mode"], "blind"
+        )
         self.assertEqual(adapter.PI_WORKER_SANDBOX["workspace_access"], "read_only")
         self.assertEqual(
             adapter.PI_WORKER_SANDBOX["read_only_workspace_paths"],
@@ -118,6 +124,11 @@ class AdapterContractTest(unittest.TestCase):
         self.assertFalse((workspace / "source" / ".git").exists())
         metadata = json.loads((workspace / "task.json").read_text())
         self.assertEqual(metadata["source_revision"], commit)
+        self.assertNotIn("upstream_root", metadata)
+        self.assertEqual(metadata["primary_metric"], "format_valid")
+        self.assertTrue((workspace / "public_check.py").is_file())
+        self.assertFalse((workspace / "evaluate.py").exists())
+        self.assertFalse((workspace / ".goal-plus-verifiers").exists())
 
     def test_materialize_copies_an_explicit_validated_source_cache(self) -> None:
         tmp = Path(tempfile.mkdtemp())
@@ -219,7 +230,7 @@ class AdapterContractTest(unittest.TestCase):
                 benchmark_root=adapter.BENCHMARK_ROOT,
             )
 
-    def test_evaluate_scores_candidate_submission_without_agent_api(self) -> None:
+    def test_public_evaluate_checks_format_without_official_scorer(self) -> None:
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         workspace = tmp / "workspace"
@@ -234,12 +245,16 @@ class AdapterContractTest(unittest.TestCase):
             )
         )
 
-        report = adapter.evaluate_workspace(workspace, adapter.BENCHMARK_ROOT, "public")
+        with mock.patch.object(adapter, "_run") as scorer:
+            report = adapter.evaluate_workspace(
+                workspace, Path("/not-visible-to-public-check"), "public"
+            )
 
+        scorer.assert_not_called()
         self.assertTrue(report["valid"])
-        self.assertEqual(report[adapter.PRIMARY_METRIC], 0.0)
-        self.assertEqual(report["message"], "ok")
-        self.assertIsNotNone(report["zsoft_score"])
+        self.assertEqual(report[adapter.GOAL_PLUS_PROCESS_METRIC], 1.0)
+        self.assertNotIn(adapter.PRIMARY_METRIC, report)
+        self.assertNotIn("zsoft_score", report)
         self.assertEqual(report["budget"]["total_claimed"], 1)
 
     def test_evaluate_rejects_submission_symlinks_before_scoring(self) -> None:
@@ -268,8 +283,9 @@ class AdapterContractTest(unittest.TestCase):
 
         scorer.assert_not_called()
         self.assertFalse(report["valid"])
-        self.assertEqual(report[adapter.PRIMARY_METRIC], 0.0)
-        self.assertIn("symlink", report["message"])
+        self.assertEqual(report[adapter.GOAL_PLUS_PROCESS_METRIC], 0.0)
+        self.assertNotIn(adapter.PRIMARY_METRIC, report)
+        self.assertIn("symlink", json.dumps(report["public_diagnostics"]))
 
     def test_adapter_cli_evaluates_candidate_submission(self) -> None:
         tmp = Path(tempfile.mkdtemp())
@@ -304,7 +320,8 @@ class AdapterContractTest(unittest.TestCase):
         )
         report = json.loads(completed.stdout)
         self.assertTrue(report["valid"])
-        self.assertEqual(report[adapter.PRIMARY_METRIC], 0.0)
+        self.assertEqual(report[adapter.GOAL_PLUS_PROCESS_METRIC], 1.0)
+        self.assertNotIn(adapter.PRIMARY_METRIC, report)
 
     def test_git_commit_supports_shared_runtime_checkouts(self) -> None:
         self.assertRegex(

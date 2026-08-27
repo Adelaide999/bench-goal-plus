@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
-"""Adapter for the cybergym-zsoft-detect static detection benchmark.
+"""Blind adapter for the cybergym-zsoft-detect static detection benchmark.
 
-Wraps the benchmark's own scripts through the vendored copy at
-`third_party/zsoft-bench/benchmarks/vulnerability/zsoft-detect` (framework 1.1.0):
-
-- `materialize_workspace` exports the public bench contract
-  (`scripts/show_bench.py`) and prepares an isolated Git workspace containing
-  the clean source checkout plus TASK.md;
-- `evaluate_workspace` scores the agent's `submission/` findings directory
-  with the benchmark-owned `scripts/score_submission.py --track tp`;
-- `git_commit` reports `zsoft-detect-framework-<FRAMEWORK_VERSION>` (the
-  vendored copy is not a Git checkout); the scored source ref is pinned in
-  each workspace's `task.json` as `upstream_commit`.
-
-The upstream native runner remains separate from this adapter and is not an
-evaluator for Goal Plus candidates. Its SWE-agent profile is exposed by the
-dedicated ``zsoft-detect-swe-agent`` native target.
+Worker-visible validation checks only the public finding format. The trusted
+benchmark controller runs the benchmark-owned scorer once after selection.
 """
 
 from __future__ import annotations
@@ -35,6 +22,16 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CONTROLLER_PATH = Path(__file__).resolve()
 sys.path.insert(0, str(ROOT))
+from adapters import zsoft_blind  # noqa: E402
+from adapters.zsoft_blind import (  # noqa: E402
+    DETECT_VALIDATION_KIND,
+    PUBLIC_CHECKER_NAME,
+    PUBLIC_METRIC,
+    diagnostics_valid,
+    ensure_single_final_claim,
+    validate_detect_submission,
+)
+
 ZSOFT_ROOT = Path(
     os.environ.get("BENCH_GOAL_PLUS_ZSOFT_ROOT", ROOT / "third_party" / "zsoft-bench")
 ).expanduser().resolve()
@@ -47,14 +44,18 @@ UPSTREAM_KEY = "zsoft_l1"
 UPSTREAM_SUBDIR = "benchmarks/vulnerability/zsoft-detect"
 ARTIFACT_NAME = "submission"
 PRIMARY_METRIC = "f1"
+GOAL_PLUS_PROCESS_METRIC = PUBLIC_METRIC
+PUBLIC_FORMAT_METRIC = PUBLIC_METRIC
+EVALUATION_MODE = "blind"
+BLIND_EVALUATION = True
 DIRECTION = "maximize"
 CASE_SET_DESCRIPTION = (
-    "one zsoft-detect project bench: static TP detection on a pinned commit,"
-    " scored as precision/recall/F1 on the deterministic tp track"
+    "one blind zsoft-detect project bench: static findings on a pinned commit"
 )
 CODEX_SANDBOX = "workspace-write"
 PI_WORKER_SANDBOX = {
     "engine": "bubblewrap",
+    "evaluation_mode": EVALUATION_MODE,
     "workspace_access": "read_only",
     "read_only_workspace_paths": ["source", "schemas"],
     "writable_workspace_paths": [ARTIFACT_NAME],
@@ -67,7 +68,8 @@ PI_WORKER_SANDBOX = {
         "no_proxy",
     ],
 }
-VERIFIER_TIMEOUT_SECONDS = 600
+VERIFIER_TIMEOUT_SECONDS = 30
+OFFICIAL_EVALUATOR_TIMEOUT_SECONDS = 600
 SOURCE_CACHE_ENV = "BENCH_GOAL_PLUS_ZSOFT_DETECT_SOURCE_CACHE"
 
 # project -> bench commit (from projects/<p>/versions/*)
@@ -184,9 +186,9 @@ def task_text(project: str, contract: dict[str, Any]) -> str:
             "function, 1-based inclusive line range), bug_type, and",
             "root_cause (cause/trigger/impact).",
             "",
-            "Only real, manually-confirmed vulnerabilities count as true",
-            "positives; unconfirmed or duplicate findings count against",
-            "precision.",
+            f"Use `python3 {PUBLIC_CHECKER_NAME}` to check only the public",
+            "JSON structure. It does not assess whether a reported issue is",
+            "real. Submit only findings supported by your source audit.",
         ]
     ) + "\n"
 
@@ -261,19 +263,15 @@ def materialize_workspace(
     (workspace / "AGENTS.md").write_text(
         "# ZSoft detect task rules\n\n"
         "- Audit only the tree under `source/`.\n"
-        f"- Write finding JSON files into `{ARTIFACT_NAME}/`; nothing else is graded.\n"
+        f"- Write finding JSON files into `{ARTIFACT_NAME}/`.\n"
         "- The bench contract in `bench-contract.json` is read-only reference.\n"
-        "- Ground truth, benchmark cases, scorer sources, and other run directories are forbidden.\n"
+        f"- `{PUBLIC_CHECKER_NAME}` checks structure only and is read-only.\n"
+        "- Hidden task data and other run directories are forbidden.\n"
     )
-    from adapters.portable import render_evaluate_wrapper, render_goal_plus_verifier
-
-    (workspace / "evaluate.py").write_text(
-        render_evaluate_wrapper(CONTROLLER_PATH, benchmark_root)
-    )
-    verifier_dir = workspace / ".goal-plus-verifiers"
-    verifier_dir.mkdir()
-    (verifier_dir / "primary_metric.py").write_text(
-        render_goal_plus_verifier(CONTROLLER_PATH, benchmark_root, PRIMARY_METRIC)
+    shutil.copy2(
+        Path(zsoft_blind.__file__),
+        workspace / PUBLIC_CHECKER_NAME,
+        follow_symlinks=False,
     )
     (workspace / ".gitignore").write_text(
         ".bench-runtime/\n.gp/\n.codex-log/\n__pycache__/\n*.pyc\n"
@@ -286,12 +284,13 @@ def materialize_workspace(
         "project_id": project,
         "commit": commit,
         "artifact_name": ARTIFACT_NAME,
-        "upstream_root": str(benchmark_root),
         "upstream_commit": commit,
         "source_revision": commit,
         "source_materialization": source_materialization,
         "framework_version": _framework_version(benchmark_root),
-        "primary_metric": PRIMARY_METRIC,
+        "evaluation_mode": EVALUATION_MODE,
+        "public_validation_kind": DETECT_VALIDATION_KIND,
+        "primary_metric": GOAL_PLUS_PROCESS_METRIC,
         "direction": DIRECTION,
     }
     (workspace / "task.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -477,17 +476,42 @@ def evaluate_workspace(
 ) -> dict[str, Any]:
     from adapters.portable import append_history, claim_evaluator_call
 
+    if mode not in {"public", "final"}:
+        raise ValueError(f"unsupported evaluation mode: {mode}")
     started = time.monotonic()
     workspace = Path(workspace).expanduser().absolute()
-    benchmark_root = Path(upstream_root).expanduser().absolute()
     metadata = json.loads((workspace / "task.json").read_text(encoding="utf-8"))
+    runtime_dir, budget = claim_evaluator_call(workspace, mode)
+    ensure_single_final_claim(mode, budget)
+    submission = workspace / ARTIFACT_NAME
+    public_diagnostics = validate_detect_submission(submission)
+    format_valid = diagnostics_valid(public_diagnostics)
+    if mode == "public":
+        report = {
+            "schema_version": 1,
+            "task_id": metadata["task_id"],
+            "mode": mode,
+            "valid": format_valid,
+            "primary_metric": {
+                "name": GOAL_PLUS_PROCESS_METRIC,
+                "value": 1.0 if format_valid else 0.0,
+                "direction": "maximize",
+            },
+            GOAL_PLUS_PROCESS_METRIC: 1.0 if format_valid else 0.0,
+            "public_diagnostics": public_diagnostics,
+            "budget": budget,
+            "duration_seconds": time.monotonic() - started,
+            "evaluated_at": _utc_now(),
+        }
+        append_history(runtime_dir, report)
+        return report
+
+    benchmark_root = _resolve_benchmark_root(upstream_root)
     project = metadata["project_id"]
     commit = metadata["commit"]
-    runtime_dir, budget = claim_evaluator_call(workspace, mode)
-    submission = workspace / ARTIFACT_NAME
-    valid = submission.is_dir() and not submission.is_symlink()
+    valid = format_valid
     score_payload: dict[str, Any] | None = None
-    message = "ok" if valid else f"candidate artifact {ARTIFACT_NAME} is missing"
+    message = "ok" if valid else "candidate artifact failed public validation"
     if valid:
         try:
             scored_submission = _snapshot_submission(
@@ -513,6 +537,7 @@ def evaluate_workspace(
                     "tp",
                 ],
                 cwd=benchmark_root,
+                timeout=OFFICIAL_EVALUATOR_TIMEOUT_SECONDS,
             )
             (runtime_dir / "score.stdout").write_text(
                 scored.stdout, encoding="utf-8"
@@ -524,7 +549,11 @@ def evaluate_workspace(
                 valid = False
                 message = f"scoring failed: {scored.stderr[-300:]}"
             else:
-                score_payload = json.loads(scored.stdout)
+                try:
+                    score_payload = json.loads(scored.stdout)
+                except json.JSONDecodeError:
+                    valid = False
+                    message = "official scorer did not emit JSON"
 
     f1 = float(score_payload.get("f1", 0.0)) if score_payload else 0.0
     report = {
@@ -538,6 +567,8 @@ def evaluate_workspace(
         PRIMARY_METRIC: f1,
         "zsoft_score": score_payload,
         "message": message,
+        "format_valid": format_valid,
+        "public_diagnostics": public_diagnostics,
         "budget": budget,
         "duration_seconds": time.monotonic() - started,
         "evaluated_at": _utc_now(),

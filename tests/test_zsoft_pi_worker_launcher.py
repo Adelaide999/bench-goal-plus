@@ -40,6 +40,7 @@ def _policy(
     *paths: str,
     writable: tuple[str, ...] = (),
     pass_env: tuple[str, ...] = (),
+    evaluation_mode: str = "visible",
 ) -> SandboxPolicy:
     return SandboxPolicy(
         engine="bubblewrap",
@@ -47,6 +48,7 @@ def _policy(
         read_only_workspace_paths=paths,
         writable_workspace_paths=writable,
         pass_env=pass_env,
+        evaluation_mode=evaluation_mode,
     )
 
 
@@ -284,6 +286,359 @@ def test_host_tool_proxy_enforces_worker_identity(
         proxy.dispatch({"tool": "search_select", "args": {"run_id": "run_1"}})
 
 
+def test_blind_tool_proxy_exposes_only_frozen_context_and_receipt_contracts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy = WorkerToolProxy(
+        root=tmp_path / ".gp",
+        context=_context(tmp_path),
+        socket_dir=tmp_path / "proxy",
+        evaluation_mode="blind",
+    )
+    context_request = {
+        "tool": "search_get_agent_context",
+        "args": {"agent_session_id": "agent_1"},
+    }
+    context_result = {
+        "agent_session_id": "agent_1",
+        "run_id": "run_1",
+        "candidate_id": "c001",
+        "workspace": str(tmp_path),
+        "evaluation_mode": "blind",
+        "metric_name": "format_valid",
+        "metric_direction": "maximize",
+        "candidate_task": {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "workspace": str(tmp_path),
+            "hypothesis": "independent audit",
+            "allowed_files": ["submission"],
+            "denied_files": ["task.json"],
+            "instructions": ["Commit the artifact."],
+            "expected_artifacts": ["submission"],
+        },
+        "latest_result": {"score": 1.0, "process_passed": True},
+        "recent_iterations": [{"summary": "private annotation"}],
+        "best_iteration": {"score": 1.0},
+        "results_tsv": "/private/results.tsv",
+        "resume": {"latest_handoff": {"summary": "private handoff"}},
+    }
+    monkeypatch.setattr(
+        "goal_plus.pi_tool.call_pi_tool", lambda *_args: context_result
+    )
+    response = proxy.dispatch(context_request)
+    assert response["ok"] is True
+    assert response["result"] == {
+        "agent_session_id": "agent_1",
+        "run_id": "run_1",
+        "candidate_id": "c001",
+        "workspace": str(tmp_path),
+        "metric_name": "format_valid",
+        "metric_direction": "maximize",
+        "candidate_task": {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "workspace": str(tmp_path),
+            "allowed_files": ["submission"],
+            "denied_files": ["task.json"],
+            "expected_artifacts": ["submission"],
+        },
+    }
+    serialized = json.dumps(response)
+    for hidden in (
+        "latest_result",
+        "recent_iterations",
+        "results.tsv",
+        "private",
+        "independent audit",
+        "Commit the artifact",
+    ):
+        assert hidden not in serialized
+
+    forbidden_keys = (
+        "score",
+        "metrics",
+        "process_passed",
+        "process_passed_reason",
+        "disposition",
+        "bestCandidateId",
+        "log_path",
+        "failure_class",
+        "globalEvidence",
+        "global_evidence_stats",
+        "evidence_summary",
+        "annotation",
+        "view",
+        "raw_error",
+    )
+    for key in forbidden_keys:
+        sentinel = f"secret-{key}"
+
+        def forbidden_result(
+            _root: Path,
+            _tool: str,
+            _args: dict[str, Any],
+            *,
+            response_key: str = key,
+            response_value: str = sentinel,
+        ) -> dict[str, Any]:
+            return {**context_result, response_key: response_value}
+
+        monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", forbidden_result)
+        response = proxy.dispatch(context_request)
+        assert response == {
+            "ok": False,
+            "error": "blind worker tool response is unavailable",
+        }
+        assert sentinel not in json.dumps(response)
+
+    def raises_raw_error(
+        _root: Path, _tool: str, _args: dict[str, Any]
+    ) -> dict[str, Any]:
+        raise RuntimeError("secret-host-exception")
+
+    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", raises_raw_error)
+    response = proxy.dispatch(context_request)
+    assert response == {
+        "ok": False,
+        "error": "blind worker tool response is unavailable",
+    }
+    assert "secret-host-exception" not in json.dumps(response)
+
+
+
+def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy = WorkerToolProxy(
+        root=tmp_path / ".gp",
+        context=_context(tmp_path),
+        socket_dir=tmp_path / "proxy",
+        evaluation_mode="blind",
+    )
+    verifier_request = {
+        "tool": "search_run_verifier",
+        "args": {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "agent_session_id": "agent_1",
+            "hypothesis": "final public format check",
+        },
+    }
+    monkeypatch.setattr(
+        "goal_plus.pi_tool.call_pi_tool",
+        lambda *_args: {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "agent_session_id": "agent_1",
+            "iteration": 1,
+            "commit": "a" * 40,
+            "state": "recorded",
+        },
+    )
+    verified = proxy.dispatch(verifier_request)
+    assert verified == {
+        "ok": True,
+        "result": {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "agent_session_id": "agent_1",
+            "iteration": 1,
+            "commit": "a" * 40,
+            "state": "recorded",
+        },
+    }
+    assert "passed" not in json.dumps(verified)
+    assert "score" not in json.dumps(verified)
+    monkeypatch.setattr(
+        "goal_plus.pi_tool.call_pi_tool",
+        lambda *_args: {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "agent_session_id": "agent_1",
+            "iteration": 1,
+            "commit": "a" * 40,
+            "state": "passed",
+        },
+    )
+    assert proxy.dispatch(verifier_request) == {
+        "ok": False,
+        "error": "blind worker tool response is unavailable",
+    }
+
+    legacy_private_marker = "legacy-private-score-and-summary"
+    monkeypatch.setattr(
+        "goal_plus.pi_tool.call_pi_tool",
+        lambda *_args: {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "parent_id": None,
+            "validity_passed": True,
+            "process_passed": True,
+            "promotion_passed": None,
+            "aggregate_score": 0.75,
+            "verifier_results": [
+                {
+                    "metrics": {"private": legacy_private_marker},
+                    "summary": legacy_private_marker,
+                }
+            ],
+        },
+    )
+    legacy_receipt = proxy.dispatch(verifier_request)
+    assert legacy_receipt == {
+        "ok": True,
+        "result": {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "recorded": True,
+        },
+    }
+    assert legacy_private_marker not in json.dumps(legacy_receipt)
+
+    def raises_private_verifier_error(*_args: Any) -> dict[str, Any]:
+        raise RuntimeError("private-verifier-exception")
+
+    monkeypatch.setattr(
+        "goal_plus.pi_tool.call_pi_tool", raises_private_verifier_error
+    )
+    verifier_error = proxy.dispatch(verifier_request)
+    assert verifier_error == {
+        "ok": False,
+        "error": "blind worker tool response is unavailable",
+    }
+    assert "private-verifier-exception" not in json.dumps(verifier_error)
+
+    iteration_request = {
+        "tool": "search_list_iterations",
+        "args": {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "agent_session_id": "agent_1",
+        },
+    }
+    monkeypatch.setattr(
+        "goal_plus.pi_tool.call_pi_tool",
+        lambda *_args: [
+            {
+                "run_id": "run_1",
+                "candidate_id": "c001",
+                "agent_session_id": "agent_1",
+                "iteration": 1,
+                "commit": "a" * 40,
+                "state": "recorded",
+            }
+        ],
+    )
+    iterations = proxy.dispatch(iteration_request)
+    assert iterations == {
+        "ok": True,
+        "result": [
+            {
+                "run_id": "run_1",
+                "candidate_id": "c001",
+                "agent_session_id": "agent_1",
+                "iteration": 1,
+                "commit": "a" * 40,
+                "state": "recorded",
+            }
+        ],
+    }
+    assert "summary" not in json.dumps(iterations)
+
+    monkeypatch.setattr(
+        "goal_plus.pi_tool.call_pi_tool",
+        lambda *_args: [
+            {
+                "run_id": "run_1",
+                "candidate_id": "c001",
+                "agent_session_id": "agent_other",
+                "iteration": 1,
+                "commit": "a" * 40,
+                "state": "recorded",
+            }
+        ],
+    )
+    assert proxy.dispatch(iteration_request) == {
+        "ok": False,
+        "error": "blind worker tool response is unavailable",
+    }
+
+    legacy_iteration_marker = "legacy-private-iteration"
+    monkeypatch.setattr(
+        "goal_plus.pi_tool.call_pi_tool",
+        lambda *_args: [
+            {
+                "iteration": 2,
+                "agent_session_id": "agent_legacy",
+                "git_head": "b" * 40,
+                "score": 0.95,
+                "process_passed": True,
+                "summary": legacy_iteration_marker,
+                "metrics": {"private": legacy_iteration_marker},
+            }
+        ],
+    )
+    legacy_iterations = proxy.dispatch(iteration_request)
+    assert legacy_iterations == {
+        "ok": True,
+        "result": [{"iteration": 2, "recorded": True}],
+    }
+    assert legacy_iteration_marker not in json.dumps(legacy_iterations)
+
+    wrong_session_request = {
+        "tool": "search_list_iterations",
+        "args": {
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "agent_session_id": "agent_other",
+        },
+    }
+    with pytest.raises(PermissionError, match="bound agent_session_id"):
+        proxy.dispatch(wrong_session_request)
+
+    evidence_request = {
+        "tool": "search_get_global_evidence",
+        "args": {"agent_session_id": "agent_1"},
+    }
+    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", lambda *_args: [])
+    assert proxy.dispatch(evidence_request) == {"ok": True, "result": []}
+    monkeypatch.setattr(
+        "goal_plus.pi_tool.call_pi_tool",
+        lambda *_args: [{"candidate_id": "c001", "view": "private"}],
+    )
+    assert proxy.dispatch(evidence_request) == {
+        "ok": False,
+        "error": "blind worker tool response is unavailable",
+    }
+
+    called = False
+
+    def must_not_call(*_args: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", must_not_call)
+    blocked = proxy.dispatch(
+        {
+            "tool": "search_get_evidence_detail",
+            "args": {
+                "agent_session_id": "agent_1",
+                "candidate_id": "c001",
+                "iteration": 1,
+            },
+        }
+    )
+    assert blocked == {
+        "ok": False,
+        "error": "blind worker tool response is unavailable",
+    }
+    assert called is False
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="Bubblewrap is Linux-only")
 def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
     tmp_path: Path,
@@ -316,7 +671,19 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
     def fake_call(_root: Path, tool: str, args: dict[str, Any]) -> dict[str, Any]:
         assert tool == "search_get_agent_context"
         assert args == {"agent_session_id": "agent_1"}
-        return {"candidate_id": "c001"}
+        return {
+            "agent_session_id": "agent_1",
+            "run_id": "run_1",
+            "candidate_id": "c001",
+            "workspace": str(workspace),
+            "metric_name": "format_valid",
+            "metric_direction": "maximize",
+            "candidate_task": {
+                "run_id": "run_1",
+                "candidate_id": "c001",
+                "workspace": str(workspace),
+            },
+        }
 
     monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", fake_call)
     script = "\n".join(
@@ -386,6 +753,7 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             "source",
             writable=("submission",),
             pass_env=("TEST_ALLOWED",),
+            evaluation_mode="blind",
         ),
         command=_worker_command(
             script,

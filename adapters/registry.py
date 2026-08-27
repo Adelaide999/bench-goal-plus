@@ -41,6 +41,8 @@ class BenchmarkAdapterModule(Protocol):
     CASE_SET_DESCRIPTION: str
     CODEX_SANDBOX: str
     DIRECTION: Literal["minimize", "maximize"]
+    EVALUATION_MODE: Literal["visible", "blind"]
+    GOAL_PLUS_PROCESS_METRIC: str
     PRIMARY_METRIC: str
     TASK_ID: str
     UPSTREAM_KEY: str
@@ -82,6 +84,10 @@ class LoadedAdapter:
 
     def manifest_contract(self) -> dict[str, Any]:
         list_task_ids = getattr(self.module, "list_task_ids", None)
+        evaluation_mode = getattr(self.module, "EVALUATION_MODE", "visible")
+        process_metric = getattr(
+            self.module, "GOAL_PLUS_PROCESS_METRIC", self.module.PRIMARY_METRIC
+        )
         return {
             "adapter_id": self.adapter_id,
             "module": self.module_name,
@@ -90,6 +96,8 @@ class LoadedAdapter:
             "task_ids": list(list_task_ids()) if callable(list_task_ids) else None,
             "artifact_name": self.module.ARTIFACT_NAME,
             "primary_metric": self.module.PRIMARY_METRIC,
+            "goal_plus_process_metric": process_metric,
+            "evaluation_mode": evaluation_mode,
             "direction": self.module.DIRECTION,
             "upstream_subdir": getattr(self.module, "UPSTREAM_SUBDIR", None),
             "workspace_isolation": "one Git workspace per long-lived lane",
@@ -156,6 +164,17 @@ def _validate_module(definition: AdapterDefinition, module: ModuleType) -> None:
     if module.DIRECTION not in {"minimize", "maximize"}:
         raise AdapterContractError(
             f"adapter {definition.adapter_id} has invalid direction {module.DIRECTION!r}"
+        )
+    evaluation_mode = getattr(module, "EVALUATION_MODE", "visible")
+    if evaluation_mode not in {"visible", "blind"}:
+        raise AdapterContractError(
+            f"adapter {definition.adapter_id} has invalid evaluation mode "
+            f"{evaluation_mode!r}"
+        )
+    process_metric = getattr(module, "GOAL_PLUS_PROCESS_METRIC", module.PRIMARY_METRIC)
+    if not isinstance(process_metric, str) or not process_metric:
+        raise AdapterContractError(
+            f"adapter {definition.adapter_id} Goal Plus process metric must be non-empty"
         )
     if module.CODEX_SANDBOX not in {
         "read-only",

@@ -20,6 +20,7 @@ class ZSoftPiSandboxTest(unittest.TestCase):
         experiment.configure_adapter("zsoft-detect")
         detect = experiment._pi_worker_sandbox_policy("CUSTOM_API_KEY")
         self.assertEqual(detect["engine"], "bubblewrap")
+        self.assertEqual(detect["evaluation_mode"], "blind")
         self.assertEqual(detect["workspace_access"], "read_only")
         self.assertEqual(detect["read_only_workspace_paths"], ["source", "schemas"])
         self.assertEqual(detect["writable_workspace_paths"], ["submission"])
@@ -27,6 +28,7 @@ class ZSoftPiSandboxTest(unittest.TestCase):
 
         experiment.configure_adapter("zsoft-l1")
         l1 = experiment._pi_worker_sandbox_policy("CUSTOM_API_KEY")
+        self.assertEqual(l1["evaluation_mode"], "blind")
         self.assertEqual(l1["read_only_workspace_paths"], ["public"])
         self.assertEqual(l1["writable_workspace_paths"], ["poc"])
 
@@ -82,6 +84,7 @@ class ZSoftPiSandboxTest(unittest.TestCase):
                     "goal_plus_config": {
                         "worker_sandbox": {
                             "engine": "bubblewrap",
+                            "evaluation_mode": "blind",
                             "workspace_access": "read_only",
                             "read_only_workspace_paths": [],
                             "writable_workspace_paths": ["poc"],

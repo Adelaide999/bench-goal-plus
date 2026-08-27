@@ -28,6 +28,7 @@ _MAX_PROXY_REQUEST_BYTES = 1024 * 1024
 _MAX_UNIX_SOCKET_PATH_BYTES = 103
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PATH_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_GIT_COMMIT = re.compile(r"^[0-9a-f]{40,64}$")
 _RESERVED_ENV_NAMES = {
     "GIT_DIR",
     "GIT_OPTIONAL_LOCKS",
@@ -51,6 +52,176 @@ _WORKER_TOOLS = {
 _SESSION_SCOPED_TOOLS = _WORKER_TOOLS - {"search_list_iterations"}
 _TOOL_PROXY_BIN = Path(__file__).resolve().parent / "bin" / "goal-plus-pi-tool"
 _SANDBOX_TOOL_BIN = Path("/opt/bench-goal-plus/bin")
+_BLIND_PUBLIC_METRIC = "format_valid"
+_BLIND_RESPONSE_REJECTED = {
+    "ok": False,
+    "error": "blind worker tool response is unavailable",
+}
+_BLIND_BLOCKED_TOOLS = {
+    "search_copy_shared_tool",
+    "search_get_evidence_detail",
+    "search_stage_shared_tool",
+}
+_BLIND_CONTEXT_SOURCE_FIELDS = {
+    "agent_session_id",
+    "best_iteration",
+    "candidate_id",
+    "candidate_task",
+    "directive",
+    "evaluation_mode",
+    "host",
+    "host_handle",
+    "iteration_count",
+    "latest_result",
+    "metric_direction",
+    "metric_name",
+    "model_provenance",
+    "objective",
+    "recent_iterations",
+    "result_count",
+    "results_tsv",
+    "resume",
+    "run_budget",
+    "run_id",
+    "selected_model",
+    "supplemental_evaluation_enabled",
+    "tool_family_catalog",
+    "workspace",
+}
+_BLIND_CANDIDATE_TASK_SOURCE_FIELDS = {
+    "allowed_files",
+    "base_candidate_id",
+    "candidate_id",
+    "denied_files",
+    "expected_artifacts",
+    "hypothesis",
+    "instructions",
+    "model_provenance",
+    "parent_candidate_ids",
+    "parent_id",
+    "plan_id",
+    "proposal",
+    "run_id",
+    "selected_model",
+    "share_out_dir",
+    "stop_conditions",
+    "strategy_metadata",
+    "workspace",
+    "workspace_backend",
+    "workspace_base_revision",
+    "workspace_branch",
+}
+_BLIND_CANDIDATE_TASK_OUTPUT_FIELDS = {
+    "allowed_files",
+    "candidate_id",
+    "denied_files",
+    "expected_artifacts",
+    "run_id",
+    "workspace",
+}
+_BLIND_VERIFIER_SOURCE_FIELDS = {
+    "agent_session_id",
+    "aggregate_score",
+    "best_git_head",
+    "best_iteration",
+    "candidate_id",
+    "changed_outside_allowed",
+    "commit",
+    "disposition",
+    "global_evidence_entry_count",
+    "global_evidence_injected",
+    "global_evidence_snapshot",
+    "global_evidence_warning",
+    "hardcoding_suspected",
+    "iteration",
+    "parent_id",
+    "process_passed",
+    "promotion_passed",
+    "run_id",
+    "shared_tool_consumed_entries",
+    "shared_tool_deduplicated_entries",
+    "shared_tool_errors",
+    "shared_tool_publish_status",
+    "shared_tool_staged_bytes",
+    "shared_tool_staged_entries",
+    "shared_tool_staged_file_count",
+    "state",
+    "toolization_advisories",
+    "toolization_decision",
+    "touched_denied_files",
+    "validity_passed",
+    "verifier_results",
+    "workspace_git_head_after_settlement",
+}
+_BLIND_VERIFIER_RECEIPT_FIELDS = {
+    "agent_session_id",
+    "candidate_id",
+    "commit",
+    "iteration",
+    "run_id",
+    "state",
+}
+_BLIND_ITERATION_SOURCE_FIELDS = {
+    "adopted_tools",
+    "adoption_confounded",
+    "adapter_version",
+    "agent_session_id",
+    "artifact_hash",
+    "attempt_base_git_head",
+    "attempt_changed_files",
+    "candidate_id",
+    "changed_files",
+    "changed_outside_allowed",
+    "commit",
+    "created_at",
+    "disposition",
+    "exact_model_ref",
+    "failure_class",
+    "git_artifact_clean",
+    "git_head",
+    "git_status",
+    "hypothesis",
+    "iteration",
+    "ledger_git_head",
+    "log_paths",
+    "metrics",
+    "model_provenance",
+    "process_passed",
+    "restored_to_git_head",
+    "restored_to_iteration",
+    "run_id",
+    "score",
+    "selected_model",
+    "shared_tool_consumed_entries",
+    "shared_tool_deduplicated_entries",
+    "shared_tool_errors",
+    "shared_tool_publish_status",
+    "shared_tool_staged_bytes",
+    "shared_tool_staged_entries",
+    "shared_tool_staged_file_count",
+    "shared_tools",
+    "state",
+    "summary",
+    "toolization_advisories",
+    "toolization_decision",
+    "touched_denied_files",
+    "workspace_git_head_after_settlement",
+}
+_BLIND_ITERATION_RECEIPT_FIELDS = {
+    "agent_session_id",
+    "candidate_id",
+    "commit",
+    "iteration",
+    "run_id",
+    "state",
+}
+_BLIND_ITERATION_LEGACY_FIELDS = _BLIND_ITERATION_SOURCE_FIELDS - {
+    "candidate_id",
+    "commit",
+    "run_id",
+    "state",
+}
+_INVALID_BLIND_RESPONSE = object()
 
 
 @dataclass(frozen=True)
@@ -116,6 +287,7 @@ class SandboxPolicy:
     read_only_workspace_paths: tuple[str, ...]
     writable_workspace_paths: tuple[str, ...]
     pass_env: tuple[str, ...]
+    evaluation_mode: str = "visible"
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str]) -> SandboxPolicy:
@@ -130,6 +302,7 @@ class SandboxPolicy:
             raise TypeError(f"{SANDBOX_POLICY_ENV} must be a JSON object")
         allowed = {
             "engine",
+            "evaluation_mode",
             "workspace_access",
             "read_only_workspace_paths",
             "writable_workspace_paths",
@@ -144,6 +317,12 @@ class SandboxPolicy:
         if engine != "bubblewrap":
             raise ValueError(
                 f"{SANDBOX_POLICY_ENV}.engine must be 'bubblewrap', got {engine!r}"
+            )
+        evaluation_mode = payload.get("evaluation_mode", "visible")
+        if evaluation_mode not in {"visible", "blind"}:
+            raise ValueError(
+                f"{SANDBOX_POLICY_ENV}.evaluation_mode must be 'visible' or "
+                f"'blind', got {evaluation_mode!r}"
             )
         workspace_access = payload.get("workspace_access")
         if workspace_access != "read_only":
@@ -194,6 +373,7 @@ class SandboxPolicy:
             read_only_workspace_paths=tuple(read_only_paths),
             writable_workspace_paths=tuple(writable_paths),
             pass_env=tuple(pass_env),
+            evaluation_mode=evaluation_mode,
         )
 
 
@@ -234,6 +414,156 @@ def _relative_paths_overlap(left: str, right: str) -> bool:
     )
 
 
+def _blind_context_response(
+    result: Any, context: LaunchContext
+) -> dict[str, Any] | object:
+    if not isinstance(result, dict) or not set(result) <= _BLIND_CONTEXT_SOURCE_FIELDS:
+        return _INVALID_BLIND_RESPONSE
+    required = {
+        "agent_session_id",
+        "run_id",
+        "candidate_id",
+        "workspace",
+        "candidate_task",
+        "metric_name",
+        "metric_direction",
+    }
+    if not required <= set(result):
+        return _INVALID_BLIND_RESPONSE
+    if (
+        result["agent_session_id"] != context.agent_session_id
+        or result["run_id"] != context.run_id
+        or result["candidate_id"] != context.candidate_id
+        or result["workspace"] != str(context.workspace)
+        or result.get("evaluation_mode", "blind") != "blind"
+        or result["metric_name"] != _BLIND_PUBLIC_METRIC
+        or result["metric_direction"] != "maximize"
+    ):
+        return _INVALID_BLIND_RESPONSE
+
+    candidate_task = result["candidate_task"]
+    if (
+        not isinstance(candidate_task, dict)
+        or not set(candidate_task) <= _BLIND_CANDIDATE_TASK_SOURCE_FIELDS
+        or candidate_task.get("run_id") != context.run_id
+        or candidate_task.get("candidate_id") != context.candidate_id
+        or candidate_task.get("workspace") != str(context.workspace)
+    ):
+        return _INVALID_BLIND_RESPONSE
+    projected_task: dict[str, Any] = {}
+    for key in _BLIND_CANDIDATE_TASK_OUTPUT_FIELDS:
+        if key not in candidate_task:
+            continue
+        value = candidate_task[key]
+        if key in {
+            "allowed_files",
+            "denied_files",
+            "expected_artifacts",
+            "instructions",
+            "parent_candidate_ids",
+        }:
+            if not isinstance(value, list) or any(
+                not isinstance(item, str) for item in value
+            ):
+                return _INVALID_BLIND_RESPONSE
+        elif value is not None and not isinstance(value, str):
+            return _INVALID_BLIND_RESPONSE
+        projected_task[key] = value
+
+    projected: dict[str, Any] = {
+        "agent_session_id": context.agent_session_id,
+        "run_id": context.run_id,
+        "candidate_id": context.candidate_id,
+        "workspace": str(context.workspace),
+        "candidate_task": projected_task,
+    }
+    projected["metric_name"] = _BLIND_PUBLIC_METRIC
+    projected["metric_direction"] = "maximize"
+    return projected
+
+
+def _blind_verifier_receipt(
+    result: Any, context: LaunchContext
+) -> dict[str, Any] | object:
+    if isinstance(result, dict) and set(result) == _BLIND_VERIFIER_RECEIPT_FIELDS:
+        if (
+            result["run_id"] != context.run_id
+            or result["candidate_id"] != context.candidate_id
+            or result["agent_session_id"] != context.agent_session_id
+            or type(result["iteration"]) is not int
+            or result["iteration"] < 1
+            or not isinstance(result["commit"], str)
+            or _GIT_COMMIT.fullmatch(result["commit"]) is None
+            or result["state"] != "recorded"
+        ):
+            return _INVALID_BLIND_RESPONSE
+        return dict(result)
+    if isinstance(result, dict) and (
+        set(result)
+        & (_BLIND_VERIFIER_RECEIPT_FIELDS - {"run_id", "candidate_id"})
+    ):
+        return _INVALID_BLIND_RESPONSE
+    if (
+        not isinstance(result, dict)
+        or not set(result) <= _BLIND_VERIFIER_SOURCE_FIELDS
+        or result.get("run_id") != context.run_id
+        or result.get("candidate_id") != context.candidate_id
+    ):
+        return _INVALID_BLIND_RESPONSE
+    return {
+        "run_id": context.run_id,
+        "candidate_id": context.candidate_id,
+        "recorded": True,
+    }
+
+
+def _blind_iteration_receipts(
+    result: Any, context: LaunchContext
+) -> list[dict[str, Any]] | object:
+    if not isinstance(result, list):
+        return _INVALID_BLIND_RESPONSE
+    receipts: list[dict[str, Any]] = []
+    for item in result:
+        if isinstance(item, dict) and set(item) == _BLIND_ITERATION_RECEIPT_FIELDS:
+            if (
+                item["run_id"] != context.run_id
+                or item["candidate_id"] != context.candidate_id
+                or item["agent_session_id"] != context.agent_session_id
+                or type(item["iteration"]) is not int
+                or item["iteration"] < 1
+                or not isinstance(item["commit"], str)
+                or _GIT_COMMIT.fullmatch(item["commit"]) is None
+                or item["state"] != "recorded"
+            ):
+                return _INVALID_BLIND_RESPONSE
+            receipts.append(dict(item))
+            continue
+        if (
+            not isinstance(item, dict)
+            or not set(item) <= _BLIND_ITERATION_LEGACY_FIELDS
+        ):
+            return _INVALID_BLIND_RESPONSE
+        iteration = item.get("iteration")
+        if type(iteration) is not int or iteration < 1:
+            return _INVALID_BLIND_RESPONSE
+        receipts.append({"iteration": iteration, "recorded": True})
+    return receipts
+
+
+def _blind_tool_response(
+    tool: str, result: Any, context: LaunchContext
+) -> Any:
+    if tool == "search_get_agent_context":
+        return _blind_context_response(result, context)
+    if tool == "search_run_verifier":
+        return _blind_verifier_receipt(result, context)
+    if tool == "search_list_iterations":
+        return _blind_iteration_receipts(result, context)
+    if tool == "search_get_global_evidence":
+        return [] if result == [] else _INVALID_BLIND_RESPONSE
+    return _INVALID_BLIND_RESPONSE
+
+
 class _ThreadingUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
@@ -245,11 +575,15 @@ class WorkerToolProxy:
         root: Path,
         context: LaunchContext,
         socket_dir: Path,
+        evaluation_mode: str = "visible",
     ) -> None:
         self.root = root
         self.context = context
         self.socket_dir = socket_dir
         self.socket_path = socket_dir / "tool.sock"
+        if evaluation_mode not in {"visible", "blind"}:
+            raise ValueError(f"unsupported proxy evaluation mode: {evaluation_mode}")
+        self.evaluation_mode = evaluation_mode
         self._server: _ThreadingUnixServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -267,11 +601,15 @@ class WorkerToolProxy:
                         request = json.loads(raw.decode("utf-8"))
                         response = proxy.dispatch(request)
                     except Exception as exc:  # noqa: BLE001
-                        response = {
-                            "ok": False,
-                            "error": str(exc),
-                            "error_type": type(exc).__name__,
-                        }
+                        response = (
+                            dict(_BLIND_RESPONSE_REJECTED)
+                            if proxy.evaluation_mode == "blind"
+                            else {
+                                "ok": False,
+                                "error": str(exc),
+                                "error_type": type(exc).__name__,
+                            }
+                        )
                 self.wfile.write(
                     (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
                 )
@@ -295,11 +633,23 @@ class WorkerToolProxy:
         if not isinstance(args, dict):
             raise TypeError("proxy tool args must be a JSON object")
         self._authorize(str(tool), args)
+        if self.evaluation_mode == "blind" and tool in _BLIND_BLOCKED_TOOLS:
+            return dict(_BLIND_RESPONSE_REJECTED)
         from goal_plus.pi_tool import call_pi_tool
 
+        try:
+            result = call_pi_tool(self.root, str(tool), args)
+        except Exception:  # blind workers must not receive raw host exceptions
+            if self.evaluation_mode == "blind":
+                return dict(_BLIND_RESPONSE_REJECTED)
+            raise
+        if self.evaluation_mode == "blind":
+            result = _blind_tool_response(str(tool), result, self.context)
+            if result is _INVALID_BLIND_RESPONSE:
+                return dict(_BLIND_RESPONSE_REJECTED)
         return {
             "ok": True,
-            "result": call_pi_tool(self.root, str(tool), args),
+            "result": result,
         }
 
     def _authorize(self, tool: str, args: dict[str, Any]) -> None:
@@ -315,6 +665,14 @@ class WorkerToolProxy:
             and args.get("candidate_id") != self.context.candidate_id
         ):
             raise PermissionError("Pi worker proxy rejected a different candidate_id")
+        if (
+            self.evaluation_mode == "blind"
+            and tool == "search_list_iterations"
+            and args.get("agent_session_id") != self.context.agent_session_id
+        ):
+            raise PermissionError(
+                "blind Pi iteration listing requires the bound agent_session_id"
+            )
         if tool == "search_run_verifier" and args.get("scope", "process") != "process":
             raise PermissionError("Pi workers may only run process verifiers")
 
@@ -352,6 +710,7 @@ class BubblewrapWorker:
             root=self.root,
             context=context,
             socket_dir=proxy_base / f"bgp-pi-{uuid.uuid4().hex[:16]}",
+            evaluation_mode=policy.evaluation_mode,
         )
         self.private_git_admin: PrivateGitAdmin | None = None
 

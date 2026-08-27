@@ -64,6 +64,7 @@ DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_WALL_TIME_SECONDS = 300
 DEFAULT_CONCURRENCY = 2
 DEFAULT_REASONING_EFFORT = "high"
+BLIND_SELECTION_RULE = "lowest_candidate_id_latest_compliant_iteration"
 REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 CODEX_SANDBOX = "danger-full-access"
 CODEX_PROVIDER_ID = "bench_proxy"
@@ -226,6 +227,27 @@ def render_common_task_prompt(
     )
 
 
+def render_blind_task_prompt(
+    task_text: str,
+    wall_seconds: int,
+    closeout_seconds: int,
+) -> str:
+    exploration_seconds = max(1, wall_seconds - closeout_seconds)
+    return (
+        f"{task_text.strip()}\n\n"
+        "# Common experiment contract\n\n"
+        f"- Total outer wall-clock budget: {wall_seconds} seconds.\n"
+        f"- Use about {exploration_seconds} seconds for independent exploration and reserve "
+        f"{closeout_seconds} seconds to leave the selected artifact ready for controller closeout.\n"
+        "- Use only `python3 public_check.py` for public format and structure diagnostics. "
+        "The checker provides no behavioral quality signal.\n"
+        "- Hidden evaluation is unavailable during exploration and selection. Do not infer, "
+        "request, or optimize against hidden results.\n"
+        "- The wall-clock value is the total budget, not an outcome criterion. Stop when the "
+        "budget is exhausted, leaving the latest committed artifact in each candidate.\n"
+    )
+
+
 def goal_plus_entrypoint(worker_host: str) -> str:
     if worker_host == "codex":
         return "$goal-plus mode=autonomous"
@@ -253,6 +275,7 @@ def render_goal(
     coordination_condition: str | None = None,
     search_space_mode: str | None = None,
     shared_dir_enabled: bool = False,
+    evaluation_mode: str = "visible",
 ) -> str:
     """Add the host-native Goal Plus entrypoint and config to the common prompt."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
@@ -271,6 +294,8 @@ def render_goal(
         raise ValueError("verifier timeout must be positive")
     if search_space_mode not in {None, "observe", "enforce"}:
         raise ValueError(f"unsupported search-space mode: {search_space_mode}")
+    if evaluation_mode not in {"visible", "blind"}:
+        raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
     if coordination_condition in {"B3", "B4"} and search_space_mode is None:
         raise ValueError(
             f"{coordination_condition} requires an explicit search-space mode"
@@ -313,10 +338,10 @@ def render_goal(
         "unavailable or fails, leave the run incomplete and report the launch "
         "failure instead of simulating worker progress.\n"
     )
-    common_prompt = render_common_task_prompt(
-        task_text,
-        wall_seconds,
-        closeout_seconds,
+    common_prompt = (
+        render_blind_task_prompt(task_text, wall_seconds, closeout_seconds)
+        if evaluation_mode == "blind"
+        else render_common_task_prompt(task_text, wall_seconds, closeout_seconds)
     )
     edit_surface_limit = (
         "omit `max_file_changes` because this artifact is a directory and multiple "
@@ -324,6 +349,66 @@ def render_goal(
         if artifact_is_directory
         else "allow at most one changed file.\n"
     )
+    if evaluation_mode == "blind":
+        return (
+            f"{goal_plus_entrypoint(worker_host)}\n\n"
+            f"{common_prompt.rstrip()}\n\n"
+            "# Goal Plus configuration\n\n"
+            "Use the current workspace and construct the blind Goal Plus search from "
+            "the configuration below. Goal Plus owns intake, triage, SearchSpec freezing, "
+            "candidate workspaces, deterministic selection, promotion, and final reporting.\n\n"
+            f"- `budget.max_parallel={concurrency}`; omit deprecated `budget.max_candidates`.\n"
+            f"- `strategy.name=\"agent_guided\"`, `strategy.worker_host=\"{worker_host}\"`, "
+            "and `strategy.orchestration_mode=\"parallel_loops\"`.\n"
+            + (
+                "- Set top-level `shared_dir.enabled=true`.\n"
+                if shared_dir_enabled
+                else ""
+            )
+            + f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
+            "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "
+            "lineages while useful work and outer time remain.\n"
+            + (
+                f"- `strategy.worker_budget.min_runtime_seconds={worker_min_runtime_seconds}` "
+                "and `strategy.worker_budget.min_verifier_runs=1`; preserve this minimum "
+                f"AutoResearch lease so {minimum_lease_enforcement}. Do not place either "
+                "field in `strategy.config`.\n"
+                if worker_min_runtime_seconds is not None
+                else ""
+            )
+            + f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
+            f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
+            f"{initial_launch_contract}"
+            f"{coordination_text}"
+            "- Set top-level `evaluation_mode=\"blind\"`.\n"
+            f"- Metric: `{metric_name}` with direction `{metric_direction}`; it is a public "
+            "format gate only and must not rank candidates.\n"
+            "- Process verifier: `python3 public_check.py`, role `validity_gate`, feedback "
+            f"policy `final_only`, timeout {verifier_timeout_seconds} seconds.\n"
+            "- Promotion verifier: the same command, role `promotion_gate`, feedback policy "
+            f"`final_only`, timeout {verifier_timeout_seconds} seconds.\n"
+            "- Verifier feedback, hidden result fields in worker context, Search history, "
+            "`results.tsv`, and Global Evidence are opaque in blind mode. Do not request or "
+            "use them for iteration, continuation, rollback, or selection.\n"
+            "- Each worker must commit its latest artifact and submit its own final process "
+            "verifier result. Do not run duplicate parent-side process verification when "
+            "matching durable evidence already exists.\n"
+            f"- Edit surface: allow only `{artifact_name}`; deny `public_check.py`, "
+            "`task.json`, `TASK.md`, `AGENTS.md`, and `GOAL.md`; "
+            f"{edit_surface_limit}"
+            "- Workspace: use `source_path=\".\"` and `workspace.backend=\"git_worktree\"`.\n"
+            "- Constraints: no network; preserve all controller-owned public task files.\n"
+            f"- `strategy.config.closeout_reserve_seconds={closeout_seconds}` so host "
+            "supervisors stop worker continuation before final completion work.\n"
+            f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
+            f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
+            "Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as the authoritative upper deadline.\n"
+            "- Predeclare the blind selection rule: among candidates with a publicly compliant "
+            "`process_passed` iteration, choose the lowest candidate ID and that candidate's latest "
+            "such commit. Compliance is determined only by the public format checker and is "
+            "never disclosed to workers. Never rank or roll back from metric values. Promote the "
+            "selected commit, complete the full goal audit, and write the final Goal Plus report.\n"
+        )
     return (
         f"{goal_plus_entrypoint(worker_host)}\n\n"
         f"{common_prompt.rstrip()}\n\n"
@@ -385,7 +470,12 @@ def render_plain_prompt(
     task_text: str,
     wall_seconds: int,
     closeout_seconds: int,
+    evaluation_mode: str = "visible",
 ) -> str:
+    if evaluation_mode == "blind":
+        return render_blind_task_prompt(task_text, wall_seconds, closeout_seconds)
+    if evaluation_mode != "visible":
+        raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
     return render_common_task_prompt(task_text, wall_seconds, closeout_seconds)
 
 
@@ -1672,6 +1762,8 @@ def _existing_promotion(
         "selected_candidate_id": candidate_id,
         "selected_score": run_data.get("selected_score"),
         "selected_iteration": run_data.get("selected_iteration"),
+        "selected_git_head": run_data.get("selected_git_head"),
+        "selected_artifact_hash": run_data.get("selected_artifact_hash"),
         "reused_existing_promotion": True,
     }
     return run_data, candidate_id, selection, {"artifact_path": str(patch_path)}
@@ -1705,8 +1797,60 @@ def _goal_plus_runtime_types() -> tuple[type[Any], type[Any], type[Any]]:
     return FileGoalPlusRuntime, FileSearchRuntime, SearchTools
 
 
-def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
+def _validate_existing_blind_selection(
+    run_path: Path, selection: dict[str, Any]
+) -> None:
+    expected: tuple[str, int, str] | None = None
+    candidates = [
+        load_json(candidate_path)
+        for candidate_path in (run_path.parent / "candidates").glob(
+            "*/candidate.json"
+        )
+    ]
+    if any(
+        not isinstance(candidate, dict)
+        or not isinstance(candidate.get("candidate_id"), str)
+        or not isinstance(candidate.get("iterations"), list)
+        for candidate in candidates
+    ):
+        raise RuntimeError("blind candidate evidence is malformed")
+    for candidate in sorted(candidates, key=lambda item: item["candidate_id"]):
+        compliant = [
+            iteration
+            for iteration in candidate.get("iterations", [])
+            if isinstance(iteration, dict)
+            and iteration.get("process_passed") is True
+            and type(iteration.get("iteration")) is int
+            and isinstance(iteration.get("git_head"), str)
+            and iteration.get("git_artifact_clean") is True
+            and not iteration.get("touched_denied_files", False)
+            and not iteration.get("changed_outside_allowed", False)
+        ]
+        if compliant:
+            latest = max(compliant, key=lambda item: item["iteration"])
+            expected = (
+                str(candidate["candidate_id"]),
+                int(latest["iteration"]),
+                str(latest["git_head"]),
+            )
+            break
+    if expected is None:
+        raise RuntimeError("no publicly compliant candidate iteration is available")
+    actual = (
+        selection.get("selected_candidate_id"),
+        selection.get("selected_iteration"),
+        selection.get("selected_git_head"),
+    )
+    if actual != expected:
+        raise RuntimeError("existing promotion violates the frozen blind selection rule")
+
+
+def finalize_goal_plus_search(
+    workspace: Path, evaluation_mode: str = "visible"
+) -> dict[str, Any]:
     """Controller-owned post-deadline drain/select/promote, outside search T."""
+    if evaluation_mode not in {"visible", "blind"}:
+        raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
     FileGoalPlusRuntime, FileSearchRuntime, SearchTools = _goal_plus_runtime_types()
 
     started = time.monotonic()
@@ -1743,20 +1887,41 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
             existing = _existing_promotion(run_path)
             if existing is not None:
                 run_data, candidate_id, selection, promotion = existing
+                if evaluation_mode == "blind":
+                    _validate_existing_blind_selection(run_path, selection)
+                    selection["selection_rule"] = BLIND_SELECTION_RULE
             else:
                 try:
-                    selected = _existing_selection(run_path)
+                    selected = (
+                        None
+                        if evaluation_mode == "blind"
+                        else _existing_selection(run_path)
+                    )
                     if selected is None:
-                        for candidate_path in candidate_paths:
-                            candidate = load_json(candidate_path)
-                            if not candidate.get("iterations"):
-                                tools.search_run_verifier(
-                                    run_id,
-                                    candidate["candidate_id"],
-                                    hypothesis="controller post-deadline final verification",
+                        if evaluation_mode == "blind":
+                            selection = tools.search_select(run_id)
+                            if (
+                                selection.get("selection_rule")
+                                != BLIND_SELECTION_RULE
+                            ):
+                                raise RuntimeError(
+                                    "Goal Plus runtime did not apply the frozen blind "
+                                    "selection rule"
                                 )
-                                verified_in_closeout.append(candidate["candidate_id"])
-                        selection = tools.search_select(run_id)
+                            _validate_existing_blind_selection(run_path, selection)
+                        else:
+                            for candidate_path in candidate_paths:
+                                candidate = load_json(candidate_path)
+                                if not candidate.get("iterations"):
+                                    tools.search_run_verifier(
+                                        run_id,
+                                        candidate["candidate_id"],
+                                        hypothesis="controller post-deadline final verification",
+                                    )
+                                    verified_in_closeout.append(
+                                        candidate["candidate_id"]
+                                    )
+                            selection = tools.search_select(run_id)
                         candidate_id = selection["selected_candidate_id"]
                         run_data = load_json(run_path)
                     else:
@@ -1766,7 +1931,12 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
                     existing = _existing_promotion(run_path)
                     if existing is not None:
                         run_data, candidate_id, selection, promotion = existing
+                        if evaluation_mode == "blind":
+                            _validate_existing_blind_selection(run_path, selection)
+                            selection["selection_rule"] = BLIND_SELECTION_RULE
                     else:
+                        if evaluation_mode == "blind":
+                            raise
                         selected = _existing_selection(run_path)
                         if selected is None:
                             raise
@@ -1803,6 +1973,11 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
                             }
                         ],
                     )
+            goal_statuses = {
+                goal_plus_id: goal_runtime.status(goal_plus_id).status
+                for goal_plus_id in goal_ids
+            }
+            final_run_data = load_json(run_path)
             report = tools.search_report(run_id)
             result["runs"].append(
                 {
@@ -1814,6 +1989,8 @@ def finalize_goal_plus_search(workspace: Path) -> dict[str, Any]:
                     "selection": selection,
                     "promotion": promotion,
                     "source_patch_status": patch_status,
+                    "final_state": final_run_data.get("state"),
+                    "goal_statuses": goal_statuses,
                     "report": report,
                 }
             )
