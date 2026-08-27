@@ -606,7 +606,7 @@ def write_pi_models_config(
     if api != "anthropic-messages":
         model_config["thinkingLevelMap"] = {reasoning_effort: reasoning_effort}
         model_config["compat"] = {
-            "supportsDeveloperRole": True,
+            "supportsDeveloperRole": provider_id.casefold() != "deepseek",
             "supportsReasoningEffort": True,
         }
     payload = {

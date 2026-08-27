@@ -883,7 +883,29 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             self.assertEqual(
                 provider["models"][0]["thinkingLevelMap"], {"high": "high"}
             )
+            self.assertTrue(
+                provider["models"][0]["compat"]["supportsDeveloperRole"]
+            )
             self.assertNotRegex(raw, r"\bsk-[A-Za-z0-9_-]{16,}\b")
+
+    def test_pi_model_config_disables_developer_role_for_deepseek(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir)
+            experiment.write_pi_models_config(
+                target,
+                api_base="https://api.deepseek.com/v1",
+                model="deepseek-v4-flash",
+                provider_id="deepseek",
+                api="openai-completions",
+                api_key_env="DEEPSEEK_API_KEY",
+            )
+            provider = json.loads((target / "models.json").read_text())["providers"][
+                "deepseek"
+            ]
+
+            self.assertFalse(
+                provider["models"][0]["compat"]["supportsDeveloperRole"]
+            )
 
     def test_pi_model_config_supports_anthropic_provider(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
