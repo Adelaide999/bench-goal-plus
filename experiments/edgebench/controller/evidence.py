@@ -440,14 +440,25 @@ def latest_judge_report(
     } | {"path": io.portable_path(path)}
 
 
-def remaining_time(cell: dict[str, Any]) -> dict[str, int | None]:
-    started_at = cell.get("started_at")
-    if not isinstance(started_at, str):
-        return {"exploration_seconds": None, "finalization_seconds": None}
-    try:
-        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-    except ValueError:
-        return {"exploration_seconds": None, "finalization_seconds": None}
+def remaining_time(
+    cell: dict[str, Any], task_run: Path | None = None
+) -> dict[str, int | None]:
+    started: datetime | None = None
+    if task_run is not None:
+        try:
+            lines = (task_run / "started_at").read_text(encoding="utf-8").splitlines()
+            if len(lines) >= 2:
+                started = datetime.fromtimestamp(float(lines[1]), tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            pass
+    if started is None:
+        started_at = cell.get("started_at")
+        if not isinstance(started_at, str):
+            return {"exploration_seconds": None, "finalization_seconds": None}
+        try:
+            started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        except ValueError:
+            return {"exploration_seconds": None, "finalization_seconds": None}
     elapsed = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
     exploration = int(cell["wall_time_seconds"])
     grace = int(cell.get("goal_plus_finalization_grace_seconds", 300))
@@ -565,11 +576,14 @@ def live_goal_plus_status(
         "spawned_worker_thread_ids": events["spawned_agent_thread_ids"],
         "spawn_agent_completed_count": events["spawn_agent_completed_count"],
         "bound_worker_handles": bound_worker_handles,
-        "actual_worker_launch_count": max(
-            int(events["spawned_agent_thread_count"]),
-            int(event_goal_plus["bound_worker_handle_count"]),
-            int((live or {}).get("actual_worker_launch_count") or 0),
-            int((archived or {}).get("agent_sessions") or 0),
+        "actual_worker_launch_count": (
+            int(events["spawned_agent_thread_count"])
+            if cell.get("method") == "goal-plus-codex"
+            else max(
+                int(event_goal_plus["bound_worker_handle_count"]),
+                int((live or {}).get("actual_worker_launch_count") or 0),
+                int((archived or {}).get("agent_sessions") or 0),
+            )
         ),
         "verifier_ledger": verifier_ledger,
         "worker_verifier_runs": max(
@@ -607,7 +621,7 @@ def live_goal_plus_status(
         "terminal_ready": (live or {}).get("terminal_ready"),
         "snapshot_at": (live or {}).get("captured_at"),
         "state_sources": state_sources,
-        "remaining": remaining_time(cell),
+        "remaining": remaining_time(cell, task_run),
         "latest_judge_submission": latest_judge_report(destination, cell, task_run),
     }
 
@@ -752,10 +766,10 @@ def goal_plus_completion_evidence(
     if cell["method"] == "goal-plus-codex":
         checks["actual_worker_launches"] = {
             "expected": expected_workers,
-            "actual": max(spawned_worker_threads, bound_worker_handles),
+            "actual": spawned_worker_threads,
         }
         checks["spawn_agent_event_coverage"] = {
-            "expected": 0,
+            "expected": expected_workers,
             "actual": spawned_worker_threads,
         }
     checks["verifier_candidate_coverage"] = {

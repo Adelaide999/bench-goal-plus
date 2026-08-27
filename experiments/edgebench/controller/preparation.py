@@ -8,7 +8,14 @@ from typing import Any
 
 from . import io
 from .context import current_paths
-from .environment import require_api_only_network, task_config
+from .environment import (
+    codex_provider_contract,
+    pi_provider_bundle_contract,
+    require_api_only_network,
+    resolve_goal_plus_source,
+    resolve_pi_provider_bundle,
+    task_config,
+)
 from .profiles import (
     ALLOWED_PROTOCOL_OVERRIDE_FIELDS,
     GOAL_PLUS_METHODS,
@@ -52,9 +59,7 @@ def _resolved_override_reasons(
         "agent": f"method={method} selects SForge agent={method_config['agent']}",
         "attempts_per_task": attempts_reason,
         "backend": f"resolved campaign backend={backend}",
-        "cell_concurrency": (
-            f"C={cell_concurrency} controls concurrent task cells"
-        ),
+        "cell_concurrency": (f"C={cell_concurrency} controls concurrent task cells"),
         "judge_concurrency": (
             f"judge_concurrency={judge_concurrency} caps official Judge execution"
         ),
@@ -81,8 +86,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     wall_time = int(args.wall_time_seconds or profile["wall_time_seconds"])
     concurrency = int(args.concurrency or profile["concurrency"])
     cell_concurrency = int(
-        getattr(args, "cell_concurrency", None)
-        or profile.get("cell_concurrency", 1)
+        getattr(args, "cell_concurrency", None) or profile.get("cell_concurrency", 1)
     )
     model = args.model or profile["model"]
     if api_protocol == "pi-provider":
@@ -108,6 +112,9 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     worker_min_runtime = int(profile.get("worker_min_runtime_seconds", 0))
     worker_min_verifiers = int(profile.get("worker_min_verifier_runs", 0))
     closeout_reserve = int(profile.get("closeout_reserve_seconds", 0))
+    goal_plus_verifier_timeout = int(
+        profile.get("goal_plus_verifier_timeout_seconds", 120)
+    )
     has_goal_plus = bool(set(methods) & GOAL_PLUS_METHODS)
     global_evidence_config = (
         {"global_evidence_mode": str(profile.get("global_evidence_mode", "manual"))}
@@ -122,9 +129,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "evidence_annotator_timeout_seconds",
     )
     role_config: dict[str, Any] = {}
-    if api_protocol == "pi-provider" and any(
-        field in profile for field in role_fields
-    ):
+    if api_protocol == "pi-provider" and any(field in profile for field in role_fields):
         role_config = {
             "worker_model": str(profile.get("worker_model") or model),
             "worker_reasoning_effort": str(
@@ -142,9 +147,50 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 profile.get("evidence_annotator_timeout_seconds", 1800)
             ),
         }
+    resolved_execution_profile = {
+        **profile,
+        "methods": methods,
+        "model": model,
+        "reasoning_effort": reasoning,
+        **role_config,
+    }
+    pi_provider_contract: dict[str, Any] | None = None
+    if api_protocol == "pi-provider":
+        bundle = resolve_pi_provider_bundle(
+            [
+                str(resolved_execution_profile["model"]),
+                str(
+                    resolved_execution_profile.get("worker_model")
+                    or resolved_execution_profile["model"]
+                ),
+                str(
+                    resolved_execution_profile.get("evidence_annotator_model")
+                    or resolved_execution_profile["model"]
+                ),
+            ]
+        )
+        if not bundle["valid"]:
+            raise ValueError(f"Pi provider resolution failed: {bundle['error']}")
+        pi_provider_contract = pi_provider_bundle_contract(bundle)
+
+    codex_contract: dict[str, Any] | None = None
+    if api_protocol == "openai":
+        codex_contract = codex_provider_contract(resolved_execution_profile)
+        if not codex_contract["valid"]:
+            raise ValueError(
+                f"Codex provider resolution failed: {codex_contract['error']}"
+            )
+
+    goal_plus_source: dict[str, Any] | None = None
+    if has_goal_plus:
+        goal_plus_source = resolve_goal_plus_source(methods=methods)
+        if not goal_plus_source["valid"]:
+            raise ValueError(
+                f"Goal Plus source validation failed: {goal_plus_source['error']}"
+            )
     profile_protocol_overrides = dict(profile.get("protocol_overrides") or {})
-    allowed_protocol_override_fields = (
-        ALLOWED_PROTOCOL_OVERRIDE_FIELDS | set(profile_protocol_overrides)
+    allowed_protocol_override_fields = ALLOWED_PROTOCOL_OVERRIDE_FIELDS | set(
+        profile_protocol_overrides
     )
     if wall_time < 1 or concurrency < 1 or cell_concurrency < 1:
         raise ValueError(
@@ -180,9 +226,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     cells: list[dict[str, Any]] = []
     for task_id in profile["task_ids"]:
         config = task_config(task_id)
-        official_effective = official_task_protocol(
-            official_protocol, task_id, config
-        )
+        official_effective = official_task_protocol(official_protocol, task_id, config)
         profile_effective = profile_task_protocol(
             profile, official_protocol, task_id, config
         )
@@ -239,8 +283,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             for role_field in ("worker_model", "evidence_annotator_model"):
                 if role_field in profile:
                     override_reasons[role_field] = (
-                        f"resolved campaign {role_field}="
-                        f"{role_config[role_field]}"
+                        f"resolved campaign {role_field}=" f"{role_config[role_field]}"
                     )
             differences = protocol_diff(
                 official=official_contract,
@@ -259,8 +302,9 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "model": model,
                 "reasoning_effort": reasoning,
                 **role_config,
+                **(global_evidence_config if method in GOAL_PLUS_METHODS else {}),
                 **(
-                    global_evidence_config
+                    {"goal_plus_source": goal_plus_source}
                     if method in GOAL_PLUS_METHODS
                     else {}
                 ),
@@ -268,9 +312,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "claude_context_window_tokens": profile.get(
                     "claude_context_window_tokens"
                 ),
-                "claude_autocompact_percent": profile.get(
-                    "claude_autocompact_percent"
-                ),
+                "claude_autocompact_percent": profile.get("claude_autocompact_percent"),
                 "pi_package_version": profile.get("pi_package_version"),
                 "wall_time_seconds": wall_time,
                 "live_search_concurrency": concurrency,
@@ -283,6 +325,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "worker_min_runtime_seconds": worker_min_runtime,
                 "worker_min_verifier_runs": worker_min_verifiers,
                 "closeout_reserve_seconds": closeout_reserve,
+                "goal_plus_verifier_timeout_seconds": goal_plus_verifier_timeout,
                 "goal_plus_finalization_grace_seconds": int(
                     profile.get("goal_plus_finalization_grace_seconds", 300)
                 ),
@@ -296,9 +339,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 "submission_cooldown": effective_contract["submission_cooldown"],
                 "max_submissions": effective_contract["max_submissions"],
                 "auto_eval_enabled": not effective_contract["disable_auto_eval"],
-                "auto_resume_enabled": not effective_contract[
-                    "disable_auto_resume"
-                ],
+                "auto_resume_enabled": not effective_contract["disable_auto_resume"],
                 "stop_hook_enabled": not effective_contract["disable_stop_hook"],
                 "internet": effective_contract["internet"],
                 "internet_source": internet_source,
@@ -325,12 +366,8 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 ),
                 "official_edgebench_comparable": not differences,
                 "prompt_sha256": io.sha256_text(prompt),
-                "metric_direction": config["judge"].get(
-                    "score_direction", "maximize"
-                ),
-                "sforge_run_id": io.sanitize_id(
-                    f"{campaign_id}-{task_id}-{method}"
-                ),
+                "metric_direction": config["judge"].get("score_direction", "maximize"),
+                "sforge_run_id": io.sanitize_id(f"{campaign_id}-{task_id}-{method}"),
                 "state": "prepared",
                 "created_at": io.utc_now(),
             }
@@ -363,10 +400,14 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "worker_min_runtime_seconds": worker_min_runtime,
         "worker_min_verifier_runs": worker_min_verifiers,
         "closeout_reserve_seconds": closeout_reserve,
+        "goal_plus_verifier_timeout_seconds": goal_plus_verifier_timeout,
         "protocol_source": {
             "path": official_protocol["source"],
             "sha256": official_protocol["source_sha256"],
         },
+        "pi_provider_contract": pi_provider_contract,
+        "codex_provider_contract": codex_contract,
+        "goal_plus_source": goal_plus_source,
     }
     io.write_json(destination / "profile.json", snapshot)
     campaign_official_comparable = all(
@@ -385,11 +426,19 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             ],
             "edgebench_branch": io.git_branch(paths.edge_root),
             "edgebench_commit": io.git_head(paths.edge_root),
-            "goal_plus_tracking_branch": io.upstream_entry("goal_plus")[
-                "tracking_branch"
-            ],
-            "goal_plus_branch": io.git_branch(paths.goal_plus_root),
-            "goal_plus_commit": io.git_head(paths.goal_plus_root),
+            "goal_plus_tracking_branch": (
+                io.upstream_entry("goal_plus")["tracking_branch"]
+                if goal_plus_source is not None
+                and goal_plus_source["source_kind"] == "managed"
+                else None
+            ),
+            "goal_plus_source": goal_plus_source,
+            "goal_plus_branch": (
+                goal_plus_source["branch"] if goal_plus_source is not None else None
+            ),
+            "goal_plus_commit": (
+                goal_plus_source["commit"] if goal_plus_source is not None else None
+            ),
             "dataset_revision": profile["dataset_revision"],
             "task_ids": list(profile["task_ids"]),
             "methods": methods,
@@ -400,6 +449,8 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "pi_package_version": profile.get("pi_package_version"),
             "api_protocol": api_protocol,
             "thinking": thinking,
+            "pi_provider_contract": pi_provider_contract,
+            "codex_provider_contract": codex_contract,
             "wall_time_seconds": wall_time,
             "concurrency": concurrency,
             "cell_concurrency": cell_concurrency,
@@ -407,6 +458,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "worker_min_runtime_seconds": worker_min_runtime,
             "worker_min_verifier_runs": worker_min_verifiers,
             "closeout_reserve_seconds": closeout_reserve,
+            "goal_plus_verifier_timeout_seconds": goal_plus_verifier_timeout,
             "goal_plus_finalization_grace_seconds": int(
                 profile.get("goal_plus_finalization_grace_seconds", 300)
             ),

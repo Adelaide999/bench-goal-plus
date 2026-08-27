@@ -350,6 +350,8 @@ class BenchmarkAgent:
         *,
         profile: str | None,
         methods: tuple[str, ...] = (),
+        model: str | None = None,
+        reasoning_effort: str | None = None,
         skip_bootstrap: bool,
         skip_provision: bool,
         dry_run: bool,
@@ -380,11 +382,29 @@ class BenchmarkAgent:
         for runner_id, members in groups.items():
             definition = self.catalog.runners[runner_id]
             runner = create_runner(definition)
+            selected_methods = tuple(
+                method for method in methods if method in definition.supported_methods
+            )
+            unsupported = set(methods) - {
+                method
+                for target in targets
+                for method in self.catalog.runners[
+                    target.runner_id
+                ].supported_methods
+            }
+            if unsupported:
+                raise ContractError(
+                    "setup method(s) are not supported by the selected runner(s): "
+                    + ", ".join(sorted(unsupported))
+                )
             spec = CampaignSpec(
                 campaign_id="setup",
                 targets=tuple(members),
                 runner=definition,
                 profile=profile,
+                methods=selected_methods,
+                model=model,
+                reasoning_effort=reasoning_effort,
             )
             commands.extend(
                 runner.provision_commands(
@@ -419,6 +439,8 @@ class BenchmarkAgent:
             spec.targets, dry_run=dry_run, require_uv=not skip_bootstrap
         )
         runner = create_runner(spec.runner)
+        runtime_metadata = runner.runtime_metadata(spec)
+        resolved_spec = {**spec.as_dict(), **runtime_metadata}
         setup_commands: list[list[str]] = []
         if spec.profile:
             for target in spec.targets:
@@ -449,7 +471,7 @@ class BenchmarkAgent:
         plan = {
             "schema_version": 1,
             "action": "start",
-            "resolved_spec": spec.as_dict(),
+            "resolved_spec": resolved_spec,
             "campaign": campaign.as_dict(),
             "docker": [item.docker.as_dict() for item in spec.targets],
             "warnings": warnings,
@@ -469,6 +491,7 @@ class BenchmarkAgent:
             campaign,
             commands=plan["commands"],
             follow_up=follow_up,
+            resolved_spec=resolved_spec,
         )
         if run_commands:
             try:

@@ -40,9 +40,10 @@ def edgebench_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
         best = cell.get("best") or {}
         completion = cell.get("completion_evidence") or {}
         completion_checks = completion.get("checks") or {}
-        if cell.get("method") == "goal-plus-codex":
+        method = cell.get("method")
+        if method == "goal-plus-codex":
             actual_subagents = completion_checks.get("actual_worker_launches") or {}
-        elif cell.get("method") == "goal-plus-pi":
+        elif method in {"goal-plus-pi", "goal-plus-pi-provider"}:
             actual_subagents = completion_checks.get("agent_sessions") or {}
         else:
             actual_subagents = {}

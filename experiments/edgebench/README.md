@@ -109,6 +109,19 @@ python3 scripts/bench.py plan --preset edgebench-vliw-pi-local-smoke
 python3 scripts/bench.py plan --preset edgebench-vliw-goal-plus-pi-local-smoke
 ```
 
+Goal Plus + Codex 的十五分钟语义 smoke 使用：
+
+```bash
+python3 scripts/bench.py plan \
+  --preset edgebench-vliw-goal-plus-codex-local-smoke
+```
+
+该 preset 固定 `gpt-5.5/high`、`T=900s`、`K=2`、`C=2`、`R=1`。setup 和
+launch 会先用当次外部 API 配置与已解析的 Goal Plus source commit 在宿主机完成一次
+真实 `goal_plus_monitor_snapshot` MCP 往返；普通 shell tool 往返不能代替该 gate。
+API 地址与密钥不进入 preset，Goal Plus 的受管 tracking branch 也不因实验 source override
+而改变。
+
 确认 host `openai-codex` 登录和 resolved contract 后，把 `plan` 改成 `start`。
 当前只声明 wiring-ready；真实 Pi E2E evidence 生成前不得标为 pass。
 
@@ -126,6 +139,25 @@ python3 scripts/bench.py plan \
 直接使用真实 `PROVIDER/MODEL` 和各自标准 key env，不需要另造 provider 名称。
 macOS/OrbStack 与 Linux/Docker 使用同一 adapter；provider registry 中的 `api`
 可以是 Pi 支持的 Anthropic 或 OpenAI wire API，控制面不按 wire API 分叉 method。
+
+自定义 Pi API 配置是 campaign 外部输入。设置 `SFORGE_PI_MODELS_FILE` 指向
+`models.json`，并在环境中提供该文件 `apiKey` 所引用的变量。doctor 会先在宿主机用
+profile 的精确 `PROVIDER/MODEL`、reasoning 和 Pi 版本完成一次 read tool 调用、tool
+result 与 final answer 回环；这一步失败时不会启动 Docker。控制面不拼接
+`/responses`、`/chat/completions` 或 models route。宿主机通过后，容器阶段只验证配置中
+动态 base URL 的无凭据网络可达性，实际协议仍由复制同一 provider 配置的 Pi 负责。
+
+Goal Plus 源码也按同一规则处理。长期默认仍是 `environment/upstreams.json` 中的
+`master`；临时分支使用独立 checkout，并同时设置：
+
+```bash
+export SFORGE_GOAL_PLUS_SOURCE_DIR=/path/to/muyuan/plugins/goal-plus
+export SFORGE_GOAL_PLUS_EXPECTED_REF=experiment/my-goal-plus-ref
+```
+
+doctor 在 Docker 前验证 clean checkout、ref/HEAD commit 与必需 runtime assets；prepare
+把 source path/ref/commit 写进 campaign，launch 再核对同一个 commit。临时分支不会写回
+upstream registry。
 
 当前 50 个可运行公开任务的 Codex-only 固定协议是通用 dispatcher 中的一个 preset：
 

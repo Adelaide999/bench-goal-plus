@@ -78,7 +78,7 @@ OAuth 模式不需要把 token 复制进 profile 或环境变量。doctor 只记
 不记录内容。EdgeBench 还要求：
 
 ```text
-~/.cache/sforge/codex/codex-0.144.1-linux-x64.tgz
+~/.cache/sforge/codex/codex-0.146.0-linux-x64.tgz
 ```
 
 该缓存是 Work container 使用的 Linux Codex runtime，不是当前 Mac/Linux host 的 Codex
@@ -106,6 +106,13 @@ export SFORGE_AGENT_API_BASE_URL='https://api.example.com/v1'
 
 controller 会从 host 和 Work container 各做一次鉴权 probe。manifest 只记录使用了哪个环境
 变量，不记录值。
+
+对 `goal-plus-codex`，host probe 不是普通 Codex ping。controller 使用 SForge 将采用的
+精确 Codex 版本、profile 中的 model/reasoning，以及当次解析并冻结的 Goal Plus source
+commit 启动临时 MCP server；必须在 Codex JSON event 中观察到成功的
+`goal_plus_monitor_snapshot` `mcp_tool_call`。如果 endpoint 能完成 shell tool call 但拒绝
+Goal Plus tool schema，setup 会在任何 Docker 创建前失败。API base/key 仍只从上述环境
+变量动态读取，不写入 profile 或源代码。
 
 ### SWE-bench Verified Plain/Goal Plus Codex API
 
@@ -215,52 +222,11 @@ Pi built-in provider 不需要额外 registry。adapter 跟随当前解析 Pi �
 OrbStack socket、`/Users/...` 或其他 macOS 专用路径。服务器可通过
 `SFORGE_PI_MODELS_FILE` 指向自己的 registry。
 
-wire API 由 Pi registry 中 provider 的 `api` 字段决定。当前 Pi 能识别的
+wire API 由外部 Pi registry 中 provider 的 `api` 字段决定。当前 Pi 能识别的
 `anthropic-messages`、`openai-completions`、`openai-responses` 都走同一个
-`goal-plus-pi-provider` adapter；bench 控制面只验证 provider/model/credential，
-不会把远程 Claude API 或 OpenAI-compatible API 写成不同 method。
-
-“OpenAI-compatible”只表示 endpoint 使用 OpenAI 风格协议族，不等于它实现了 OpenAI
-Responses API。必须按实际 route 分开验证：
-
-| Pi `api` | 必须成功的 endpoint | 失败时的结论 |
-| --- | --- | --- |
-| `openai-completions` | `POST /chat/completions` | 不能使用该 Chat Completions 配置 |
-| `openai-responses` | `POST /responses` | 不能选择 Responses；不得用 Chat 成功结果代替 |
-
-选择顺序是 Responses-first，但不是按厂商名猜测：先探测 `/responses`，成功后再通过
-Pi streaming + tool loop；任一层失败才回退 `/chat/completions`。可先运行仓库随 Skill
-提供的无密钥落盘 probe：
-
-```bash
-python3 .agents/skills/benchmark-setup/scripts/probe_openai_wire.py \
-  --base-url https://api.example.com/v1 \
-  --model provider-model-id \
-  --api-key-env PROVIDER_API_KEY
-```
-
-该脚本只给出 wire-level 推荐，不能代替 Pi session 和 EdgeBench Work container gate。
-如果 `/chat/completions` 成功而 `/responses` 返回 404，只能登记
-`api: "openai-completions"`。
-
-截至 2026-08-01 的实测矩阵如下；远端能力会变化，每次正式 campaign 仍须重跑 probe：
-
-| Provider/model | Responses | Chat Completions | Pi 0.83.0 结论 |
-| --- | --- | --- | --- |
-| Z.AI `glm-5.2` | 404 | 成功 | built-in `zai/glm-5.2` 使用 `openai-completions`；工具回环与 reasoning usage 均通过 |
-| DeepSeek `deepseek-v4-flash` | 成功 | 成功 | built-in `deepseek` 仍使用 `openai-completions`；要优先 Responses，使用自定义 `deepseek-responses` registry；Responses 工具回环与 reasoning usage 均通过 |
-
-DeepSeek 的[官方 Responses API 指南](https://api-docs.deepseek.com/zh-cn/guides/responses_api/)
-确认当前仅 `deepseek-v4-flash` 支持该接口，`deepseek-v4-pro` 暂不支持；不能因为两者都能
-通过 Chat Completions 调用，就把 V4 Pro 登记成 `openai-responses`。该实现是无状态 API，
-不支持 `previous_response_id`、`conversation`、`background` 等能力；Agent 验证应使用
-它明确支持的 streaming、function tool call 和 tool result 回传链路。
-
-Z.AI 同一把 `ZAI_API_KEY` 应优先写成 `zai/glm-5.2`，不需要额外
-`models.json`。DeepSeek built-in 虽已登记 V4 Flash，但 wire API 仍是 Chat
-Completions；Responses-first 路径使用
-[registry 模板](pi-openai-provider-registry.example.json)。只有评测自定义 endpoint、
-切换 wire API 或 Pi 尚未内置的 model/provider 时才创建自定义 registry，例如：
+`goal-plus-pi-provider` adapter；bench 控制面不追加协议 route、不预测 provider
+兼容性，也不把远程 Claude API 或 OpenAI-compatible API 写成不同 method。自定义
+provider 只需提供外部配置和该配置引用的 credential environment，例如：
 
 ```json
 {
@@ -286,15 +252,16 @@ Completions；Responses-first 路径使用
 
 API smoke 必须使用 campaign 将采用的 Pi 版本，并按以下顺序取证：
 
-1. 记录 `pi --version`，对声明的 wire API 发最小协议请求；不要只探测 base URL 或
-   models route。
-2. Responses 成功时优先登记 `openai-responses`；再运行一次短 Pi JSON session，确认
-   事件中的 `api` 与 registry 一致，并至少完成一次 tool call → tool result → final answer。
+1. controller 把外部 registry 的所选 provider/model 原样复制到仓库本地的隔离
+   `PI_CODING_AGENT_DIR`，记录 `pi --version`，再让 Pi 自己按该配置完成一次真实请求；
+   controller 不直接构造 provider HTTP 请求。
+2. 短 Pi JSON session 必须确认事件中的 provider/model 与请求一致，并至少完成一次
+   tool call → tool result → final answer。
 3. reasoning model 至少出现 thinking content/event，或响应 usage 中有非零
    reasoning token；只有普通文本输出不算“正在思考”的证据。
-4. EdgeBench 路径还必须在实际 Work container、实际运行用户、同一个
-   `PI_CODING_AGENT_DIR` 中执行 `pi --list-models <provider>`，确认精确的
-   `PROVIDER/MODEL` 可见。host doctor 成功不能替代这一步。
+4. 宿主机真实回环通过后，controller 才启动诊断 Work container；容器只对 registry
+   动态给出的 base URL 做无凭据连通性检查，任意 HTTP 响应都能证明网络可达。协议语义
+   继续由随后复制同一份 registry 的 Pi runtime 负责。
 
 这种 smoke 只证明 provider wiring 和推理事件可用，不是 benchmark 成绩。用户只要求
 “跑起来并确认正在思考”时，取得上述证据后立即 stop，保留 partial artifacts，并执行
@@ -312,8 +279,11 @@ model 和 credential source；它不会把 Pi provider 错配为 `openai-codex`�
 不需要 Skill 在容器里手工
 拼安装命令。当前真实路径是：
 
-- controller 设置 `SFORGE_GOAL_PLUS_SOURCE_DIR`，`prepare_container` 把 Muyuan 受管
-  checkout 中的 `plugins/goal-plus` source directory 复制到 `/opt/goal-plus`，因此不会在每个任务里重新 clone；
+- 默认情况下 controller 使用 registry 声明的 Muyuan `master` checkout。临时实验分支
+  不修改 registry，而是显式设置 `SFORGE_GOAL_PLUS_SOURCE_DIR` 为外部 checkout 中的
+  `plugins/goal-plus`，并设置 `SFORGE_GOAL_PLUS_EXPECTED_REF`。doctor 在 Docker 前要求
+  checkout clean、HEAD 与该 ref 的本地 commit 一致、运行资产完整；prepare 冻结 commit，
+  launch 再核对后才由 `prepare_container` 复制到 `/opt/goal-plus`；
 - SForge 接受 `SFORGE_GOAL_PLUS_PYTHON_DIR`，把 Linux Python 3.10+ runtime
   复制到 `/opt/sforge-python`；该目录必须与 Work container 的平台兼容，macOS
   Python 或 macOS venv 不能使用；

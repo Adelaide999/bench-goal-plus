@@ -771,6 +771,57 @@ class ReproEnvironmentTest(unittest.TestCase):
             },
         )
 
+    def test_git_is_ancestor_accepts_local_ahead_but_rejects_divergence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checkout = Path(temp_dir) / "checkout"
+            subprocess.run(
+                ["git", "init", "-q", "--initial-branch=main", checkout],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", checkout, "config", "user.name", "Test Controller"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    checkout,
+                    "config",
+                    "user.email",
+                    "test@example.invalid",
+                ],
+                check=True,
+            )
+            readme = checkout / "README.md"
+            readme.write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", checkout, "add", "README.md"], check=True)
+            subprocess.run(
+                ["git", "-C", checkout, "commit", "-q", "-m", "base"],
+                check=True,
+            )
+            base = subprocess.run(
+                ["git", "-C", checkout, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            readme.write_text("ahead\n", encoding="utf-8")
+            subprocess.run(["git", "-C", checkout, "add", "README.md"], check=True)
+            subprocess.run(
+                ["git", "-C", checkout, "commit", "-q", "-m", "ahead"],
+                check=True,
+            )
+            ahead = subprocess.run(
+                ["git", "-C", checkout, "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            self.assertTrue(repro_env.git_is_ancestor(checkout, base, ahead))
+            self.assertFalse(repro_env.git_is_ancestor(checkout, ahead, base))
+
 
 if __name__ == "__main__":
     unittest.main()

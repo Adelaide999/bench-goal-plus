@@ -65,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
     setup = children.add_parser("setup")
     add_selection(setup)
     setup.add_argument("--asset-pack", action="append", default=[])
+    setup.add_argument("--method", action="append", default=[])
+    setup.add_argument("--model")
+    setup.add_argument(
+        "--reasoning-effort", choices=("low", "medium", "high", "xhigh")
+    )
     setup.add_argument("--skip-bootstrap", action="store_true")
     setup.add_argument("--skip-provision", action="store_true")
     setup.add_argument("--dry-run", action="store_true")
@@ -183,9 +188,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "setup":
         if args.asset_pack:
-            if args.benchmark or args.preset:
+            if (
+                args.benchmark
+                or args.preset
+                or args.method
+                or args.model
+                or args.reasoning_effort
+            ):
                 raise ContractError(
-                    "use --asset-pack or --benchmark/--preset, not both"
+                    "asset-pack setup does not accept benchmark, preset, method, "
+                    "model, or reasoning effort"
                 )
             packs = agent.resolve_asset_packs(args.asset_pack)
             result = agent.setup_asset_packs(
@@ -203,7 +215,26 @@ def main(argv: list[str] | None = None) -> int:
                 targets,
                 profile=args.profile or (preset.profile if preset else None),
                 methods=tuple(
-                    (preset.expected_profile.get("methods") or []) if preset else []
+                    args.method
+                    or (
+                        (preset.expected_profile.get("methods") or [])
+                        if preset
+                        else []
+                    )
+                ),
+                model=(
+                    args.model
+                    or (
+                        preset.expected_profile.get("model") if preset else None
+                    )
+                ),
+                reasoning_effort=(
+                    args.reasoning_effort
+                    or (
+                        preset.expected_profile.get("reasoning_effort")
+                        if preset
+                        else None
+                    )
                 ),
                 skip_bootstrap=args.skip_bootstrap,
                 skip_provision=args.skip_provision,

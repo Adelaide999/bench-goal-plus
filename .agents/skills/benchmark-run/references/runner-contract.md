@@ -10,7 +10,7 @@
 | `controller` | Existing repository controller; the Agent calls it instead of copying it |
 | `evidence_filename` | Native final JSON basename consumed by the unified `finish` path |
 | `supported_methods` | Canonical methods accepted during plan resolution; unknown methods fail before setup |
-| `method_contracts` | Optional per-method input constraints; `model_format: provider/model` requires an exact `PROVIDER/MODEL` value |
+| `method_contracts` | Optional per-method input constraints; `model_format: provider/model` requires an exact `PROVIDER/MODEL` value, while `runtime_source_command` selects a read-only native source probe |
 | `capabilities` | `provision`, `detach`, `stop`, `resume`, `repeat_seeds`, `cell_concurrency`, `retain_containers`, official evaluator, and exact resume semantics |
 
 Current kinds are `native-profile`, `common-matrix`, and `openevolve-batch`. If a new native
@@ -20,6 +20,9 @@ target-name branches to the CLI.
 Every `method_contracts` key must also appear in `supported_methods`. Resolve these contracts during
 `plan` and reject malformed method inputs before setup, doctor, preparation, or launch. The same
 resolved method, provider, and model must then flow unchanged through the runner lifecycle.
+When a method declares `runtime_source_command`, `plan` runs that native read-only command and adds
+its secret-free `source_kind/ref/branch/commit` result to `resolved_spec.runtime_sources`; launch
+persists the same confirmation in `agent-run.json` while the native campaign remains authoritative.
 
 ## Target fields
 

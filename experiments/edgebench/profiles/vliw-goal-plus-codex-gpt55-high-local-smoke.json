@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "vliw-goal-plus-codex-gpt55-high-local-smoke",
+  "description": "Fifteen-minute local API-only VLIW Goal Plus + Codex smoke with two live workers and a provider-validated gpt-5.5 model.",
+  "protocol_source": "edgebench-official-codex",
+  "backend": "docker",
+  "dataset_repository": "ByteDance-Seed/EdgeBench",
+  "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+  "registry": "seededge",
+  "task_ids": [
+    "vliw_kernel_optimization"
+  ],
+  "methods": [
+    "goal-plus-codex"
+  ],
+  "model": "gpt-5.5",
+  "reasoning_effort": "high",
+  "wall_time_seconds": 900,
+  "concurrency": 2,
+  "worker_runtime_seconds": 240,
+  "goal_plus_verifier_timeout_seconds": 30,
+  "goal_plus_finalization_grace_seconds": 120,
+  "cell_concurrency": 2,
+  "judge_concurrency": 1,
+  "judge_port": 8080,
+  "protocol_overrides": {
+    "eval_interval": 60,
+    "internet": false
+  },
+  "protocol_override_reasons": {
+    "agent": "the smoke validates Goal Plus with Codex and two live search workers",
+    "backend": "the local smoke uses Docker instead of the official Kubernetes backend",
+    "model": "the model is selected from the current endpoint after a real Goal Plus MCP semantic probe",
+    "reasoning_effort": "reasoning effort is pinned explicitly for reproducibility",
+    "timeout": "the Goal Plus wiring smoke uses a fifteen-minute exploration budget",
+    "attempts_per_task": "Goal Plus maps K to internal workers in one outer trajectory",
+    "cell_concurrency": "the campaign reserves capacity for two task cells while this preset contains one VLIW cell",
+    "judge_concurrency": "the local shared Judge serializes ephemeral Judge containers",
+    "eval_interval": "the smoke evaluates once per minute so it records hidden-Judge evidence",
+    "internet": "all Agent execution is restricted to the Judge and the dynamically resolved LLM API endpoint"
+  }
+}

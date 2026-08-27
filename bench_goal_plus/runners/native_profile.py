@@ -29,6 +29,53 @@ def process_alive(pid: int | None) -> bool | None:
 
 
 class NativeProfileRunner(BenchmarkRunner):
+    def runtime_metadata(self, spec: CampaignSpec) -> dict:
+        commands = {
+            self.definition.method_contracts.get(method, {}).get(
+                "runtime_source_command"
+            )
+            for method in spec.methods
+        }
+        commands.discard(None)
+        if not commands:
+            return {}
+        if len(commands) != 1:
+            raise ContractError(
+                "one native campaign cannot mix runtime source probe commands"
+            )
+        if not spec.profile:
+            raise ContractError("runtime source probe requires a native profile")
+        command = [
+            str(managed_python()),
+            str(self.definition.controller.relative_to(ROOT)),
+            str(next(iter(commands))),
+            "--profile",
+            spec.profile,
+        ]
+        for method in spec.methods:
+            command.extend(["--method", method])
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise ContractError(f"runtime source probe failed: {detail}")
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError as error:
+            raise ContractError("runtime source probe returned invalid JSON") from error
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version") != 1
+            or not isinstance(payload.get("runtime_sources"), dict)
+        ):
+            raise ContractError("runtime source probe returned an invalid contract")
+        return {"runtime_sources": payload["runtime_sources"]}
+
     def local_asset_check_commands(
         self, profile: str, *, allow_missing: bool = False
     ) -> list[list[str]]:
@@ -59,6 +106,8 @@ class NativeProfileRunner(BenchmarkRunner):
         doctor_command = [python, controller, "doctor", "--profile", spec.profile]
         if spec.model is not None:
             doctor_command.extend(["--model", spec.model])
+        if spec.reasoning_effort is not None:
+            doctor_command.extend(["--reasoning-effort", spec.reasoning_effort])
         for method in spec.methods:
             doctor_command.extend(["--method", method])
         commands.append(doctor_command)

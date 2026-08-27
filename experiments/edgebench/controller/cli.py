@@ -8,7 +8,7 @@ from pathlib import Path
 
 from bench_runtime_paths import configure_temp_environment
 
-from .environment import doctor, provision
+from .environment import doctor, provision, resolve_goal_plus_source
 from .io import campaign_dir
 from .preparation import prepare
 from .profiles import (
@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
             child.add_argument("--output", type=Path)
             child.add_argument("--method", action="append", choices=sorted(METHODS))
             child.add_argument("--model")
+            child.add_argument("--reasoning-effort")
             child.add_argument("--local-assets-only", action="store_true")
             child.add_argument(
                 "--allow-missing-local-assets", action="store_true"
@@ -44,6 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--wall-time-seconds", type=int)
     prepare_parser.add_argument("--concurrency", type=int)
     prepare_parser.add_argument("--cell-concurrency", type=int)
+    metadata_parser = subparsers.add_parser("plan-metadata")
+    metadata_parser.add_argument("--profile", default="vliw-smoke")
+    metadata_parser.add_argument("--method", action="append", choices=sorted(METHODS))
     for name in ("run", "status", "stop", "finalize", "_execute"):
         child = subparsers.add_parser(name)
         child.add_argument("--campaign", required=True)
@@ -61,8 +65,36 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     configure_temp_environment()
     args = build_parser().parse_args(argv)
-    if args.command in {"provision", "doctor", "prepare"}:
+    if args.command in {"provision", "doctor", "prepare", "plan-metadata"}:
         _, profile = load_profile(args.profile)
+        if args.command == "plan-metadata":
+            if args.method:
+                profile = {**profile, "methods": args.method}
+            source = resolve_goal_plus_source(methods=profile["methods"])
+            if not source["valid"]:
+                raise RuntimeError(
+                    f"Goal Plus source validation failed: {source['error']}"
+                )
+            visible_source = {
+                key: source.get(key)
+                for key in (
+                    "source_kind",
+                    "source_path",
+                    "expected_ref",
+                    "branch",
+                    "commit",
+                )
+            }
+            print(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "runtime_sources": {"goal_plus": visible_source},
+                    },
+                    indent=2,
+                )
+            )
+            return 0
         if args.command == "provision":
             return provision(profile)
         if args.command == "doctor":
@@ -71,6 +103,8 @@ def main(argv: list[str] | None = None) -> int:
                 profile["methods"] = args.method
             if args.model:
                 profile["model"] = args.model
+            if args.reasoning_effort:
+                profile["reasoning_effort"] = args.reasoning_effort
             protocol = api_protocol_for_methods(profile["methods"])
             if protocol == "pi-provider":
                 validate_pi_provider_model(profile["model"])

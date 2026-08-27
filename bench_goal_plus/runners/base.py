@@ -26,6 +26,9 @@ class BenchmarkRunner(ABC):
             f"runner {self.definition.runner_id} does not support profiled local-asset checks"
         )
 
+    def runtime_metadata(self, spec: CampaignSpec) -> dict:
+        return {}
+
     @abstractmethod
     def provision_commands(
         self, spec: CampaignSpec, *, skip_provision: bool

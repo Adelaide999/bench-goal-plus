@@ -282,6 +282,13 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
         or annotator_timeout < 1
     ):
         raise ValueError("evidence_annotator_timeout_seconds must be positive")
+    verifier_timeout = profile.get("goal_plus_verifier_timeout_seconds")
+    if verifier_timeout is not None and (
+        not isinstance(verifier_timeout, int)
+        or isinstance(verifier_timeout, bool)
+        or verifier_timeout < 1
+    ):
+        raise ValueError("goal_plus_verifier_timeout_seconds must be positive")
     worker_runtime = int(
         profile.get("worker_runtime_seconds", profile["wall_time_seconds"])
     )

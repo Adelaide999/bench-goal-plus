@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
+import subprocess
 import sys
 import tarfile
 import time
@@ -26,6 +28,7 @@ sys.modules[SPEC.name] = EDGE
 SPEC.loader.exec_module(EDGE)
 
 from experiments.edgebench.controller import io as EDGE_IO
+from experiments.edgebench.controller import cli as EDGE_CLI
 from experiments.edgebench.controller import environment as EDGE_ENV
 from experiments.edgebench.controller import evidence as EDGE_EVIDENCE
 from experiments.edgebench.controller import reporting as EDGE_REPORTING
@@ -33,6 +36,38 @@ from experiments.edgebench.controller import runtime as EDGE_RUNTIME
 
 
 class EdgeBenchExperimentTest(unittest.TestCase):
+    def test_doctor_accepts_exact_reasoning_override(self) -> None:
+        args = EDGE_CLI.build_parser().parse_args(
+            [
+                "doctor",
+                "--profile",
+                "vliw-smoke",
+                "--method",
+                "goal-plus-codex",
+                "--model",
+                "gpt-5.6-sol",
+                "--reasoning-effort",
+                "medium",
+            ]
+        )
+
+        self.assertEqual(args.method, ["goal-plus-codex"])
+        self.assertEqual(args.model, "gpt-5.6-sol")
+        self.assertEqual(args.reasoning_effort, "medium")
+
+    def test_plan_metadata_accepts_selected_goal_plus_method(self) -> None:
+        args = EDGE_CLI.build_parser().parse_args(
+            [
+                "plan-metadata",
+                "--profile",
+                "vliw-goal-plus-codex-gpt55-high-local-smoke",
+                "--method",
+                "goal-plus-codex",
+            ]
+        )
+
+        self.assertEqual(args.method, ["goal-plus-codex"])
+
     def test_compatibility_entrypoint_stays_thin(self) -> None:
         entrypoint = ROOT / "experiments" / "edgebench" / "experiment.py"
         source = entrypoint.read_text(encoding="utf-8")
@@ -161,15 +196,83 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "running",
         )
         self.assertEqual(
-            status["evidence_annotations"]["active_attempts"][0][
-                "event_type_counts"
-            ],
+            status["evidence_annotations"]["active_attempts"][0]["event_type_counts"],
             {"message_update": 4},
         )
         self.assertTrue(status["terminal_ready"])
-        self.assertEqual(
-            status["state_sources"], ["goal-plus-live-status.json"]
+        self.assertEqual(status["state_sources"], ["goal-plus-live-status.json"])
+
+    def test_live_goal_plus_codex_does_not_count_allocated_sessions_as_workers(
+        self,
+    ) -> None:
+        task_run = self.temp / "task-run"
+        task_run.mkdir(parents=True)
+        (task_run / "goal-plus-live-status.json").write_text(
+            json.dumps(
+                {
+                    "candidate_ids": ["c001", "c002"],
+                    "candidate_count": 2,
+                    "agent_session_count": 2,
+                    "actual_worker_launch_count": 2,
+                    "bound_worker_handles": [
+                        {
+                            "agent_session_id": "agent_001",
+                            "host": "codex",
+                            "external_id": "allocated-task-name-001",
+                        },
+                        {
+                            "agent_session_id": "agent_002",
+                            "host": "codex",
+                            "external_id": "allocated-task-name-002",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
         )
+
+        status = EDGE_EVIDENCE.live_goal_plus_status(
+            self.temp,
+            {
+                "method": "goal-plus-codex",
+                "state": "running",
+                "started_at": "2026-07-31T10:35:00Z",
+                "wall_time_seconds": 600,
+                "goal_plus_finalization_grace_seconds": 120,
+                "task_id": "vliw_kernel_optimization",
+                "sforge_run_id": "codex-live-status-test",
+            },
+            task_run,
+        )
+
+        self.assertEqual(status["candidate_count"], 2)
+        self.assertEqual(status["agent_session_count"], 2)
+        self.assertEqual(status["actual_worker_launch_count"], 0)
+        self.assertEqual(status["spawn_agent_completed_count"], 0)
+
+    def test_remaining_time_uses_agent_start_after_install(self) -> None:
+        task_run = self.temp / "task-run"
+        task_run.mkdir(parents=True)
+        agent_started_at = time.time() - 120
+        (task_run / "started_at").write_text(
+            f"2026-07-31T10:35:00\n{agent_started_at}\n",
+            encoding="utf-8",
+        )
+
+        remaining = EDGE_EVIDENCE.remaining_time(
+            {
+                "state": "running",
+                "started_at": "2000-01-01T00:00:00Z",
+                "wall_time_seconds": 600,
+                "goal_plus_finalization_grace_seconds": 120,
+            },
+            task_run,
+        )
+
+        self.assertGreaterEqual(remaining["exploration_seconds"], 479)
+        self.assertLessEqual(remaining["exploration_seconds"], 480)
+        self.assertGreaterEqual(remaining["finalization_seconds"], 599)
+        self.assertLessEqual(remaining["finalization_seconds"], 600)
 
     def setUp(self) -> None:
         self.temp = (
@@ -188,6 +291,44 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         EDGE.set_paths(self.test_paths)
         self.test_paths.tasks_dir.mkdir(parents=True)
         self.test_paths.goal_plus_root.mkdir(parents=True)
+        for relative in EDGE_ENV.GOAL_PLUS_REQUIRED_ASSETS:
+            asset = self.test_paths.goal_plus_root / relative
+            asset.parent.mkdir(parents=True, exist_ok=True)
+            asset.write_text("fixture\n", encoding="utf-8")
+        plugin_hooks = self.test_paths.goal_plus_root / "hooks" / "hooks.json"
+        plugin_hooks.parent.mkdir(parents=True, exist_ok=True)
+        plugin_hooks.write_text('{"hooks": {}}\n', encoding="utf-8")
+        subprocess.run(
+            [
+                "git",
+                "init",
+                "--initial-branch=master",
+                str(self.test_paths.goal_plus_root),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(self.test_paths.goal_plus_root), "add", "."],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.test_paths.goal_plus_root),
+                "-c",
+                "user.name=EdgeBench Test",
+                "-c",
+                "user.email=edgebench@example.invalid",
+                "commit",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+            capture_output=True,
+        )
         (self.test_paths.tasks_dir / "vliw_kernel_optimization.json").write_text(
             json.dumps(
                 {
@@ -208,6 +349,29 @@ class EdgeBenchExperimentTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         EDGE.set_paths(self.original_paths)
+
+    def _commit_goal_plus_fixture(self, message: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.test_paths.goal_plus_root), "add", "-A"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.test_paths.goal_plus_root),
+                "-c",
+                "user.name=EdgeBench Test",
+                "-c",
+                "user.email=edgebench@example.invalid",
+                "commit",
+                "-m",
+                message,
+            ],
+            check=True,
+            capture_output=True,
+        )
 
     def profile(self) -> dict:
         _, profile = EDGE.load_profile("vliw-smoke")
@@ -252,9 +416,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             if command[:3] == ["docker", "image", "inspect"]:
                 reference = command[-1]
                 image_id = (
-                    "sha256:work-id"
-                    if reference == work_ref
-                    else "sha256:judge-id"
+                    "sha256:work-id" if reference == work_ref else "sha256:judge-id"
                 )
                 return {
                     "returncode": 0,
@@ -301,7 +463,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(payload["docker_commands"], commands)
         for command in commands:
             self.assertTrue(
-                command[:3] in (
+                command[:3]
+                in (
                     ["docker", "ps", "-a"],
                     ["docker", "image", "inspect"],
                 )
@@ -476,16 +639,12 @@ class EdgeBenchExperimentTest(unittest.TestCase):
 
     def test_full_codex_profile_covers_all_runnable_public_tasks(self) -> None:
         _, profile = EDGE.load_profile("full-codex-2h")
-        _, terra_profile = EDGE.load_profile(
-            "full-codex-terra-high-2h-k1-c4"
-        )
+        _, terra_profile = EDGE.load_profile("full-codex-terra-high-2h-k1-c4")
 
         self.assertEqual(len(profile["task_ids"]), 50)
         self.assertEqual(len(set(profile["task_ids"])), 50)
         self.assertEqual(set(terra_profile["task_ids"]), set(profile["task_ids"]))
-        self.assertNotIn(
-            "order_addition_permutation_optimization", profile["task_ids"]
-        )
+        self.assertNotIn("order_addition_permutation_optimization", profile["task_ids"])
         self.assertEqual(profile["methods"], ["plain-codex"])
         self.assertEqual(profile["model"], "gpt-5.6-sol")
         self.assertEqual(profile["reasoning_effort"], "medium")
@@ -540,22 +699,25 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 path.name,
             )
 
+    def test_vliw_goal_plus_codex_smoke_bounds_local_verifiers(self) -> None:
+        _, profile = EDGE.load_profile(
+            "vliw-goal-plus-codex-gpt55-high-local-smoke"
+        )
+
+        self.assertEqual(profile["wall_time_seconds"], 900)
+        self.assertEqual(profile["worker_runtime_seconds"], 240)
+        self.assertEqual(profile["goal_plus_verifier_timeout_seconds"], 30)
+
     def test_pi_profiles_use_canonical_method_names_and_explicit_budgets(self) -> None:
         _, plain = EDGE.load_profile("vliw-pi-sol-medium-local-smoke")
-        _, goal_plus = EDGE.load_profile(
-            "vliw-goal-plus-pi-sol-medium-local-smoke"
-        )
+        _, goal_plus = EDGE.load_profile("vliw-goal-plus-pi-sol-medium-local-smoke")
         _, api_provider = EDGE.load_profile(
             "vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1"
         )
-        _, zai_provider = EDGE.load_profile(
-            "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1"
-        )
+        _, zai_provider = EDGE.load_profile("vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1")
 
         self.assertEqual(EDGE.METHODS["plain-pi"]["agent"], "pi")
-        self.assertEqual(
-            EDGE.METHODS["plain-pi-provider"]["agent"], "pi-provider"
-        )
+        self.assertEqual(EDGE.METHODS["plain-pi-provider"]["agent"], "pi-provider")
         self.assertEqual(
             EDGE.METHODS["plain-pi-provider"]["api_protocol"], "pi-provider"
         )
@@ -570,9 +732,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(goal_plus["worker_runtime_seconds"], 240)
         self.assertEqual(goal_plus["goal_plus_finalization_grace_seconds"], 120)
         self.assertEqual(goal_plus["global_evidence_mode"], "manual")
-        self.assertEqual(
-            api_provider["methods"], ["goal-plus-pi-provider"]
-        )
+        self.assertEqual(api_provider["methods"], ["goal-plus-pi-provider"])
         self.assertEqual(api_provider["model"], "glm-proxy/GLM-5.2")
         self.assertEqual(api_provider["pi_package_version"], "0.83.0")
         self.assertEqual(api_provider["wall_time_seconds"], 3600)
@@ -586,9 +746,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(zai_provider["cell_concurrency"], 1)
 
     def test_goal_plus_profile_validates_global_evidence_mode(self) -> None:
-        _, profile = EDGE.load_profile(
-            "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1"
-        )
+        _, profile = EDGE.load_profile("vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1")
         profile["global_evidence_mode"] = "independent"
         path = self.temp / "independent-evidence.json"
         path.write_text(json.dumps(profile), encoding="utf-8")
@@ -602,9 +760,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             EDGE.load_profile(path)
 
     def test_pi_provider_profile_requires_qualified_role_models(self) -> None:
-        _, profile = EDGE.load_profile(
-            "vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1"
-        )
+        _, profile = EDGE.load_profile("vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1")
         for field in ("model", "worker_model", "evidence_annotator_model"):
             with self.subTest(field=field):
                 invalid = {**profile, field: "unqualified-model"}
@@ -683,7 +839,9 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(profile["concurrency"], 1)
         self.assertEqual(profile["cell_concurrency"], 2)
 
-    def test_validation_regression_profile_targets_suspicious_legacy_cells(self) -> None:
+    def test_validation_regression_profile_targets_suspicious_legacy_cells(
+        self,
+    ) -> None:
         _, profile = EDGE.load_profile("validation-regression-codex-2h-c4")
 
         self.assertEqual(len(profile["task_ids"]), 17)
@@ -872,14 +1030,14 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                         reasons={field: "not permitted"},
                     )
 
-    def test_protocol_diff_accepts_only_explicitly_allowed_network_override(self) -> None:
+    def test_protocol_diff_accepts_only_explicitly_allowed_network_override(
+        self,
+    ) -> None:
         diff = EDGE._protocol_diff(
             official={"internet": False},
             effective={"internet": True},
             reasons={"internet": "local development smoke"},
-            allowed_fields=(
-                EDGE.ALLOWED_PROTOCOL_OVERRIDE_FIELDS | {"internet"}
-            ),
+            allowed_fields=(EDGE.ALLOWED_PROTOCOL_OVERRIDE_FIELDS | {"internet"}),
         )
 
         self.assertEqual(
@@ -1023,7 +1181,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                                 {"status": "no_scored_submission"}
                             ]
                         },
-                    }
+                    },
                 },
             },
             "cells": [
@@ -1103,7 +1261,9 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(results.freeze_panes, "A2")
         self.assertEqual(len(results.tables), 1)
         overview_values = {row[0].value: row[1].value for row in workbook["Overview"]}
-        self.assertIn("not an apples-to-apples", overview_values["Paper reference role"])
+        self.assertIn(
+            "not an apples-to-apples", overview_values["Paper reference role"]
+        )
         self.assertEqual(
             overview_values["Local fast coverage"],
             "<=0.5h: 1/2; <=1h: 1/2",
@@ -1178,6 +1338,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             worker_min_runtime_seconds=90,
             worker_min_verifier_runs=1,
             closeout_reserve_seconds=30,
+            goal_plus_verifier_timeout_seconds=30,
         )
         destination = EDGE.prepare(args, profile)
 
@@ -1205,6 +1366,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(goal_plus["worker_min_runtime_seconds"], 90)
         self.assertEqual(goal_plus["worker_min_verifier_runs"], 1)
         self.assertEqual(goal_plus["closeout_reserve_seconds"], 30)
+        self.assertEqual(goal_plus["goal_plus_verifier_timeout_seconds"], 30)
         self.assertFalse(plain["internet"])
         self.assertEqual(plain["eval_interval_seconds"], 1800)
         self.assertEqual(plain["submission_cooldown"], 120)
@@ -1250,12 +1412,12 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             json.loads((destination / "profile.json").read_text())["cell_concurrency"],
             1,
         )
-        self.assertFalse(any(path.name in {".gp", ".goal-plus"} for path in destination.rglob("*")))
+        self.assertFalse(
+            any(path.name in {".gp", ".goal-plus"} for path in destination.rglob("*"))
+        )
 
     def test_prepare_recomputes_overrides_and_routes_pi_role_models(self) -> None:
-        _, profile = EDGE.load_profile(
-            "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1"
-        )
+        _, profile = EDGE.load_profile("vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1")
         role_config = {
             "worker_model": "worker-provider/worker-model",
             "worker_reasoning_effort": "medium",
@@ -1296,7 +1458,12 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         with mock.patch.dict(
             EDGE.os.environ,
-            {"SFORGE_PI_MODELS_FILE": str(models)},
+            {
+                "SFORGE_PI_MODELS_FILE": str(models),
+                "ZAI_API_KEY": "zai-secret",
+                "WORKER_API_KEY": "worker-secret",
+                "ANNOTATION_API_KEY": "annotation-secret",
+            },
             clear=False,
         ):
             destination = EDGE.prepare(args, profile)
@@ -1308,9 +1475,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 / "cell.json"
             ).read_text()
         )
-        reasons = {
-            item["field"]: item["reason"] for item in cell["protocol_diff"]
-        }
+        reasons = {item["field"]: item["reason"] for item in cell["protocol_diff"]}
 
         self.assertIn("T=1200", reasons["timeout"])
         self.assertIn("K=1", reasons["attempts_per_task"])
@@ -1357,9 +1522,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         }
         for env_name, profile_name in field_map.items():
             self.assertEqual(extra[env_name], str(role_config[profile_name]))
-        self.assertEqual(
-            extra["GOAL_PLUS_GLOBAL_EVIDENCE_MODE"], "independent"
-        )
+        self.assertEqual(extra["GOAL_PLUS_GLOBAL_EVIDENCE_MODE"], "independent")
         self.assertEqual(
             extra["SFORGE_PI_AUX_MODELS"],
             "worker-provider/worker-model annotation-provider/annotation-model",
@@ -1368,9 +1531,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(env["TEST_API_KEY"], "test-secret")
 
     def test_stop_default_wait_covers_normal_controller_closeout(self) -> None:
-        parsed = EDGE.build_parser().parse_args(
-            ["stop", "--campaign", "campaign"]
-        )
+        parsed = EDGE.build_parser().parse_args(["stop", "--campaign", "campaign"])
         self.assertEqual(parsed.wait_seconds, 60)
 
         campaign = self.temp / "stop-campaign"
@@ -1388,9 +1549,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             clock["now"] += seconds
 
         with (
-            mock.patch.object(
-                EDGE_RUNTIME, "process_alive", side_effect=process_alive
-            ),
+            mock.patch.object(EDGE_RUNTIME, "process_alive", side_effect=process_alive),
             mock.patch.object(EDGE_RUNTIME.os, "kill"),
             mock.patch.object(
                 EDGE_RUNTIME.time,
@@ -1538,8 +1697,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         EDGE.write_json(destination / "controller.json", {"state": "running"})
         campaign = {
             "cells": [
-                {"cell_id": cell_id, "task_id": cell_id}
-                for cell_id in ("a", "b", "c")
+                {"cell_id": cell_id, "task_id": cell_id} for cell_id in ("a", "b", "c")
             ]
         }
         started = []
@@ -1623,14 +1781,15 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             {},
         )
 
-    def test_cell_queue_stop_interrupts_active_cells_without_starting_more(self) -> None:
+    def test_cell_queue_stop_interrupts_active_cells_without_starting_more(
+        self,
+    ) -> None:
         destination = self.temp / "campaign"
         destination.mkdir()
         EDGE.write_json(destination / "controller.json", {"state": "running"})
         campaign = {
             "cells": [
-                {"cell_id": cell_id, "task_id": cell_id}
-                for cell_id in ("a", "b", "c")
+                {"cell_id": cell_id, "task_id": cell_id} for cell_id in ("a", "b", "c")
             ]
         }
         started = []
@@ -1711,6 +1870,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "internet": False,
             "inner_search_concurrency": 4,
             "worker_runtime_seconds": 600,
+            "goal_plus_verifier_timeout_seconds": 45,
             "goal_plus_finalization_grace_seconds": 90,
         }
 
@@ -1729,13 +1889,12 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertEqual(extra["SFORGE_GOAL_PLUS_PARALLEL_NUM"], "4")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "600")
+        self.assertEqual(
+            extra["SFORGE_GOAL_PLUS_VERIFIER_TIMEOUT_SECONDS"], "45"
+        )
         self.assertEqual(extra["GOAL_PLUS_GLOBAL_EVIDENCE_MODE"], "manual")
-        self.assertEqual(
-            extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "90"
-        )
-        self.assertEqual(
-            extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"], "gpt-5.6-sol"
-        )
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "90")
+        self.assertEqual(extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"], "gpt-5.6-sol")
         self.assertEqual(
             extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT"], "xhigh"
         )
@@ -1777,16 +1936,12 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertEqual(extra["SFORGE_GOAL_PLUS_PARALLEL_NUM"], "2")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "240")
-        self.assertEqual(
-            extra["SFORGE_GOAL_PLUS_WORKER_MIN_RUNTIME_SECONDS"], "180"
-        )
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_MIN_RUNTIME_SECONDS"], "180")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_MIN_VERIFIER_RUNS"], "1")
         self.assertEqual(extra["SFORGE_GOAL_PLUS_CLOSEOUT_RESERVE_SECONDS"], "60")
         self.assertEqual(extra["SFORGE_PI_REASONING_EFFORT"], "medium")
         self.assertEqual(extra["SFORGE_PI_PACKAGE_VERSION"], "0.83.0")
-        self.assertEqual(
-            extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "120"
-        )
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "120")
 
     def test_goal_plus_pi_provider_environment_uses_goal_plus_contract(self) -> None:
         env = EDGE.cell_environment(
@@ -1810,9 +1965,22 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(extra["SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS"], "3300")
         self.assertEqual(extra["SFORGE_PI_REASONING_EFFORT"], "high")
         self.assertEqual(
+            extra["SFORGE_GOAL_PLUS_WORKER_MODEL"],
+            "glm-proxy/GLM-5.2",
+        )
+        self.assertEqual(
+            extra["SFORGE_GOAL_PLUS_WORKER_REASONING_EFFORT"],
+            "high",
+        )
+        self.assertEqual(
+            extra["SFORGE_GOAL_PLUS_EVIDENCE_ANNOTATOR_TIMEOUT_SECONDS"],
+            "1800",
+        )
+        self.assertEqual(
             extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"],
             "GLM-5.2",
         )
+        self.assertNotIn("SFORGE_PI_AUX_MODELS", extra)
 
     def test_api_config_prefers_sforge_then_openai_then_codex(self) -> None:
         config = EDGE.resolve_agent_api_config(
@@ -1850,9 +2018,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertEqual(anthropic["api_key"], "anthropic-token")
         self.assertEqual(anthropic["api_key_source"], "ANTHROPIC_AUTH_TOKEN")
-        self.assertEqual(
-            anthropic["api_base_url"], "https://anthropic.example"
-        )
+        self.assertEqual(anthropic["api_base_url"], "https://anthropic.example")
         self.assertEqual(
             EDGE.agent_api_probe_url(
                 "https://anthropic.example/api/anthropic", "anthropic"
@@ -1897,7 +2063,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                             "api": "openai-completions",
                             "apiKey": "$GLM_PROXY_API_KEY",
                             "models": [{"id": "GLM-5.2"}],
-                        }
+                        },
                     }
                 }
             )
@@ -1909,9 +2075,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
 
         for provider in ("glm-anthropic", "glm-openai"):
             with self.subTest(provider=provider):
-                status = EDGE.resolve_pi_provider(
-                    f"{provider}/GLM-5.2", env
-                )
+                status = EDGE.resolve_pi_provider(f"{provider}/GLM-5.2", env)
                 self.assertTrue(status["valid"])
                 self.assertEqual(status["provider"], provider)
                 self.assertEqual(status["model"], "GLM-5.2")
@@ -1951,13 +2115,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
     def test_pi_provider_requires_custom_api_key_reference(self) -> None:
         models = self.temp / "models-missing-api-key.json"
         models.write_text(
-            json.dumps(
-                {
-                    "providers": {
-                        "custom": {"models": [{"id": "model"}]}
-                    }
-                }
-            )
+            json.dumps({"providers": {"custom": {"models": [{"id": "model"}]}}})
         )
 
         status = EDGE.resolve_pi_provider(
@@ -2006,6 +2164,627 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                     host,
                 )
 
+    def test_pi_host_probe_uses_external_registry_and_real_tool_roundtrip(self) -> None:
+        models = self.temp / "external-models.json"
+        registry = {
+            "providers": {
+                "dynamic-provider": {
+                    "baseUrl": "http://127.0.0.1:43123/custom/base",
+                    "api": "openai-responses",
+                    "apiKey": "$DYNAMIC_API_KEY",
+                    "models": [{"id": "dynamic-model", "reasoning": True}],
+                }
+            }
+        }
+        EDGE.write_json(models, registry)
+        captured: dict[str, object] = {}
+
+        def fake_run_capture(command, *, env=None, timeout_seconds=None):
+            if command[-1] == "--version":
+                return {"returncode": 0, "stdout": "0.84.1", "stderr": ""}
+            captured["command"] = command
+            captured["env"] = dict(env or {})
+            copied = Path(str(env["PI_CODING_AGENT_DIR"])) / "models.json"
+            captured["registry"] = json.loads(copied.read_text(encoding="utf-8"))
+            stdout = "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "message_end",
+                            "message": {
+                                "role": "assistant",
+                                "provider": "dynamic-provider",
+                                "model": "dynamic-model",
+                                "api": "openai-responses",
+                                "content": [{"type": "toolCall", "name": "read"}],
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "message_end",
+                            "message": {"role": "toolResult", "content": []},
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "message_end",
+                            "message": {
+                                "role": "assistant",
+                                "provider": "dynamic-provider",
+                                "model": "dynamic-model",
+                                "api": "openai-responses",
+                                "content": [{"type": "text", "text": "PI_HOST_API_OK"}],
+                            },
+                        }
+                    ),
+                ]
+            )
+            return {"returncode": 0, "stdout": stdout, "stderr": ""}
+
+        probe_env = {
+            "SFORGE_PI_MODELS_FILE": str(models),
+            "SFORGE_PI_HOST_EXECUTABLE": "/opt/pi/bin/pi",
+            "DYNAMIC_API_KEY": "rotating-secret-value",
+        }
+        with mock.patch.object(EDGE_ENV.io, "run_capture", fake_run_capture):
+            result = EDGE_ENV.pi_host_provider_probe(
+                "dynamic-provider/dynamic-model",
+                reasoning_effort="medium",
+                expected_pi_version="0.84.1",
+                env=probe_env,
+            )
+
+        command = captured["command"]
+        self.assertTrue(result["passed"])
+        self.assertEqual(captured["registry"], registry)
+        self.assertEqual(command[command.index("--provider") + 1], "dynamic-provider")
+        self.assertEqual(command[command.index("--model") + 1], "dynamic-model")
+        self.assertEqual(command[command.index("--thinking") + 1], "medium")
+        self.assertEqual(result["wire_apis"], ["openai-responses"])
+        self.assertTrue(result["tool_roundtrip"])
+        self.assertNotIn("rotating-secret-value", json.dumps(result))
+        self.assertNotIn("rotating-secret-value", json.dumps(command))
+
+    def test_codex_host_probe_uses_dynamic_provider_and_real_tool_roundtrip(
+        self,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_capture(command, *, env=None, timeout_seconds=None):
+            if command[-1] == "--version":
+                return {
+                    "returncode": 0,
+                    "stdout": "codex-cli 0.146.0",
+                    "stderr": "",
+                }
+            captured["command"] = command
+            captured["env"] = dict(env or {})
+            config_path = Path(str(env["CODEX_HOME"])) / "config.toml"
+            captured["config"] = config_path.read_text(encoding="utf-8")
+            stdout = "\n".join(
+                [
+                    json.dumps({"type": "turn.started"}),
+                    json.dumps(
+                        {
+                            "type": "item.started",
+                            "item": {
+                                "id": "item-1",
+                                "type": "command_execution",
+                                "status": "in_progress",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "item-1",
+                                "type": "command_execution",
+                                "status": "completed",
+                                "exit_code": 0,
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "item-2",
+                                "type": "agent_message",
+                                "text": "CODEX_HOST_API_OK",
+                            },
+                        }
+                    ),
+                    json.dumps({"type": "turn.completed", "usage": {}}),
+                ]
+            )
+            return {"returncode": 0, "stdout": stdout, "stderr": ""}
+
+        probe_env = {
+            "SFORGE_CODEX_HOST_EXECUTABLE": "/opt/codex/bin/codex",
+            "OPENAI_API_KEY": "rotating-secret-value",
+            "OPENAI_BASE_URL": "http://127.0.0.1:43123/changing/base",
+        }
+        with mock.patch.object(EDGE_ENV.io, "run_capture", fake_run_capture):
+            result = EDGE_ENV.codex_host_provider_probe(
+                {
+                    "model": "gpt-5.6-sol",
+                    "reasoning_effort": "medium",
+                },
+                env=probe_env,
+            )
+
+        command = captured["command"]
+        config = str(captured["config"])
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["tool_roundtrip"])
+        self.assertTrue(result["turn_completed"])
+        self.assertEqual(result["contract"]["provider"], "sforge-proxy")
+        self.assertIn(
+            'base_url = "http://127.0.0.1:43123/changing/base"', config
+        )
+        self.assertIn('env_key = "OPENAI_API_KEY"', config)
+        self.assertIn("stream_idle_timeout_ms = 60000", config)
+        self.assertIn("stream_max_retries = 2", config)
+        self.assertIn("request_max_retries = 2", config)
+        self.assertEqual(command[command.index("--model") + 1], "gpt-5.6-sol")
+        self.assertEqual(command[command.index("--disable") + 1], "plugins")
+        self.assertNotIn("http://127.0.0.1:43123/changing/base", command)
+        self.assertNotIn("rotating-secret-value", config)
+        self.assertNotIn("rotating-secret-value", json.dumps(result))
+        self.assertNotIn("rotating-secret-value", json.dumps(command))
+
+    def test_codex_goal_plus_host_probe_requires_real_mcp_roundtrip(self) -> None:
+        captured: dict[str, object] = {}
+        source_dir = self.test_paths.goal_plus_root
+        resolved_source = {
+            "valid": True,
+            "source_kind": "external",
+            "source_dir": str(source_dir),
+            "source_path": "goal-plus",
+            "expected_ref": "experiment/test",
+            "branch": "experiment/test",
+            "commit": "a" * 40,
+            "error": None,
+        }
+
+        def fake_run_capture(command, *, env=None, timeout_seconds=None):
+            if command[-1] == "--version":
+                return {
+                    "returncode": 0,
+                    "stdout": "codex-cli 0.146.0",
+                    "stderr": "",
+                }
+            captured["command"] = command
+            captured["env"] = dict(env or {})
+            config_path = Path(str(env["CODEX_HOME"])) / "config.toml"
+            captured["config"] = config_path.read_text(encoding="utf-8")
+            stdout = "\n".join(
+                [
+                    json.dumps({"type": "turn.started"}),
+                    json.dumps(
+                        {
+                            "type": "item.started",
+                            "item": {
+                                "id": "mcp-1",
+                                "type": "mcp_tool_call",
+                                "server": "goal-plus",
+                                "tool": "goal_plus_monitor_snapshot",
+                                "status": "in_progress",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "mcp-1",
+                                "type": "mcp_tool_call",
+                                "server": "goal-plus",
+                                "tool": "goal_plus_monitor_snapshot",
+                                "status": "completed",
+                                "result": {"ok": True},
+                                "error": None,
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "item.started",
+                            "item": {
+                                "id": "mcp-2",
+                                "type": "mcp_tool_call",
+                                "server": "goal-plus",
+                                "tool": "goal_plus_monitor_snapshot",
+                                "status": "in_progress",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "mcp-2",
+                                "type": "mcp_tool_call",
+                                "server": "goal-plus",
+                                "tool": "goal_plus_monitor_snapshot",
+                                "status": "completed",
+                                "result": {"ok": True},
+                                "error": None,
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "message-1",
+                                "type": "agent_message",
+                                "text": "GOAL_PLUS_MCP_HOST_OK",
+                            },
+                        }
+                    ),
+                    json.dumps({"type": "turn.completed", "usage": {}}),
+                ]
+            )
+            return {"returncode": 0, "stdout": stdout, "stderr": ""}
+
+        probe_env = {
+            "SFORGE_CODEX_HOST_EXECUTABLE": "/opt/codex/bin/codex",
+            "SFORGE_GOAL_PLUS_HOST_EXECUTABLE": "/opt/goal-plus/bin/goal-plus",
+            "OPENAI_API_KEY": "rotating-secret-value",
+            "OPENAI_BASE_URL": "https://changing.example/v1",
+        }
+        with mock.patch.object(
+            EDGE_ENV, "resolve_goal_plus_source", return_value=resolved_source
+        ), mock.patch.object(EDGE_ENV.io, "run_capture", fake_run_capture):
+            result = EDGE_ENV.codex_host_provider_probe(
+                {
+                    "methods": ["goal-plus-codex"],
+                    "model": "gpt-5.5",
+                    "reasoning_effort": "high",
+                    "goal_plus_source": {
+                        "source_dir": str(source_dir),
+                        "expected_ref": "experiment/test",
+                        "commit": "a" * 40,
+                    },
+                },
+                env=probe_env,
+            )
+
+        command = captured["command"]
+        config = str(captured["config"])
+        probe_python_path = str(captured["env"]["PYTHONPATH"])
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["mcp_tool_roundtrip"])
+        self.assertEqual(
+            result["mcp_tools"], ["goal-plus:goal_plus_monitor_snapshot"]
+        )
+        self.assertEqual(
+            result["mcp_tool_completion_counts"],
+            {"goal-plus:goal_plus_monitor_snapshot": 2},
+        )
+        self.assertTrue(result["goal_plus_mcp_required"])
+        self.assertEqual(result["goal_plus_source"]["commit"], "a" * 40)
+        self.assertIn("[mcp_servers.goal-plus]", config)
+        self.assertIn(
+            'command = "/opt/goal-plus/bin/goal-plus"', config
+        )
+        self.assertIn(str(source_dir / "src"), probe_python_path.split(os.pathsep))
+        self.assertIn("goal_plus_monitor_snapshot exactly twice", command[-1])
+        self.assertNotIn("rotating-secret-value", json.dumps(result))
+
+    def test_codex_goal_plus_host_probe_rejects_generic_tool_roundtrip(self) -> None:
+        resolved_source = {
+            "valid": True,
+            "source_kind": "external",
+            "source_dir": str(self.test_paths.goal_plus_root),
+            "source_path": "goal-plus",
+            "expected_ref": "experiment/test",
+            "branch": "experiment/test",
+            "commit": "b" * 40,
+            "error": None,
+        }
+
+        def fake_run_capture(command, *, env=None, timeout_seconds=None):
+            if command[-1] == "--version":
+                return {
+                    "returncode": 0,
+                    "stdout": "codex-cli 0.146.0",
+                    "stderr": "",
+                }
+            stdout = "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "shell-1",
+                                "type": "command_execution",
+                                "status": "completed",
+                                "exit_code": 0,
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "message-1",
+                                "type": "agent_message",
+                                "text": "GOAL_PLUS_MCP_HOST_OK",
+                            },
+                        }
+                    ),
+                    json.dumps({"type": "turn.completed", "usage": {}}),
+                ]
+            )
+            return {"returncode": 0, "stdout": stdout, "stderr": ""}
+
+        with mock.patch.object(
+            EDGE_ENV, "resolve_goal_plus_source", return_value=resolved_source
+        ), mock.patch.object(EDGE_ENV.io, "run_capture", fake_run_capture):
+            result = EDGE_ENV.codex_host_provider_probe(
+                {
+                    "methods": ["goal-plus-codex"],
+                    "model": "gpt-5.5",
+                    "reasoning_effort": "high",
+                },
+                env={
+                    "SFORGE_CODEX_HOST_EXECUTABLE": "/opt/codex/bin/codex",
+                    "SFORGE_GOAL_PLUS_HOST_EXECUTABLE": (
+                        "/opt/goal-plus/bin/goal-plus"
+                    ),
+                    "OPENAI_API_KEY": "secret",
+                    "OPENAI_BASE_URL": "https://changing.example/v1",
+                },
+            )
+
+        self.assertFalse(result["passed"])
+        self.assertTrue(result["tool_roundtrip"])
+        self.assertFalse(result["mcp_tool_roundtrip"])
+        self.assertIn("required Goal Plus MCP", result["error"])
+
+    def test_codex_provider_contract_changes_with_external_api_config(self) -> None:
+        profile = {"model": "gpt-5.6-sol", "reasoning_effort": "medium"}
+        first = EDGE_ENV.codex_provider_contract(
+            profile,
+            {
+                "OPENAI_API_KEY": "secret",
+                "OPENAI_BASE_URL": "https://first.example/v1",
+            },
+        )
+        second = EDGE_ENV.codex_provider_contract(
+            profile,
+            {
+                "OPENAI_API_KEY": "secret",
+                "OPENAI_BASE_URL": "https://second.example/new-base",
+            },
+        )
+
+        self.assertTrue(first["valid"])
+        self.assertTrue(second["valid"])
+        self.assertNotEqual(
+            first["provider_config_sha256"], second["provider_config_sha256"]
+        )
+        self.assertNotIn("secret", json.dumps(first))
+        self.assertNotIn("/v1", json.dumps(first))
+
+    def test_pi_host_probe_requires_tool_result_and_final_marker(self) -> None:
+        models = self.temp / "incomplete-models.json"
+        EDGE.write_json(
+            models,
+            {
+                "providers": {
+                    "dynamic": {
+                        "baseUrl": "https://one.example/api",
+                        "api": "openai-completions",
+                        "apiKey": "$DYNAMIC_KEY",
+                        "models": [{"id": "model"}],
+                    }
+                }
+            },
+        )
+
+        def fake_run_capture(command, *, env=None, timeout_seconds=None):
+            if command[-1] == "--version":
+                return {"returncode": 0, "stdout": "0.84.1", "stderr": ""}
+            return {
+                "returncode": 0,
+                "stdout": json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "provider": "dynamic",
+                            "model": "model",
+                            "api": "openai-completions",
+                            "content": [{"type": "toolCall", "name": "read"}],
+                        },
+                    }
+                ),
+                "stderr": "",
+            }
+
+        with mock.patch.object(EDGE_ENV.io, "run_capture", fake_run_capture):
+            result = EDGE_ENV.pi_host_provider_probe(
+                "dynamic/model",
+                env={
+                    "SFORGE_PI_MODELS_FILE": str(models),
+                    "SFORGE_PI_HOST_EXECUTABLE": "/opt/pi/bin/pi",
+                    "DYNAMIC_KEY": "secret",
+                },
+            )
+
+        self.assertFalse(result["passed"])
+        self.assertIn("tool call/result", result["error"])
+        self.assertIn("expected final response", result["error"])
+
+    def test_external_goal_plus_source_requires_and_matches_explicit_ref(self) -> None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.test_paths.goal_plus_root),
+                "switch",
+                "-c",
+                "experiment/test-goal-plus-ref",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        env = {
+            "SFORGE_GOAL_PLUS_SOURCE_DIR": str(self.test_paths.goal_plus_root),
+            "SFORGE_GOAL_PLUS_EXPECTED_REF": "experiment/test-goal-plus-ref",
+        }
+
+        source = EDGE_ENV.resolve_goal_plus_source(env)
+
+        self.assertTrue(source["valid"])
+        self.assertEqual(source["source_kind"], "external")
+        self.assertEqual(source["branch"], "experiment/test-goal-plus-ref")
+        self.assertEqual(source["commit"], source["expected_ref_commit"])
+        self.assertEqual(EDGE.upstream_entry("goal_plus")["tracking_branch"], "master")
+
+        missing_ref = EDGE_ENV.resolve_goal_plus_source(
+            {"SFORGE_GOAL_PLUS_SOURCE_DIR": str(self.test_paths.goal_plus_root)}
+        )
+        self.assertFalse(missing_ref["valid"])
+        self.assertIn("SFORGE_GOAL_PLUS_EXPECTED_REF", missing_ref["error"])
+
+        (self.test_paths.goal_plus_root / "dirty.txt").write_text("dirty\n")
+        dirty = EDGE_ENV.resolve_goal_plus_source(env)
+        self.assertFalse(dirty["valid"])
+        self.assertIn("must be clean", dirty["error"])
+
+    def test_codex_goal_plus_source_requires_explicit_mcp_server_assets(self) -> None:
+        root = self.test_paths.goal_plus_root
+        env = {
+            "SFORGE_GOAL_PLUS_SOURCE_DIR": str(root),
+            "SFORGE_GOAL_PLUS_EXPECTED_REF": "master",
+        }
+        self.assertTrue(
+            EDGE_ENV.resolve_goal_plus_source(
+                env, methods=["goal-plus-codex"]
+            )["valid"]
+        )
+
+        server = root / "src" / "goal_plus" / "server.py"
+        server.unlink()
+        self._commit_goal_plus_fixture("remove MCP server")
+        missing = EDGE_ENV.resolve_goal_plus_source(
+            env, methods=["goal-plus-codex"]
+        )
+        self.assertFalse(missing["valid"])
+        self.assertIn("src/goal_plus/server.py", missing["missing_assets"])
+
+    def test_goal_plus_source_checks_active_sforge_runtime_compatibility(self) -> None:
+        root = self.test_paths.goal_plus_root
+        env = {
+            "SFORGE_GOAL_PLUS_SOURCE_DIR": str(root),
+            "SFORGE_GOAL_PLUS_EXPECTED_REF": "master",
+        }
+        incompatible_adapter = {
+            "valid": False,
+            "mode": "plugin",
+            "error": "plugin runtime enabled",
+        }
+
+        with mock.patch.object(
+            EDGE_ENV,
+            "active_sforge_codex_runtime_contract",
+            return_value=incompatible_adapter,
+        ):
+            incompatible = EDGE_ENV.resolve_goal_plus_source(
+                env, methods=["goal-plus-codex"]
+            )
+        self.assertFalse(incompatible["valid"])
+        self.assertEqual(
+            incompatible["codex_runtime_compatibility"]["mode"],
+            "plugin",
+        )
+
+    def test_goal_plus_runtime_assets_are_selected_by_method(self) -> None:
+        root = self.test_paths.goal_plus_root
+        server = root / "src" / "goal_plus" / "server.py"
+        server.unlink()
+        self._commit_goal_plus_fixture("remove Codex MCP server")
+        env = {
+            "SFORGE_GOAL_PLUS_SOURCE_DIR": str(root),
+            "SFORGE_GOAL_PLUS_EXPECTED_REF": "master",
+        }
+
+        codex = EDGE_ENV.resolve_goal_plus_source(
+            env, methods=["goal-plus-codex"]
+        )
+        pi = EDGE_ENV.resolve_goal_plus_source(
+            env, methods=["goal-plus-pi"]
+        )
+
+        self.assertFalse(codex["valid"])
+        self.assertIn("src/goal_plus/server.py", codex["missing_assets"])
+        self.assertTrue(pi["valid"])
+
+    def test_prepare_freezes_external_api_and_goal_plus_inputs(self) -> None:
+        models = self.temp / "prepare-models.json"
+        EDGE.write_json(
+            models,
+            {
+                "providers": {
+                    "dynamic": {
+                        "baseUrl": "http://127.0.0.1:43123/replaceable",
+                        "api": "openai-responses",
+                        "apiKey": "$DYNAMIC_KEY",
+                        "models": [{"id": "model"}],
+                    }
+                }
+            },
+        )
+        profile = {
+            **self.profile(),
+            "methods": ["goal-plus-pi-provider"],
+            "model": "dynamic/model",
+            "reasoning_effort": "medium",
+            "pi_package_version": "0.84.1",
+        }
+        args = SimpleNamespace(
+            method=None,
+            wall_time_seconds=60,
+            concurrency=2,
+            cell_concurrency=1,
+            model=None,
+            reasoning_effort=None,
+            campaign_id="freeze-external-inputs",
+        )
+        selected_env = {
+            "SFORGE_PI_MODELS_FILE": str(models),
+            "DYNAMIC_KEY": "secret",
+            "SFORGE_GOAL_PLUS_SOURCE_DIR": str(self.test_paths.goal_plus_root),
+            "SFORGE_GOAL_PLUS_EXPECTED_REF": "master",
+        }
+        with mock.patch.dict(EDGE_ENV.os.environ, selected_env, clear=False):
+            destination = EDGE.prepare(args, profile)
+
+        campaign = EDGE.read_json(destination / "campaign.json")
+        snapshot = EDGE.read_json(destination / "profile.json")
+        cell = EDGE.read_json(
+            destination
+            / "cells"
+            / "vliw_kernel_optimization--goal-plus-pi-provider"
+            / "cell.json"
+        )
+        self.assertEqual(campaign["goal_plus_source"]["source_kind"], "external")
+        self.assertIsNone(campaign["goal_plus_tracking_branch"])
+        self.assertEqual(
+            campaign["goal_plus_commit"], EDGE.git_head(self.test_paths.goal_plus_root)
+        )
+        self.assertEqual(cell["goal_plus_source"], campaign["goal_plus_source"])
+        self.assertEqual(
+            snapshot["pi_provider_contract"]["model_refs"], ["dynamic/model"]
+        )
+        self.assertNotIn("secret", json.dumps(campaign))
+
     def test_goal_plus_pi_roles_resolve_multiple_provider_endpoints(self) -> None:
         models = self.temp / "multi-role-models.json"
         models.write_text(
@@ -2037,7 +2816,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             profile, {"SFORGE_PI_MODELS_FILE": str(models)}
         )
 
-        self.assertEqual([item["role"] for item in endpoints], ["main", "worker", "evidence_annotator"])
+        self.assertEqual(
+            [item["role"] for item in endpoints],
+            ["main", "worker", "evidence_annotator"],
+        )
         self.assertEqual(
             {(item["host"], item["port"]) for item in endpoints},
             {
@@ -2080,8 +2862,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 EDGE.os.environ["SFORGE_AGENT_EXTRA_ENV"] = previous
 
         extra = dict(
-            item.split("=", 1)
-            for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+            item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
         )
         self.assertEqual(extra["EXISTING"], "value")
         self.assertEqual(extra["CLAUDE_CODE_EFFORT_LEVEL"], "high")
@@ -2119,8 +2900,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                     EDGE.os.environ[key] = value
 
         extra = dict(
-            item.split("=", 1)
-            for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+            item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
         )
         self.assertEqual(extra["EXISTING"], "value")
         self.assertEqual(extra["MAX_THINKING_TOKENS"], "0")
@@ -2168,8 +2948,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                     EDGE.os.environ[key] = value
 
         extra = dict(
-            item.split("=", 1)
-            for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+            item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
         )
         self.assertEqual(extra["EXISTING"], "value")
         for key in (
@@ -2192,14 +2971,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             ("127.0.0.1", 3788),
         )
         self.assertEqual(
-            EDGE.bridged_base_url(
-                "http://127.0.0.1:3788/v1", "192.0.2.10", 45678
-            ),
+            EDGE.bridged_base_url("http://127.0.0.1:3788/v1", "192.0.2.10", 45678),
             "http://192.0.2.10:45678/v1",
         )
-        self.assertIsNone(
-            EDGE.loopback_api_target("https://api.example.com/v1")
-        )
+        self.assertIsNone(EDGE.loopback_api_target("https://api.example.com/v1"))
 
     def test_pi_role_models_get_independent_loopback_bridges(self) -> None:
         def provider(port: int, key: str, *model_ids: str) -> dict:
@@ -2233,9 +3008,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         def bridge(pid: int, port: int) -> tuple:
             return SimpleNamespace(pid=pid), {"listen_port": port}, mock.Mock()
 
-        bridges = mock.Mock(
-            side_effect=[bridge(101, 28080), bridge(102, 28081)]
-        )
+        bridges = mock.Mock(side_effect=[bridge(101, 28080), bridge(102, 28081)])
         probes = mock.Mock(
             return_value={"passed": True, "status": "200", "stderr": None}
         )
@@ -2258,7 +3031,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         ), mock.patch.object(
             EDGE_RUNTIME, "start_socket_bridge", bridges
         ), mock.patch.object(
-            EDGE_RUNTIME, "docker_http_probe", probes
+            EDGE_RUNTIME, "docker_endpoint_reachability_probe", probes
         ), mock.patch.object(
             EDGE_RUNTIME, "task_images", return_value=("example:work", "example:judge")
         ):
@@ -2268,9 +3041,13 @@ class EdgeBenchExperimentTest(unittest.TestCase):
 
         runtime_registry = json.loads(resources.pi_models_file.read_text())
         self.assertEqual(bridges.call_count, 2)
+        self.assertEqual(probes.call_count, 2)
         self.assertCountEqual(
-            [call.kwargs["model"] for call in probes.call_args_list],
-            ["main-model", "worker-model", "annotator-model"],
+            [call.args[1] for call in probes.call_args_list],
+            [
+                "http://192.0.2.10:28080/v1",
+                "http://192.0.2.10:28081/v1",
+            ],
         )
         self.assertEqual(
             {
@@ -2285,9 +3062,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(
             [
                 model["id"]
-                for model in runtime_registry["providers"]["main-provider"][
-                    "models"
-                ]
+                for model in runtime_registry["providers"]["main-provider"]["models"]
             ],
             ["main-model", "annotator-model"],
         )
@@ -2372,8 +3147,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 EDGE.os.environ["SFORGE_JUDGE_EXTRA_ENV"] = previous
 
         values = dict(
-            item.split("=", 1)
-            for item in env["SFORGE_JUDGE_EXTRA_ENV"].split(",")
+            item.split("=", 1) for item in env["SFORGE_JUDGE_EXTRA_ENV"].split(",")
         )
         self.assertEqual(values["SFORGE_JUDGE_API_KEY"], "judge-key")
         self.assertEqual(
@@ -2508,6 +3282,191 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertEqual(captured[0][2:4], ["--pull", "never"])
 
+    def test_pi_container_probe_only_checks_dynamic_endpoint_reachability(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_capture(command, *, env=None, timeout_seconds=None):
+            captured["command"] = command
+            captured["env"] = dict(env or {})
+            return {"returncode": 0, "stdout": "404", "stderr": ""}
+
+        with mock.patch.object(EDGE_ENV.io, "run_capture", fake_run_capture):
+            result = EDGE_ENV.docker_endpoint_reachability_probe(
+                "example:work", "https://changing.example/custom/base"
+            )
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["status"], "404")
+        self.assertEqual(captured["command"][2:4], ["--pull", "never"])
+        self.assertEqual(
+            captured["env"]["SFORGE_PROBE_URL"],
+            "https://changing.example/custom/base",
+        )
+        serialized = json.dumps(captured)
+        self.assertNotIn("SFORGE_PROBE_API_KEY", serialized)
+        self.assertNotIn("/responses", serialized)
+        self.assertNotIn("/chat/completions", serialized)
+
+    def test_host_pi_failure_stops_launch_before_all_docker_calls(self) -> None:
+        profile = {
+            **self.profile(),
+            "methods": ["goal-plus-pi-provider"],
+            "api_protocol": "pi-provider",
+            "model": "dynamic/model",
+            "reasoning_effort": "medium",
+            "goal_plus_source": {
+                "source_dir": str(self.test_paths.goal_plus_root),
+                "expected_ref": "master",
+                "commit": EDGE.git_head(self.test_paths.goal_plus_root),
+            },
+        }
+        bundle = {
+            "valid": True,
+            "error": None,
+            "model_refs": ["dynamic/model"],
+            "models": [],
+            "credential_envs": ["DYNAMIC_KEY"],
+            "registry": {"providers": {}},
+        }
+        docker_probe = mock.Mock()
+        with mock.patch.object(
+            EDGE_RUNTIME,
+            "resolve_goal_plus_source",
+            return_value={
+                "valid": True,
+                "source_kind": "external",
+                "source_path": "goal-plus",
+                "checkout_root": "checkout",
+                "expected_ref": "master",
+                "branch": "master",
+                "commit": profile["goal_plus_source"]["commit"],
+                "dirty": False,
+                "missing_assets": [],
+                "missing_asset_alternatives": [],
+                "codex_runtime_compatibility": None,
+                "error": None,
+            },
+        ), mock.patch.object(
+            EDGE_RUNTIME, "resolve_pi_provider_bundle", return_value=bundle
+        ), mock.patch.object(
+            EDGE_RUNTIME,
+            "pi_provider_host_preflight",
+            return_value={
+                "passed": False,
+                "contract": None,
+                "probes": [{"passed": False, "error": "tool roundtrip failed"}],
+                "error": None,
+            },
+        ), mock.patch.object(
+            EDGE_RUNTIME, "docker_endpoint_reachability_probe", docker_probe
+        ), mock.patch.object(
+            EDGE_RUNTIME, "docker_http_probe", docker_probe
+        ):
+            with self.assertRaisesRegex(RuntimeError, "before Docker"):
+                EDGE_RUNTIME.prepare_runtime_resources(
+                    self.temp / "campaign", profile, {}
+                )
+
+        docker_probe.assert_not_called()
+
+    def test_host_codex_failure_stops_launch_before_all_docker_calls(self) -> None:
+        profile = {
+            **self.profile(),
+            "methods": ["goal-plus-codex"],
+            "api_protocol": "openai",
+            "model": "gpt-5.6-sol",
+            "reasoning_effort": "medium",
+            "goal_plus_source": {
+                "source_dir": str(self.test_paths.goal_plus_root),
+                "expected_ref": "master",
+                "commit": EDGE.git_head(self.test_paths.goal_plus_root),
+            },
+        }
+        contract = {
+            "valid": True,
+            "provider": "sforge-proxy",
+            "model": "gpt-5.6-sol",
+        }
+        docker_probe = mock.Mock()
+        with mock.patch.object(
+            EDGE_RUNTIME,
+            "resolve_goal_plus_source",
+            return_value={
+                "valid": True,
+                "source_kind": "external",
+                "source_path": "goal-plus",
+                "checkout_root": "checkout",
+                "expected_ref": "master",
+                "branch": "master",
+                "commit": profile["goal_plus_source"]["commit"],
+                "dirty": False,
+                "missing_assets": [],
+                "missing_asset_alternatives": [],
+                "codex_runtime_compatibility": None,
+                "error": None,
+            },
+        ), mock.patch.object(
+            EDGE_RUNTIME, "codex_provider_contract", return_value=contract
+        ), mock.patch.object(
+            EDGE_RUNTIME,
+            "codex_host_provider_probe",
+            return_value={
+                "passed": False,
+                "contract": contract,
+                "error": "tool roundtrip failed",
+            },
+        ), mock.patch.object(
+            EDGE_RUNTIME, "docker_endpoint_reachability_probe", docker_probe
+        ), mock.patch.object(
+            EDGE_RUNTIME, "docker_http_probe", docker_probe
+        ):
+            with self.assertRaisesRegex(RuntimeError, "before Docker"):
+                EDGE_RUNTIME.prepare_runtime_resources(
+                    self.temp / "campaign", profile, {}
+                )
+
+        docker_probe.assert_not_called()
+
+    def test_changed_external_provider_config_stops_before_host_pi_or_docker(
+        self,
+    ) -> None:
+        profile = {
+            **self.profile(),
+            "methods": ["plain-pi-provider"],
+            "api_protocol": "pi-provider",
+            "model": "dynamic/model",
+            "reasoning_effort": "medium",
+            "pi_provider_contract": {"frozen": True},
+        }
+        bundle = {
+            "valid": True,
+            "error": None,
+            "model_refs": ["dynamic/model"],
+            "models": [],
+            "credential_envs": [],
+            "registry": {"providers": {}},
+        }
+        host_preflight = mock.Mock()
+        docker_probe = mock.Mock()
+        with mock.patch.object(
+            EDGE_RUNTIME, "resolve_pi_provider_bundle", return_value=bundle
+        ), mock.patch.object(
+            EDGE_RUNTIME,
+            "pi_provider_bundle_contract",
+            return_value={"frozen": False},
+        ), mock.patch.object(
+            EDGE_RUNTIME, "pi_provider_host_preflight", host_preflight
+        ), mock.patch.object(
+            EDGE_RUNTIME, "docker_endpoint_reachability_probe", docker_probe
+        ):
+            with self.assertRaisesRegex(RuntimeError, "changed after campaign prepare"):
+                EDGE_RUNTIME.prepare_runtime_resources(
+                    self.temp / "campaign", profile, {}
+                )
+
+        host_preflight.assert_not_called()
+        docker_probe.assert_not_called()
+
     def test_codex_usage_reads_jsonl_agent_output(self) -> None:
         run = self.temp / "task-run"
         run.mkdir()
@@ -2636,9 +3595,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             '{"type":"turn_end","usage":'
             '{"input":7,"output":3,"cacheRead":5,"cacheWrite":0}}'
         ).encode()
-        member = tarfile.TarInfo(
-            ".goal-plus/host-logs/pi-rpc-agent-session.jsonl"
-        )
+        member = tarfile.TarInfo(".goal-plus/host-logs/pi-rpc-agent-session.jsonl")
         member.size = len(events)
         with tarfile.open(run / "goal-plus-state.tar", "w") as archive:
             archive.addfile(member, io.BytesIO(events))
@@ -2663,9 +3620,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertEqual(record["Input tokens"], 7)
         self.assertEqual(record["Output tokens"], 3)
-        self.assertEqual(
-            record["Usage coverage"], "persisted Pi worker message usage"
-        )
+        self.assertEqual(record["Usage coverage"], "persisted Pi worker message usage")
 
     def test_goal_plus_stats_recovers_archived_promotion(self) -> None:
         run = self.temp / "task-run"
@@ -2817,6 +3772,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertFalse(too_many_spawns["passed"])
         self.assertEqual(
             missing_spawn["checks"]["actual_worker_launches"],
+            {"expected": 2, "actual": 0},
+        )
+        self.assertEqual(
+            missing_spawn["checks"]["spawn_agent_event_coverage"],
             {"expected": 2, "actual": 0},
         )
         self.assertEqual(
@@ -2998,13 +3957,9 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             EDGE_REPORTING.load_paper_reference = original_reference
             EDGE_REPORTING.write_comparison_workbook = original_workbook
 
-        recovered_campaign = json.loads(
-            (destination / "campaign.json").read_text()
-        )
+        recovered_campaign = json.loads((destination / "campaign.json").read_text())
         recovered_cell = json.loads((cell_dir / "cell.json").read_text())
-        recovered_controller = json.loads(
-            (destination / "controller.json").read_text()
-        )
+        recovered_controller = json.loads((destination / "controller.json").read_text())
         self.assertTrue(payload["completion_evidence_passed"])
         self.assertEqual(recovered_campaign["state"], "completed")
         self.assertTrue(recovered_campaign["completion_evidence_passed"])

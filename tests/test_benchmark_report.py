@@ -165,6 +165,31 @@ class BenchmarkReportTest(unittest.TestCase):
             self.assertIn("incomplete_reason", rendered)
             self.assertIn("Codex completed 0 spawn_agent calls", rendered)
 
+    def test_edgebench_pi_provider_reports_bound_worker_sessions_as_subagents(
+        self,
+    ) -> None:
+        payload = {
+            "cells": [
+                {
+                    "task_id": "vliw_kernel_optimization",
+                    "method": "goal-plus-pi-provider",
+                    "completion_evidence": {
+                        "passed": True,
+                        "checks": {
+                            "agent_sessions": {"expected": 2, "actual": 2},
+                            "candidates": {"expected": 2, "actual": 2},
+                            "worker_verifier_runs": {"expected": 2, "actual": 3},
+                        },
+                    },
+                }
+            ]
+        }
+
+        rows = benchmark_report.edgebench_rows(payload)
+
+        self.assertEqual(rows[0]["actual_goal_plus_subagents"], 2)
+        self.assertEqual(rows[0]["goal_plus_worker_sessions"], 2)
+
     def test_campaign_id_cannot_escape_output_directory(self) -> None:
         with self.temporary_campaign() as temporary:
             campaign = Path(temporary)

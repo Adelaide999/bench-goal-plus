@@ -153,11 +153,25 @@ class BenchmarkDocsTest(unittest.TestCase):
             "不得执行 `launch` 或 `e2e`",
             "K=<数量>：仅 Goal Plus 生效",
             "C=<数量>：campaign 同时运行的不同 task cell 数",
+            "方法运行时源码=<source kind；ref/branch；完整 commit SHA",
             "同时运行规模=<按该方法解释的 K × C>",
             "不能自动映射到配置",
+            "只写版本号、目录名、tracking branch、短 SHA",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, text)
+
+        edgebench = (
+            ROOT
+            / ".agents/skills/benchmark-run/references/benchmarks/edgebench.md"
+        ).read_text(encoding="utf-8")
+        for required in (
+            "source_kind + expected_ref/branch + 完整 commit SHA",
+            "受管 Goal Plus tracking branch 没有变化",
+            "goal_plus_source.commit",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, edgebench)
 
     def test_router_skill_routes_platform_and_benchmark_differences(self):
         text = (ROOT / ".agents/skills/bench-goal-plus/SKILL.md").read_text(

@@ -119,7 +119,11 @@ class Catalog:
                     raise ContractError(
                         f"{runner_id}: contract for {method} must be an object"
                     )
-                unknown_fields = set(contract) - {"model_format", "bootstrap_targets"}
+                unknown_fields = set(contract) - {
+                    "model_format",
+                    "bootstrap_targets",
+                    "runtime_source_command",
+                }
                 if unknown_fields:
                     raise ContractError(
                         f"{runner_id}: contract for {method} has unknown fields: "
@@ -143,6 +147,16 @@ class Catalog:
                     raise ContractError(
                         f"{runner_id}: contract for {method} bootstrap_targets must "
                         "name managed upstreams"
+                    )
+                runtime_source_command = contract.get("runtime_source_command")
+                if runtime_source_command is not None and (
+                    kind != "native-profile"
+                    or not isinstance(runtime_source_command, str)
+                    or SAFE_ID.fullmatch(runtime_source_command) is None
+                ):
+                    raise ContractError(
+                        f"{runner_id}: contract for {method} runtime_source_command "
+                        "must be a safe native controller command"
                     )
                 method_contracts[method] = dict(contract)
             raw_capabilities = entry.get("capabilities")

@@ -23,11 +23,18 @@ from .environment import (
     append_no_proxy,
     authenticated_api_probe,
     bridged_base_url,
+    codex_host_provider_probe,
+    codex_provider_contract,
     default_route_ipv4,
+    docker_endpoint_reachability_probe,
     docker_http_probe,
+    endpoint_reachability_probe,
     judge_server_environment,
     loopback_api_target,
+    pi_provider_bundle_contract,
+    pi_provider_host_preflight,
     resolve_agent_api_config,
+    resolve_goal_plus_source,
     resolve_profile_api_endpoints,
     resolve_pi_provider_bundle,
     sanitized_api_endpoint,
@@ -172,7 +179,9 @@ def cell_environment(
         if default_api_url:
             resolved_api_urls.append(default_api_url)
     if not resolved_api_urls:
-        raise ValueError("API-only EdgeBench cells require at least one LLM API endpoint")
+        raise ValueError(
+            "API-only EdgeBench cells require at least one LLM API endpoint"
+        )
     env["SFORGE_AGENT_API_BASE_URLS"] = json.dumps(resolved_api_urls)
     if pi_models_file is not None:
         env["SFORGE_PI_MODELS_FILE"] = str(pi_models_file)
@@ -186,9 +195,7 @@ def cell_environment(
     elif agent.startswith("pi"):
         pi_env = {"SFORGE_PI_REASONING_EFFORT": str(cell["reasoning_effort"])}
         if cell.get("pi_package_version"):
-            pi_env["SFORGE_PI_PACKAGE_VERSION"] = str(
-                cell["pi_package_version"]
-            )
+            pi_env["SFORGE_PI_PACKAGE_VERSION"] = str(cell["pi_package_version"])
         merge_agent_extra_env(
             env,
             pi_env,
@@ -255,11 +262,17 @@ def cell_environment(
             and explicit_annotator_model is None
         ):
             annotator_model = annotator_model.partition("/")[2]
-        env["SFORGE_GOAL_PLUS_SOURCE_DIR"] = str(current_paths().goal_plus_root)
+        goal_plus_source = cell.get("goal_plus_source") or {}
+        env["SFORGE_GOAL_PLUS_SOURCE_DIR"] = str(
+            goal_plus_source.get("source_dir") or current_paths().goal_plus_root
+        )
         extra_env = {
             "SFORGE_GOAL_PLUS_PARALLEL_NUM": str(cell["inner_search_concurrency"]),
             "SFORGE_GOAL_PLUS_WORKER_RUNTIME_SECONDS": str(
                 cell["worker_runtime_seconds"]
+            ),
+            "SFORGE_GOAL_PLUS_VERIFIER_TIMEOUT_SECONDS": str(
+                cell.get("goal_plus_verifier_timeout_seconds", 120)
             ),
             "SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS": str(
                 cell.get("goal_plus_finalization_grace_seconds", 300)
@@ -287,24 +300,13 @@ def cell_environment(
                     ),
                 }
             )
-        role_split = cell["method"] == "goal-plus-pi-provider" and any(
-            key in cell
-            for key in (
-                "worker_model",
-                "worker_reasoning_effort",
-                "evidence_annotator_model",
-                "evidence_annotator_reasoning_effort",
-                "evidence_annotator_timeout_seconds",
-            )
-        )
-        if role_split:
+        if cell["method"] == "goal-plus-pi-provider":
             worker_model = str(cell.get("worker_model") or cell["model"])
             extra_env.update(
                 {
                     "SFORGE_GOAL_PLUS_WORKER_MODEL": worker_model,
                     "SFORGE_GOAL_PLUS_WORKER_REASONING_EFFORT": str(
-                        cell.get("worker_reasoning_effort")
-                        or cell["reasoning_effort"]
+                        cell.get("worker_reasoning_effort") or cell["reasoning_effort"]
                     ),
                     "SFORGE_GOAL_PLUS_EVIDENCE_ANNOTATOR_TIMEOUT_SECONDS": str(
                         cell.get("evidence_annotator_timeout_seconds", 1800)
@@ -314,7 +316,11 @@ def cell_environment(
             auxiliary_models = list(
                 dict.fromkeys(
                     model_ref
-                    for model_ref in (worker_model, annotator_model)
+                    for model_ref in (
+                        worker_model,
+                        str(explicit_annotator_model or ""),
+                    )
+                    if model_ref
                     if model_ref != str(cell["model"])
                 )
             )
@@ -489,7 +495,8 @@ def start_campaign_cell(
                 "credentials": (
                     "host Pi provider credentials mapped to SForge; values are never persisted"
                     if pi_provider_credentials
-                    else "host API environment mapped to SForge; values are never persisted"
+                    else
+                        "host API environment mapped to SForge; values are never persisted"
                     if api_key
                     else "host login; auth contents are never persisted"
                 ),
@@ -503,7 +510,8 @@ def start_campaign_cell(
                 ],
                 "temp": ".tmp",
                 "goal_plus_source": (
-                    io.portable_path(current_paths().goal_plus_root)
+                    (cell.get("goal_plus_source") or {}).get("source_path")
+                    or io.portable_path(current_paths().goal_plus_root)
                     if cell["method"] in GOAL_PLUS_METHODS
                     else None
                 ),
@@ -568,9 +576,7 @@ def finish_campaign_cell(
             "state": (
                 "interrupted"
                 if stop_requested
-                else "completed"
-                if returncode == 0
-                else "failed"
+                else "completed" if returncode == 0 else "failed"
             ),
             "returncode": returncode,
             "finished_at": io.utc_now(),
@@ -743,13 +749,10 @@ def prepare_pi_provider_runtime(
     providers = registry.get("providers", {})
     if providers:
         resources.bridge_host = default_route_ipv4()
-        probe_image = task_images(str(profile["task_ids"][0]))[0]
         for provider, provider_config in providers.items():
             base_url = provider_config.get("baseUrl")
             if not isinstance(base_url, str) or not base_url:
-                raise RuntimeError(
-                    f"custom Pi provider {provider!r} requires baseUrl"
-                )
+                raise RuntimeError(f"custom Pi provider {provider!r} requires baseUrl")
             target = loopback_api_target(base_url)
             if target is not None:
                 target_host, target_port = target
@@ -769,32 +772,6 @@ def prepare_pi_provider_runtime(
                     int(metadata["listen_port"]),
                 )
                 provider_config["baseUrl"] = base_url
-        for model_status in bundle["models"]:
-            if model_status.get("models_path") is None:
-                continue
-            provider = str(model_status["provider"])
-            provider_config = providers[provider]
-            probe = docker_http_probe(
-                probe_image,
-                str(provider_config["baseUrl"]),
-                api_key=credentials.get(
-                    str(model_status.get("credential_env") or "")
-                ),
-                protocol=(
-                    "anthropic"
-                    if provider_config.get("api") == "anthropic-messages"
-                    else "openai"
-                ),
-                model=str(model_status["model"]),
-            )
-            if not probe["passed"]:
-                raise RuntimeError(
-                    f"Pi provider model {provider}/{model_status['model']} "
-                    "is not reachable from an "
-                    "EdgeBench Work container "
-                    f"(HTTP {probe.get('status')}; "
-                    f"{probe.get('stderr') or 'no stderr'})"
-                )
         runtime_dir = destination / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
         resources.pi_models_file = runtime_dir / "pi-models.json"
@@ -821,6 +798,17 @@ def prepare_pi_provider_runtime(
             )
         resolved_provider_urls.append(base_url)
     resources.runtime_api_base_urls = list(dict.fromkeys(resolved_provider_urls))
+    probe_image = task_images(str(profile["task_ids"][0]))[0]
+    for base_url in resources.runtime_api_base_urls:
+        probe = docker_endpoint_reachability_probe(probe_image, base_url)
+        if not probe["passed"]:
+            endpoint = sanitized_api_endpoint(base_url)
+            raise RuntimeError(
+                "Pi provider endpoint is not reachable from an EdgeBench Work "
+                f"container ({endpoint['scheme']}://{endpoint['host']}:"
+                f"{endpoint['port']}; HTTP {probe.get('status')}; "
+                f"{probe.get('stderr') or 'no stderr'})"
+            )
     controller["pi_provider_roles"] = {
         "main": str(profile["model"]),
         "worker": str(profile.get("worker_model") or profile["model"]),
@@ -836,12 +824,118 @@ def prepare_runtime_resources(
     profile: dict[str, Any],
     controller: dict[str, Any],
 ) -> RuntimeResources:
+    api_protocol = str(
+        profile.get("api_protocol") or api_protocol_for_methods(profile["methods"])
+    )
+    if set(profile["methods"]) & GOAL_PLUS_METHODS:
+        frozen_source = profile.get("goal_plus_source") or {}
+        resolved_source = resolve_goal_plus_source(
+            source_dir=frozen_source.get("source_dir"),
+            expected_ref=frozen_source.get("expected_ref"),
+            expected_commit=frozen_source.get("commit"),
+            methods=profile["methods"],
+        )
+        if not resolved_source["valid"]:
+            raise RuntimeError(
+                "Goal Plus source changed or is invalid at launch: "
+                + str(resolved_source["error"])
+            )
+        controller["goal_plus_source_preflight"] = {
+            key: resolved_source[key]
+            for key in (
+                "source_kind",
+                "source_path",
+                "checkout_root",
+                "expected_ref",
+                "branch",
+                "commit",
+                "dirty",
+                "missing_assets",
+                "missing_asset_alternatives",
+                "codex_runtime_compatibility",
+            )
+        }
+    if api_protocol == "pi-provider":
+        current_bundle = resolve_pi_provider_bundle(
+            pi_provider_role_model_refs(profile)
+        )
+        if not current_bundle["valid"]:
+            raise RuntimeError(
+                "Pi provider role resolution failed before launch: "
+                + str(current_bundle["error"])
+            )
+        current_contract = pi_provider_bundle_contract(current_bundle)
+        frozen_contract = profile.get("pi_provider_contract")
+        if frozen_contract is not None and current_contract != frozen_contract:
+            raise RuntimeError(
+                "external Pi provider configuration changed after campaign prepare"
+            )
+        preflight = pi_provider_host_preflight(profile)
+        if not preflight["passed"]:
+            failures = [
+                str(probe.get("error") or "unknown host Pi failure")
+                for probe in preflight["probes"]
+                if not probe["passed"]
+            ]
+            raise RuntimeError(
+                "host Pi provider preflight failed before Docker: "
+                + "; ".join(failures or [str(preflight.get("error"))])
+            )
+        if preflight["contract"] != current_contract:
+            raise RuntimeError(
+                "external Pi provider configuration changed during host preflight"
+            )
+        controller["pi_provider_host_preflight"] = {
+            "passed": True,
+            "contract": preflight["contract"],
+            "probes": preflight["probes"],
+        }
+    if api_protocol == "openai":
+        current_codex_contract = codex_provider_contract(profile)
+        if not current_codex_contract["valid"]:
+            raise RuntimeError(
+                "Codex provider resolution failed before launch: "
+                + str(current_codex_contract["error"])
+            )
+        frozen_codex_contract = profile.get("codex_provider_contract")
+        if (
+            frozen_codex_contract is not None
+            and current_codex_contract != frozen_codex_contract
+        ):
+            raise RuntimeError(
+                "external Codex provider configuration changed after campaign prepare"
+            )
+        codex_preflight = codex_host_provider_probe(profile)
+        if not codex_preflight["passed"]:
+            raise RuntimeError(
+                "host Codex provider preflight failed before Docker: "
+                + str(codex_preflight.get("error") or "unknown host Codex failure")
+            )
+        if codex_preflight["contract"] != current_codex_contract:
+            raise RuntimeError(
+                "external Codex provider configuration changed during host preflight"
+            )
+        controller["codex_provider_host_preflight"] = {
+            key: codex_preflight.get(key)
+            for key in (
+                "passed",
+                "contract",
+                "codex_version",
+                "expected_codex_version",
+                "event_count",
+                "models",
+                "providers",
+                "tool_roundtrip",
+                "mcp_tool_roundtrip",
+                "mcp_tools",
+                "goal_plus_mcp_required",
+                "goal_plus_source",
+                "turn_completed",
+            )
+        }
+
     resources = RuntimeResources()
     judge_port = int(profile.get("judge_port", 8080))
-    api_protocol = str(
-        profile.get("api_protocol")
-        or api_protocol_for_methods(profile["methods"])
-    )
     resources.judge_container_url = f"http://host.docker.internal:{judge_port}"
     resources.api_config = resolve_agent_api_config(protocol=api_protocol)
     resources.api_key = resources.api_config["api_key"]
@@ -849,8 +943,7 @@ def prepare_runtime_resources(
     resources.runtime_api_base_url = str(api_base_url) if api_base_url else None
     resources.runtime_api_base_urls = list(
         dict.fromkeys(
-            endpoint["base_url"]
-            for endpoint in resolve_profile_api_endpoints(profile)
+            endpoint["base_url"] for endpoint in resolve_profile_api_endpoints(profile)
         )
     )
     controller["bridges"] = []
@@ -862,9 +955,7 @@ def prepare_runtime_resources(
                 "Claude Code campaigns require an API key and Anthropic base URL"
             )
         if api_protocol == "pi-provider":
-            prepare_pi_provider_runtime(
-                resources, destination, profile, controller
-            )
+            prepare_pi_provider_runtime(resources, destination, profile, controller)
         if resources.runtime_api_base_url and loopback_api_target(
             resources.runtime_api_base_url
         ):
@@ -889,34 +980,44 @@ def prepare_runtime_resources(
                 int(metadata["listen_port"]),
             )
             resources.runtime_api_base_urls = [
-                resources.runtime_api_base_url
-                if url == unbridged_base_url
-                else url
+                resources.runtime_api_base_url if url == unbridged_base_url else url
                 for url in resources.runtime_api_base_urls
             ]
-            api_probe = authenticated_api_probe(
-                resources.runtime_api_base_url,
-                str(resources.api_key or ""),
-                protocol=api_protocol,
-                model=str(profile["model"]),
-                thinking=profile.get("thinking"),
-                reasoning_effort=profile.get("reasoning_effort"),
+            api_probe = (
+                endpoint_reachability_probe(resources.runtime_api_base_url)
+                if api_protocol == "openai"
+                else authenticated_api_probe(
+                    resources.runtime_api_base_url,
+                    str(resources.api_key or ""),
+                    protocol=api_protocol,
+                    model=str(profile["model"]),
+                    thinking=profile.get("thinking"),
+                    reasoning_effort=profile.get("reasoning_effort"),
+                )
             )
-            if not resources.api_key or not api_probe["passed"]:
+            if not api_probe["passed"]:
                 raise RuntimeError(
-                    "authenticated agent API bridge probe failed "
+                    "agent API bridge reachability probe failed "
                     f"(HTTP {api_probe.get('status')})"
                 )
         if resources.api_key and resources.runtime_api_base_url:
             probe_image = task_images(str(profile["task_ids"][0]))[0]
-            container_probe = docker_http_probe(
-                probe_image,
-                resources.runtime_api_base_url,
-                api_key=str(resources.api_key),
-                protocol=api_protocol,
-                model=str(profile["model"]),
-                thinking_type=str((profile.get("thinking") or {}).get("type") or ""),
-                reasoning_effort=str(profile.get("reasoning_effort") or ""),
+            container_probe = (
+                docker_endpoint_reachability_probe(
+                    probe_image, resources.runtime_api_base_url
+                )
+                if api_protocol == "openai"
+                else docker_http_probe(
+                    probe_image,
+                    resources.runtime_api_base_url,
+                    api_key=str(resources.api_key),
+                    protocol=api_protocol,
+                    model=str(profile["model"]),
+                    thinking_type=str(
+                        (profile.get("thinking") or {}).get("type") or ""
+                    ),
+                    reasoning_effort=str(profile.get("reasoning_effort") or ""),
+                )
             )
             if not container_probe["passed"]:
                 raise RuntimeError(
@@ -964,9 +1065,7 @@ def prepare_runtime_resources(
                 "agent_auth_mode": (
                     "pi-provider"
                     if api_protocol == "pi-provider"
-                    else "api_key"
-                    if resources.api_key
-                    else "oauth"
+                    else "api_key" if resources.api_key else "oauth"
                 ),
                 "agent_api_protocol": api_protocol,
                 "agent_api_key_source": resources.api_config["api_key_source"],
@@ -1153,9 +1252,7 @@ def status_payload(destination: Path) -> dict[str, Any]:
     for item in campaign["cells"]:
         cell_path = destination / "cells" / item["cell_id"]
         cell = io.read_json(cell_path / "cell.json")
-        task_runs = sorted(
-            (cell_path / "sforge" / "runs").glob(f"*/{cell['task_id']}")
-        )
+        task_runs = sorted((cell_path / "sforge" / "runs").glob(f"*/{cell['task_id']}"))
         final_results = [
             run / "final_result.json"
             for run in task_runs

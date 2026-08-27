@@ -16,11 +16,18 @@
         "goal-plus-pi-provider"
       ],
       "method_contracts": {
+        "goal-plus-codex": {
+          "runtime_source_command": "plan-metadata"
+        },
         "plain-pi-provider": {
           "model_format": "provider/model"
         },
+        "goal-plus-pi": {
+          "runtime_source_command": "plan-metadata"
+        },
         "goal-plus-pi-provider": {
-          "model_format": "provider/model"
+          "model_format": "provider/model",
+          "runtime_source_command": "plan-metadata"
         }
       },
       "capabilities": {
@@ -471,6 +478,22 @@
         "wall_time_seconds": 300,
         "concurrency": 1,
         "cell_concurrency": 1
+      }
+    },
+    {
+      "id": "edgebench-vliw-goal-plus-codex-local-smoke",
+      "description": "One-task 15-minute local Goal Plus + Codex smoke with a real host MCP gate and two live workers.",
+      "benchmarks": ["edgebench"],
+      "profile": "vliw-goal-plus-codex-gpt55-high-local-smoke",
+      "campaign_id_template": "edgebench-vliw-goal-plus-codex-gpt-5-5-high-local-smoke-15m-k2-c2-r1-{timestamp}",
+      "expected_profile": {
+        "task_count": 1,
+        "methods": ["goal-plus-codex"],
+        "model": "gpt-5.5",
+        "reasoning_effort": "high",
+        "wall_time_seconds": 900,
+        "concurrency": 2,
+        "cell_concurrency": 2
       }
     },
     {

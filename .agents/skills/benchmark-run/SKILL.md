@@ -32,6 +32,8 @@ benchmark 使用相同 lifecycle 或支持相同并发。
 ## 通用流程
 
 1. 冻结 task/evaluator、model、reasoning、`T/K/C/R`、seed、method 和 resolved commit。
+   方法会把外部或受管运行时源码复制进执行环境时，还必须冻结并展示该源码的
+   source kind、ref/branch 和完整 commit SHA；tracking branch 不能代替实际 commit。
 2. 在 `benchmarks/runners.json` 解析 target/runner；使用 native controller、common matrix 或 OpenEvolve batch 的 `prepare`，确认 prepare 不调用模型且不预建 Goal Plus state。
    Common matrix 的普通方法运行使用 `--method plain-codex` 或 `--method goal-plus-codex`；只有做 B0-B4 消融实验时才使用 `--condition`。两者不能混用。
 3. 对 Agent 容器执行网络门禁：doctor 必须证明 effective `internet=false`、每个模型调用角色的
@@ -84,15 +86,23 @@ K=<数量>：仅 Goal Plus 生效的、同一个 task cell 内 internal subagent
 C=<数量>：campaign 同时运行的不同 task cell 数
 R=<数量>：每个 task 的独立重复/seed 数
 method=<方法及其 K 拓扑>
+方法运行时源码=<source kind；ref/branch；完整 commit SHA；不使用外部源码时写 not applicable>
 单个 cell 拓扑=<非 Goal Plus 的 1 条 outer trajectory，或 Goal Plus 的 1 个 outer session + K 个 internal subagents>
 同时运行规模=<按该方法解释的 K × C>
 总 cells=<task 数 × method 数 × R>
 ```
 
+所有 Goal Plus 方法的“方法运行时源码”必须指向实际复制或挂载进任务环境的 Goal Plus
+checkout。使用外部实验 checkout 时，必须显示 external、显式 expected ref 和完整 HEAD SHA，
+并另行说明 registry 的受管 tracking branch 未被改写；使用受管 checkout 时也必须显示实际
+branch 和完整 SHA。只写版本号、目录名、tracking branch、短 SHA，或只在 doctor/prepare
+日志中出现而没有进入确认块，都不能通过启动确认门禁。
+
 即使 preset 已冻结 K/C，也必须展示其解析值。混合方法 campaign 只能使用 `K=1`，并分别
 说明非 Goal Plus 方法的 1 条 outer trajectory 与 Goal Plus 的 1 个 outer session + 1 个
 internal subagent。
-用户只确认了其中一个维度、使用了未标注的“并发/并行”数字，或确认内容与 `plan` 不一致时，
+用户只确认了其中一个维度、缺少方法运行时源码版本、使用了未标注的“并发/并行”数字，
+或确认内容与 `plan`/doctor 冻结的源码不一致时，
 不得启动；先重新 `plan` 并再次确认。`resume` 已有 campaign 不重复询问，但不能借 resume
 修改原有 K/C。
 

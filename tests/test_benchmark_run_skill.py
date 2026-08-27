@@ -93,8 +93,17 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertEqual(
             self.catalog.runners["edgebench-native"].method_contracts,
             {
+                "goal-plus-codex": {
+                    "runtime_source_command": "plan-metadata"
+                },
                 "plain-pi-provider": {"model_format": "provider/model"},
-                "goal-plus-pi-provider": {"model_format": "provider/model"},
+                "goal-plus-pi": {
+                    "runtime_source_command": "plan-metadata"
+                },
+                "goal-plus-pi-provider": {
+                    "model_format": "provider/model",
+                    "runtime_source_command": "plan-metadata",
+                },
             },
         )
 
@@ -143,6 +152,61 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             {"T": 3600, "K": 2, "C": 1, "R": 1},
         )
 
+    def test_edgebench_goal_plus_codex_preset_resolves_fifteen_minute_contract(
+        self,
+    ) -> None:
+        spec = self.agent.resolve_spec(
+            preset_id="edgebench-vliw-goal-plus-codex-local-smoke"
+        )
+
+        self.assertEqual(spec.methods, ("goal-plus-codex",))
+        self.assertEqual(spec.model, "gpt-5.5")
+        self.assertEqual(spec.reasoning_effort, "high")
+        self.assertEqual(spec.concurrency(), {"T": 900, "K": 2, "C": 2, "R": 1})
+
+    def test_goal_plus_plan_includes_native_runtime_source_metadata(self) -> None:
+        spec = self.agent.resolve_spec(
+            preset_id="edgebench-vliw-goal-plus-codex-local-smoke"
+        )
+        probe = mock.Mock(
+            return_value=mock.Mock(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "runtime_sources": {
+                            "goal_plus": {
+                                "source_kind": "external",
+                                "source_path": ".worktrees/goal-plus/plugins/goal-plus",
+                                "expected_ref": "experiment/ref",
+                                "branch": "experiment/ref",
+                                "commit": "a" * 40,
+                            }
+                        },
+                    }
+                ),
+                stderr="",
+            )
+        )
+
+        with mock.patch(
+            "bench_goal_plus.runners.native_profile.subprocess.run", probe
+        ):
+            plan = self.agent.start(
+                spec,
+                skip_bootstrap=True,
+                skip_provision=True,
+                prepare_only=False,
+                foreground=False,
+                dry_run=True,
+            )
+
+        source = plan["resolved_spec"]["runtime_sources"]["goal_plus"]
+        self.assertEqual(source["source_kind"], "external")
+        self.assertEqual(source["expected_ref"], "experiment/ref")
+        self.assertEqual(source["commit"], "a" * 40)
+        self.assertIn("plan-metadata", probe.call_args.args[0])
+
     def test_pi_provider_method_requires_qualified_provider_and_model(self) -> None:
         arguments = {
             "target_ids": ("edgebench",),
@@ -162,8 +226,15 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             spec, skip_provision=True
         )[0]
         self.assertEqual(
-            doctor[-4:],
-            ["--model", "zai/glm-5.2", "--method", "goal-plus-pi-provider"],
+            doctor[-6:],
+            [
+                "--model",
+                "zai/glm-5.2",
+                "--reasoning-effort",
+                "high",
+                "--method",
+                "goal-plus-pi-provider",
+            ],
         )
 
     def test_plain_pi_provider_uses_the_same_qualified_model_contract(self) -> None:
@@ -229,6 +300,53 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             if "provision" in command
         )
         self.assertGreater(provision_index, 0)
+
+    def test_setup_routes_selected_method_and_model_to_native_doctor(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "setup",
+                "--benchmark",
+                "edgebench",
+                "--profile",
+                "vliw-smoke",
+                "--method",
+                "goal-plus-codex",
+                "--model",
+                "gpt-5.6-sol",
+                "--reasoning-effort",
+                "medium",
+            ]
+        )
+        self.assertEqual(args.method, ["goal-plus-codex"])
+        self.assertEqual(args.model, "gpt-5.6-sol")
+        self.assertEqual(args.reasoning_effort, "medium")
+
+        target = self.catalog.targets["edgebench"]
+        self.agent.setup(
+            (target,),
+            profile="vliw-smoke",
+            methods=("goal-plus-codex",),
+            model="gpt-5.6-sol",
+            reasoning_effort="medium",
+            skip_bootstrap=True,
+            skip_provision=True,
+            dry_run=True,
+        )
+
+        doctor = next(
+            command
+            for command in self.executor.commands
+            if "experiments/edgebench/experiment.py" in command
+            and "doctor" in command
+            and "--local-assets-only" not in command
+        )
+        self.assertEqual(doctor[doctor.index("--model") + 1], "gpt-5.6-sol")
+        self.assertEqual(
+            doctor[doctor.index("--reasoning-effort") + 1], "medium"
+        )
+        self.assertEqual(
+            doctor[doctor.index("--method") + 1], "goal-plus-codex"
+        )
 
     def test_profiled_check_fails_closed_for_unsupported_runner(self) -> None:
         with self.assertRaisesRegex(UnsupportedOperation, "target local-vliw"):

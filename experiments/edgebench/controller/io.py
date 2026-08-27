@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import signal
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -84,7 +86,9 @@ def campaign_dir(value: str | Path) -> Path:
     candidate = Path(value).expanduser()
     if not candidate.is_absolute():
         direct = (paths.root / candidate).resolve()
-        candidate = direct if direct.is_dir() else (paths.runs_root / candidate).resolve()
+        candidate = (
+            direct if direct.is_dir() else (paths.runs_root / candidate).resolve()
+        )
     else:
         candidate = candidate.resolve()
     try:
@@ -119,26 +123,59 @@ def portable_command(command: Iterable[str]) -> list[str]:
 
 
 def run_capture(
-    command: list[str], *, env: dict[str, str] | None = None
+    command: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    timeout_seconds: int | float | None = None,
 ) -> dict[str, Any]:
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=current_paths().root,
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            check=False,
+            start_new_session=True,
         )
     except FileNotFoundError as exc:
         return {"returncode": 127, "stdout": "", "stderr": str(exc)}
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        else:
+            process.terminate()
+        try:
+            process.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                process.kill()
+            process.communicate()
+        return {
+            "returncode": 124,
+            "stdout": "",
+            "stderr": f"command timed out after {timeout_seconds} seconds",
+        }
     return {
-        "returncode": completed.returncode,
-        "stdout": completed.stdout.strip(),
-        "stderr": completed.stderr.strip(),
+        "returncode": process.returncode,
+        "stdout": stdout.strip(),
+        "stderr": stderr.strip(),
     }
 
 
 def sanitize_id(value: str) -> str:
-    clean = "".join(character if character.isalnum() or character in "-_." else "-" for character in value)
+    clean = "".join(
+        character if character.isalnum() or character in "-_." else "-"
+        for character in value
+    )
     return clean.strip("-.") or "campaign"

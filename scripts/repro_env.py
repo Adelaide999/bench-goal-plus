@@ -322,6 +322,25 @@ def git_state(path: Path, tracking_branch: str | None = None) -> dict[str, Any]:
     }
 
 
+def git_is_ancestor(path: Path, ancestor: str | None, descendant: str | None) -> bool:
+    """Return whether both revisions exist and descendant only moves forward."""
+    if not ancestor or not descendant:
+        return False
+    result = run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
+        ],
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def ensure_checkout(path: Path, entry: dict[str, Any]) -> None:
     branch = entry["tracking_branch"]
     if not path.exists():
@@ -956,11 +975,17 @@ def collect_doctor(
         branch = entry["tracking_branch"]
         state = git_state(paths[name], branch)
         source_exists = sources[name].is_dir()
+        remote_is_ancestor = git_is_ancestor(
+            paths[name], state["remote_head"], state["head"]
+        )
+        local_ahead = bool(
+            remote_is_ancestor and state["head"] != state["remote_head"]
+        )
         checkout_matches = bool(
             state["is_git"]
             and state["branch"] == branch
             and state["upstream"] == f"origin/{branch}"
-            and state["head"] == state["remote_head"]
+            and remote_is_ancestor
             and repository_matches(entry, state["origin_url"])
             and state["dirty"] is False
             and source_exists
@@ -977,6 +1002,8 @@ def collect_doctor(
                 "expected_repositories": repository_transport_urls(entry),
                 "source_path": str(sources[name]),
                 "source_exists": source_exists,
+                "remote_is_ancestor": remote_is_ancestor,
+                "local_ahead": local_ahead,
                 **state,
                 "origin_url": redact_git_text(state["origin_url"]),
             }

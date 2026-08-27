@@ -69,6 +69,7 @@ def create_agent_state(
     *,
     commands: list[str],
     follow_up: dict[str, str],
+    resolved_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "schema_version": 1,
@@ -79,7 +80,7 @@ def create_agent_state(
         "agent_phase": "prepared",
         "created_at": utc_now(),
         "updated_at": utc_now(),
-        "resolved_spec": spec.as_dict(),
+        "resolved_spec": resolved_spec or spec.as_dict(),
         "runner_manifest": "campaign.json",
         "commands": commands,
         "follow_up": follow_up,

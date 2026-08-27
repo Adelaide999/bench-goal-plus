@@ -13,6 +13,10 @@ EdgeBench 保留 native SForge lifecycle。控制面负责选择 profile/preset�
 5. 检查 doctor 中 `network:api-only-policy` 和 `network:offline-task-isolation` 均通过，
    endpoint 清单覆盖 main、Goal Plus worker 和 evidence annotation；检查 prepare 产物只有
    `--disable-internet`。任一缺失时不得 launch，也不得用开放公网 smoke 替代。
+6. Goal Plus 方法在启动确认块中必须展示 doctor 已验证、prepare 将复制进 Work container
+   的 `source_kind + expected_ref/branch + 完整 commit SHA`。外部 source 还必须明确说明
+   `environment/upstreams.json` 中的受管 Goal Plus tracking branch 没有变化。确认块缺少这组
+   版本信息时不得 launch。
 
 ## 已登记方法
 
@@ -40,25 +44,35 @@ EdgeBench Linux Work container 中。
 allowlist。缺失 built-in endpoint、custom `baseUrl`、loopback bridge 或 iptables 权限时失败
 关闭；不得因为 provider 多样而设置 `internet=true`。
 
-`goal-plus-pi-provider` 在开始计时前必须完成 provider runtime gate：使用 Work
-container 的实际运行用户和实际 `PI_CODING_AGENT_DIR` 执行
-`pi --list-models <provider>`，并核对精确 `PROVIDER/MODEL`。随后用短 JSON session
-取得 `thinking_start`/`thinking_delta` 或非零 reasoning usage，才可把 provider wiring
-记为通过。只在 host 上读取 registry、只通过 controller doctor，或只看到普通 assistant
-文本都不够。
+`goal-plus-codex` 在创建 Docker 资源前还必须使用 campaign 将采用的精确 Codex 版本、
+model/reasoning、外部 API 配置和已解析的 Goal Plus source commit 完成一次原生
+`goal_plus_monitor_snapshot` MCP tool call。只有普通 shell tool roundtrip、只列出 MCP
+registration/resource，或通过手写 stdio client 调 server 都不能通过该 gate。端点更换后
+每次重新运行 setup/launch 都会重做语义探针；endpoint 和 credential 不写入 preset。
 
-不要把 `openai-completions` 与 `openai-responses` 合并成一个模糊的“OpenAI 接口”：前者
-必须验证 `/chat/completions`，后者必须验证 `/responses`。`/responses` 返回 404 时，
-即使 Chat Completions 正常，也必须明确记录 Responses 不受支持并选择
-`openai-completions`。
+当前十五分钟 VLIW preset：
 
-协议选择采用 Responses-first：`/responses` 最小请求成功后，还必须用 campaign 将采用的
-Pi 版本完成 streaming、tool call、tool result 和 final answer；通过后才选择
-`openai-responses`。只有这条链路失败时才验证并回退 `openai-completions`。DeepSeek
-V4 Flash 的 built-in `deepseek` provider 当前仍走 Chat；Responses 路径使用
-`deepseek-responses/deepseek-v4-flash` 自定义 registry。GLM-5.2 的 Z.AI 路径当前走
-`zai/glm-5.2` Chat Completions。DeepSeek 官方当前只声明 V4 Flash 支持 Responses；
-V4 Pro 不得复用该配置，除非后续官方能力和当次 live probe 都确认支持。
+```bash
+python3 scripts/bench.py plan \
+  --preset edgebench-vliw-goal-plus-codex-local-smoke
+```
+
+它固定 `gpt-5.5/high`、`T=900,K=2,C=2,R=1`，不固定 API 地址或 Goal Plus 分支。
+
+`goal-plus-pi-provider` 在 Docker 前必须完成 provider runtime gate。controller 把外部
+Pi registry 的所选 provider/model 原样复制到仓库本地的隔离
+`PI_CODING_AGENT_DIR`，并使用 campaign 将采用的精确 Pi 版本运行一次真实 JSON session；
+事件必须报告精确 `PROVIDER/MODEL`，并包含 tool call、tool result 和 final answer。
+reasoning model 还必须出现 thinking event/content 或非零 reasoning usage。只读取配置、
+只做 controller HTTP 请求，或只看到普通 assistant 文本都不够。
+
+协议和 API route 由外部 Pi registry 的 `api` 与 `baseUrl` 决定。控制面不得追加
+`/responses`、`/chat/completions` 或其他协议路径，不得探测后改写 registry，也不得静默
+回退到另一 wire API/provider/model。宿主 gate 让 Pi 自己按这份配置完成语义验证；诊断
+Work container 只对 registry 给出的 base URL 做无凭据连通性检查，随后 SForge 再用复制
+进去的同一份 registry 执行 `pi --list-models <provider>` 并核对精确模型。更换 API 地址、
+协议或模型时只需更新外部 registry 并重新经过 prepare/doctor，benchmark 代码和默认
+upstream 分支都不随之修改。
 
 EdgeBench Work container 不再精确锁死旧 Pi：默认
 `SFORGE_PI_PACKAGE_VERSION=latest`，安装输出必须记录解析后的 `pi --version`。短 capability
@@ -138,9 +152,33 @@ Goal Plus + Codex 的 session allocation 本身不是 worker launch：
 - 至少 `K` 个 candidate-bound verifier records；
 - 必须有 promotion 和 official Judge trajectory。
 
+Codex worker 的 `strategy.worker_budget` 由每次
+`search_start_agent_session` 返回的 `launch.budget_control` 交给父会话强制执行。全部 `K`
+个 worker 绑定后，父会话必须立即进入 orchestration-only watchdog 阶段：只在非空的真实
+receiver thread ID 集合上执行 `wait_agent`，到各自 initial wait deadline 后发送一次配置的
+closeout message，再等待 final window，并在仍未终止时执行配置的 interrupt。worker 存活时
+不得用主工作区分析或独立优化填充等待时间。`worker_budget` 只进入 frozen spec、没有对应
+Codex host 操作证据，或父会话一直工作到外层 cutoff，都不算预算已执行。
+
+Codex `0.146.0` 的内置 collaboration schema 可能只暴露 `wait` 和 `close_agent`，而不暴露
+`send_message`/`interrupt_agent`。此时父会话仍须完成 initial wait 和 final wait，并只在 hard
+deadline 使用一次 `close_agent` 作为 hard-stop fallback。worker drain 后必须先读取
+`goal_plus_monitor_snapshot`；其中的 durable `verifier_ledger` 和 `verifier_candidate_ids` 是
+selection gate 的权威来源。`goal_plus_status` 不展示 Search verifier ledger，不能单独用于判定
+缺少 worker evidence。coverage 达到 `K/K` 后应立即执行 `search_select` 和 `search_promote`，
+期间不得进入主 workspace 自行分析或优化。
+
+`T` 截止必须是 SForge 的真实 agent segment boundary，不能把同一个 Codex 进程直接允许运行
+到 `T + finalization_grace`。若 Goal Plus 在 `T` 时仍未终态，SForge 终止探索 segment，并用
+resume prompt 启动 finalization-only segment；该 segment 的第一个原生工具调用必须是
+`goal_plus_monitor_snapshot`，且只能恢复 evidence、选优、提升、Judge、结果记录和终态报告。
+
 Goal Plus + Pi 不使用 Codex collaboration events，必须持久化至少 `K` 个 candidate-bound
 Pi sessions 和 verifier records，并同样保留 promotion 与 official trajectory。
 缺失任何 required evidence 时 cell/campaign 为 `partial`。
+
+Goal Plus completion evidence 中的源码版本必须与确认块和 campaign manifest 的
+`goal_plus_source.commit` 相同；branch 名相同但 commit 漂移也必须在 launch 前失败关闭。
 
 ## Finalize
 
