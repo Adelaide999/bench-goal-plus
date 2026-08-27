@@ -206,7 +206,7 @@ def materialize_workspace(
     contract = bench_contract(project, benchmark_root)
 
     source_checkout = validated_source_cache(project, commit)
-    source_materialization = "validated_local_cache_copy"
+    source_materialization = "validated_local_cache"
     if source_checkout is None:
         source_checkout = workspace.parent / f"{workspace.name}-source"
         if source_checkout.exists() or source_checkout.is_symlink():
@@ -224,22 +224,41 @@ def materialize_workspace(
                 commit,
                 label="fetched campaign-local source checkout",
             )
-        source_materialization = "campaign_local_copy"
+        source_materialization = "campaign_local"
 
     _require_disjoint_paths(
         workspace=workspace,
         source_checkout=source_checkout,
         benchmark_root=benchmark_root,
     )
+    scan_roots = _validated_scan_roots(contract, source_checkout)
     workspace.mkdir(parents=True)
     from adapters.portable import copytree_confined
 
-    copytree_confined(
-        source_checkout,
-        workspace / "source",
-        label="ZSoft detect source checkout",
-        ignore=shutil.ignore_patterns(".git"),
-    )
+    source_destination = workspace / "source"
+    if scan_roots:
+        source_destination.mkdir()
+        for relative, source_path in scan_roots:
+            destination = source_destination / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if source_path.is_dir():
+                copytree_confined(
+                    source_path,
+                    destination,
+                    label=f"ZSoft detect scan root {relative.as_posix()}",
+                    ignore=shutil.ignore_patterns(".git"),
+                )
+            else:
+                shutil.copy2(source_path, destination, follow_symlinks=False)
+        source_materialization += "_scan_roots"
+    else:
+        copytree_confined(
+            source_checkout,
+            source_destination,
+            label="ZSoft detect source checkout",
+            ignore=shutil.ignore_patterns(".git"),
+        )
+        source_materialization += "_copy"
     (workspace / "bench-contract.json").write_text(
         json.dumps(contract, indent=2) + "\n"
     )
@@ -317,6 +336,51 @@ def validated_source_cache(project: str, commit: str) -> Path | None:
         commit,
         label=SOURCE_CACHE_ENV,
     )
+
+
+def _validated_scan_roots(
+    contract: dict[str, Any], source_checkout: Path
+) -> list[tuple[Path, Path]]:
+    """Resolve public scan roots without allowing aliases outside the checkout."""
+    values = contract.get("scan_roots")
+    if not isinstance(values, list):
+        raise AdapterError("bench contract scan_roots must be a list")
+    if not values:
+        return []
+
+    checkout = Path(source_checkout).resolve(strict=True)
+    resolved_roots: list[tuple[Path, Path]] = []
+    for value in values:
+        if not isinstance(value, str) or not value:
+            raise AdapterError(f"invalid scan root: {value!r}")
+        relative = Path(value)
+        if relative.is_absolute() or relative == Path(".") or ".." in relative.parts:
+            raise AdapterError(f"invalid scan root: {value!r}")
+
+        candidate = checkout / relative
+        if candidate.is_symlink():
+            raise AdapterError(f"scan root must not be a symlink: {value!r}")
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise AdapterError(f"scan root does not exist: {value!r}") from exc
+        if resolved == checkout or checkout not in resolved.parents:
+            raise AdapterError(f"scan root escapes source checkout: {value!r}")
+        mode = candidate.stat(follow_symlinks=False).st_mode
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            raise AdapterError(f"scan root is not a regular file or directory: {value!r}")
+
+        for existing, _ in resolved_roots:
+            if (
+                relative == existing
+                or relative in existing.parents
+                or existing in relative.parents
+            ):
+                raise AdapterError(
+                    f"scan roots overlap: {existing.as_posix()!r} and {value!r}"
+                )
+        resolved_roots.append((relative, resolved))
+    return resolved_roots
 
 
 def validate_source_checkout(

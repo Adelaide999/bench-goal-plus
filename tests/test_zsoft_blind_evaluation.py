@@ -33,7 +33,9 @@ def _init_source_checkout(path: Path) -> str:
         check=True,
     )
     (path / "src").mkdir()
-    (path / "src/audit.c").write_text("/* public fixture */\n", encoding="utf-8")
+    (path / "src/civetweb.c").write_text(
+        "/* public fixture */\n", encoding="utf-8"
+    )
     subprocess.run(["git", "-C", str(path), "add", "."], check=True)
     subprocess.run(
         ["git", "-C", str(path), "commit", "-q", "-m", "fixture"], check=True

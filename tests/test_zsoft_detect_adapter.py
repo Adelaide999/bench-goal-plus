@@ -144,8 +144,10 @@ class AdapterContractTest(unittest.TestCase):
         subprocess.run(
             ["git", "-C", str(source), "config", "user.name", "Test"], check=True
         )
-        (source / "sample.c").write_text("/* fixture */\n")
-        subprocess.run(["git", "-C", str(source), "add", "sample.c"], check=True)
+        (source / "src").mkdir()
+        (source / "src" / "civetweb.c").write_text("/* fixture */\n")
+        (source / "outside.c").write_text("/* outside scan roots */\n")
+        subprocess.run(["git", "-C", str(source), "add", "."], check=True)
         subprocess.run(
             ["git", "-C", str(source), "commit", "-q", "-m", "fixture"],
             check=True,
@@ -172,7 +174,8 @@ class AdapterContractTest(unittest.TestCase):
 
         self.assertTrue((workspace / "source").is_dir())
         self.assertFalse((workspace / "source").is_symlink())
-        self.assertTrue((workspace / "source" / "sample.c").is_file())
+        self.assertTrue((workspace / "source" / "src" / "civetweb.c").is_file())
+        self.assertFalse((workspace / "source" / "outside.c").exists())
         self.assertFalse((workspace / "source" / ".git").exists())
         self.assertEqual(
             json.loads((workspace / "schemas" / "finding.schema.json").read_text()),
@@ -182,8 +185,42 @@ class AdapterContractTest(unittest.TestCase):
         )
         metadata = json.loads((workspace / "task.json").read_text())
         self.assertEqual(
-            metadata["source_materialization"], "validated_local_cache_copy"
+            metadata["source_materialization"], "validated_local_cache_scan_roots"
         )
+
+    def test_scan_roots_copy_only_declared_files_and_directories(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        source = root / "source"
+        (source / "net" / "rxrpc").mkdir(parents=True)
+        (source / "net" / "rxrpc" / "call.c").write_text("/* included */\n")
+        (source / "net" / "other.c").write_text("/* excluded */\n")
+        (source / "single.c").write_text("/* included */\n")
+
+        roots = adapter._validated_scan_roots(
+            {"scan_roots": ["net/rxrpc", "single.c"]}, source
+        )
+
+        self.assertEqual(
+            [(relative.as_posix(), path.name) for relative, path in roots],
+            [("net/rxrpc", "rxrpc"), ("single.c", "single.c")],
+        )
+
+    def test_scan_roots_reject_invalid_missing_and_escaping_paths(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        source = root / "source"
+        source.mkdir()
+        (source / "valid").mkdir()
+        outside = root / "outside"
+        outside.mkdir()
+        (source / "escape").symlink_to(outside, target_is_directory=True)
+
+        invalid = ["/absolute", "../outside", "valid/../valid", "missing", "escape"]
+        for value in invalid:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(adapter.AdapterError, "scan root"):
+                    adapter._validated_scan_roots({"scan_roots": [value]}, source)
 
     def test_campaign_local_checkout_must_be_exact_and_clean(self) -> None:
         tmp = Path(tempfile.mkdtemp())
