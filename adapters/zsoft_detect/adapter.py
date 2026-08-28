@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
-"""Adapter for the cybergym-zsoft-detect static detection benchmark.
+"""Blind adapter for the cybergym-zsoft-detect static detection benchmark.
 
-Wraps the benchmark's own scripts through the vendored copy at
-`third_party/zsoft-bench/benchmarks/vulnerability/zsoft-detect` (framework 1.1.0):
-
-- `materialize_workspace` exports the public bench contract
-  (`scripts/show_bench.py`) and prepares an isolated Git workspace containing
-  the clean source checkout plus TASK.md;
-- `evaluate_workspace` scores the agent's `submission/` findings directory
-  with the benchmark-owned `scripts/score_submission.py --track tp`;
-- `git_commit` reports `zsoft-detect-framework-<FRAMEWORK_VERSION>` (the
-  vendored copy is not a Git checkout); the scored source ref is pinned in
-  each workspace's `task.json` as `upstream_commit`.
-
-The upstream native runner remains separate from this adapter and is not an
-evaluator for Goal Plus candidates. Its SWE-agent profile is exposed by the
-dedicated ``zsoft-detect-swe-agent`` native target.
+Worker-visible validation checks only the public finding format. The trusted
+benchmark controller runs the benchmark-owned scorer once after selection.
 """
 
 from __future__ import annotations
@@ -24,6 +11,7 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -34,6 +22,16 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CONTROLLER_PATH = Path(__file__).resolve()
 sys.path.insert(0, str(ROOT))
+from adapters import zsoft_blind  # noqa: E402
+from adapters.zsoft_blind import (  # noqa: E402
+    DETECT_VALIDATION_KIND,
+    PUBLIC_CHECKER_NAME,
+    PUBLIC_METRIC,
+    diagnostics_valid,
+    ensure_single_final_claim,
+    validate_detect_submission,
+)
+
 ZSOFT_ROOT = Path(
     os.environ.get("BENCH_GOAL_PLUS_ZSOFT_ROOT", ROOT / "third_party" / "zsoft-bench")
 ).expanduser().resolve()
@@ -46,13 +44,33 @@ UPSTREAM_KEY = "zsoft_l1"
 UPSTREAM_SUBDIR = "benchmarks/vulnerability/zsoft-detect"
 ARTIFACT_NAME = "submission"
 PRIMARY_METRIC = "f1"
+GOAL_PLUS_PROCESS_METRIC = PUBLIC_METRIC
+PUBLIC_FORMAT_METRIC = PUBLIC_METRIC
+EVALUATION_MODE = "blind"
+BLIND_EVALUATION = True
 DIRECTION = "maximize"
 CASE_SET_DESCRIPTION = (
-    "one zsoft-detect project bench: static TP detection on a pinned commit,"
-    " scored as precision/recall/F1 on the deterministic tp track"
+    "one blind zsoft-detect project bench: static findings on a pinned commit"
 )
 CODEX_SANDBOX = "workspace-write"
-VERIFIER_TIMEOUT_SECONDS = 600
+PI_WORKER_SANDBOX = {
+    "engine": "bubblewrap",
+    "evaluation_mode": EVALUATION_MODE,
+    "workspace_access": "read_only",
+    "read_only_workspace_paths": ["source", "schemas"],
+    "writable_workspace_paths": [ARTIFACT_NAME],
+    "pass_env": [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+    ],
+}
+VERIFIER_TIMEOUT_SECONDS = 30
+OFFICIAL_EVALUATOR_TIMEOUT_SECONDS = 600
+SOURCE_CACHE_ENV = "BENCH_GOAL_PLUS_ZSOFT_DETECT_SOURCE_CACHE"
 
 # project -> bench commit (from projects/<p>/versions/*)
 PROJECT_COMMITS: dict[str, str] = {
@@ -168,9 +186,9 @@ def task_text(project: str, contract: dict[str, Any]) -> str:
             "function, 1-based inclusive line range), bug_type, and",
             "root_cause (cause/trigger/impact).",
             "",
-            "Only real, manually-confirmed vulnerabilities count as true",
-            "positives; unconfirmed or duplicate findings count against",
-            "precision.",
+            f"Use `python3 {PUBLIC_CHECKER_NAME}` to check only the public",
+            "JSON structure. It does not assess whether a reported issue is",
+            "real. Submit only findings supported by your source audit.",
         ]
     ) + "\n"
 
@@ -179,46 +197,100 @@ def materialize_workspace(
     source_root: Path,
     workspace: Path,
 ) -> dict[str, Any]:
-    global ACTIVE_PROJECT
     benchmark_root = _resolve_benchmark_root(source_root)
     workspace = Path(workspace).expanduser().absolute()
+    if workspace.exists() or workspace.is_symlink():
+        raise FileExistsError(workspace)
     project = ACTIVE_PROJECT
     commit = project_commit(project)
     contract = bench_contract(project, benchmark_root)
 
-    source_checkout = workspace.parent / f"{workspace.name}-source"
-    if not source_checkout.exists():
-        fetch_source_checkout(project, commit, source_checkout)
+    source_checkout = validated_source_cache(project, commit)
+    source_materialization = "validated_local_cache"
+    if source_checkout is None:
+        source_checkout = workspace.parent / f"{workspace.name}-source"
+        if source_checkout.exists() or source_checkout.is_symlink():
+            source_checkout = validate_source_checkout(
+                source_checkout,
+                project,
+                commit,
+                label="campaign-local source checkout",
+            )
+        else:
+            fetch_source_checkout(project, commit, source_checkout)
+            source_checkout = validate_source_checkout(
+                source_checkout,
+                project,
+                commit,
+                label="fetched campaign-local source checkout",
+            )
+        source_materialization = "campaign_local"
 
-    if workspace.exists():
-        raise FileExistsError(workspace)
-    workspace.mkdir(parents=True)
-    shutil.copytree(
-        source_checkout,
-        workspace / "source",
-        ignore=shutil.ignore_patterns(".git"),
+    _require_disjoint_paths(
+        workspace=workspace,
+        source_checkout=source_checkout,
+        benchmark_root=benchmark_root,
     )
+    scan_roots = _validated_scan_roots(contract, source_checkout)
+    workspace.mkdir(parents=True)
+    from adapters.portable import copytree_confined
+
+    source_destination = workspace / "source"
+    if scan_roots:
+        source_destination.mkdir()
+        for relative, source_path in scan_roots:
+            destination = source_destination / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if source_path.is_dir():
+                copytree_confined(
+                    source_path,
+                    destination,
+                    label=f"ZSoft detect scan root {relative.as_posix()}",
+                    ignore=shutil.ignore_patterns(".git"),
+                )
+            else:
+                shutil.copy2(source_path, destination, follow_symlinks=False)
+        source_materialization += "_scan_roots"
+    else:
+        copytree_confined(
+            source_checkout,
+            source_destination,
+            label="ZSoft detect source checkout",
+            ignore=shutil.ignore_patterns(".git"),
+        )
+        source_materialization += "_copy"
     (workspace / "bench-contract.json").write_text(
         json.dumps(contract, indent=2) + "\n"
     )
+    schema_relative = _submission_schema_path(contract)
+    schema_source = (benchmark_root / schema_relative).resolve(strict=True)
+    resolved_benchmark_root = benchmark_root.resolve(strict=True)
+    if (
+        schema_source == resolved_benchmark_root
+        or resolved_benchmark_root not in schema_source.parents
+        or not schema_source.is_file()
+    ):
+        raise AdapterError(
+            f"public submission schema escapes the benchmark root: {schema_relative}"
+        )
+    schema_destination = workspace / schema_relative
+    schema_destination.parent.mkdir(parents=True)
+    shutil.copy2(schema_source, schema_destination, follow_symlinks=False)
     (workspace / ARTIFACT_NAME).mkdir()
     (workspace / ARTIFACT_NAME / ".gitkeep").write_text("")
     (workspace / "TASK.md").write_text(task_text(project, contract))
     (workspace / "AGENTS.md").write_text(
         "# ZSoft detect task rules\n\n"
         "- Audit only the tree under `source/`.\n"
-        f"- Write finding JSON files into `{ARTIFACT_NAME}/`; nothing else is graded.\n"
+        f"- Write finding JSON files into `{ARTIFACT_NAME}/`.\n"
         "- The bench contract in `bench-contract.json` is read-only reference.\n"
+        f"- `{PUBLIC_CHECKER_NAME}` checks structure only and is read-only.\n"
+        "- Hidden task data and other run directories are forbidden.\n"
     )
-    from adapters.portable import render_evaluate_wrapper, render_goal_plus_verifier
-
-    (workspace / "evaluate.py").write_text(
-        render_evaluate_wrapper(CONTROLLER_PATH, benchmark_root)
-    )
-    verifier_dir = workspace / ".goal-plus-verifiers"
-    verifier_dir.mkdir()
-    (verifier_dir / "primary_metric.py").write_text(
-        render_goal_plus_verifier(CONTROLLER_PATH, benchmark_root, PRIMARY_METRIC)
+    shutil.copy2(
+        Path(zsoft_blind.__file__),
+        workspace / PUBLIC_CHECKER_NAME,
+        follow_symlinks=False,
     )
     (workspace / ".gitignore").write_text(
         ".bench-runtime/\n.gp/\n.codex-log/\n__pycache__/\n*.pyc\n"
@@ -231,11 +303,13 @@ def materialize_workspace(
         "project_id": project,
         "commit": commit,
         "artifact_name": ARTIFACT_NAME,
-        "upstream_root": str(benchmark_root),
         "upstream_commit": commit,
         "source_revision": commit,
+        "source_materialization": source_materialization,
         "framework_version": _framework_version(benchmark_root),
-        "primary_metric": PRIMARY_METRIC,
+        "evaluation_mode": EVALUATION_MODE,
+        "public_validation_kind": DETECT_VALIDATION_KIND,
+        "primary_metric": GOAL_PLUS_PROCESS_METRIC,
         "direction": DIRECTION,
     }
     (workspace / "task.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -248,6 +322,135 @@ def materialize_workspace(
         "workspace_commit": workspace_commit,
         "upstream_commit": commit,
     }
+
+
+def validated_source_cache(project: str, commit: str) -> Path | None:
+    """Return an explicitly configured, clean checkout at the pinned commit."""
+    configured = os.environ.get(SOURCE_CACHE_ENV)
+    if not configured:
+        return None
+    source = Path(configured).expanduser().resolve()
+    return validate_source_checkout(
+        source,
+        project,
+        commit,
+        label=SOURCE_CACHE_ENV,
+    )
+
+
+def _validated_scan_roots(
+    contract: dict[str, Any], source_checkout: Path
+) -> list[tuple[Path, Path]]:
+    """Resolve public scan roots without allowing aliases outside the checkout."""
+    values = contract.get("scan_roots")
+    if not isinstance(values, list):
+        raise AdapterError("bench contract scan_roots must be a list")
+    if not values:
+        return []
+
+    checkout = Path(source_checkout).resolve(strict=True)
+    resolved_roots: list[tuple[Path, Path]] = []
+    for value in values:
+        if not isinstance(value, str) or not value:
+            raise AdapterError(f"invalid scan root: {value!r}")
+        relative = Path(value)
+        if relative.is_absolute() or relative == Path(".") or ".." in relative.parts:
+            raise AdapterError(f"invalid scan root: {value!r}")
+
+        candidate = checkout / relative
+        if candidate.is_symlink():
+            raise AdapterError(f"scan root must not be a symlink: {value!r}")
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise AdapterError(f"scan root does not exist: {value!r}") from exc
+        if resolved == checkout or checkout not in resolved.parents:
+            raise AdapterError(f"scan root escapes source checkout: {value!r}")
+        mode = candidate.stat(follow_symlinks=False).st_mode
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            raise AdapterError(f"scan root is not a regular file or directory: {value!r}")
+
+        for existing, _ in resolved_roots:
+            if (
+                relative == existing
+                or relative in existing.parents
+                or existing in relative.parents
+            ):
+                raise AdapterError(
+                    f"scan roots overlap: {existing.as_posix()!r} and {value!r}"
+                )
+        resolved_roots.append((relative, resolved))
+    return resolved_roots
+
+
+def validate_source_checkout(
+    source: Path,
+    project: str,
+    commit: str,
+    *,
+    label: str,
+) -> Path:
+    """Require one exact, clean Git top level before it can be copied."""
+    source = Path(source).expanduser().resolve()
+    if not source.is_dir():
+        raise AdapterError(f"{label} is not a directory: {source}")
+    top_level = _run(
+        ["git", "-C", str(source), "rev-parse", "--show-toplevel"],
+        cwd=source,
+    )
+    head = _run(["git", "-C", str(source), "rev-parse", "HEAD"], cwd=source)
+    status = _run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ],
+        cwd=source,
+    )
+    if top_level.returncode != 0 or Path(top_level.stdout.strip()).resolve() != source:
+        raise AdapterError(f"{label} is not its Git top level: {source}")
+    if head.returncode != 0 or head.stdout.strip() != commit:
+        actual = head.stdout.strip() or "unavailable"
+        raise AdapterError(
+            f"{label} has wrong commit for {project}: expected {commit}, got {actual}"
+        )
+    if status.returncode != 0 or status.stdout.strip():
+        raise AdapterError(f"{label} is not clean: {source}")
+    return source
+
+
+def _submission_schema_path(contract: dict[str, Any]) -> Path:
+    value = contract.get("submission_schema")
+    if not isinstance(value, str) or not value:
+        raise AdapterError("bench contract does not declare a submission schema")
+    relative = Path(value)
+    if relative.is_absolute() or value == "." or ".." in relative.parts:
+        raise AdapterError(f"invalid public submission schema path: {value!r}")
+    return relative
+
+
+def _require_disjoint_paths(
+    *,
+    workspace: Path,
+    source_checkout: Path,
+    benchmark_root: Path,
+) -> None:
+    resolved = {
+        "workspace": workspace.resolve(strict=False),
+        "source checkout": source_checkout.resolve(strict=False),
+        "benchmark root": benchmark_root.resolve(strict=True),
+    }
+    items = list(resolved.items())
+    for index, (left_name, left) in enumerate(items):
+        for right_name, right in items[index + 1 :]:
+            if left == right or left in right.parents or right in left.parents:
+                raise AdapterError(
+                    f"materialization paths overlap: {left_name}={left} and "
+                    f"{right_name}={right}"
+                )
 
 
 def fetch_source_checkout(project: str, commit: str, destination: Path) -> None:
@@ -337,41 +540,84 @@ def evaluate_workspace(
 ) -> dict[str, Any]:
     from adapters.portable import append_history, claim_evaluator_call
 
+    if mode not in {"public", "final"}:
+        raise ValueError(f"unsupported evaluation mode: {mode}")
     started = time.monotonic()
     workspace = Path(workspace).expanduser().absolute()
-    benchmark_root = Path(upstream_root).expanduser().absolute()
     metadata = json.loads((workspace / "task.json").read_text(encoding="utf-8"))
+    runtime_dir, budget = claim_evaluator_call(workspace, mode)
+    ensure_single_final_claim(mode, budget)
+    submission = workspace / ARTIFACT_NAME
+    public_diagnostics = validate_detect_submission(submission)
+    format_valid = diagnostics_valid(public_diagnostics)
+    if mode == "public":
+        report = {
+            "schema_version": 1,
+            "task_id": metadata["task_id"],
+            "mode": mode,
+            "valid": format_valid,
+            "primary_metric": {
+                "name": GOAL_PLUS_PROCESS_METRIC,
+                "value": 1.0 if format_valid else 0.0,
+                "direction": "maximize",
+            },
+            GOAL_PLUS_PROCESS_METRIC: 1.0 if format_valid else 0.0,
+            "public_diagnostics": public_diagnostics,
+            "budget": budget,
+            "duration_seconds": time.monotonic() - started,
+            "evaluated_at": _utc_now(),
+        }
+        append_history(runtime_dir, report)
+        return report
+
+    benchmark_root = _resolve_benchmark_root(upstream_root)
     project = metadata["project_id"]
     commit = metadata["commit"]
-    runtime_dir, budget = claim_evaluator_call(workspace, mode)
-    submission = workspace / ARTIFACT_NAME
-    valid = submission.is_dir()
+    valid = format_valid
     score_payload: dict[str, Any] | None = None
-    message = "ok" if valid else f"candidate artifact {ARTIFACT_NAME} is missing"
+    message = "ok" if valid else "candidate artifact failed public validation"
     if valid:
-        scored = _run(
-            [
-                sys.executable,
-                "scripts/score_submission.py",
-                str(submission),
-                "--project",
-                project,
-                "--commit",
-                commit,
-                "--release",
-                "0.1.0",
-                "--track",
-                "tp",
-            ],
-            cwd=benchmark_root,
-        )
-        (runtime_dir / "score.stdout").write_text(scored.stdout, encoding="utf-8")
-        (runtime_dir / "score.stderr").write_text(scored.stderr, encoding="utf-8")
-        if scored.returncode != 0:
+        try:
+            scored_submission = _snapshot_submission(
+                submission,
+                runtime_dir / f"submission-{budget['total_claimed']:06d}",
+            )
+        except (AdapterError, OSError) as exc:
             valid = False
-            message = f"scoring failed: {scored.stderr[-300:]}"
+            message = f"candidate artifact is unsafe: {exc}"
         else:
-            score_payload = json.loads(scored.stdout)
+            scored = _run(
+                [
+                    sys.executable,
+                    "scripts/score_submission.py",
+                    str(scored_submission),
+                    "--project",
+                    project,
+                    "--commit",
+                    commit,
+                    "--release",
+                    "0.1.0",
+                    "--track",
+                    "tp",
+                ],
+                cwd=benchmark_root,
+                timeout=OFFICIAL_EVALUATOR_TIMEOUT_SECONDS,
+            )
+            (runtime_dir / "score.stdout").write_text(
+                scored.stdout, encoding="utf-8"
+            )
+            (runtime_dir / "score.stderr").write_text(
+                scored.stderr, encoding="utf-8"
+            )
+            if scored.returncode != 0:
+                valid = False
+                message = f"scoring failed: {scored.stderr[-300:]}"
+            else:
+                try:
+                    score_payload = json.loads(scored.stdout)
+                except json.JSONDecodeError:
+                    valid = False
+                    message = "official scorer did not emit JSON"
 
     f1 = float(score_payload.get("f1", 0.0)) if score_payload else 0.0
     report = {
@@ -385,12 +631,43 @@ def evaluate_workspace(
         PRIMARY_METRIC: f1,
         "zsoft_score": score_payload,
         "message": message,
+        "format_valid": format_valid,
+        "public_diagnostics": public_diagnostics,
         "budget": budget,
         "duration_seconds": time.monotonic() - started,
         "evaluated_at": _utc_now(),
     }
     append_history(runtime_dir, report)
     return report
+
+
+def _snapshot_submission(source: Path, destination: Path) -> Path:
+    """Copy direct regular files without following worker-created links."""
+    destination.mkdir(mode=0o700, exist_ok=False)
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise AdapterError("submission snapshots require O_NOFOLLOW support")
+    with os.scandir(source) as entries:
+        for entry in entries:
+            entry_path = Path(entry.path)
+            if entry.is_symlink():
+                raise AdapterError(f"submission entry is a symlink: {entry.name}")
+            if not entry.is_file(follow_symlinks=False):
+                raise AdapterError(
+                    f"submission entry is not a regular file: {entry.name}"
+                )
+            descriptor = os.open(entry_path, os.O_RDONLY | nofollow)
+            try:
+                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    raise AdapterError(
+                        f"submission entry changed type while reading: {entry.name}"
+                    )
+                with os.fdopen(descriptor, "rb", closefd=False) as candidate:
+                    payload = candidate.read()
+            finally:
+                os.close(descriptor)
+            (destination / entry.name).write_bytes(payload)
+    return destination
 
 
 def _framework_version(benchmark_root: Path) -> str:

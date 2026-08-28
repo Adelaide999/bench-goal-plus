@@ -16,8 +16,8 @@ Codex/Pi launch, Goal Plus launch, wall deadline, concurrency, and evidence.
 | `frontier-engineering-malloclab` | `mm.c` | `combined_score` maximize | 不需要 | `0 GB` | C compiler and `make` |
 | `heurigym` | `solver.py` | `total_cost` minimize | 不需要 | `0 GB` | Python only after dataset bootstrap |
 | `local-vliw` | `solution.py` | `cycles` minimize | 不需要 | `0 GB` | Python standard library；local replica，非官方 EdgeBench |
-| `zsoft-detect` | `submission/` | `f1` maximize | 不需要 | `0 GB` | pinned project source + benchmark-owned deterministic scorer |
-| `zsoft-l1` | `poc` | `success` maximize | **必需** | 依任务镜像和源码缓存而定 | official Docker Compose vulnerable/fixed differential judge |
+| `zsoft-detect` | `submission/` | `format_valid` public; `f1` final-only | 不需要 | `0 GB` | pinned project source + controller-only deterministic scorer |
+| `zsoft-l1` | `poc` | `format_valid` public; `success` final-only | **必需** | 依任务镜像和源码缓存而定 | controller-only Docker Compose vulnerable/fixed differential judge |
 
 Every upstream checkout lives in the ignored `third_party/` directory. Run a
 task-specific bootstrap instead of cloning beside the repository:
@@ -26,6 +26,15 @@ task-specific bootstrap instead of cloning beside the repository:
 python3 scripts/repro_env.py bootstrap --only autolab
 python3 scripts/repro_env.py doctor --only autolab
 ```
+
+The ZSoft adapters run in blind evaluation mode. Workers see only the public
+task material and `format_valid` checker, and the Pi tool proxy returns only
+minimal context and opaque verifier receipts. Candidate histories, pass/fail,
+metrics, Global Evidence, official commands, and benchmark roots remain
+controller-only. After deterministic public-compliance selection and complete
+Goal Plus promotion/closeout, the controller makes one official final call.
+`goal-plus-codex` is rejected for ZSoft; use the Bubblewrap-backed
+`goal-plus-pi` method.
 
 The upstream keys are `ale_bench`, `autolab`, `frontier_cs`,
 `frontier_engineering`, `heurigym`, and `zsoft_l1`. OpenEvolve and Goal Plus

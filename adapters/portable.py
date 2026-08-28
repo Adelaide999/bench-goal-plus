@@ -6,13 +6,13 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from bench_runtime_paths import configure_temp_environment
-
 
 configure_temp_environment()
 
@@ -27,6 +27,53 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def validate_confined_symlinks(root: Path, *, label: str) -> None:
+    """Reject links whose fully resolved target leaves a published tree."""
+    root = Path(root).absolute()
+    if root.is_symlink():
+        raise RuntimeError(f"{label} root must not be a symlink: {root}")
+    if not root.is_dir():
+        raise FileNotFoundError(f"{label} root is not a directory: {root}")
+    resolved_root = root.resolve(strict=True)
+    for directory, dirnames, filenames in os.walk(root, followlinks=False):
+        parent = Path(directory)
+        for name in (*dirnames, *filenames):
+            path = parent / name
+            if not path.is_symlink():
+                continue
+            try:
+                target = path.resolve(strict=False)
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"{label} contains an unresolvable symlink: "
+                    f"{path.relative_to(root)}"
+                ) from exc
+            if target != resolved_root and resolved_root not in target.parents:
+                raise RuntimeError(
+                    f"{label} symlink escapes its root: "
+                    f"{path.relative_to(root)} -> {os.readlink(path)}"
+                )
+
+
+def copytree_confined(
+    source: Path,
+    destination: Path,
+    *,
+    label: str,
+    ignore: Any = None,
+) -> Path:
+    """Copy a public tree while preserving only root-confined symlinks."""
+    validate_confined_symlinks(source, label=label)
+    return Path(
+        shutil.copytree(
+            source,
+            destination,
+            symlinks=True,
+            ignore=ignore,
+        )
+    )
 
 
 def git_commit(path: Path) -> str:

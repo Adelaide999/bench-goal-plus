@@ -38,7 +38,12 @@ from experiments.benchmark_compare.conditions import (  # noqa: E402
     VARIANT_LIMITATIONS,
     resolve_condition,
 )
+from experiments.benchmark_compare.pi_worker_launcher import (  # noqa: E402
+    GOAL_PLUS_WORKER_LAUNCHER_ENV,
+    SANDBOX_POLICY_ENV,
+)
 from experiments.openevolve_compare.experiment import (  # noqa: E402
+    BLIND_SELECTION_RULE,
     DEFAULT_REASONING_EFFORT,
     PI_APIS,
     PI_API_KEY_ENV,
@@ -98,6 +103,12 @@ each SEARCH block must be a short exact excerpt from the current program, and
 each block must include its closing `>>>>>>> REPLACE` marker.
 """.rstrip()
 BENCHMARK_ADAPTERS = adapter_modules()
+PI_WORKER_LAUNCHER = (
+    ROOT / "experiments" / "benchmark_compare" / "pi_worker_launcher.py"
+)
+PI_TOOL_PROXY = (
+    ROOT / "experiments" / "benchmark_compare" / "bin" / "goal-plus-pi-tool"
+)
 
 
 @dataclass(frozen=True)
@@ -201,6 +212,8 @@ def configure_adapter(
     global ADAPTER_CONTRACT
     global ARTIFACT_NAME, BENCHMARK_NAME, CASE_SET_DESCRIPTION
     global CODEX_SANDBOX, DIRECTION, GOAL_PLUS_MCP_ENV_VARS
+    global EVALUATION_MODE, GOAL_PLUS_PROCESS_METRIC
+    global PI_WORKER_SANDBOX
     global PRIMARY_METRIC, TASK_ID, UPSTREAM_KEY
     global LOCAL_SOURCE_RELATIVE, UPSTREAM_SUBDIR
     global OFFICIAL_BENCHMARK_COMPARABLE
@@ -211,7 +224,12 @@ def configure_adapter(
     CASE_SET_DESCRIPTION = module.CASE_SET_DESCRIPTION
     CODEX_SANDBOX = module.CODEX_SANDBOX
     GOAL_PLUS_MCP_ENV_VARS = tuple(getattr(module, "GOAL_PLUS_MCP_ENV_VARS", ()))
+    PI_WORKER_SANDBOX = getattr(module, "PI_WORKER_SANDBOX", None)
     DIRECTION = module.DIRECTION
+    EVALUATION_MODE = getattr(module, "EVALUATION_MODE", "visible")
+    GOAL_PLUS_PROCESS_METRIC = getattr(
+        module, "GOAL_PLUS_PROCESS_METRIC", module.PRIMARY_METRIC
+    )
     PRIMARY_METRIC = module.PRIMARY_METRIC
     TASK_ID = module.TASK_ID
     UPSTREAM_KEY = module.UPSTREAM_KEY
@@ -228,6 +246,96 @@ def configure_adapter(
 
 
 configure_adapter("heurigym")
+
+
+def _pi_worker_sandbox_policy(api_key_env: str) -> dict[str, Any] | None:
+    if PI_WORKER_SANDBOX is None:
+        return None
+    policy = json.loads(json.dumps(PI_WORKER_SANDBOX))
+    pass_env = list(policy.get("pass_env", []))
+    for name in (api_key_env, "OPENAI_BASE_URL", "OPENAI_API_BASE_URL"):
+        if name not in pass_env:
+            pass_env.append(name)
+    policy["pass_env"] = pass_env
+    return policy
+
+
+def _require_pi_worker_launcher_source(goal_plus_root: Path) -> None:
+    worker_source = goal_plus_root / "src" / "goal_plus" / "pi_worker.py"
+    if not worker_source.is_file() or GOAL_PLUS_WORKER_LAUNCHER_ENV not in (
+        worker_source.read_text(encoding="utf-8")
+    ):
+        raise RuntimeError(
+            "selected Goal Plus source does not support the required external "
+            "Pi worker launcher protocol"
+        )
+
+
+def _require_pi_worker_launcher_runtime(runtime_bin_dir: Path) -> None:
+    python = runtime_bin_dir / ("python.exe" if os.name == "nt" else "python")
+    completed = subprocess.run(
+        [
+            str(python),
+            "-c",
+            (
+                "from goal_plus.pi_worker import PI_WORKER_LAUNCHER_ENV; "
+                "print(PI_WORKER_LAUNCHER_ENV)"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if (
+        completed.returncode != 0
+        or completed.stdout.strip() != GOAL_PLUS_WORKER_LAUNCHER_ENV
+    ):
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(
+            "benchmark runtime does not support the required external Pi worker "
+            f"launcher protocol: {detail or 'capability probe failed'}"
+        )
+
+
+def _configure_pi_worker_sandbox_environment(
+    manifest: dict[str, Any],
+    environment: dict[str, str],
+    runtime_bin_dir: Path,
+    api_key_env: str,
+) -> None:
+    if manifest["method"] != "goal-plus-pi" or PI_WORKER_SANDBOX is None:
+        return
+    worker_sandbox = (manifest.get("goal_plus_config") or {}).get(
+        "worker_sandbox"
+    )
+    expected_sandbox = _pi_worker_sandbox_policy(api_key_env)
+    if worker_sandbox is None:
+        raise RuntimeError(
+            "this adapter requires a Pi worker sandbox; re-prepare the run "
+            "with a sandbox-capable Goal Plus checkout"
+        )
+    if worker_sandbox != expected_sandbox:
+        raise RuntimeError(
+            "prepared Pi worker sandbox policy does not match the adapter contract"
+        )
+    if shutil.which("bwrap", path=environment.get("PATH")) is None:
+        raise RuntimeError("ZSoft Goal Plus Pi worker sandbox requires bwrap")
+    for executable in (PI_WORKER_LAUNCHER, PI_TOOL_PROXY):
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise RuntimeError(
+                f"ZSoft Pi worker launcher asset is unavailable: {executable}"
+            )
+    _require_pi_worker_launcher_runtime(runtime_bin_dir)
+    environment[GOAL_PLUS_WORKER_LAUNCHER_ENV] = str(PI_WORKER_LAUNCHER)
+    environment[SANDBOX_POLICY_ENV] = json.dumps(
+        worker_sandbox, separators=(",", ":")
+    )
+    manifest["pi_worker_sandbox"] = {
+        **worker_sandbox,
+        "owner": "bench-goal-plus",
+        "launcher_protocol": GOAL_PLUS_WORKER_LAUNCHER_ENV,
+        "environment_values_persisted": False,
+    }
 
 
 def default_run_dir(method: str) -> Path:
@@ -265,6 +373,11 @@ def prepare(args: argparse.Namespace) -> int:
         task_id=getattr(args, "task_id", None),
         module_name=getattr(args, "adapter_module", None),
     )
+    if EVALUATION_MODE == "blind" and args.method == "goal-plus-codex":
+        raise ValueError(
+            "blind ZSoft evaluation rejects goal-plus-codex at prepare: "
+            "only goal-plus-pi has the required Bubblewrap worker boundary"
+        )
     is_sky = sky_backend.is_method(args.method)
     condition = resolve_condition(
         method=args.method,
@@ -385,7 +498,10 @@ def prepare(args: argparse.Namespace) -> int:
             workspace_commits.append(materialized["workspace_commit"])
         task_text = (workspaces[0] / "TASK.md").read_text()
         common_prompt = render_plain_prompt(
-            task_text, args.wall_time_seconds, args.soft_closeout_seconds
+            task_text,
+            args.wall_time_seconds,
+            args.soft_closeout_seconds,
+            evaluation_mode=EVALUATION_MODE,
         )
         prompt_contract = {
             "mode": f"{args.method.replace('-', '_')}_common_prompt",
@@ -406,6 +522,8 @@ def prepare(args: argparse.Namespace) -> int:
             worker_host = "codex"
             worker_model = args.model
         else:
+            if PI_WORKER_SANDBOX is not None:
+                _require_pi_worker_launcher_source(goal_plus_root)
             copy_goal_plus_pi_assets(goal_plus_root, workspace)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
             worker_host = "pi-rpc"
@@ -415,7 +533,7 @@ def prepare(args: argparse.Namespace) -> int:
             task_text=task_text,
             artifact_name=ARTIFACT_NAME,
             artifact_is_directory=(workspace / ARTIFACT_NAME).is_dir(),
-            metric_name=PRIMARY_METRIC,
+            metric_name=GOAL_PLUS_PROCESS_METRIC,
             metric_direction=DIRECTION,
             wall_seconds=args.wall_time_seconds,
             closeout_seconds=args.soft_closeout_seconds,
@@ -429,6 +547,7 @@ def prepare(args: argparse.Namespace) -> int:
             coordination_condition=condition.condition_id if condition else None,
             search_space_mode=condition.search_space_mode if condition else None,
             shared_dir_enabled=getattr(args, "shared_dir", False),
+            evaluation_mode=EVALUATION_MODE,
         )
         (workspace / "GOAL.md").write_text(goal_prompt)
         workspaces.append(workspace)
@@ -436,7 +555,10 @@ def prepare(args: argparse.Namespace) -> int:
             commit_workspace(workspace, "install managed Goal Plus host assets")
         )
         common_prompt = render_plain_prompt(
-            task_text, args.wall_time_seconds, args.soft_closeout_seconds
+            task_text,
+            args.wall_time_seconds,
+            args.soft_closeout_seconds,
+            evaluation_mode=EVALUATION_MODE,
         )
         prompt_contract = {
             "mode": "natural_goal_plus_entry",
@@ -452,11 +574,17 @@ def prepare(args: argparse.Namespace) -> int:
             "entrypoint": goal_plus_entrypoint(worker_host),
             "worker_host": worker_host,
             "worker_model": worker_model,
-            "metric_name": PRIMARY_METRIC,
+            "metric_name": GOAL_PLUS_PROCESS_METRIC,
             "metric_direction": DIRECTION,
+            "evaluation_mode": EVALUATION_MODE,
             "artifact_name": ARTIFACT_NAME,
             "artifact_is_directory": (workspace / ARTIFACT_NAME).is_dir(),
             "shared_dir_enabled": getattr(args, "shared_dir", False),
+            "worker_sandbox": (
+                _pi_worker_sandbox_policy(args.pi_api_key_env)
+                if worker_host == "pi-rpc"
+                else None
+            ),
             "state_at_t0": "absent; natural prompt creates all Goal Plus state inside T",
             "condition": condition.as_manifest() if condition else None,
             "coordination_reviewer": (
@@ -560,6 +688,8 @@ def prepare(args: argparse.Namespace) -> int:
         "task": {
             "artifact_name": ARTIFACT_NAME,
             "primary_metric": PRIMARY_METRIC,
+            "goal_plus_process_metric": GOAL_PLUS_PROCESS_METRIC,
+            "evaluation_mode": EVALUATION_MODE,
             "direction": DIRECTION,
             "codex_sandbox": CODEX_SANDBOX,
             "upstream_key": UPSTREAM_KEY,
@@ -635,10 +765,22 @@ def evaluator_budget(workspace: Path) -> dict[str, Any]:
     return load_json(workspace / ".bench-runtime/budget.json")
 
 
-def evaluate(workspace: Path, mode: str) -> dict[str, Any]:
+def evaluate(
+    workspace: Path,
+    mode: str,
+    upstream_root: Path | None = None,
+) -> dict[str, Any]:
     metadata = load_json(workspace / "task.json")
+    trusted_root = upstream_root
+    if trusted_root is None:
+        stored_root = metadata.get("upstream_root")
+        if not isinstance(stored_root, str) or not stored_root:
+            raise RuntimeError(
+                "evaluation requires a controller-provided benchmark root"
+            )
+        trusted_root = Path(stored_root)
     return evaluate_workspace(
-        workspace, Path(metadata["upstream_root"]), mode
+        workspace, Path(trusted_root), mode
     )
 
 
@@ -646,12 +788,15 @@ def evaluate_with_controller_runtime(
     workspace: Path,
     mode: str,
     controller_runtime: Path,
+    upstream_root: Path | None = None,
 ) -> dict[str, Any]:
     """Evaluate without materializing mutable runtime files in a Goal workspace."""
     previous = os.environ.get("GOAL_PLUS_VERIFIER_TMPDIR")
     os.environ["GOAL_PLUS_VERIFIER_TMPDIR"] = str(controller_runtime)
     try:
-        return evaluate(workspace, mode)
+        if upstream_root is None:
+            return evaluate(workspace, mode)
+        return evaluate(workspace, mode, upstream_root)
     finally:
         if previous is None:
             os.environ.pop("GOAL_PLUS_VERIFIER_TMPDIR", None)
@@ -813,6 +958,11 @@ def execute_plain(
     environment: dict[str, str],
 ) -> dict[str, Any]:
     budget = manifest["budget"]
+    benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
+    benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
+    evaluation_mode = (manifest.get("task") or {}).get(
+        "evaluation_mode", "visible"
+    )
     is_pi = manifest["method"] == "plain-pi"
     pi_provider_id, pi_api, pi_api_key_env = pi_provider_config(args)
     workspaces = [Path(path) for path in manifest["workspaces"]]
@@ -825,7 +975,7 @@ def execute_plain(
         lane_name = f"lane-{lane_index:02d}"
         lane_dir = lanes_root / lane_name
         lane_dir.mkdir()
-        seed = evaluate(workspace, "public")
+        seed = evaluate(workspace, "public", benchmark_root)
         write_json(lane_dir / "seed-eval.json", seed)
         seeds.append({"lane": lane_name, "evaluation": seed})
         setup_calls += evaluator_budget(workspace)["total_claimed"]
@@ -833,6 +983,7 @@ def execute_plain(
             (workspace / "TASK.md").read_text(),
             budget["wall_time_seconds"],
             budget["soft_closeout_seconds"],
+            evaluation_mode=evaluation_mode,
         )
         (lane_dir / "prompt.md").write_text(prompt)
         lane_environment = environment.copy()
@@ -909,8 +1060,16 @@ def execute_plain(
     for lane_index, workspace in enumerate(workspaces):
         lane_name = f"lane-{lane_index:02d}"
         lane_dir = lanes_root / lane_name
-        final = evaluate(workspace, "final")
-        write_json(lane_dir / "final-eval.json", final)
+        lane_evaluation = evaluate(
+            workspace,
+            "public" if evaluation_mode == "blind" else "final",
+            benchmark_root,
+        )
+        write_json(
+            lane_dir
+            / ("public-eval.json" if evaluation_mode == "blind" else "final-eval.json"),
+            lane_evaluation,
+        )
         candidate = lane_dir / ARTIFACT_NAME
         copy_artifact(workspace / ARTIFACT_NAME, candidate)
         lane_results.append(
@@ -918,7 +1077,7 @@ def execute_plain(
                 "lane": lane_name,
                 "workspace": str(workspace),
                 "candidate": str(candidate),
-                "evaluation": final,
+                "evaluation": lane_evaluation,
                 ("pi" if is_pi else "codex"): (
                     parse_pi_events(lane_dir / "events.jsonl")
                     if is_pi
@@ -930,15 +1089,29 @@ def execute_plain(
         item for item in lane_results if item["evaluation"].get("valid") is True
     ]
     selection_pool = valid_lane_results or lane_results
-    selected = min(
-        selection_pool,
-        key=lambda item: score_order_key(item["evaluation"]),
+    selected = (
+        min(selection_pool, key=lambda item: item["lane"])
+        if evaluation_mode == "blind"
+        else min(
+            selection_pool,
+            key=lambda item: score_order_key(item["evaluation"]),
+        )
     )
+    selected_evaluation = selected["evaluation"]
+    if evaluation_mode == "blind":
+        selected_evaluation = evaluate(
+            Path(selected["workspace"]), "final", benchmark_root
+        )
+        selected["official_evaluation"] = selected_evaluation
+        write_json(
+            lanes_root / selected["lane"] / "final-eval.json",
+            selected_evaluation,
+        )
     write_json(run_dir / "lane-results.json", {"lanes": lane_results})
-    write_json(run_dir / "final-eval.json", selected["evaluation"])
+    write_json(run_dir / "final-eval.json", selected_evaluation)
     copy_artifact(Path(selected["candidate"]), run_dir / ARTIFACT_NAME)
     control["selected_lane"] = selected["lane"]
-    control["selected_score"] = primary_score(selected["evaluation"])
+    control["selected_score"] = primary_score(selected_evaluation)
     agent_key = "pi" if is_pi else "codex"
     control[agent_key] = {
         "lanes": [
@@ -948,10 +1121,16 @@ def execute_plain(
     }
     control["evaluator_calls"] = {
         "lane_count": len(lane_results),
-        "total_claimed": sum(
-            item["evaluation"]["budget"]["total_claimed"] for item in lane_results
+        "total_claimed": (
+            setup_calls + len(lane_results) + 1
+            if evaluation_mode == "blind"
+            else sum(
+                item["evaluation"]["budget"]["total_claimed"]
+                for item in lane_results
+            )
         ),
         "setup_claimed_before_t": setup_calls,
+        "controller_final_claimed": 1 if evaluation_mode == "blind" else len(lane_results),
     }
     bad = [
         lane["name"]
@@ -962,11 +1141,47 @@ def execute_plain(
         control["result_incomplete_reason"] = (
             f"{manifest['method']} lanes did not exit cleanly: " + ", ".join(bad)
         )
-    if not valid_lane_results:
+    if not valid_lane_results or selected_evaluation.get("valid") is not True:
         control["result_incomplete_reason"] = (
             f"official final evaluator rejected every {manifest['method']} lane"
         )
     return control
+
+
+def _blind_closeout_incomplete_reason(closeout: Any) -> str | None:
+    if not isinstance(closeout, dict) or closeout.get("completed") is not True:
+        error = closeout.get("error") if isinstance(closeout, dict) else None
+        return f"blind Goal Plus closeout did not complete: {error or 'unknown error'}"
+    runs = closeout.get("runs")
+    if not isinstance(runs, list) or not runs:
+        return "blind Goal Plus closeout has no completed Search run"
+    for item in runs:
+        if not isinstance(item, dict):
+            return "blind Goal Plus closeout contains malformed Search evidence"
+        selection = item.get("selection")
+        promotion = item.get("promotion")
+        goal_statuses = item.get("goal_statuses")
+        if (
+            not isinstance(selection, dict)
+            or not isinstance(selection.get("selected_candidate_id"), str)
+            or not selection["selected_candidate_id"]
+            or selection.get("selection_rule") != BLIND_SELECTION_RULE
+        ):
+            return "blind Goal Plus closeout lacks deterministic selection evidence"
+        if (
+            not isinstance(promotion, dict)
+            or not isinstance(promotion.get("artifact_path"), str)
+            or not promotion["artifact_path"]
+            or item.get("final_state") != "promoted"
+        ):
+            return "blind Goal Plus closeout lacks completed promotion evidence"
+        if (
+            not isinstance(goal_statuses, dict)
+            or not goal_statuses
+            or any(status != "complete" for status in goal_statuses.values())
+        ):
+            return "blind Goal Plus closeout lacks complete Goal Plus terminal evidence"
+    return None
 
 
 def execute_goal_plus(
@@ -976,7 +1191,12 @@ def execute_goal_plus(
     environment: dict[str, str],
 ) -> dict[str, Any]:
     budget = manifest["budget"]
+    benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
+    benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
     workspace = Path(manifest["workspace"])
+    evaluation_mode = (manifest.get("task") or {}).get(
+        "evaluation_mode", "visible"
+    )
     is_pi = manifest.get("method", "goal-plus-codex") == "goal-plus-pi"
     pi_provider_id, pi_api, pi_api_key_env = pi_provider_config(args)
     if (workspace / ".gp").exists():
@@ -985,6 +1205,7 @@ def execute_goal_plus(
         workspace,
         "public",
         run_dir / "controller-runtime/seed",
+        benchmark_root,
     )
     write_json(run_dir / "seed-eval.json", seed)
     setup_calls = seed["budget"]["total_claimed"]
@@ -1010,7 +1231,7 @@ def execute_goal_plus(
         task_text=(workspace / "TASK.md").read_text(),
         artifact_name=ARTIFACT_NAME,
         artifact_is_directory=(workspace / ARTIFACT_NAME).is_dir(),
-        metric_name=PRIMARY_METRIC,
+        metric_name=GOAL_PLUS_PROCESS_METRIC,
         metric_direction=DIRECTION,
         wall_seconds=budget["wall_time_seconds"],
         closeout_seconds=budget["soft_closeout_seconds"],
@@ -1028,6 +1249,7 @@ def execute_goal_plus(
         shared_dir_enabled=bool(
             (manifest.get("goal_plus_config") or {}).get("shared_dir_enabled")
         ),
+        evaluation_mode=evaluation_mode,
     )
     (run_dir / "prompt.md").write_text(prompt)
     reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)
@@ -1102,18 +1324,41 @@ def execute_goal_plus(
         control["pi_pool_cleanup"] = close_pi_pools(
             workspace, budget["hard_kill_grace_seconds"]
         )
-    with controller_subprocess_environment(
-        runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
-        verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
-    ):
-        control["goal_plus_controller_closeout"] = finalize_goal_plus_search(workspace)
-    final = evaluate_with_controller_runtime(
-        workspace,
-        "final",
-        run_dir / "controller-runtime/final",
+    try:
+        with controller_subprocess_environment(
+            runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
+            verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
+        ):
+            closeout = finalize_goal_plus_search(
+                workspace, evaluation_mode=evaluation_mode
+            )
+    except Exception as exc:
+        if evaluation_mode != "blind":
+            raise
+        closeout = {
+            "completed": False,
+            "runs": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    control["goal_plus_controller_closeout"] = closeout
+    blind_closeout_reason = (
+        _blind_closeout_incomplete_reason(closeout)
+        if evaluation_mode == "blind"
+        else None
     )
-    write_json(run_dir / "final-eval.json", final)
-    copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
+    final: dict[str, Any] | None = None
+    if blind_closeout_reason is None:
+        final = evaluate_with_controller_runtime(
+            workspace,
+            "final",
+            run_dir / "controller-runtime/final",
+            benchmark_root,
+        )
+        write_json(run_dir / "final-eval.json", final)
+        copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
+    else:
+        control["official_evaluation_withheld"] = True
+        control["result_incomplete_reason"] = blind_closeout_reason
     if is_pi:
         control["pi"] = parse_pi_events(run_dir / "events.jsonl")
     else:
@@ -1129,17 +1374,18 @@ def execute_goal_plus(
     promotion_calls = sum(
         item.get("promotion_verifier_command_count", 0) for item in goal_runs
     )
+    final_claims = final["budget"]["total_claimed"] if final is not None else 0
     control["evaluator_calls"] = {
         "total_claimed": (
             setup_calls
             + process_calls
             + promotion_calls
-            + final["budget"]["total_claimed"]
+            + final_claims
         ),
         "setup_claimed_before_t": setup_calls,
         "process_verifier_commands": process_calls,
         "promotion_verifier_commands": promotion_calls,
-        "controller_final_claimed": final["budget"]["total_claimed"],
+        "controller_final_claimed": final_claims,
         "coverage": "seed + Goal Plus verifier command logs + controller final ledger",
     }
     reason = goal_plus_incomplete_reason(
@@ -1166,9 +1412,11 @@ def execute_goal_plus(
             "Goal Plus controller closeout failed: "
             + control["goal_plus_controller_closeout"].get("error", "unknown error")
         )
+    if blind_closeout_reason is not None:
+        control["result_incomplete_reason"] = blind_closeout_reason
     if control["hard_killed"]:
         control["result_incomplete_reason"] = "Goal Plus exceeded hard-kill grace"
-    if final.get("valid") is not True:
+    if final is not None and final.get("valid") is not True:
         control["result_incomplete_reason"] = "official final evaluator rejected the artifact"
     return control
 
@@ -1181,8 +1429,10 @@ def execute_skydiscover(
 ) -> dict[str, Any]:
     """Run one standalone benchmark through a native SkyDiscover method."""
     budget = manifest["budget"]
+    benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
+    benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
     workspace = Path(manifest["workspace"])
-    seed = evaluate(workspace, "public")
+    seed = evaluate(workspace, "public", benchmark_root)
     write_json(run_dir / "seed-eval.json", seed)
     setup_calls = seed["budget"]["total_claimed"]
 
@@ -1239,7 +1489,7 @@ def execute_skydiscover(
     if best.is_file():
         shutil.copy2(best, workspace / ARTIFACT_NAME)
         shutil.copy2(best, run_dir / ARTIFACT_NAME)
-        final = evaluate(workspace, "final")
+        final = evaluate(workspace, "final", benchmark_root)
         write_json(run_dir / "final-eval.json", final)
         if final.get("valid") is not True:
             control["result_incomplete_reason"] = (
@@ -1345,6 +1595,12 @@ def execute(args: argparse.Namespace) -> int:
     environment = configure_temp_environment(os.environ.copy())
     bin_dir = Path(manifest["environment"]["runtime_bin"])
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
+    _configure_pi_worker_sandbox_environment(
+        manifest,
+        environment,
+        bin_dir,
+        pi_api_key_env,
+    )
     manifest["status"] = "running"
     manifest["execution_started_at"] = utc_now()
     write_json(manifest_path, manifest)
@@ -1402,6 +1658,8 @@ def seed_smoke(args: argparse.Namespace) -> int:
         task_id=manifest.get("benchmark_task_selector"),
         module_name=manifest.get("benchmark_adapter_module"),
     )
+    benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
+    benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
     results = []
     for workspace_text in manifest["workspaces"]:
         workspace = Path(workspace_text)
@@ -1410,9 +1668,10 @@ def seed_smoke(args: argparse.Namespace) -> int:
                 workspace,
                 "public",
                 run_dir / "controller-runtime/seed-smoke" / workspace.name,
+                benchmark_root,
             )
             if manifest["method"] in {"goal-plus-codex", "goal-plus-pi"}
-            else evaluate(workspace, "public")
+            else evaluate(workspace, "public", benchmark_root)
         )
         results.append(
             {"workspace": str(workspace), "evaluation": evaluation}
@@ -1435,26 +1694,51 @@ def repair_closeout(args: argparse.Namespace) -> int:
     )
     if manifest["method"] not in {"goal-plus-codex", "goal-plus-pi"}:
         raise ValueError("closeout is only valid for Goal Plus runs")
+    benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
+    benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
     workspace = Path(manifest["workspace"])
+    evaluation_mode = (manifest.get("task") or {}).get(
+        "evaluation_mode", "visible"
+    )
     control = dict(manifest.get("execution") or {})
     if manifest["method"] == "goal-plus-pi":
         control["pi_pool_cleanup_repair"] = close_pi_pools(
             workspace, manifest["budget"]["hard_kill_grace_seconds"]
         )
-    with controller_subprocess_environment(
-        runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
-        verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
-    ):
-        control["goal_plus_controller_closeout_repair"] = finalize_goal_plus_search(
-            workspace
-        )
-    final = evaluate_with_controller_runtime(
-        workspace,
-        "final",
-        run_dir / "controller-runtime/final",
+    try:
+        with controller_subprocess_environment(
+            runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
+            verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
+        ):
+            closeout = finalize_goal_plus_search(
+                workspace, evaluation_mode=evaluation_mode
+            )
+    except Exception as exc:
+        if evaluation_mode != "blind":
+            raise
+        closeout = {
+            "completed": False,
+            "runs": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    control["goal_plus_controller_closeout_repair"] = closeout
+    blind_closeout_reason = (
+        _blind_closeout_incomplete_reason(closeout)
+        if evaluation_mode == "blind"
+        else None
     )
-    write_json(run_dir / "final-eval.json", final)
-    copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
+    final: dict[str, Any] | None = None
+    if blind_closeout_reason is None:
+        final = evaluate_with_controller_runtime(
+            workspace,
+            "final",
+            run_dir / "controller-runtime/final",
+            benchmark_root,
+        )
+        write_json(run_dir / "final-eval.json", final)
+        copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
+    else:
+        control["official_evaluation_withheld"] = True
     control["goal_plus"] = collect_goal_plus_state(workspace)
     control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
         workspace
@@ -1469,17 +1753,18 @@ def repair_closeout(args: argparse.Namespace) -> int:
     setup_calls = (control.get("evaluator_calls") or {}).get(
         "setup_claimed_before_t", 1
     )
+    final_claims = final["budget"]["total_claimed"] if final is not None else 0
     control["evaluator_calls"] = {
         "total_claimed": (
             setup_calls
             + process_calls
             + promotion_calls
-            + final["budget"]["total_claimed"]
+            + final_claims
         ),
         "setup_claimed_before_t": setup_calls,
         "process_verifier_commands": process_calls,
         "promotion_verifier_commands": promotion_calls,
-        "controller_final_claimed": final["budget"]["total_claimed"],
+        "controller_final_claimed": final_claims,
         "coverage": "seed + Goal Plus verifier command logs + controller final ledger",
     }
     budget = manifest["budget"]
@@ -1502,7 +1787,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
                 "error", "unknown error"
             )
         )
-    if final.get("valid") is not True:
+    if blind_closeout_reason is not None:
+        reason = blind_closeout_reason
+    if final is not None and final.get("valid") is not True:
         reason = "official final evaluator rejected the artifact"
     if control.get("hard_killed"):
         reason = "Goal Plus exceeded hard-kill grace"
