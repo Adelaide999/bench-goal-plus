@@ -354,17 +354,15 @@ def render_goal(
             f"{goal_plus_entrypoint(worker_host)}\n\n"
             f"{common_prompt.rstrip()}\n\n"
             "# Goal Plus configuration\n\n"
-            "Use the current workspace and construct the blind Goal Plus search from "
-            "the configuration below. Goal Plus owns intake, triage, SearchSpec freezing, "
-            "candidate workspaces, deterministic selection, promotion, and final reporting.\n\n"
+            "Use the current workspace and construct a public-format-only Goal Plus search "
+            "from the configuration below. The benchmark-owned Pi boundary keeps worker "
+            "feedback opaque; Goal Plus remains an unmodified generic runtime and never "
+            "receives the official evaluator or official metric.\n\n"
             f"- `budget.max_parallel={concurrency}`; omit deprecated `budget.max_candidates`.\n"
             f"- `strategy.name=\"agent_guided\"`, `strategy.worker_host=\"{worker_host}\"`, "
             "and `strategy.orchestration_mode=\"parallel_loops\"`.\n"
-            + (
-                "- Set top-level `shared_dir.enabled=true`.\n"
-                if shared_dir_enabled
-                else ""
-            )
+            + "- Set top-level `shared_dir.enabled=false` and "
+            "`strategy.config.global_evidence_mode=\"independent\"`.\n"
             + f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
             "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "
             "lineages while useful work and outer time remain.\n"
@@ -380,16 +378,15 @@ def render_goal(
             f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
             f"{initial_launch_contract}"
             f"{coordination_text}"
-            "- Set top-level `evaluation_mode=\"blind\"`.\n"
             f"- Metric: `{metric_name}` with direction `{metric_direction}`; it is a public "
-            "format gate only and must not rank candidates.\n"
+            "format gate only. No official evaluation value may enter this Search run.\n"
             "- Process verifier: `python3 public_check.py`, role `validity_gate`, feedback "
             f"policy `final_only`, timeout {verifier_timeout_seconds} seconds.\n"
             "- Promotion verifier: the same command, role `promotion_gate`, feedback policy "
             f"`final_only`, timeout {verifier_timeout_seconds} seconds.\n"
-            "- Verifier feedback, hidden result fields in worker context, Search history, "
-            "`results.tsv`, and Global Evidence are opaque in blind mode. Do not request or "
-            "use them for iteration, continuation, rollback, or selection.\n"
+            "- The benchmark-owned Pi shim makes verifier feedback, worker context history, "
+            "`results.tsv`, Git administration, and Global Evidence opaque to workers. "
+            "Workers must not request or infer those values.\n"
             "- Each worker must commit its latest artifact and submit its own final process "
             "verifier result. Do not run duplicate parent-side process verification when "
             "matching durable evidence already exists.\n"
@@ -403,11 +400,13 @@ def render_goal(
             f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
             f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
             "Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as the authoritative upper deadline.\n"
-            "- Predeclare the blind selection rule: among candidates with a publicly compliant "
+            "- Predeclare the controller-checked selection rule: among candidates with a publicly compliant "
             "`process_passed` iteration, choose the lowest candidate ID and that candidate's latest "
             "such commit. Compliance is determined only by the public format checker and is "
-            "never disclosed to workers. Never rank or roll back from metric values. Promote the "
-            "selected commit, complete the full goal audit, and write the final Goal Plus report.\n"
+            "never disclosed to workers. Goal Plus may settle only on this public gate; after "
+            "closeout the benchmark controller independently rejects any selection that does "
+            "not match this rule before invoking the official evaluator. Promote the selected "
+            "commit, complete the full goal audit, and write the final Goal Plus report.\n"
         )
     return (
         f"{goal_plus_entrypoint(worker_host)}\n\n"
@@ -1892,23 +1891,12 @@ def finalize_goal_plus_search(
                     selection["selection_rule"] = BLIND_SELECTION_RULE
             else:
                 try:
-                    selected = (
-                        None
-                        if evaluation_mode == "blind"
-                        else _existing_selection(run_path)
-                    )
+                    selected = _existing_selection(run_path)
                     if selected is None:
                         if evaluation_mode == "blind":
                             selection = tools.search_select(run_id)
-                            if (
-                                selection.get("selection_rule")
-                                != BLIND_SELECTION_RULE
-                            ):
-                                raise RuntimeError(
-                                    "Goal Plus runtime did not apply the frozen blind "
-                                    "selection rule"
-                                )
                             _validate_existing_blind_selection(run_path, selection)
+                            selection["selection_rule"] = BLIND_SELECTION_RULE
                         else:
                             for candidate_path in candidate_paths:
                                 candidate = load_json(candidate_path)
@@ -1926,6 +1914,9 @@ def finalize_goal_plus_search(
                         run_data = load_json(run_path)
                     else:
                         run_data, candidate_id, selection = selected
+                        if evaluation_mode == "blind":
+                            _validate_existing_blind_selection(run_path, selection)
+                            selection["selection_rule"] = BLIND_SELECTION_RULE
                     promotion = tools.search_promote(run_id, candidate_id)
                 except RuntimeError:
                     existing = _existing_promotion(run_path)

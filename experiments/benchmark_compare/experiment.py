@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -39,7 +42,8 @@ from experiments.benchmark_compare.conditions import (  # noqa: E402
     resolve_condition,
 )
 from experiments.benchmark_compare.pi_worker_launcher import (  # noqa: E402
-    GOAL_PLUS_WORKER_LAUNCHER_ENV,
+    LEGACY_GOAL_PLUS_WORKER_LAUNCHER_ENV,
+    REAL_PI_BIN_ENV,
     SANDBOX_POLICY_ENV,
 )
 from experiments.openevolve_compare.experiment import (  # noqa: E402
@@ -109,6 +113,7 @@ PI_WORKER_LAUNCHER = (
 PI_TOOL_PROXY = (
     ROOT / "experiments" / "benchmark_compare" / "bin" / "goal-plus-pi-tool"
 )
+PI_SHIM = ROOT / "experiments" / "benchmark_compare" / "pi-shim" / "pi"
 
 
 @dataclass(frozen=True)
@@ -260,48 +265,32 @@ def _pi_worker_sandbox_policy(api_key_env: str) -> dict[str, Any] | None:
     return policy
 
 
-def _require_pi_worker_launcher_source(goal_plus_root: Path) -> None:
-    worker_source = goal_plus_root / "src" / "goal_plus" / "pi_worker.py"
-    if not worker_source.is_file() or GOAL_PLUS_WORKER_LAUNCHER_ENV not in (
-        worker_source.read_text(encoding="utf-8")
-    ):
-        raise RuntimeError(
-            "selected Goal Plus source does not support the required external "
-            "Pi worker launcher protocol"
-        )
-
-
-def _require_pi_worker_launcher_runtime(runtime_bin_dir: Path) -> None:
-    python = runtime_bin_dir / ("python.exe" if os.name == "nt" else "python")
-    completed = subprocess.run(
-        [
-            str(python),
-            "-c",
-            (
-                "from goal_plus.pi_worker import PI_WORKER_LAUNCHER_ENV; "
-                "print(PI_WORKER_LAUNCHER_ENV)"
-            ),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if (
-        completed.returncode != 0
-        or completed.stdout.strip() != GOAL_PLUS_WORKER_LAUNCHER_ENV
-    ):
-        detail = (completed.stderr or completed.stdout).strip()
-        raise RuntimeError(
-            "benchmark runtime does not support the required external Pi worker "
-            f"launcher protocol: {detail or 'capability probe failed'}"
-        )
+def _resolve_real_pi_binary(
+    pi_bin: str,
+    environment: dict[str, str],
+) -> Path:
+    configured = Path(pi_bin)
+    if configured.is_absolute():
+        candidate = configured
+    else:
+        found = shutil.which(pi_bin, path=environment.get("PATH"))
+        if found is None:
+            raise FileNotFoundError(f"Pi executable not found: {pi_bin}")
+        candidate = Path(found)
+    candidate = candidate.expanduser().absolute()
+    resolved = candidate.resolve(strict=True)
+    if candidate == PI_SHIM.absolute() or resolved == PI_SHIM.resolve():
+        raise RuntimeError("bench Pi shim cannot be configured as the real Pi binary")
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        raise PermissionError(f"Pi executable is not executable: {resolved}")
+    return candidate
 
 
 def _configure_pi_worker_sandbox_environment(
     manifest: dict[str, Any],
     environment: dict[str, str],
-    runtime_bin_dir: Path,
     api_key_env: str,
+    pi_bin: str,
 ) -> None:
     if manifest["method"] != "goal-plus-pi" or PI_WORKER_SANDBOX is None:
         return
@@ -320,20 +309,25 @@ def _configure_pi_worker_sandbox_environment(
         )
     if shutil.which("bwrap", path=environment.get("PATH")) is None:
         raise RuntimeError("ZSoft Goal Plus Pi worker sandbox requires bwrap")
-    for executable in (PI_WORKER_LAUNCHER, PI_TOOL_PROXY):
+    for executable in (PI_WORKER_LAUNCHER, PI_TOOL_PROXY, PI_SHIM):
         if not executable.is_file() or not os.access(executable, os.X_OK):
             raise RuntimeError(
                 f"ZSoft Pi worker launcher asset is unavailable: {executable}"
             )
-    _require_pi_worker_launcher_runtime(runtime_bin_dir)
-    environment[GOAL_PLUS_WORKER_LAUNCHER_ENV] = str(PI_WORKER_LAUNCHER)
+    real_pi = _resolve_real_pi_binary(pi_bin, environment)
+    environment.pop(LEGACY_GOAL_PLUS_WORKER_LAUNCHER_ENV, None)
+    environment[REAL_PI_BIN_ENV] = str(real_pi)
     environment[SANDBOX_POLICY_ENV] = json.dumps(
         worker_sandbox, separators=(",", ":")
+    )
+    environment["PATH"] = (
+        str(PI_SHIM.parent) + os.pathsep + environment.get("PATH", "")
     )
     manifest["pi_worker_sandbox"] = {
         **worker_sandbox,
         "owner": "bench-goal-plus",
-        "launcher_protocol": GOAL_PLUS_WORKER_LAUNCHER_ENV,
+        "launch_interception": "bench-owned-pi-path-shim",
+        "goal_plus_source_changes_required": False,
         "environment_values_persisted": False,
     }
 
@@ -394,6 +388,8 @@ def prepare(args: argparse.Namespace) -> int:
         "goal-plus-pi",
     }:
         raise ValueError("--shared-dir requires a Goal Plus method")
+    if EVALUATION_MODE == "blind" and getattr(args, "shared_dir", False):
+        raise ValueError("blind ZSoft evaluation requires shared_dir to remain disabled")
     if args.iterations_ceiling < 1:
         raise ValueError("iterations ceiling must be positive")
     if args.llm_max_tokens < 1:
@@ -522,8 +518,6 @@ def prepare(args: argparse.Namespace) -> int:
             worker_host = "codex"
             worker_model = args.model
         else:
-            if PI_WORKER_SANDBOX is not None:
-                _require_pi_worker_launcher_source(goal_plus_root)
             copy_goal_plus_pi_assets(goal_plus_root, workspace)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
             worker_host = "pi-rpc"
@@ -840,6 +834,353 @@ def copy_artifact(source: Path, destination: Path) -> None:
         shutil.copytree(source, destination)
         return
     shutil.copy2(source, destination)
+
+
+ROUND_F1_COLUMNS = (
+    "run_id",
+    "candidate_id",
+    "iteration",
+    "git_head",
+    "artifact_hash",
+    "snapshot_sha256",
+    "format_valid",
+    "valid",
+    "f1",
+    "precision",
+    "recall",
+    "tp",
+    "fp",
+    "fn",
+    "score_source",
+)
+
+
+def _materialize_git_directory(
+    repository: Path,
+    git_head: str,
+    artifact_name: str,
+    destination: Path,
+) -> str:
+    """Materialize direct regular files from one committed artifact tree."""
+    if len(git_head) != 40 or any(
+        char not in "0123456789abcdef" for char in git_head
+    ):
+        raise ValueError(f"invalid iteration Git head: {git_head!r}")
+    verified = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "rev-parse",
+            "--verify",
+            f"{git_head}^{{commit}}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if verified != git_head:
+        raise RuntimeError("iteration Git head did not resolve exactly")
+    tree = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "ls-tree",
+            "-rz",
+            "--full-tree",
+            git_head,
+            "--",
+            artifact_name,
+        ],
+        capture_output=True,
+        check=True,
+    ).stdout
+    destination.mkdir(mode=0o700)
+    digest = hashlib.sha256()
+    digest.update(b"bench-goal-plus-round-artifact-v1\0")
+    seen: set[str] = set()
+    for raw_entry in tree.split(b"\0"):
+        if not raw_entry:
+            continue
+        header, separator, raw_path = raw_entry.partition(b"\t")
+        if not separator:
+            raise RuntimeError("malformed Git tree entry")
+        mode, object_type, object_id = header.decode("ascii").split(" ")
+        path = raw_path.decode("utf-8")
+        relative = Path(path)
+        if (
+            mode not in {"100644", "100755"}
+            or object_type != "blob"
+            or len(relative.parts) != 2
+            or relative.parts[0] != artifact_name
+            or relative.parts[1] in {"", ".", ".."}
+            or relative.parts[1] in seen
+        ):
+            raise RuntimeError(f"unsafe committed artifact entry: {path!r}")
+        seen.add(relative.parts[1])
+        payload = subprocess.run(
+            ["git", "-C", str(repository), "cat-file", "blob", object_id],
+            capture_output=True,
+            check=True,
+        ).stdout
+        name = relative.parts[1]
+        name_bytes = name.encode("utf-8")
+        digest.update(len(name_bytes).to_bytes(8, "big"))
+        digest.update(name_bytes)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+        output = destination / name
+        output.write_bytes(payload)
+        output.chmod(0o600)
+    return digest.hexdigest()
+
+
+def export_posthoc_detect_round_f1(
+    *,
+    run_dir: Path,
+    workspace: Path,
+    benchmark_root: Path,
+    final_evaluation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Score committed Detect iterations only after every agent has exited."""
+    started = time.monotonic()
+    run_dir = Path(run_dir).resolve(strict=True)
+    workspace = Path(workspace).resolve(strict=True)
+    report_path = run_dir / "round-f1.tsv"
+    if workspace == run_dir or run_dir not in workspace.parents:
+        raise RuntimeError("round scoring requires a cell-owned workspace")
+    task_path = workspace / "task.json"
+    if not task_path.is_file():
+        raise FileNotFoundError(task_path)
+
+    analysis_root = run_dir / "controller-runtime" / "round-f1"
+    analysis_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    rows: list[dict[str, Any]] = []
+    cache: dict[str, dict[str, Any]] = {}
+    official_calls = 0
+    error_rows: list[dict[str, Any]] = []
+    search_runs = workspace / ".gp" / "runs"
+    for search_run in sorted(search_runs.glob("run_*")):
+        if not search_run.is_dir() or search_run.is_symlink():
+            continue
+        run_id = search_run.name
+        for candidate_path in sorted(
+            (search_run / "candidates").glob("*/candidate.json")
+        ):
+            candidate = load_json(candidate_path)
+            candidate_id = candidate.get("candidate_id")
+            iterations = candidate.get("iterations")
+            if (
+                not isinstance(candidate_id, str)
+                or candidate_path.parent.name != candidate_id
+                or not isinstance(iterations, list)
+            ):
+                raise RuntimeError("malformed candidate iteration metadata")
+            repository = search_run / "workspace" / candidate_id
+            if not repository.is_dir() or repository.is_symlink():
+                raise RuntimeError(
+                    f"candidate workspace is unavailable: {candidate_id}"
+                )
+            for iteration in sorted(
+                iterations,
+                key=lambda item: (
+                    item.get("iteration", -1) if isinstance(item, dict) else -1
+                ),
+            ):
+                if not isinstance(iteration, dict):
+                    raise RuntimeError("malformed iteration metadata")
+                iteration_number = iteration.get("iteration")
+                git_head = iteration.get("git_head")
+                if type(iteration_number) is not int or not isinstance(
+                    git_head, str
+                ):
+                    raise RuntimeError("iteration is missing its Git provenance")
+                row = {
+                    "run_id": run_id,
+                    "candidate_id": candidate_id,
+                    "iteration": iteration_number,
+                    "git_head": git_head,
+                    "artifact_hash": iteration.get("artifact_hash") or "",
+                }
+                try:
+                    with tempfile.TemporaryDirectory(
+                        prefix=f"{candidate_id}-{iteration_number:04d}-",
+                        dir=analysis_root,
+                    ) as temporary:
+                        evaluation_workspace = Path(temporary) / "workspace"
+                        evaluation_workspace.mkdir(mode=0o700)
+                        shutil.copy2(
+                            task_path, evaluation_workspace / "task.json"
+                        )
+                        snapshot_sha256 = _materialize_git_directory(
+                            repository,
+                            git_head,
+                            ARTIFACT_NAME,
+                            evaluation_workspace / ARTIFACT_NAME,
+                        )
+                        evaluation = cache.get(snapshot_sha256)
+                        if evaluation is None:
+                            evaluation = evaluate_with_controller_runtime(
+                                evaluation_workspace,
+                                "final",
+                                analysis_root / "scores" / snapshot_sha256,
+                                benchmark_root,
+                            )
+                            cache[snapshot_sha256] = evaluation
+                            score_source = "official_evaluator"
+                            official_calls += 1
+                        else:
+                            score_source = "artifact_cache"
+                    score = evaluation.get("zsoft_score") or {}
+                    row.update(
+                        {
+                            "snapshot_sha256": snapshot_sha256,
+                            "format_valid": evaluation.get("format_valid"),
+                            "valid": evaluation.get("valid"),
+                            "f1": evaluation.get("f1"),
+                            "precision": score.get("precision"),
+                            "recall": score.get("recall"),
+                            "tp": score.get("tp"),
+                            "fp": score.get("fp"),
+                            "fn": score.get("fn"),
+                            "score_source": score_source,
+                        }
+                    )
+                except Exception as exc:
+                    row.update(
+                        {
+                            "snapshot_sha256": "",
+                            "format_valid": "",
+                            "valid": False,
+                            "f1": "",
+                            "precision": "",
+                            "recall": "",
+                            "tp": "",
+                            "fp": "",
+                            "fn": "",
+                            "score_source": "error",
+                        }
+                    )
+                    error_rows.append(
+                        {
+                            "run_id": run_id,
+                            "candidate_id": candidate_id,
+                            "iteration": iteration_number,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                rows.append(row)
+
+    def tsv(value: Any) -> str:
+        if value is None:
+            return ""
+        if value is True:
+            return "true"
+        if value is False:
+            return "false"
+        return (
+            str(value)
+            .replace("\t", " ")
+            .replace("\r", " ")
+            .replace("\n", " ")
+        )
+
+    temporary_report = report_path.with_suffix(".tsv.tmp")
+    with temporary_report.open("w", encoding="utf-8", newline="") as report:
+        report.write("\t".join(ROUND_F1_COLUMNS) + "\n")
+        for row in rows:
+            report.write(
+                "\t".join(tsv(row.get(column)) for column in ROUND_F1_COLUMNS)
+            )
+            report.write("\n")
+    temporary_report.chmod(0o600)
+    os.replace(temporary_report, report_path)
+    latest_f1: dict[tuple[str, str], tuple[int, float]] = {}
+    for row in rows:
+        f1 = row.get("f1")
+        if not isinstance(f1, (int, float)):
+            continue
+        key = (str(row["run_id"]), str(row["candidate_id"]))
+        current = latest_f1.get(key)
+        if current is None or int(row["iteration"]) > current[0]:
+            latest_f1[key] = (int(row["iteration"]), float(f1))
+    final_f1 = None
+    if final_evaluation is not None and isinstance(
+        final_evaluation.get("f1"), (int, float)
+    ):
+        final_f1 = float(final_evaluation["f1"])
+    updated_reports = []
+    for search_run in sorted(search_runs.glob("run_*")):
+        report = search_run / "report.md"
+        candidate_scores = {
+            candidate_id: score
+            for (run_id, candidate_id), (_, score) in latest_f1.items()
+            if run_id == search_run.name
+        }
+        if report.is_file() and candidate_scores:
+            _update_detect_report_latest_f1(report, candidate_scores, final_f1)
+            updated_reports.append(str(report))
+    return {
+        "completed": not error_rows,
+        "report_path": str(report_path),
+        "row_count": len(rows),
+        "official_evaluator_calls": official_calls,
+        "artifact_cache_hits": len(rows) - official_calls - len(error_rows),
+        "duration_seconds": time.monotonic() - started,
+        "timing_scope": "posthoc_after_agent_exit",
+        "visible_to_workers": False,
+        "affects_online_selection": False,
+        "updated_report_paths": updated_reports,
+        "errors": error_rows,
+    }
+
+
+def _update_detect_report_latest_f1(
+    report_path: Path,
+    candidate_scores: dict[str, float],
+    final_f1: float | None,
+) -> None:
+    """Relabel the terminal report after hidden scores can no longer affect search."""
+    lines = report_path.read_text(encoding="utf-8").splitlines()
+    output: list[str] = []
+    in_ledgers = False
+    inserted_note = False
+    for line in lines:
+        if line.startswith("- Metric: "):
+            output.append(
+                "- Search metric: `format_valid` (maximize; online public gate only)"
+            )
+            output.append(
+                "- Final benchmark metric: `f1` (maximize; controller-only posthoc)"
+            )
+            if final_f1 is not None:
+                output.append(f"- Final benchmark F1: `{final_f1}`")
+            continue
+        if line == "## Results Ledgers":
+            in_ledgers = True
+            output.append(line)
+            continue
+        if in_ledgers and line.startswith("## "):
+            in_ledgers = False
+        if in_ledgers and not inserted_note and line.startswith("Each candidate"):
+            output.append(
+                "Latest Score is the final iteration's official posthoc F1. "
+                "It was computed after all agents exited and did not affect selection."
+            )
+            inserted_note = True
+            continue
+        if in_ledgers and line.startswith("| `"):
+            fields = line.split("|")
+            if len(fields) >= 8:
+                candidate_id = fields[1].strip().strip("`")
+                if candidate_id in candidate_scores:
+                    fields[5] = f" {candidate_scores[candidate_id]} "
+                    line = "|".join(fields)
+        output.append(line)
+    temporary = report_path.with_suffix(".md.tmp")
+    temporary.write_text("\n".join(output) + "\n", encoding="utf-8")
+    os.replace(temporary, report_path)
 
 
 def condition_incomplete_reason(
@@ -1367,6 +1708,21 @@ def execute_goal_plus(
     control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
         workspace
     )
+    if BENCHMARK_NAME == "zsoft-detect" and evaluation_mode == "blind":
+        try:
+            control["posthoc_round_scoring"] = export_posthoc_detect_round_f1(
+                run_dir=run_dir,
+                workspace=workspace,
+                benchmark_root=benchmark_root,
+                final_evaluation=final,
+            )
+        except Exception as exc:
+            control["posthoc_round_scoring"] = {
+                "completed": False,
+                "visible_to_workers": False,
+                "affects_online_selection": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
     goal_runs = control["goal_plus"]["runs"]
     process_calls = sum(
         item.get("process_verifier_command_count", 0) for item in goal_runs
@@ -1598,8 +1954,8 @@ def execute(args: argparse.Namespace) -> int:
     _configure_pi_worker_sandbox_environment(
         manifest,
         environment,
-        bin_dir,
         pi_api_key_env,
+        args.pi_bin,
     )
     manifest["status"] = "running"
     manifest["execution_started_at"] = utc_now()

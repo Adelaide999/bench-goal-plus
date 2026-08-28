@@ -17,13 +17,17 @@ except ModuleNotFoundError as exc:
     ) from exc
 
 from experiments.benchmark_compare.pi_worker_launcher import (
+    REAL_PI_BIN_ENV,
     SANDBOX_POLICY_ENV,
     TOOL_SOCKET_ENV,
     BubblewrapWorker,
     LaunchContext,
     SandboxPolicy,
     WorkerToolProxy,
+    _OPAQUE_RESULTS_LEDGER,
     _runtime_root,
+    _shim_worker_launch,
+    run_pi_shim,
 )
 
 
@@ -81,8 +85,13 @@ def _init_git(workspace: Path) -> None:
         ["git", "-C", str(workspace), "config", "user.email", "test@example.com"],
         check=True,
     )
+    (workspace / "results.tsv").write_text(
+        "iteration\tformat_valid\n1\tprivate-score-sentinel\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(workspace), "add", "-A"], check=True)
     subprocess.run(
-        ["git", "-C", str(workspace), "commit", "--allow-empty", "-q", "-m", "fixture"],
+        ["git", "-C", str(workspace), "commit", "-q", "-m", "fixture"],
         check=True,
     )
 
@@ -98,8 +107,38 @@ def _fixture_extension(tmp_path: Path) -> Path:
     extension_dir = tmp_path / "pi-extension"
     extension_dir.mkdir()
     extension = extension_dir / "goal-plus.ts"
-    extension.write_text("// fixture\n", encoding="utf-8")
+    extension.write_text(
+        "export default function fixture() {}\n",
+        encoding="utf-8",
+    )
     return extension
+
+
+def _write_session_record(
+    root: Path,
+    workspace: Path,
+    *,
+    session_id: str = "agent_1",
+    run_id: str = "run_1",
+    candidate_id: str = "c001",
+    host: str = "pi-rpc",
+) -> Path:
+    path = root / "runs" / run_id / "agent_sessions" / f"{session_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "agent_session_id": session_id,
+                "run_id": run_id,
+                "candidate_id": candidate_id,
+                "host": host,
+                "workspace": str(workspace.resolve()),
+                "launch": {"role": "worker"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_launch_context_and_policy_are_strict() -> None:
@@ -207,6 +246,137 @@ def test_runtime_root_is_bound_to_run_candidate_and_workspace(tmp_path: Path) ->
                 workspace=workspace.resolve(),
             ),
         )
+
+
+def test_bench_pi_shim_derives_a_trusted_worker_context(tmp_path: Path) -> None:
+    root, workspace = _candidate_paths(tmp_path)
+    workspace.mkdir()
+    _write_session_record(root, workspace)
+    environment = {
+        "GOAL_PLUS_PI_ROLE": "worker",
+        "GOAL_PLUS_ROOT": str(root),
+        REAL_PI_BIN_ENV: str(Path(sys.executable).resolve()),
+    }
+    command = [
+        "--model",
+        "provider/model",
+        "--mode",
+        "rpc",
+        "--session-id",
+        "agent_1",
+    ]
+
+    planned = _shim_worker_launch(command, environment, workspace)
+
+    assert planned is not None
+    context, wrapped = planned
+    assert context == _context(workspace.resolve())
+    assert wrapped[:1] == [str(Path(sys.executable).resolve())]
+    assert wrapped[1 : 1 + len(command)] == command
+    assert wrapped[-2] == "--append-system-prompt"
+    assert "official metric are unavailable" in wrapped[-1]
+    assert "GOAL_PLUS_PI_WORKER_LAUNCHER" not in environment
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    (
+        ("host", "does not match"),
+        ("candidate", "does not match"),
+        ("session", "no trusted"),
+        ("cwd", "outside"),
+        ("session_chars", "safe identity"),
+    ),
+)
+def test_bench_pi_shim_rejects_tampered_worker_identity(
+    tmp_path: Path,
+    mutation: str,
+    error: str,
+) -> None:
+    root, workspace = _candidate_paths(tmp_path)
+    workspace.mkdir()
+    host = "codex" if mutation == "host" else "pi-rpc"
+    candidate = "c002" if mutation == "candidate" else "c001"
+    _write_session_record(
+        root,
+        workspace,
+        host=host,
+        candidate_id=candidate,
+    )
+    session_id = (
+        "agent_missing"
+        if mutation == "session"
+        else "../agent_1"
+        if mutation == "session_chars"
+        else "agent_1"
+    )
+    cwd = tmp_path / "outside" if mutation == "cwd" else workspace
+    if mutation == "cwd":
+        cwd.mkdir()
+    environment = {
+        "GOAL_PLUS_PI_ROLE": "worker",
+        "GOAL_PLUS_ROOT": str(root),
+        REAL_PI_BIN_ENV: str(Path(sys.executable).resolve()),
+    }
+
+    with pytest.raises((RuntimeError, ValueError), match=error):
+        _shim_worker_launch(
+            ["--mode", "rpc", "--session-id", session_id],
+            environment,
+            cwd,
+        )
+
+
+def test_bench_pi_shim_rejects_symlinked_root_and_non_rpc_worker(
+    tmp_path: Path,
+) -> None:
+    root, workspace = _candidate_paths(tmp_path)
+    workspace.mkdir()
+    _write_session_record(root, workspace)
+    root_link = tmp_path / "runtime-link"
+    root_link.symlink_to(root, target_is_directory=True)
+    environment = {
+        "GOAL_PLUS_PI_ROLE": "worker",
+        "GOAL_PLUS_ROOT": str(root_link),
+        REAL_PI_BIN_ENV: str(Path(sys.executable).resolve()),
+    }
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        _shim_worker_launch(
+            ["--mode", "rpc", "--session-id", "agent_1"],
+            environment,
+            workspace,
+        )
+    with pytest.raises(RuntimeError, match="must use RPC mode"):
+        _shim_worker_launch(
+            ["--mode", "json", "--session-id", "agent_1"],
+            {**environment, "GOAL_PLUS_ROOT": str(root)},
+            workspace,
+        )
+
+
+def test_bench_pi_shim_passes_non_worker_pi_to_the_real_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, Any] = {}
+
+    def fake_execve(path: str, argv: list[str], environment: dict[str, str]) -> None:
+        observed.update(path=path, argv=argv, environment=environment)
+        raise RuntimeError("exec intercepted")
+
+    monkeypatch.setattr(os, "execve", fake_execve)
+    environment = {
+        "GOAL_PLUS_PI_ROLE": "main",
+        REAL_PI_BIN_ENV: str(Path(sys.executable).resolve()),
+    }
+    with pytest.raises(RuntimeError, match="exec intercepted"):
+        run_pi_shim(["--version"], environment, tmp_path)
+
+    real_pi = str(Path(sys.executable).resolve())
+    assert observed["path"] == real_pi
+    assert observed["argv"] == [real_pi, "--version"]
+    assert observed["environment"] == environment
 
 
 def test_extension_bundle_must_not_overlap_runtime_root(tmp_path: Path) -> None:
@@ -603,23 +773,19 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
         "tool": "search_get_global_evidence",
         "args": {"agent_session_id": "agent_1"},
     }
-    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", lambda *_args: [])
-    assert proxy.dispatch(evidence_request) == {"ok": True, "result": []}
-    monkeypatch.setattr(
-        "goal_plus.pi_tool.call_pi_tool",
-        lambda *_args: [{"candidate_id": "c001", "view": "private"}],
-    )
-    assert proxy.dispatch(evidence_request) == {
-        "ok": False,
-        "error": "blind worker tool response is unavailable",
-    }
-
     called = False
 
     def must_not_call(*_args: Any) -> dict[str, Any]:
         nonlocal called
         called = True
         return {}
+
+    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", must_not_call)
+    assert proxy.dispatch(evidence_request) == {
+        "ok": False,
+        "error": "blind worker tool response is unavailable",
+    }
+    assert called is False
 
     monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", must_not_call)
     blocked = proxy.dispatch(
@@ -919,6 +1085,10 @@ def test_external_git_administration_uses_candidate_private_view(
         check=True,
     )
     (repository / "tracked.txt").write_text("fixture\n", encoding="utf-8")
+    (repository / "results.tsv").write_text(
+        "iteration\tformat_valid\n1\tprivate-score-sentinel\n",
+        encoding="utf-8",
+    )
     subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
     subprocess.run(
         ["git", "-C", str(repository), "commit", "-q", "-m", "fixture"],
@@ -945,15 +1115,23 @@ def test_external_git_administration_uses_candidate_private_view(
     pi_home.mkdir()
     worker = BubblewrapWorker(
         context=_context(workspace),
-        policy=_policy(writable=("tracked.txt",)),
+        policy=_policy(writable=("tracked.txt",), evaluation_mode="blind"),
         command=_worker_command(
             "\n".join(
                 (
                     "import pathlib, subprocess",
-                    f"assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == {candidate_head!r}",
+                    f"assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() != {candidate_head!r}",
                     "refs = subprocess.check_output(['git', 'for-each-ref', '--format=%(refname)'], text=True).splitlines()",
                     "assert refs == ['refs/heads/sandbox'], refs",
-                    "assert subprocess.check_output(['git', 'log', '-1', '--format=%s'], text=True).strip() == 'fixture'",
+                    "assert subprocess.check_output(['git', 'log', '-1', '--format=%s'], text=True).strip() == 'public candidate baseline'",
+                    f"assert not pathlib.Path({str(root / 'worker-sandbox-state')!r}).exists()",
+                    f"assert not pathlib.Path({str(root / 'runs' / 'run_1' / 'candidates')!r}).exists()",
+                    "assert pathlib.Path('.git').read_text().strip() == 'gitdir: /opt/bench-goal-plus/git-admin'",
+                    f"assert subprocess.run(['git', 'cat-file', '-e', {candidate_head!r}], capture_output=True).returncode != 0",
+                    f"assert pathlib.Path('results.tsv').read_text() == {_OPAQUE_RESULTS_LEDGER!r}",
+                    f"assert subprocess.check_output(['git', 'show', 'HEAD:results.tsv'], text=True) == {_OPAQUE_RESULTS_LEDGER!r}",
+                    "assert 'private-score-sentinel' not in subprocess.check_output(['git', 'log', '-p', '--all'], text=True)",
+                    "assert 'fixture' not in subprocess.check_output(['git', 'log', '--format=%s', '--all'], text=True).splitlines()",
                     "pathlib.Path('tracked.txt').write_text('changed\\n')",
                     "assert 'tracked.txt' in subprocess.check_output(['git', 'status', '--short'], text=True)",
                     "subprocess.run(['git', '-c', 'user.name=Worker', '-c', 'user.email=worker@example.com', 'add', 'tracked.txt'], check=True)",
@@ -985,6 +1163,9 @@ def test_external_git_administration_uses_candidate_private_view(
 
     assert completed.returncode == 0, completed.stderr
     assert (workspace / "tracked.txt").read_text(encoding="utf-8") == "changed\n"
+    assert "private-score-sentinel" in (workspace / "results.tsv").read_text(
+        encoding="utf-8"
+    )
     private_git = root / "worker-sandbox-state" / "run_1" / "c001" / "git-admin"
     assert private_git.is_dir()
     assert (
@@ -997,7 +1178,7 @@ def test_external_git_administration_uses_candidate_private_view(
 
     continued = BubblewrapWorker(
         context=_context(workspace),
-        policy=_policy(writable=("tracked.txt",)),
+        policy=_policy(writable=("tracked.txt",), evaluation_mode="blind"),
         command=_worker_command(
             "import subprocess; "
             "assert subprocess.check_output(["
@@ -1030,95 +1211,20 @@ def test_external_git_administration_uses_candidate_private_view(
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Bubblewrap is Linux-only")
-def test_external_launcher_cli_runs_the_original_worker_command(
+def test_bench_path_shim_launches_standard_goal_plus_pi_worker(
     tmp_path: Path,
 ) -> None:
-    if not shutil.which("bwrap"):
-        pytest.skip("bwrap is unavailable")
+    real_pi_text = shutil.which("pi")
+    if not shutil.which("bwrap") or real_pi_text is None:
+        pytest.skip("bwrap or pi is unavailable")
+    real_pi = Path(real_pi_text).absolute()
     root, workspace = _candidate_paths(tmp_path)
     workspace.mkdir()
     _init_git(workspace)
+    _write_session_record(root, workspace)
     session_root = root / "host-sessions" / "pi"
     session_root.mkdir(parents=True)
     extension = _fixture_extension(tmp_path)
-    pi_home = tmp_path / "pi-home"
-    pi_home.mkdir()
-    context = {
-        "schema_version": 1,
-        "run_id": "run_1",
-        "candidate_id": "c001",
-        "agent_session_id": "agent_1",
-        "workspace": str(workspace),
-    }
-    launcher = (
-        Path(__file__).resolve().parents[1]
-        / "experiments"
-        / "benchmark_compare"
-        / "pi_worker_launcher.py"
-    )
-    command = _worker_command(
-        "print('launcher-ok')",
-        session_root=session_root,
-        extension=extension,
-    )
-    environment = {
-        **os.environ,
-        "GOAL_PLUS_ROOT": str(root),
-        "PI_CODING_AGENT_DIR": str(pi_home),
-        SANDBOX_POLICY_ENV: json.dumps(
-            {
-                "engine": "bubblewrap",
-                "workspace_access": "read_only",
-                "read_only_workspace_paths": [],
-                "writable_workspace_paths": [],
-                "pass_env": [],
-            }
-        ),
-    }
-
-    completed = subprocess.run(
-        [
-            str(launcher),
-            "--context-json",
-            json.dumps(context),
-            "--",
-            *command,
-        ],
-        cwd=workspace,
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-
-    assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.strip() == "launcher-ok"
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="Bubblewrap is Linux-only")
-def test_bubblewrap_launches_real_pi_rpc(tmp_path: Path) -> None:
-    if not shutil.which("bwrap") or not shutil.which("pi"):
-        pytest.skip("bwrap or pi is unavailable")
-    root, workspace = _candidate_paths(tmp_path)
-    workspace.mkdir()
-    _init_git(workspace)
-    session_root = root / "host-sessions" / "pi"
-    session_root.mkdir(parents=True)
-    extension_dir = tmp_path / "pi-extension"
-    extension_dir.mkdir()
-    helper = extension_dir / "fixture-helper.ts"
-    helper.write_text(
-        'export const fixtureValue = "loaded";\n',
-        encoding="utf-8",
-    )
-    extension = extension_dir / "fixture-extension.ts"
-    extension.write_text(
-        'import { fixtureValue } from "./fixture-helper.ts";\n'
-        'if (fixtureValue !== "loaded") throw new Error("helper not loaded");\n'
-        "export default function fixture() {}\n",
-        encoding="utf-8",
-    )
     pi_home = tmp_path / "pi-home"
     pi_home.mkdir()
     (pi_home / "auth.json").write_text("{}\n", encoding="utf-8")
@@ -1147,48 +1253,59 @@ def test_bubblewrap_launches_real_pi_rpc(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
-    command = [
-        "pi",
-        "--mode",
-        "rpc",
-        "--provider",
-        "test-provider",
-        "--model",
-        "test-provider/test-model",
-        "--approve",
-        "--session-dir",
-        str(session_root),
-        "--session-id",
-        "rpc-smoke",
-        "--no-extensions",
-        "-e",
-        str(extension),
-    ]
-    worker = BubblewrapWorker(
-        context=_context(workspace),
-        policy=_policy(pass_env=("TEST_API_KEY",)),
-        command=command,
-        environment={
-            **os.environ,
-            "GOAL_PLUS_ROOT": str(root),
-            "PI_CODING_AGENT_DIR": str(pi_home),
-            "TEST_API_KEY": "fixture-key",
-        },
+    shim_dir = (
+        Path(__file__).resolve().parents[1]
+        / "experiments"
+        / "benchmark_compare"
+        / "pi-shim"
     )
-    wrapped, environment = worker.prepare()
-    try:
-        completed = subprocess.run(
-            wrapped,
-            cwd=workspace,
-            env=environment,
-            input='{"type":"get_state","id":"smoke"}\n',
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    finally:
-        worker.close()
+    assert not (shim_dir / "goal-plus-pi-tool").exists()
+    environment = {
+        **os.environ,
+        "PATH": str(shim_dir) + os.pathsep + os.environ.get("PATH", ""),
+        "GOAL_PLUS_ROOT": str(root),
+        "GOAL_PLUS_PI_ROLE": "worker",
+        "PI_CODING_AGENT_DIR": str(pi_home),
+        "TEST_API_KEY": "fixture-key",
+        REAL_PI_BIN_ENV: str(real_pi),
+        SANDBOX_POLICY_ENV: json.dumps(
+            {
+                "engine": "bubblewrap",
+                "evaluation_mode": "blind",
+                "workspace_access": "read_only",
+                "read_only_workspace_paths": [],
+                "writable_workspace_paths": [],
+                "pass_env": ["TEST_API_KEY"],
+            }
+        ),
+    }
+
+    completed = subprocess.run(
+        [
+            "pi",
+            "--mode",
+            "rpc",
+            "--provider",
+            "test-provider",
+            "--model",
+            "test-provider/test-model",
+            "--approve",
+            "--session-dir",
+            str(session_root),
+            "--session-id",
+            "agent_1",
+            "--no-extensions",
+            "-e",
+            str(extension),
+        ],
+        cwd=workspace,
+        env=environment,
+        input='{"type":"get_state","id":"shim-smoke"}\n',
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
 
     assert completed.returncode == 0, completed.stderr
     responses = [
@@ -1197,7 +1314,7 @@ def test_bubblewrap_launches_real_pi_rpc(tmp_path: Path) -> None:
         if line.startswith("{")
     ]
     assert any(
-        response.get("id") == "smoke"
+        response.get("id") == "shim-smoke"
         and response.get("success") is True
         and response.get("command") == "get_state"
         for response in responses

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from adapters.zsoft_detect import adapter
+from experiments.benchmark_compare import experiment as benchmark_experiment
 
 
 class AdapterContractTest(unittest.TestCase):
@@ -366,6 +367,166 @@ class AdapterContractTest(unittest.TestCase):
             r"^[0-9a-f]{40}$",
         )
         self.assertRegex(adapter.git_commit(adapter.ZSOFT_ROOT), r"^[0-9a-f]{40}$")
+
+    def test_posthoc_round_f1_is_outside_worker_workspace_and_updates_report(
+        self,
+    ) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        run_dir = tmp / "cell"
+        workspace = run_dir / "workspace"
+        search_run = workspace / ".gp" / "runs" / "run_fixture"
+        repository = search_run / "workspace" / "c001"
+        candidate_dir = search_run / "candidates" / "c001"
+        repository.mkdir(parents=True)
+        candidate_dir.mkdir(parents=True)
+        (workspace / "task.json").write_text(
+            json.dumps(
+                {
+                    "task_id": "civetweb-detect",
+                    "project_id": "civetweb",
+                    "commit": "1" * 40,
+                }
+            ),
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "init", "-q", str(repository)], check=True)
+        subprocess.run(
+            ["git", "-C", str(repository), "config", "user.name", "Test"],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "config",
+                "user.email",
+                "test@example.com",
+            ],
+            check=True,
+        )
+        submission = repository / "submission"
+        submission.mkdir()
+        finding = submission / "finding.json"
+        finding.write_text('{"fixture":"first"}\n', encoding="utf-8")
+        subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", str(repository), "commit", "-q", "-m", "first"],
+            check=True,
+        )
+        first = subprocess.run(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        finding.write_text('{"fixture":"second"}\n', encoding="utf-8")
+        subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", str(repository), "commit", "-q", "-m", "second"],
+            check=True,
+        )
+        second = subprocess.run(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        (repository / "controller-note").write_text("same artifact\n")
+        subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", str(repository), "commit", "-q", "-m", "third"],
+            check=True,
+        )
+        third = subprocess.run(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        (candidate_dir / "candidate.json").write_text(
+            json.dumps(
+                {
+                    "candidate_id": "c001",
+                    "iterations": [
+                        {"iteration": 1, "git_head": first, "artifact_hash": "a"},
+                        {
+                            "iteration": 2,
+                            "git_head": second,
+                            "artifact_hash": "b",
+                        },
+                        {"iteration": 3, "git_head": third, "artifact_hash": "b"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (search_run / "report.md").write_text(
+            "# Search Report: run_fixture\n\n"
+            "- Metric: `format_valid` (maximize)\n\n"
+            "## Results Ledgers\n\n"
+            "Each candidate workspace owns the complete inherited verifier ledger.\n\n"
+            "| Candidate | Ledger | Rows | Latest Commit | Latest Score | "
+            "Latest Status | Latest Hypothesis |\n"
+            "|---|---|---:|---|---:|---|---|\n"
+            "| `c001` | results.tsv | 3 | deadbeef | 1.0 | pass | fixture |\n",
+            encoding="utf-8",
+        )
+
+        def score_snapshot(
+            evaluated_workspace: Path,
+            mode: str,
+            controller_runtime: Path,
+            benchmark_root: Path,
+        ) -> dict[str, object]:
+            self.assertEqual(mode, "final")
+            self.assertEqual(benchmark_root, tmp / "benchmark")
+            self.assertTrue(controller_runtime.is_relative_to(run_dir))
+            payload = (
+                evaluated_workspace / "submission" / "finding.json"
+            ).read_text()
+            f1 = 0.25 if "first" in payload else 0.75
+            return {
+                "valid": True,
+                "format_valid": True,
+                "f1": f1,
+                "zsoft_score": {
+                    "precision": f1,
+                    "recall": f1,
+                    "tp": 1,
+                    "fp": 0,
+                    "fn": 0,
+                },
+            }
+
+        benchmark_experiment.configure_adapter("zsoft-detect")
+        self.addCleanup(benchmark_experiment.configure_adapter, "heurigym")
+        with mock.patch.object(
+            benchmark_experiment,
+            "evaluate_with_controller_runtime",
+            side_effect=score_snapshot,
+        ) as evaluator:
+            summary = benchmark_experiment.export_posthoc_detect_round_f1(
+                run_dir=run_dir,
+                workspace=workspace,
+                benchmark_root=tmp / "benchmark",
+                final_evaluation={"f1": 0.75},
+            )
+
+        self.assertTrue(summary["completed"])
+        self.assertEqual(summary["row_count"], 3)
+        self.assertEqual(summary["official_evaluator_calls"], 2)
+        self.assertEqual(summary["artifact_cache_hits"], 1)
+        self.assertEqual(evaluator.call_count, 2)
+        report = (run_dir / "round-f1.tsv").read_text(encoding="utf-8")
+        self.assertIn("\tc001\t3\t", report)
+        self.assertIn("\t0.75\t0.75\t0.75\t", report)
+        self.assertFalse((workspace / "round-f1.tsv").exists())
+        search_report = (search_run / "report.md").read_text(encoding="utf-8")
+        self.assertIn("Final benchmark metric: `f1`", search_report)
+        self.assertIn("Final benchmark F1: `0.75`", search_report)
+        self.assertIn("| deadbeef | 0.75 | pass |", search_report)
 
 
 if __name__ == "__main__":
