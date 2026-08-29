@@ -20,9 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-GOAL_PLUS_WORKER_LAUNCHER_ENV = "GOAL_PLUS_PI_WORKER_LAUNCHER"
+LEGACY_GOAL_PLUS_WORKER_LAUNCHER_ENV = "GOAL_PLUS_PI_WORKER_LAUNCHER"
 SANDBOX_POLICY_ENV = "BENCH_GOAL_PLUS_PI_SANDBOX"
 TOOL_SOCKET_ENV = "BENCH_GOAL_PLUS_PI_TOOL_SOCKET"
+REAL_PI_BIN_ENV = "BENCH_GOAL_PLUS_REAL_PI_BIN"
 LAUNCH_CONTEXT_VERSION = 1
 _MAX_PROXY_REQUEST_BYTES = 1024 * 1024
 _MAX_UNIX_SOCKET_PATH_BYTES = 103
@@ -36,9 +37,10 @@ _RESERVED_ENV_NAMES = {
     "HOME",
     "PATH",
     "TMPDIR",
-    GOAL_PLUS_WORKER_LAUNCHER_ENV,
+    LEGACY_GOAL_PLUS_WORKER_LAUNCHER_ENV,
     SANDBOX_POLICY_ENV,
     TOOL_SOCKET_ENV,
+    REAL_PI_BIN_ENV,
 }
 _WORKER_TOOLS = {
     "search_get_agent_context",
@@ -52,6 +54,7 @@ _WORKER_TOOLS = {
 _SESSION_SCOPED_TOOLS = _WORKER_TOOLS - {"search_list_iterations"}
 _TOOL_PROXY_BIN = Path(__file__).resolve().parent / "bin" / "goal-plus-pi-tool"
 _SANDBOX_TOOL_BIN = Path("/opt/bench-goal-plus/bin")
+_SANDBOX_GIT_DIR = Path("/opt/bench-goal-plus/git-admin")
 _BLIND_PUBLIC_METRIC = "format_valid"
 _BLIND_RESPONSE_REJECTED = {
     "ok": False,
@@ -60,8 +63,17 @@ _BLIND_RESPONSE_REJECTED = {
 _BLIND_BLOCKED_TOOLS = {
     "search_copy_shared_tool",
     "search_get_evidence_detail",
+    "search_get_global_evidence",
     "search_stage_shared_tool",
 }
+_BLIND_SYSTEM_PROMPT = (
+    "This is a benchmark-owned blind Search worker. The official evaluator and "
+    "official metric are unavailable during the worker trajectory. Treat Goal Plus "
+    "verifier and iteration responses as opaque submission receipts only. Do not "
+    "infer evaluation outcomes from timing, Git metadata, workspace state, or tool "
+    "errors. Work only from the public task files and source mounted in this sandbox."
+)
+_OPAQUE_RESULTS_LEDGER = "iteration\tcommit\tstate\n"
 _BLIND_CONTEXT_SOURCE_FIELDS = {
     "agent_session_id",
     "best_iteration",
@@ -110,6 +122,7 @@ _BLIND_CANDIDATE_TASK_SOURCE_FIELDS = {
     "workspace_backend",
     "workspace_base_revision",
     "workspace_branch",
+    "task_skill_paths",
 }
 _BLIND_CANDIDATE_TASK_OUTPUT_FIELDS = {
     "allowed_files",
@@ -279,6 +292,68 @@ class LaunchContext:
             workspace=workspace.resolve(),
         )
 
+    @classmethod
+    def from_runtime(
+        cls,
+        *,
+        root: Path,
+        workspace: Path,
+        session_id: str,
+    ) -> LaunchContext:
+        root = root.expanduser().absolute()
+        if root.is_symlink():
+            raise ValueError("GOAL_PLUS_ROOT must not be a symlink")
+        root = root.resolve(strict=True)
+        workspace = workspace.resolve(strict=True)
+        try:
+            relative = workspace.relative_to(root / "runs")
+        except ValueError as exc:
+            raise ValueError(
+                "Pi worker cwd is outside the declared Goal Plus runtime"
+            ) from exc
+        if len(relative.parts) != 3 or relative.parts[1] != "workspace":
+            raise ValueError("Pi worker cwd is not a Goal Plus candidate workspace")
+        run_id, _, candidate_id = relative.parts
+        for name, value in (("run_id", run_id), ("candidate_id", candidate_id)):
+            if not _PATH_ID.fullmatch(value) or value in {".", ".."}:
+                raise ValueError(f"Pi worker {name} is not a safe path identity")
+        if not _PATH_ID.fullmatch(session_id) or session_id in {".", ".."}:
+            raise ValueError("Pi worker session id is not a safe identity")
+
+        identity_path = root
+        for part in ("runs", run_id, "workspace", candidate_id):
+            identity_path = identity_path / part
+            if identity_path.is_symlink():
+                raise ValueError("Pi worker runtime identity must not contain symlinks")
+
+        session_path = root / "runs" / run_id / "agent_sessions" / f"{session_id}.json"
+        if session_path.is_symlink() or not session_path.is_file():
+            raise RuntimeError("Pi worker has no trusted Goal Plus session record")
+        try:
+            session = json.loads(session_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Pi worker session record is unreadable") from exc
+        if not isinstance(session, dict):
+            raise RuntimeError("Pi worker session record is malformed")
+        expected = {
+            "agent_session_id": session_id,
+            "run_id": run_id,
+            "candidate_id": candidate_id,
+            "host": "pi-rpc",
+            "workspace": str(workspace),
+        }
+        if any(session.get(key) != value for key, value in expected.items()):
+            raise RuntimeError("Pi worker session record does not match its process identity")
+        launch = session.get("launch")
+        if not isinstance(launch, dict) or launch.get("role", "worker") != "worker":
+            raise RuntimeError("Pi worker session record does not describe a worker launch")
+        return cls(
+            run_id=run_id,
+            candidate_id=candidate_id,
+            agent_session_id=session_id,
+            workspace=workspace,
+        )
+
 
 @dataclass(frozen=True)
 class SandboxPolicy:
@@ -380,7 +455,6 @@ class SandboxPolicy:
 @dataclass(frozen=True)
 class PrivateGitAdmin:
     git_dir: Path
-    object_dir: Path
     work_tree: Path
 
 
@@ -559,8 +633,6 @@ def _blind_tool_response(
         return _blind_verifier_receipt(result, context)
     if tool == "search_list_iterations":
         return _blind_iteration_receipts(result, context)
-    if tool == "search_get_global_evidence":
-        return [] if result == [] else _INVALID_BLIND_RESPONSE
     return _INVALID_BLIND_RESPONSE
 
 
@@ -821,15 +893,8 @@ class BubblewrapWorker:
         if self.private_git_admin is not None:
             _add_bind(
                 args,
-                self.private_git_admin.object_dir,
-                self.private_git_admin.object_dir,
-                readonly=True,
-                created=created,
-            )
-            _add_bind(
-                args,
                 self.private_git_admin.git_dir,
-                self.private_git_admin.git_dir,
+                _SANDBOX_GIT_DIR,
                 readonly=False,
                 created=created,
             )
@@ -840,6 +905,14 @@ class BubblewrapWorker:
             readonly=True,
             created=created,
         )
+        if self.policy.evaluation_mode == "blind":
+            _mount_blind_workspace_metadata(
+                args,
+                workspace=self.context.workspace,
+                private_git_admin=self.private_git_admin,
+                private_root=self.proxy.socket_dir,
+                created=created,
+            )
         _add_bind(
             args,
             isolated_session,
@@ -1214,22 +1287,9 @@ def _prepare_private_git_admin(
     destination: Path,
 ) -> PrivateGitAdmin | None:
     workspace = workspace.resolve()
-    head = _git_output(workspace, "rev-parse", "--verify", "HEAD")
-    object_dir_text = _git_output(
-        workspace,
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-path",
-        "objects",
-    )
-    if not head or object_dir_text is None:
+    if not _git_output(workspace, "rev-parse", "--verify", "HEAD"):
         raise RuntimeError(
             "ZSoft Pi worker sandbox cannot isolate the candidate Git state"
-        )
-    object_dir = Path(object_dir_text).resolve()
-    if not object_dir.is_dir():
-        raise FileNotFoundError(
-            f"candidate Git object directory not found: {object_dir}"
         )
 
     if destination.is_symlink():
@@ -1255,20 +1315,25 @@ def _prepare_private_git_admin(
             "--verify",
             "HEAD",
         )
-        alternates = destination / "objects" / "info" / "alternates"
+        isolated = _git_output(
+            workspace,
+            f"--git-dir={destination}",
+            "config",
+            "--get",
+            "bench-goal-plus.isolated",
+        )
         if (
             configured_worktree is None
             or Path(configured_worktree).resolve() != workspace
             or private_head is None
-            or not alternates.is_file()
-            or alternates.read_text(encoding="utf-8").strip() != str(object_dir)
+            or isolated != "true"
+            or (destination / "objects" / "info" / "alternates").exists()
         ):
             raise RuntimeError(
                 "existing candidate-private Git directory has an invalid identity"
             )
         return PrivateGitAdmin(
             git_dir=destination,
-            object_dir=object_dir,
             work_tree=workspace,
         )
 
@@ -1282,28 +1347,136 @@ def _prepare_private_git_admin(
         text=True,
     )
     destination.chmod(0o700)
-    alternates = destination / "objects" / "info" / "alternates"
-    alternates.parent.mkdir(parents=True, exist_ok=True)
-    alternates.write_text(f"{object_dir}\n", encoding="utf-8")
-    git_command = ["git", f"--git-dir={destination}"]
+    git_command = ["git", f"--git-dir={destination}", f"--work-tree={workspace}"]
+    identity_environment = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Bench Goal Plus",
+        "GIT_AUTHOR_EMAIL": "bench-goal-plus@localhost",
+        "GIT_COMMITTER_NAME": "Bench Goal Plus",
+        "GIT_COMMITTER_EMAIL": "bench-goal-plus@localhost",
+    }
     for command in (
         [*git_command, "config", "core.bare", "false"],
         [*git_command, "config", "core.worktree", str(workspace)],
-        [*git_command, "update-ref", "refs/heads/sandbox", head],
-        [*git_command, "symbolic-ref", "HEAD", "refs/heads/sandbox"],
-        [*git_command, f"--work-tree={workspace}", "read-tree", "HEAD"],
+        [*git_command, "config", "bench-goal-plus.isolated", "true"],
+        [
+            *git_command,
+            "add",
+            "-A",
+            "--",
+            ".",
+            ":(exclude)results.tsv",
+            ":(exclude).tmp",
+            ":(exclude).tmp/**",
+        ],
     ):
         subprocess.run(
             command,
             check=True,
             capture_output=True,
             text=True,
+            env=identity_environment,
+        )
+    blob = subprocess.run(
+        [*git_command, "hash-object", "-w", "--stdin"],
+        input=_OPAQUE_RESULTS_LEDGER,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=identity_environment,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            *git_command,
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "100644",
+            blob,
+            "results.tsv",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=identity_environment,
+    )
+    tree = subprocess.run(
+        [*git_command, "write-tree"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=identity_environment,
+    ).stdout.strip()
+    private_head = subprocess.run(
+        [*git_command, "commit-tree", tree, "-m", "public candidate baseline"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=identity_environment,
+    ).stdout.strip()
+    for command in (
+        [*git_command, "update-ref", "refs/heads/sandbox", private_head],
+        [*git_command, "symbolic-ref", "HEAD", "refs/heads/sandbox"],
+        [*git_command, "reset", "--mixed", "HEAD"],
+    ):
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=identity_environment,
         )
     return PrivateGitAdmin(
         git_dir=destination,
-        object_dir=object_dir,
         work_tree=workspace,
     )
+
+
+def _mount_blind_workspace_metadata(
+    args: list[str],
+    *,
+    workspace: Path,
+    private_git_admin: PrivateGitAdmin | None,
+    private_root: Path,
+    created: set[str],
+) -> None:
+    if private_git_admin is None:
+        raise RuntimeError("blind worker requires a candidate-private Git view")
+    results_path = workspace / "results.tsv"
+    if results_path.is_symlink() or not results_path.is_file():
+        raise RuntimeError("blind worker results.tsv must be a regular file")
+    opaque_results = private_root / "opaque-results.tsv"
+    opaque_results.write_text(_OPAQUE_RESULTS_LEDGER, encoding="utf-8")
+    opaque_results.chmod(0o400)
+    _add_bind(args, opaque_results, results_path, readonly=True, created=created)
+
+    workspace_git = workspace / ".git"
+    if workspace_git.is_symlink() or not workspace_git.exists():
+        raise RuntimeError("blind worker workspace must have Git metadata")
+    if workspace_git.is_dir():
+        _add_bind(
+            args,
+            private_git_admin.git_dir,
+            workspace_git,
+            readonly=False,
+            created=created,
+        )
+    elif workspace_git.is_file():
+        private_git_link = private_root / "workspace.git"
+        private_git_link.write_text(
+            f"gitdir: {_SANDBOX_GIT_DIR}\n",
+            encoding="utf-8",
+        )
+        private_git_link.chmod(0o400)
+        _add_bind(
+            args,
+            private_git_link,
+            workspace_git,
+            readonly=True,
+            created=created,
+        )
+    else:
+        raise RuntimeError("blind worker workspace Git metadata is unsupported")
 
 
 def _sandbox_environment(
@@ -1338,7 +1511,7 @@ def _sandbox_environment(
     if private_git_admin is not None:
         result.update(
             {
-                "GIT_DIR": str(private_git_admin.git_dir),
+                "GIT_DIR": str(_SANDBOX_GIT_DIR),
                 "GIT_WORK_TREE": str(private_git_admin.work_tree),
                 "GIT_OPTIONAL_LOCKS": "0",
             }
@@ -1391,6 +1564,71 @@ def run_launcher(
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
         sandbox.close()
+
+
+def _real_pi_binary(environment: Mapping[str, str]) -> Path:
+    value = environment.get(REAL_PI_BIN_ENV)
+    if not value:
+        raise RuntimeError(f"{REAL_PI_BIN_ENV} is required by the bench Pi shim")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise ValueError(f"{REAL_PI_BIN_ENV} must be an absolute path")
+    path = path.absolute()
+    resolved = path.resolve(strict=True)
+    shim = Path(__file__).resolve().parent / "bin" / "pi"
+    if path == shim.absolute() or resolved == shim.resolve():
+        raise RuntimeError("bench Pi shim cannot point back to itself")
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        raise PermissionError(f"{REAL_PI_BIN_ENV} is not executable")
+    return path
+
+
+def _pi_mode(command: list[str]) -> str | None:
+    try:
+        return _command_argument(command, "--mode")
+    except ValueError:
+        return None
+
+
+def _shim_worker_launch(
+    command: list[str],
+    environment: Mapping[str, str],
+    cwd: Path,
+) -> tuple[LaunchContext, list[str]] | None:
+    if environment.get("GOAL_PLUS_PI_ROLE") != "worker":
+        return None
+    if _pi_mode(command) != "rpc":
+        raise RuntimeError("Goal Plus Pi worker must use RPC mode")
+    root_value = environment.get("GOAL_PLUS_ROOT")
+    if not root_value:
+        raise RuntimeError("GOAL_PLUS_ROOT is required for a Goal Plus Pi worker")
+    session_id = _command_argument(command, "--session-id")
+    if not _PATH_ID.fullmatch(session_id) or session_id in {".", ".."}:
+        raise ValueError("Goal Plus Pi worker session id is not a safe identity")
+    context = LaunchContext.from_runtime(
+        root=Path(root_value),
+        workspace=cwd,
+        session_id=session_id,
+    )
+    real_pi = _real_pi_binary(environment)
+    wrapped = [str(real_pi), *command]
+    wrapped.extend(["--append-system-prompt", _BLIND_SYSTEM_PROMPT])
+    return context, wrapped
+
+
+def run_pi_shim(
+    argv: list[str],
+    environment: Mapping[str, str],
+    cwd: Path,
+) -> int:
+    command = list(argv)
+    planned = _shim_worker_launch(command, environment, cwd)
+    if planned is not None:
+        context, worker_command = planned
+        return run_launcher(context, worker_command, environment)
+    real_pi = _real_pi_binary(environment)
+    os.execve(str(real_pi), [str(real_pi), *command], dict(environment))
+    raise AssertionError("os.execve unexpectedly returned")
 
 
 def main(argv: list[str] | None = None) -> int:

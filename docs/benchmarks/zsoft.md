@@ -23,15 +23,18 @@ Detect uses a directory artifact, so the common runner permits multiple changed
 files inside `submission/`. The benchmark repository commit and audited project
 revision are recorded separately.
 
-The benchmark harness delegates Goal Plus Pi workers to its own fail-closed
-Bubblewrap launcher through `GOAL_PLUS_PI_WORKER_LAUNCHER`. The candidate
-workspace is mounted read-only; only the adapter-declared `submission/` artifact
-and launcher-owned `.tmp/` are writable, while `source/` and `schemas/` are
-explicitly validated and kept read-only. The benchmark repository, cases,
-scorer source, sibling runs, `.gp` state, and the rest of the host home directory
-are not mounted. A bench-owned CLI shim sends worker Goal Plus calls over a
-session-bound host socket, so official verifier execution remains outside the
-sandbox. The policy and environment-variable names, but never their values, are
+The benchmark harness prepends a bench-owned `pi` shim to `PATH`. Ordinary Pi
+invocations pass through unchanged; only Goal Plus worker RPC processes are
+intercepted and launched through the fail-closed Bubblewrap boundary. This does
+not require any Goal Plus source change or external-launcher protocol. The
+candidate workspace is mounted read-only; only the adapter-declared
+`submission/` artifact and launcher-owned `.tmp/` are writable, while `source/`
+and `schemas/` are explicitly validated and kept read-only. The benchmark
+repository, cases, scorer source, sibling runs, `.gp` state, runtime Git history,
+and the rest of the host home directory are not mounted. A bench-owned CLI shim
+sends the worker's limited Goal Plus calls over a session-bound host socket, so
+verifier execution remains outside the sandbox and score-bearing responses stay
+opaque. The policy and environment-variable names, but never their values, are
 recorded in the experiment manifest.
 Declared read-only workspace entries must be real directories; symlinked source
 or public bundles fail closed before worker startup.
