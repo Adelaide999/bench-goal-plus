@@ -46,6 +46,13 @@ Goal Plus profile 可用 `global_evidence_mode` 固定 candidate 间的 Evidence
 profile、campaign 和 cell manifest，并作为 `GOAL_PLUS_GLOBAL_EVIDENCE_MODE`
 传入 Goal Plus 冻结 spec。
 
+Goal Plus profile 还把 `shared_dir_enabled` 和
+`supplemental_evaluation_enabled` 作为显式布尔实验轴；两者默认均为 `false`。
+解析后的值会写入 profile、campaign 和 Goal Plus cell manifest，并通过
+`SFORGE_AGENT_EXTRA_ENV` 传入 Work container。控制面总是从冻结 profile 写入这些值，
+不会让宿主机遗留的同名环境变量改变实际行为；Pi Goal Plus adapter 会把前者冻结到
+SearchSpec，Goal Plus runtime 直接读取后者。
+
 ## 从新机器开始
 
 ```bash

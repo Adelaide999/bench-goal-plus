@@ -280,6 +280,15 @@ def cell_environment(
             "GOAL_PLUS_GLOBAL_EVIDENCE_MODE": str(
                 cell.get("global_evidence_mode", "manual")
             ),
+            "SFORGE_GOAL_PLUS_SHARED_DIR_ENABLED": str(
+                bool(cell.get("shared_dir_enabled", False))
+            ).lower(),
+            "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED": (
+                "1" if cell.get("supplemental_evaluation_enabled", False) else "0"
+            ),
+            "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED": (
+                "1" if cell.get("supplemental_evaluation_enabled", False) else "0"
+            ),
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": annotator_model,
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT": str(
                 cell.get("evidence_annotator_reasoning_effort")

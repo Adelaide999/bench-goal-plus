@@ -74,7 +74,15 @@ class NativeProfileRunner(BenchmarkRunner):
             or not isinstance(payload.get("runtime_sources"), dict)
         ):
             raise ContractError("runtime source probe returned an invalid contract")
-        return {"runtime_sources": payload["runtime_sources"]}
+        metadata = {"runtime_sources": payload["runtime_sources"]}
+        runtime_configuration = payload.get("runtime_configuration")
+        if runtime_configuration is not None:
+            if not isinstance(runtime_configuration, dict):
+                raise ContractError(
+                    "runtime source probe returned invalid runtime configuration"
+                )
+            metadata["runtime_configuration"] = runtime_configuration
+        return metadata
 
     def local_asset_check_commands(
         self, profile: str, *, allow_missing: bool = False

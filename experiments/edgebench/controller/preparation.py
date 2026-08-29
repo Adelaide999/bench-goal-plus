@@ -121,6 +121,16 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         if has_goal_plus
         else {}
     )
+    goal_plus_feature_config = (
+        {
+            "shared_dir_enabled": bool(profile.get("shared_dir_enabled", False)),
+            "supplemental_evaluation_enabled": bool(
+                profile.get("supplemental_evaluation_enabled", False)
+            ),
+        }
+        if has_goal_plus
+        else {}
+    )
     role_fields = (
         "worker_model",
         "worker_reasoning_effort",
@@ -304,6 +314,11 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 **role_config,
                 **(global_evidence_config if method in GOAL_PLUS_METHODS else {}),
                 **(
+                    goal_plus_feature_config
+                    if method in GOAL_PLUS_METHODS
+                    else {}
+                ),
+                **(
                     {"goal_plus_source": goal_plus_source}
                     if method in GOAL_PLUS_METHODS
                     else {}
@@ -391,6 +406,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "reasoning_effort": reasoning,
         **role_config,
         **global_evidence_config,
+        **goal_plus_feature_config,
         "api_protocol": api_protocol,
         "thinking": thinking,
         "wall_time_seconds": wall_time,
@@ -446,6 +462,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "reasoning_effort": reasoning,
             **role_config,
             **global_evidence_config,
+            **goal_plus_feature_config,
             "pi_package_version": profile.get("pi_package_version"),
             "api_protocol": api_protocol,
             "thinking": thinking,

@@ -68,6 +68,39 @@ class EdgeBenchExperimentTest(unittest.TestCase):
 
         self.assertEqual(args.method, ["goal-plus-codex"])
 
+    def test_plan_metadata_reports_native_goal_plus_feature_flags(self) -> None:
+        source = {
+            "valid": True,
+            "source_kind": "managed",
+            "source_path": "third_party/muyuan/plugins/goal-plus",
+            "expected_ref": "master",
+            "branch": "master",
+            "commit": "a" * 40,
+        }
+        stdout = io.StringIO()
+        with mock.patch.object(
+            EDGE_CLI, "resolve_goal_plus_source", return_value=source
+        ), mock.patch("sys.stdout", stdout):
+            returncode = EDGE_CLI.main(
+                [
+                    "plan-metadata",
+                    "--profile",
+                    "vliw-goal-plus-pi-sol-medium-local-smoke",
+                    "--method",
+                    "goal-plus-pi",
+                ]
+            )
+
+        self.assertEqual(returncode, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(
+            payload["runtime_configuration"]["goal_plus"],
+            {
+                "shared_dir_enabled": False,
+                "supplemental_evaluation_enabled": False,
+            },
+        )
+
     def test_compatibility_entrypoint_stays_thin(self) -> None:
         entrypoint = ROOT / "experiments" / "edgebench" / "experiment.py"
         source = entrypoint.read_text(encoding="utf-8")
@@ -759,6 +792,31 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "global_evidence_mode"):
             EDGE.load_profile(path)
 
+    def test_goal_plus_profile_validates_runtime_feature_flags(self) -> None:
+        _, profile = EDGE.load_profile(
+            "vliw-goal-plus-pi-zai-glm-5-2-1h-k2-c1"
+        )
+        self.assertFalse(profile["shared_dir_enabled"])
+        self.assertFalse(profile["supplemental_evaluation_enabled"])
+
+        for field in (
+            "shared_dir_enabled",
+            "supplemental_evaluation_enabled",
+        ):
+            with self.subTest(field=field):
+                invalid = {**profile, field: "false"}
+                path = self.temp / f"invalid-{field}.json"
+                path.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, f"{field} must be boolean"):
+                    EDGE.load_profile(path)
+
+        _, plain = EDGE.load_profile("vliw-codex-sol-medium-local-smoke")
+        plain["shared_dir_enabled"] = False
+        path = self.temp / "plain-with-goal-plus-field.json"
+        path.write_text(json.dumps(plain), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "require a Goal Plus method"):
+            EDGE.load_profile(path)
+
     def test_pi_provider_profile_requires_qualified_role_models(self) -> None:
         _, profile = EDGE.load_profile("vliw-goal-plus-pi-glm-5-2-provider-1h-k2-c1")
         for field in ("model", "worker_model", "evidence_annotator_model"):
@@ -1367,6 +1425,10 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertEqual(goal_plus["worker_min_verifier_runs"], 1)
         self.assertEqual(goal_plus["closeout_reserve_seconds"], 30)
         self.assertEqual(goal_plus["goal_plus_verifier_timeout_seconds"], 30)
+        self.assertFalse(goal_plus["shared_dir_enabled"])
+        self.assertFalse(goal_plus["supplemental_evaluation_enabled"])
+        self.assertNotIn("shared_dir_enabled", plain)
+        self.assertNotIn("supplemental_evaluation_enabled", plain)
         self.assertFalse(plain["internet"])
         self.assertEqual(plain["eval_interval_seconds"], 1800)
         self.assertEqual(plain["submission_cooldown"], 120)
@@ -1412,6 +1474,9 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             json.loads((destination / "profile.json").read_text())["cell_concurrency"],
             1,
         )
+        campaign = json.loads((destination / "campaign.json").read_text())
+        self.assertFalse(campaign["shared_dir_enabled"])
+        self.assertFalse(campaign["supplemental_evaluation_enabled"])
         self.assertFalse(
             any(path.name in {".gp", ".goal-plus"} for path in destination.rglob("*"))
         )
@@ -1893,6 +1958,13 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             extra["SFORGE_GOAL_PLUS_VERIFIER_TIMEOUT_SECONDS"], "45"
         )
         self.assertEqual(extra["GOAL_PLUS_GLOBAL_EVIDENCE_MODE"], "manual")
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_SHARED_DIR_ENABLED"], "false")
+        self.assertEqual(
+            extra["GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED"], "0"
+        )
+        self.assertEqual(
+            extra["GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED"], "0"
+        )
         self.assertEqual(extra["SFORGE_GOAL_PLUS_FINALIZATION_GRACE_SECONDS"], "90")
         self.assertEqual(extra["GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL"], "gpt-5.6-sol")
         self.assertEqual(
@@ -1908,6 +1980,68 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         for key in ("TMPDIR", "TMP", "TEMP"):
             self.assertTrue(Path(env[key]).is_relative_to(ROOT))
+
+    def test_goal_plus_environment_overrides_ambient_feature_flags(self) -> None:
+        ambient = {
+            "SFORGE_AGENT_EXTRA_ENV": ",".join(
+                (
+                    "SFORGE_GOAL_PLUS_SHARED_DIR_ENABLED=true",
+                    "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED=1",
+                    "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=1",
+                )
+            )
+        }
+        cell = {
+            "method": "goal-plus-pi-provider",
+            "sforge_agent": "pi-goal-plus-provider",
+            "model": "test-provider/test-model",
+            "reasoning_effort": "medium",
+            "internet": False,
+            "inner_search_concurrency": 2,
+            "worker_runtime_seconds": 240,
+            "shared_dir_enabled": False,
+            "supplemental_evaluation_enabled": False,
+        }
+
+        with mock.patch.dict(os.environ, ambient, clear=False):
+            env = EDGE.cell_environment(
+                cell,
+                api_base_urls=["https://api.example.invalid/v1"],
+            )
+
+        extra = dict(
+            item.split("=", 1) for item in env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+        self.assertEqual(extra["SFORGE_GOAL_PLUS_SHARED_DIR_ENABLED"], "false")
+        self.assertEqual(
+            extra["GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED"], "0"
+        )
+        self.assertEqual(
+            extra["GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED"], "0"
+        )
+
+        enabled_cell = {
+            **cell,
+            "shared_dir_enabled": True,
+            "supplemental_evaluation_enabled": True,
+        }
+        enabled_env = EDGE.cell_environment(
+            enabled_cell,
+            api_base_urls=["https://api.example.invalid/v1"],
+        )
+        enabled_extra = dict(
+            item.split("=", 1)
+            for item in enabled_env["SFORGE_AGENT_EXTRA_ENV"].split(",")
+        )
+        self.assertEqual(
+            enabled_extra["SFORGE_GOAL_PLUS_SHARED_DIR_ENABLED"], "true"
+        )
+        self.assertEqual(
+            enabled_extra["GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED"], "1"
+        )
+        self.assertEqual(
+            enabled_extra["GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED"], "1"
+        )
 
     def test_goal_plus_pi_environment_uses_the_same_runtime_contract(self) -> None:
         env = EDGE.cell_environment(

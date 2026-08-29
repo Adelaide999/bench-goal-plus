@@ -60,6 +60,10 @@ GOAL_PLUS_METHODS = frozenset(
     {"goal-plus-codex", "goal-plus-pi", "goal-plus-pi-provider"}
 )
 GLOBAL_EVIDENCE_MODES = frozenset({"manual", "auto", "independent"})
+GOAL_PLUS_FEATURE_FLAGS = (
+    "shared_dir_enabled",
+    "supplemental_evaluation_enabled",
+)
 CLAUDE_REASONING_EFFORTS = frozenset(
     {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
@@ -223,8 +227,22 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
             allowed = ", ".join(sorted(GLOBAL_EVIDENCE_MODES))
             raise ValueError(f"global_evidence_mode must be one of {allowed}")
         profile["global_evidence_mode"] = global_evidence_mode
-    elif "global_evidence_mode" in profile:
-        raise ValueError("global_evidence_mode requires a Goal Plus method")
+        for field in GOAL_PLUS_FEATURE_FLAGS:
+            value = profile.get(field, False)
+            if not isinstance(value, bool):
+                raise ValueError(f"{field} must be boolean")
+            profile[field] = value
+    else:
+        goal_plus_fields = {
+            "global_evidence_mode",
+            *GOAL_PLUS_FEATURE_FLAGS,
+        }
+        configured = sorted(goal_plus_fields & set(profile))
+        if configured:
+            raise ValueError(
+                "Goal Plus profile fields require a Goal Plus method: "
+                + ", ".join(configured)
+            )
     api_protocol = api_protocol_for_methods(profile["methods"])
     if api_protocol == "pi-provider":
         for model_ref in pi_provider_role_model_refs(profile):

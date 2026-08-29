@@ -12,6 +12,7 @@ from .environment import doctor, provision, resolve_goal_plus_source
 from .io import campaign_dir
 from .preparation import prepare
 from .profiles import (
+    GOAL_PLUS_METHODS,
     METHODS,
     api_protocol_for_methods,
     load_profile,
@@ -90,6 +91,20 @@ def main(argv: list[str] | None = None) -> int:
                     {
                         "schema_version": 1,
                         "runtime_sources": {"goal_plus": visible_source},
+                        "runtime_configuration": {
+                            "goal_plus": {
+                                "shared_dir_enabled": bool(
+                                    profile.get("shared_dir_enabled", False)
+                                ),
+                                "supplemental_evaluation_enabled": bool(
+                                    profile.get(
+                                        "supplemental_evaluation_enabled", False
+                                    )
+                                ),
+                            }
+                        }
+                        if set(profile["methods"]) & GOAL_PLUS_METHODS
+                        else {},
                     },
                     indent=2,
                 )

@@ -183,6 +183,12 @@ class BenchmarkAgentContractTest(unittest.TestCase):
                                 "commit": "a" * 40,
                             }
                         },
+                        "runtime_configuration": {
+                            "goal_plus": {
+                                "shared_dir_enabled": False,
+                                "supplemental_evaluation_enabled": False,
+                            }
+                        },
                     }
                 ),
                 stderr="",
@@ -205,6 +211,13 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertEqual(source["source_kind"], "external")
         self.assertEqual(source["expected_ref"], "experiment/ref")
         self.assertEqual(source["commit"], "a" * 40)
+        self.assertEqual(
+            plan["resolved_spec"]["runtime_configuration"]["goal_plus"],
+            {
+                "shared_dir_enabled": False,
+                "supplemental_evaluation_enabled": False,
+            },
+        )
         self.assertIn("plan-metadata", probe.call_args.args[0])
 
     def test_pi_provider_method_requires_qualified_provider_and_model(self) -> None:
