@@ -757,13 +757,14 @@ def prepare_pi_provider_runtime(
     registry = bundle["registry"]
     providers = registry.get("providers", {})
     if providers:
-        resources.bridge_host = default_route_ipv4()
         for provider, provider_config in providers.items():
             base_url = provider_config.get("baseUrl")
             if not isinstance(base_url, str) or not base_url:
                 raise RuntimeError(f"custom Pi provider {provider!r} requires baseUrl")
             target = loopback_api_target(base_url)
             if target is not None:
+                if resources.bridge_host is None:
+                    resources.bridge_host = default_route_ipv4()
                 target_host, target_port = target
                 process, metadata, closer = start_socket_bridge(
                     destination,

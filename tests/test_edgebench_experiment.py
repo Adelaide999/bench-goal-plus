@@ -3304,6 +3304,62 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertNotIn("secret", json.dumps(runtime_registry))
 
+    def test_pi_remote_provider_does_not_require_loopback_route(self) -> None:
+        models = self.temp / "models.json"
+        EDGE.write_json(
+            models,
+            {
+                "providers": {
+                    "remote-provider": {
+                        "baseUrl": "http://192.0.2.20:18081/v1",
+                        "api": "openai-responses",
+                        "apiKey": "$REMOTE_API_KEY",
+                        "models": [{"id": "remote-model"}],
+                    }
+                }
+            },
+        )
+        resources = EDGE.RuntimeResources()
+        controller = {"bridges": []}
+        profile = {
+            "model": "remote-provider/remote-model",
+            "task_ids": ["vliw_kernel_optimization"],
+        }
+        probes = mock.Mock(
+            return_value={"passed": True, "status": "401", "stderr": None}
+        )
+
+        with mock.patch.dict(
+            EDGE_RUNTIME.os.environ,
+            {
+                "SFORGE_PI_MODELS_FILE": str(models),
+                "REMOTE_API_KEY": "remote-secret",
+            },
+            clear=False,
+        ), mock.patch.object(
+            EDGE_RUNTIME, "default_route_ipv4"
+        ) as default_route, mock.patch.object(
+            EDGE_RUNTIME, "start_socket_bridge"
+        ) as start_bridge, mock.patch.object(
+            EDGE_RUNTIME, "docker_endpoint_reachability_probe", probes
+        ), mock.patch.object(
+            EDGE_RUNTIME, "task_images", return_value=("example:work", "example:judge")
+        ):
+            EDGE_RUNTIME.prepare_pi_provider_runtime(
+                resources, self.temp, profile, controller
+            )
+
+        default_route.assert_not_called()
+        start_bridge.assert_not_called()
+        probes.assert_called_once_with(
+            "example:work", "http://192.0.2.20:18081/v1"
+        )
+        self.assertIsNone(resources.bridge_host)
+        self.assertEqual(
+            resources.runtime_api_base_url, "http://192.0.2.20:18081/v1"
+        )
+        self.assertEqual(controller["bridges"], [])
+
     def test_cell_environment_maps_api_key_and_bridge(self) -> None:
         env = EDGE.cell_environment(
             {
