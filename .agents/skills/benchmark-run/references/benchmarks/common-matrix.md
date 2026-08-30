@@ -43,6 +43,13 @@ adapter 提供 task catalog 时，在 `--benchmark <id>` 后增加 `--task-id <t
 Goal Plus method 需要共享工具目录时增加 `--shared-dir`；Plain method 和 condition
 campaign 不接受该选项。
 
+Goal Plus cell 的精确宿主命令必须显式包含 `max_parallel=K`、
+`workspace_backend=git_worktree`、`promotion_mode=apply`、
+`strategy=agent_guided` 和
+`workers=MODEL*K`，并用 `annotator=MODEL` 固定已配置的 ViewAgent。这些字段同时进入
+manifest 的 `command_config`，不能只出现在目标
+正文。其余 adapter/evaluator/SearchSpec-only 合同仍由共享 `render_goal` 正文生成。
+
 common runner 当前不声明 detached controller。长任务应在受管理的 Agent/session 中运行，
 不能自行拼 `nohup` 或多个 controller。
 

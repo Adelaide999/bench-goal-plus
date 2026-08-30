@@ -26,6 +26,11 @@ from bench_artifacts import utc_now, write_json  # noqa: E402
 from bench_goal_plus.codex_provider import (  # noqa: E402
     codex_responses_provider_args,
 )
+from bench_goal_plus.goal_plus_command import (  # noqa: E402
+    goal_plus_command_config,
+    goal_plus_entrypoint,
+    render_goal_plus_command,
+)
 from bench_goal_plus.upstreams import upstream_source_path  # noqa: E402
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
@@ -248,14 +253,6 @@ def render_blind_task_prompt(
     )
 
 
-def goal_plus_entrypoint(worker_host: str) -> str:
-    if worker_host == "codex":
-        return "$goal-plus mode=autonomous"
-    if worker_host == "pi-rpc":
-        return "/goal-plus mode=autonomous"
-    raise ValueError(f"unsupported Goal Plus worker host: {worker_host}")
-
-
 def render_goal(
     *,
     task_text: str,
@@ -300,6 +297,17 @@ def render_goal(
         raise ValueError(
             f"{coordination_condition} requires an explicit search-space mode"
         )
+    goal_plus_command = render_goal_plus_command(
+        worker_host,
+        max_parallel=concurrency,
+        strategy="agent_guided",
+        worker_model=worker_model,
+        annotator_model=worker_model,
+        workspace_backend="git_worktree",
+        promotion_mode=(
+            "artifact_only" if evaluation_mode == "blind" else "apply"
+        ),
+    )
     coordination_text = ""
     if search_space_mode is not None:
         mode_behavior = (
@@ -351,16 +359,17 @@ def render_goal(
     )
     if evaluation_mode == "blind":
         return (
-            f"{goal_plus_entrypoint(worker_host)}\n\n"
+            f"{goal_plus_command}\n\n"
             f"{common_prompt.rstrip()}\n\n"
             "# Goal Plus configuration\n\n"
             "Use the current workspace and construct a public-format-only Goal Plus search "
             "from the configuration below. The benchmark-owned Pi boundary keeps worker "
             "feedback opaque; Goal Plus remains an unmodified generic runtime and never "
             "receives the official evaluator or official metric.\n\n"
-            f"- `budget.max_parallel={concurrency}`; omit deprecated `budget.max_candidates`.\n"
-            f"- `strategy.name=\"agent_guided\"`, `strategy.worker_host=\"{worker_host}\"`, "
-            "and `strategy.orchestration_mode=\"parallel_loops\"`.\n"
+            "- Honor every leading typed command field in the SearchSpec and omit "
+            "deprecated `budget.max_candidates`.\n"
+            f"- Set `strategy.worker_host=\"{worker_host}\"` and "
+            "`strategy.orchestration_mode=\"parallel_loops\"`.\n"
             + "- Set top-level `shared_dir.enabled=false` and "
             "`strategy.config.global_evidence_mode=\"independent\"`.\n"
             + f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
@@ -374,7 +383,8 @@ def render_goal(
                 if worker_min_runtime_seconds is not None
                 else ""
             )
-            + f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
+            + "- Keep `strategy.worker_launch.model` aligned with "
+            "`command_config.workers` and set "
             f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
             f"{initial_launch_contract}"
             f"{coordination_text}"
@@ -393,7 +403,8 @@ def render_goal(
             f"- Edit surface: allow only `{artifact_name}`; deny `public_check.py`, "
             "`task.json`, `TASK.md`, `AGENTS.md`, and `GOAL.md`; "
             f"{edit_surface_limit}"
-            "- Workspace: use `source_path=\".\"` and `workspace.backend=\"git_worktree\"`.\n"
+            "- Workspace: use `source_path=\".\"`; backend and promotion mode come "
+            "from the typed command config.\n"
             "- Constraints: no network; preserve all controller-owned public task files.\n"
             f"- `strategy.config.closeout_reserve_seconds={closeout_seconds}` so host "
             "supervisors stop worker continuation before final completion work.\n"
@@ -409,15 +420,16 @@ def render_goal(
             "commit, complete the full goal audit, and write the final Goal Plus report.\n"
         )
     return (
-        f"{goal_plus_entrypoint(worker_host)}\n\n"
+        f"{goal_plus_command}\n\n"
         f"{common_prompt.rstrip()}\n\n"
         "# Goal Plus configuration\n\n"
         "Use the current workspace and construct the verifier-backed Goal Plus search from "
         "the configuration below. Goal Plus owns intake, triage, SearchSpec freezing, candidate "
         "workspaces, selection, promotion, and final reporting.\n\n"
-        f"- `budget.max_parallel={concurrency}`; omit deprecated `budget.max_candidates`.\n"
-        f"- `strategy.name=\"agent_guided\"`, `strategy.worker_host=\"{worker_host}\"`, "
-        "and `strategy.orchestration_mode=\"parallel_loops\"`.\n"
+        "- Honor every leading typed command field in the SearchSpec and omit "
+        "deprecated `budget.max_candidates`.\n"
+        f"- Set `strategy.worker_host=\"{worker_host}\"` and "
+        "`strategy.orchestration_mode=\"parallel_loops\"`.\n"
         + (
             "- Set top-level `shared_dir.enabled=true`.\n"
             if shared_dir_enabled
@@ -434,7 +446,8 @@ def render_goal(
             if worker_min_runtime_seconds is not None
             else ""
         )
-        + f"- `strategy.worker_launch.model=\"{worker_model}\"` and "
+        + "- Keep `strategy.worker_launch.model` aligned with "
+        "`command_config.workers` and set "
         f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
         f"{initial_launch_contract}"
         f"{coordination_text}"
@@ -452,7 +465,8 @@ def render_goal(
         f"- Edit surface: allow only `{artifact_name}`; deny `evaluate.py`, "
         "`.goal-plus-verifiers/**`, `task.json`, `TASK.md`, `AGENTS.md`, and `GOAL.md`; "
         f"{edit_surface_limit}"
-        "- Workspace: use `source_path=\".\"` and `workspace.backend=\"git_worktree\"`.\n"
+        "- Workspace: use `source_path=\".\"`; backend and promotion mode come from "
+        "the typed command config.\n"
         "- Constraints: no network; preserve the artifact's controller-checked fixed regions.\n"
         f"- `strategy.config.closeout_reserve_seconds={closeout_seconds}` so host "
         "supervisors stop worker continuation before final completion work.\n"
@@ -797,13 +811,21 @@ def prepare(args: argparse.Namespace) -> int:
             "mode": "natural_goal_plus_entry",
             "common_prompt_sha256": sha256_text(common_prompt),
             "transform": (
-                f"{goal_plus_entrypoint(worker_host).split()[0]} prefix plus "
-                "Goal Plus configuration suffix"
+                f"{goal_plus_entrypoint(worker_host)} typed config prefix plus "
+                "Goal Plus SearchSpec-only configuration suffix"
             ),
             "goal_prompt_sha256": sha256_text(goal),
         }
         goal_plus_config = {
             "entrypoint": goal_plus_entrypoint(worker_host),
+            "command_config": goal_plus_command_config(
+                max_parallel=args.concurrency,
+                strategy="agent_guided",
+                worker_model=worker_model,
+                annotator_model=worker_model,
+                workspace_backend="git_worktree",
+                promotion_mode="apply",
+            ),
             "worker_host": worker_host,
             "worker_model": worker_model,
             "base_model": args.model,

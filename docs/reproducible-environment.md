@@ -60,12 +60,20 @@ Git 探测。单 target 的 `check --benchmark ... --profile ...` 仍然严格�
 
 `bootstrap` 会：
 
-1. 把当前进程和所有子进程的 `TMPDIR`、`TMP`、`TEMP` 固定到本仓 `.tmp/`，不依赖 `/tmp`、`/private/tmp` 或 `/var/tmp`；
+1. 把当前进程和所有子进程的 `TMPDIR`、`TMP`、`TEMP` 固定到本仓
+   `.tmp/`，不依赖 `/tmp`、`/private/tmp` 或 `/var/tmp`；
 2. 读取 `environment/upstreams.json`；
-3. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，checkout 到 manifest 指定 branch，并对 clean checkout 做 fast-forward-only 更新；声明 `source_subdir` 的 monorepo 只把对应子目录交给 editable install 和 runner；
-4. 选中 EdgeBench 时，依次尝试 rsproxy、SJTU mirror 和官方源，把 Rust 1.88.0 Linux x64 distribution 下载到宿主机 `~/.cache/sforge/rust/` 并核对官方固定 SHA256，供 Rust Work/Judge 镜像缺少工具链时离线注入；
+3. 在本仓 `third_party/` 克隆所有缺失的 benchmark/search runtime，checkout 到
+   manifest 指定 branch，并对 clean checkout 做 fast-forward-only 更新；声明
+   `source_subdir` 的 monorepo 只把对应子目录交给 editable install 和 runner；
+4. 选中 EdgeBench 时，依次尝试 rsproxy、SJTU mirror 和官方源，把 Rust 1.88.0
+   Linux x64 distribution 下载到宿主机 `~/.cache/sforge/rust/` 并核对官方固定
+   SHA256，供 Rust Work/Judge 镜像缺少工具链时离线注入；
 5. 创建 `.bench-env/venv` 的 Python 3.12 环境；
-6. 安装 `environment/requirements.lock`，再以 editable、`--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的 OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入 lock；
+6. 安装 `environment/requirements.lock`，再以 editable、
+   `--no-build-isolation --no-deps` 方式接入 manifest 中标记为 `editable` 的
+   OpenEvolve/Goal Plus；benchmark 新增 task 的额外依赖应在注册该 task 时显式加入
+   lock；
 7. 写入 ignored 的 `.bench-env/state.json` 并运行同一套 doctor 检查。
 
 Goal Plus 所在的 Muyuan 仓库默认使用 HTTPS 拉取，因此没有配置 GitCode SSH key
@@ -172,7 +180,8 @@ ALE 使用官方 `ale-bench:cpp20-202301` 镜像。首次 evaluator 会构建 Ru
 ## 先跑零模型 smoke
 
 ```bash
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
+.bench-env/venv/bin/python \
+  experiments/openevolve_compare/experiment.py prepare \
   --method goal-plus-codex \
   --task-id function_minimization \
   --wall-time-seconds 300 \
@@ -184,38 +193,45 @@ ALE 使用官方 `ale-bench:cpp20-202301` 镜像。首次 evaluator 会构建 Ru
 记录命令打印的 run directory，然后执行：
 
 ```bash
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py seed-smoke \
+.bench-env/venv/bin/python \
+  experiments/openevolve_compare/experiment.py seed-smoke \
   --run-dir runs/openevolve-compare/<run-id>
 ```
 
 这一步复用当次 branch snapshot 的 OpenEvolve evaluator，不调用模型。Goal Plus
 的 project `.codex` assets 会从 managed checkout 复制到 run-local workspace；
-该 OpenEvolve/Muyuan root commit 和 Goal Plus source path 会写入 manifest。prepare 完成时 `.gp/` 尚不存在，
+该 OpenEvolve/Muyuan root commit 和 Goal Plus source path 会写入 manifest。
+prepare 完成时 `.gp/` 尚不存在，
 只有真正发送 host-native Goal Plus prompt（Codex 为 `$goal-plus`，Pi 为
 `/goal-plus`）后才会在该 workspace 内生成。脚本不会自动删除 run directory。
 
 ## 跑四条路径
 
-四种方法必须分别 `prepare`，不能复用已经被另一方法修改的 workspace。默认主协议是 `T=300s`、`K=2`、`gpt-5.6-luna/high`：
+四种方法必须分别 `prepare`，不能复用已经被另一方法修改的 workspace。默认主协议是
+`T=300s`、`K=2`、`gpt-5.6-luna/high`：
 
 ```bash
 # Plain Codex
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
+.bench-env/venv/bin/python \
+  experiments/openevolve_compare/experiment.py prepare \
   --method plain-codex --wall-time-seconds 300 --concurrency 2 \
   --model gpt-5.6-luna --seed 1
 
 # Goal Plus + Codex
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
+.bench-env/venv/bin/python \
+  experiments/openevolve_compare/experiment.py prepare \
   --method goal-plus-codex --wall-time-seconds 300 --concurrency 2 \
   --model gpt-5.6-luna --seed 1
 
 # Goal Plus + Pi
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
+.bench-env/venv/bin/python \
+  experiments/openevolve_compare/experiment.py prepare \
   --method goal-plus-pi --wall-time-seconds 300 --concurrency 2 \
   --model gpt-5.6-luna --seed 1
 
 # Native OpenEvolve
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py prepare \
+.bench-env/venv/bin/python \
+  experiments/openevolve_compare/experiment.py prepare \
   --method openevolve --wall-time-seconds 300 --concurrency 2 \
   --model gpt-5.6-luna --seed 1
 ```
@@ -230,30 +246,62 @@ export OPENAI_API_KEY='<secret>'
   --api-base https://api.example.com/v1
 ```
 
-Plain Codex 使用 `K` 个 ephemeral lane。每个 lane 接收同一份 common task prompt；Goal Plus + Codex 接收该 prompt 的严格超集：只在开头增加 `$goal-plus mode=autonomous`，并在末尾附加完整的 Goal Plus 并发、host/model、metric/verifier、edit surface 和预算配置。Goal Plus + Codex 保留原生 session provenance；Goal Plus + Pi 使用 `/goal-plus mode=autonomous`，并写入 ignored 的 run-local `pi-home/models.json`，其中只引用 `$OPENAI_API_KEY`。Codex 的自定义 provider、Responses wire API、Goal Plus MCP 注册及 headless tool approval 全由命令行显式注入，不依赖另一台机器上的个人 `config.toml`。
+Plain Codex 使用 `K` 个 ephemeral lane。每个 lane 接收同一份 common task prompt；
+Goal Plus + Codex 接收该 prompt 的严格超集：开头的精确 `$goal-plus` 命令通过 typed
+config 显式设置 `mode`、`max_parallel=K`、workspace、promotion、strategy 和 worker
+model，正文只附加 host、metric/verifier、edit surface 和预算等 SearchSpec-only 配置。
+Goal Plus + Codex 保留原生 session provenance；Goal Plus + Pi 使用相同形式的
+`/goal-plus` typed config，并写入 ignored 的 run-local `pi-home/models.json`，其中只引用
+`$OPENAI_API_KEY`。Codex 的自定义
+provider、Responses wire API、Goal Plus MCP 注册及 headless tool approval 全由
+命令行显式注入，不依赖另一台机器上的个人 `config.toml`。MCP 只提供工具面：只有
+project-local `UserPromptSubmit` hook 接受精确 `$goal-plus ...` 后才能创建或恢复
+记录；Skill、plugin、普通自然语言和 MCP create/update 都不能替代这个宿主入口。
 
-Goal Plus 配置还明确 process-verifier 的所有权：每个 candidate worker 提交自己的最终 process result；parent 等全部 workers 返回后直接 selection，由 promotion verifier 做最终 gate。不要让 parent 在 worker closeout 同时重复 process verification，否则会制造无意义的 evaluator call，并可能与 runtime-owned `results.tsv` 提交竞争。
+Goal Plus 配置还明确 process-verifier 的所有权：每个 candidate worker 提交自己的
+最终 process result；parent 等全部 workers 返回后直接 selection，由 promotion
+verifier 做最终 gate。不要让 parent 在 worker closeout 同时重复 process
+verification，否则会制造无意义的 evaluator call，并可能与 runtime-owned
+`results.tsv` 提交竞争。
 
 run manifest 只记录 model/api base 和 credential policy，不记录任何环境变量值。
 
-如果模型/host 已结束但 Goal Plus 的确定性 selection、promotion 或 report 被中断，可对原目录执行幂等恢复，不会启动新模型：
+如果模型/host 已结束但 Goal Plus 的确定性 selection、promotion 或 report 被中断，
+可对原目录执行幂等恢复，不会启动新模型：
 
 ```bash
-.bench-env/venv/bin/python experiments/openevolve_compare/experiment.py closeout \
+.bench-env/venv/bin/python \
+  experiments/openevolve_compare/experiment.py closeout \
   --run-dir runs/openevolve-compare/<run-id>
 ```
 
-### 为什么 Goal Plus 必须从自然 prompt 开始
+### 为什么 Goal Plus 必须从精确宿主命令开始
 
-这套主协议比较完整系统，而不是只比较预构建后的 search stage。`prepare` 对所有方法只完成 task/config/workspace materialization；Goal Plus 不预创建 goal、triage、frozen spec、Search run、candidate 或 session。计时开始后，Codex 收到 `$goal-plus + common task prompt + Goal Plus configuration`，由 Goal Plus 自己完成 intake、spec discovery/freeze、并发 worker 启动和最终选择；Pi 对应使用 `/goal-plus`。
+这套主协议比较完整系统，而不是只比较预构建后的 search stage。`prepare` 对所有方法
+只完成 task/config/workspace materialization；Goal Plus 不预创建 goal、triage、
+frozen spec、Search run、candidate 或 session。计时开始后，Codex 收到
+`$goal-plus + typed command config + common task prompt + SearchSpec-only configuration`，
+由 Goal Plus 自己完成 intake、spec discovery/freeze、并发 worker 启动和最终选择；Pi
+对应使用 `/goal-plus`。
 
-这样 Plain Codex 与 Codex + Goal Plus 的任务正文保持一致，唯一实验干预就是 Goal Plus。Goal Plus 的控制开销也属于完整系统成本，必须计入 `T`；如果后续需要排除 intake/spec discovery 开销，应另做明确标注的 engine-only 消融，而不是改变主实验入口。
+这样 Plain Codex 与 Codex + Goal Plus 的任务正文保持一致，唯一实验干预就是
+Goal Plus。Goal Plus 的控制开销也属于完整系统成本，必须计入 `T`；如果后续需要
+排除 intake/spec discovery 开销，应另做明确标注的 engine-only 消融，而不是改变主
+实验入口。
 
 ## 公平预算与停止语义
 
-主对比固定：同一 task/seed/evaluator/model、总 wall deadline `T`、live search concurrency `K`。OpenEvolve 的 `iterations` 被设为很大的安全天花板；到 `T` 时外层 controller 发 `SIGTERM`，利用其原生 graceful-shutdown 保存 best，超过 grace 才 kill process group。Goal Plus 收到同一 `GOAL_PLUS_OUTER_DEADLINE_AT`；其自然流程可以在目标满足时提前完成，也可以运行到预算上限。模型结束或到达 `T` 后，controller 只做进程清理、幂等 closeout 和同口径 final evaluator。closeout 用时单独记录。
+主对比固定：同一 task/seed/evaluator/model、总 wall deadline `T`、live search
+concurrency `K`。OpenEvolve 的 `iterations` 被设为很大的安全天花板；到 `T` 时外层
+controller 发 `SIGTERM`，利用其原生 graceful-shutdown 保存 best，超过 grace 才
+kill process group。Goal Plus 收到同一 `GOAL_PLUS_OUTER_DEADLINE_AT`；其自然流程
+可以在目标满足时提前完成，也可以运行到预算上限。模型结束或到达 `T` 后，controller
+只做进程清理、幂等 closeout 和同口径 final evaluator。closeout 用时单独记录。
 
-这不是 token-或 evaluator-call-matched 因果消融。主结果必须同时报告 actual evaluator calls、iterations、tokens、known cost、wall time 和 coverage。需要更严格地隔离 search strategy 时，再单独运行显式 evaluator-call cap 的 ablation；不要把这种约束写进 Goal Plus core。
+这不是 token-或 evaluator-call-matched 因果消融。主结果必须同时报告 actual
+evaluator calls、iterations、tokens、known cost、wall time 和 coverage。需要更严格地
+隔离 search strategy 时，再单独运行显式 evaluator-call cap 的 ablation；不要把这种
+约束写进 Goal Plus core。
 
 任何 hard kill 都将 run 标记为 `incomplete`。这种结果可用于诊断，不能进入可比主表。
 
@@ -268,4 +316,6 @@ pi --version
 .bench-env/venv/bin/python -m unittest discover -s tests -v
 ```
 
-最后确认：upstream checkout clean 且 commit 精确匹配；实验 workspace 位于 ignored `runs/`；`.gp` 不在 `goal-plus/`、`openevolve/` 或 benchmark 源 checkout；任何准备提交的文件都不含本机绝对 home path 或 API key。
+最后确认：upstream checkout clean 且 commit 精确匹配；实验 workspace 位于 ignored
+`runs/`；`.gp` 不在 `goal-plus/`、`openevolve/` 或 benchmark 源 checkout；任何准备
+提交的文件都不含本机绝对 home path 或 API key。

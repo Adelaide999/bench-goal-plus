@@ -106,6 +106,38 @@ internal subagent。
 不得启动；先重新 `plan` 并再次确认。`resume` 已有 campaign 不重复询问，但不能借 resume
 修改原有 K/C。
 
+## Goal Plus typed command gate
+
+每个新 Goal Plus cell 必须由一条精确宿主命令启动，并在目标正文之前写入连续的 typed
+配置 token：
+
+<!-- markdownlint-disable MD013 -->
+
+```text
+$goal-plus mode=autonomous max_parallel=K workspace_backend=git_worktree promotion_mode=MODE strategy=STRATEGY workers=MODEL*K annotator=MODEL <目标>
+/goal-plus mode=autonomous max_parallel=K workspace_backend=git_worktree promotion_mode=MODE strategy=STRATEGY workers=MODEL*K annotator=MODEL <目标>
+```
+
+<!-- markdownlint-enable MD013 -->
+
+不要使用额外分隔符。`max_parallel=K`、workspace、promotion、strategy 和固定 worker
+model 以及 profile 明确指定的 annotator model 必须进入 host command 的
+`command_config`，并以同一结构写入 campaign manifest；
+不能只在后续 prompt prose 中要求 Agent 设置这些字段。Goal Plus runtime 会机械校验
+ready
+SearchSpec 与显式配置一致。worker budget、verifier、edit surface、evaluation mode 和
+benchmark-native Judge bridge 等尚未进入通用 command schema 的字段，继续留在任务
+正文。
+profile 明确关闭 annotator 时省略 `annotator=`，不能写占位值。
+
+Common/OpenEvolve 和 SWE-bench Verified 使用 run-local source，配置
+`promotion_mode=apply`。EdgeBench 由 `sforge-goal-plus-submit` 拥有回写和 Judge，配置
+`promotion_mode=artifact_only`，避免 runtime apply 与 benchmark bridge 双重回写。具体
+strategy 仍由对应 runner reference 冻结。Skill、MCP 或普通自然语言都不能代替精确宿主
+命令创建 Goal Plus 记录。需要重新提交宿主命令来恢复记录时，只能使用无附加文本的
+`$goal-plus resume` 或 `/goal-plus resume`；Pi `-c` 等同一 native session continuation
+不是第二次 Goal Plus 启动，不得再提交一个新 `/goal-plus` goal。
+
 ## 交付
 
 返回 campaign id/path、profile、实际 `T/K/C/R`、controller PID/状态、监控命令、停止命令和报告命令。凭据只从继承环境或 Codex auth store 读取。

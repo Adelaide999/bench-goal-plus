@@ -11,15 +11,19 @@
 
 ## Host 差异
 
+<!-- markdownlint-disable MD013 -->
+
 | 项目 | macOS | Linux |
 | --- | --- | --- |
 | Docker | Docker Desktop 或 OrbStack | 原生 Docker Engine |
 | EdgeBench 容器架构 | Docker VM 必须提供 `linux/amd64` | daemon 必须是 `amd64/x86_64` |
 | 宿主 Judge | Work container 通过 `host.docker.internal` 访问 | controller 使用 host route + systemd socket bridge |
 | 宿主 loopback API | 当前 EdgeBench controller 不支持把 `127.0.0.1` API 从 Mac 桥入容器；使用容器可达的非 loopback URL | 需要 `ip`、`systemd-socket-activate` 和 `systemd-socket-proxyd` |
-| API-only Agent 网络 | Docker VM 无法满足 SForge host `iptables` gate 时不得启动 EdgeBench Agent 测评 | 需要 SForge 可使用 passwordless `sudo iptables` 完成 Judge + LLM API allowlist |
+| API-only Agent 网络 | SForge 通过本地已有的 `ubuntu:22.04` privileged nsenter helper 进入 Docker VM 应用 `iptables`；helper 只执行固定规则且使用 `--pull never` | 需要 SForge 可使用 passwordless `sudo iptables` 完成 Judge + LLM API allowlist |
 | Codex container runtime | 需要 Linux x64 Codex runtime cache | 同样需要 Linux x64 Codex runtime cache |
 | Goal Plus container runtime | controller 会把受管 Goal Plus source directory 复制进容器；不能复制 macOS Python/venv | 可选复制兼容目标镜像的 Linux x64 便携 Python；普通 host venv 不能直接复用 |
+
+<!-- markdownlint-enable MD013 -->
 
 两种 host 都必须通过 benchmark-native doctor。macOS 能跑 local smoke 不等于官方
 offline/network-isolated protocol 已满足；正式 Linux 运行也不能跳过 bridge、resource limit
@@ -33,6 +37,8 @@ loopback bridge 失败都不能触发开放公网回退。安装依赖发生在 
 
 ## 鉴权方式
 
+<!-- markdownlint-disable MD013 -->
+
 | 路径 | 支持的鉴权 | 配置来源 | 重要限制 |
 | --- | --- | --- | --- |
 | EdgeBench Plain/Goal Plus Codex | Codex OAuth 或 OpenAI-compatible API | OAuth auth file，或 `SFORGE_AGENT_*` / `OPENAI_*` env | custom loopback API 只在具备 Linux bridge 时可用 |
@@ -44,6 +50,8 @@ loopback bridge 失败都不能触发开放公网回退。安装依赖发生在 
 | SWE-bench Verified Plain/Goal Plus Pi | Pi built-in provider API，或 profile-frozen OpenAI-compatible provider | profile 中的 `PROVIDER/MODEL` + provider 标准 key env，或 `OPENAI_BASE_URL` + `OPENAI_API_KEY` | Z.AI profile 使用 `zai/glm-5.2`；Luna profile 使用 `bench-openai/gpt-5.6-luna` + Responses；均不读取 EdgeBench Pi OAuth |
 | ZSoft Detect native SWE-agent | benchmark-owned metered OpenAI-compatible proxy | `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_API_KEY`，optional `OPENAI_COMPAT_HEADERS_JSON` | only `zsoft-detect-swe-agent`; native Linux+bwrap; SWE-agent uses Chat Completions through the host meter; no OAuth or `OPENAI_*` fallback |
 | Common/OpenEvolve 的 Pi、native OpenEvolve、SkyDiscover | OpenAI-compatible API | `--api-base` + `OPENAI_API_KEY` | 不是 Codex OAuth 路径 |
+
+<!-- markdownlint-enable MD013 -->
 
 ### ZSoft Detect native SWE-agent API
 
@@ -78,7 +86,7 @@ OAuth 模式不需要把 token 复制进 profile 或环境变量。doctor 只记
 不记录内容。EdgeBench 还要求：
 
 ```text
-~/.cache/sforge/codex/codex-0.146.0-linux-x64.tgz
+~/.cache/sforge/codex/codex-0.150.1-linux-x64.tgz
 ```
 
 该缓存是 Work container 使用的 Linux Codex runtime，不是当前 Mac/Linux host 的 Codex
@@ -275,15 +283,19 @@ model 和 credential source；它不会把 Pi provider 错配为 `openai-codex`�
 
 ### EdgeBench Goal Plus / Pi runtime cache
 
-`codex-goal-plus`、`pi-goal-plus` 与 `pi-goal-plus-provider` 已由 SForge 原生支持，
-不需要 Skill 在容器里手工
-拼安装命令。当前真实路径是：
+`codex-goal-plus`、`pi-goal-plus` 与 `pi-goal-plus-provider` 已由 SForge
+原生支持，不需要 Skill 在容器里手工拼安装命令，也不允许 Skill 启动 Goal Plus。
+Codex 的启动链固定为精确 `$goal-plus ...` UserPromptSubmit、project-local hooks
+授权、显式 Goal Plus MCP；恢复只能提交精确 `$goal-plus resume`。普通自然语言、
+Skill、plugin 和 MCP create/update 工具都没有启动或恢复权限。当前真实路径是：
 
 - 默认情况下 controller 使用 registry 声明的 Muyuan `master` checkout。临时实验分支
   不修改 registry，而是显式设置 `SFORGE_GOAL_PLUS_SOURCE_DIR` 为外部 checkout 中的
   `plugins/goal-plus`，并设置 `SFORGE_GOAL_PLUS_EXPECTED_REF`。doctor 在 Docker 前要求
   checkout clean、HEAD 与该 ref 的本地 commit 一致、运行资产完整；prepare 冻结 commit，
-  launch 再核对后才由 `prepare_container` 复制到 `/opt/goal-plus`；
+  launch 再核对后才由 `prepare_container` 复制到 `/opt/goal-plus`。Codex source
+  还必须包含 UserPromptSubmit/PreToolUse/Stop hooks 与
+  `allow_implicit_invocation: false` Skill metadata；
 - SForge 接受 `SFORGE_GOAL_PLUS_PYTHON_DIR`，把 Linux Python 3.10+ runtime
   复制到 `/opt/sforge-python`；该目录必须与 Work container 的平台兼容，macOS
   Python 或 macOS venv 不能使用；

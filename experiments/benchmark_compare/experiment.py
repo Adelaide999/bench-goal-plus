@@ -11,7 +11,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -29,7 +28,14 @@ from bench_goal_plus.upstreams import (  # noqa: E402
     upstream_checkout_path,
     upstream_source_path,
 )
-from bench_runtime_paths import configure_temp_environment  # noqa: E402
+from bench_goal_plus.goal_plus_command import (  # noqa: E402
+    goal_plus_command_config,
+    goal_plus_entrypoint,
+)
+from bench_runtime_paths import (  # noqa: E402
+    configure_temp_environment,
+    temporary_directory,
+)
 from adapters.registry import (  # noqa: E402
     adapter_modules,
     load_adapter,
@@ -64,7 +70,6 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     copy_goal_plus_assets,
     copy_goal_plus_pi_assets,
     finalize_goal_plus_search,
-    goal_plus_entrypoint,
     goal_plus_incomplete_reason,
     parse_codex_events,
     parse_pi_events,
@@ -558,14 +563,22 @@ def prepare(args: argparse.Namespace) -> int:
             "mode": "natural_goal_plus_entry",
             "common_prompt_sha256": sha256_text(common_prompt),
             "transform": (
-                f"{goal_plus_entrypoint(worker_host).split()[0]} prefix plus aligned "
-                "Goal Plus constraints"
+                f"{goal_plus_entrypoint(worker_host)} typed config prefix plus aligned "
+                "SearchSpec-only constraints"
             ),
             "goal_prompt_sha256": sha256_text(goal_prompt),
         }
         workspace_value = str(workspace)
         goal_plus_config = {
             "entrypoint": goal_plus_entrypoint(worker_host),
+            "command_config": goal_plus_command_config(
+                max_parallel=args.concurrency,
+                strategy="agent_guided",
+                worker_model=worker_model,
+                annotator_model=worker_model,
+                workspace_backend="git_worktree",
+                promotion_mode="apply",
+            ),
             "worker_host": worker_host,
             "worker_model": worker_model,
             "metric_name": GOAL_PLUS_PROCESS_METRIC,
@@ -1004,11 +1017,11 @@ def export_posthoc_detect_round_f1(
                     "artifact_hash": iteration.get("artifact_hash") or "",
                 }
                 try:
-                    with tempfile.TemporaryDirectory(
+                    with temporary_directory(
                         prefix=f"{candidate_id}-{iteration_number:04d}-",
-                        dir=analysis_root,
+                        namespace="benchmark-compare/round-f1",
                     ) as temporary:
-                        evaluation_workspace = Path(temporary) / "workspace"
+                        evaluation_workspace = temporary / "workspace"
                         evaluation_workspace.mkdir(mode=0o700)
                         shutil.copy2(
                             task_path, evaluation_workspace / "task.json"

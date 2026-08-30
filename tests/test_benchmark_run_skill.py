@@ -36,6 +36,26 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.executor = RecordingExecutor()
         self.agent = BenchmarkAgent(catalog=self.catalog, executor=self.executor)
 
+    def test_skill_requires_typed_goal_plus_host_commands(self) -> None:
+        skill = (
+            ROOT / ".agents/skills/benchmark-run/SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        for fragment in (
+            "$goal-plus mode=autonomous max_parallel=K",
+            "/goal-plus mode=autonomous max_parallel=K",
+            "workspace_backend=git_worktree",
+            "promotion_mode=MODE",
+            "strategy=STRATEGY",
+            "workers=MODEL*K",
+            "annotator=MODEL",
+            "campaign manifest",
+        ):
+            self.assertIn(fragment, skill)
+        self.assertIn("不能只在后续 prompt prose", skill)
+        self.assertIn("promotion_mode=artifact_only", skill)
+        self.assertIn("promotion_mode=apply", skill)
+
     def test_catalog_reuses_runner_families_and_covers_common_adapters(self) -> None:
         common = {
             target.adapter_id

@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from bench_goal_plus.codex_provider import codex_responses_provider_args
+from bench_goal_plus.goal_plus_command import (
+    goal_plus_command_config,
+    goal_plus_entrypoint,
+    render_goal_plus_command,
+)
 from bench_runtime_paths import configure_temp_environment, ensure_temp_root
 
 from .config import (
@@ -189,6 +194,18 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
         "agent_provider": provider_contract,
         "supplemental_evaluation_enabled": (
             profile["goal_plus"].get("supplemental_evaluation_enabled", False)
+            if profile["methods"][0] in {"goal-plus-codex", "goal-plus-pi"}
+            else None
+        ),
+        "goal_plus_config": (
+            {
+                "entrypoint": goal_plus_entrypoint(
+                    "codex"
+                    if profile["methods"][0] == "goal-plus-codex"
+                    else "pi-rpc"
+                ),
+                "command_config": swe_goal_plus_command_config(profile),
+            }
             if profile["methods"][0] in {"goal-plus-codex", "goal-plus-pi"}
             else None
         ),
@@ -1022,8 +1039,16 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
     )
     codex_host = profile["methods"][0] == "goal-plus-codex"
     worker_host = "codex" if codex_host else "pi-rpc"
-    entrypoint = (
-        "$goal-plus mode=autonomous" if codex_host else "/goal-plus mode=autonomous"
+    goal_plus_command = render_goal_plus_command(
+        worker_host,
+        max_parallel=profile["concurrency"],
+        strategy="random",
+        worker_model=profile["model"],
+        annotator_model=(
+            annotator["model"] if isinstance(annotator, dict) else None
+        ),
+        workspace_backend="git_worktree",
+        promotion_mode="apply",
     )
     if codex_host and profile["concurrency"] > 1:
         worker_instruction = (
@@ -1058,17 +1083,22 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
             "settled Evidence, keep searching so at least one worker reads a completed "
             "peer supplemental View before its next verifier attempt. "
         )
+    annotator_model_instruction = (
+        "the typed command config fixes strategy.evidence_annotator.model; "
+        if isinstance(annotator, dict)
+        else "leave strategy.evidence_annotator.model unset because the ViewAgent is disabled; "
+    )
     return (
-        f"{entrypoint} Solve the public repository issue below in "
+        f"{goal_plus_command} Solve the public repository issue below in "
         "/testbed. Treat this as verifier-guided code repair and enter Search Mode. "
         "Do not inspect benchmark metadata, hidden tests, dataset rows, reports, or "
         "answer patches. The official SWE-bench harness remains hidden and runs only "
         "after this Goal Plus session.\n\n"
         "Freeze exactly one SearchSpec discovered from the public issue and repository. "
-        "Use source_path=/testbed, metric_name=visible_test_score, direction=maximize, "
-        f"strategy.name=random, strategy.worker_host={worker_host}, and "
-        "strategy.orchestration_mode=parallel_loops. Set budget.max_parallel="
-        f"{profile['concurrency']} and do not set the deprecated max_candidates field. "
+        "Honor every leading typed command field. Use source_path=/testbed, "
+        "metric_name=visible_test_score, direction=maximize, "
+        f"strategy.worker_host={worker_host}, and strategy.orchestration_mode=parallel_loops. "
+        "Do not set the deprecated max_candidates field. "
         "Set strategy.worker_budget.max_runtime_seconds="
         f"{goal_plus['worker_runtime_seconds']}. "
         f"{minimum_budget_instruction}"
@@ -1079,7 +1109,8 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "Set strategy.evidence_annotator.host=codex and "
         "strategy.evidence_annotator.timeout_seconds="
         f"{annotator_timeout}; "
-        "leave its model and provider unset because the harness supplies the ViewAgent. "
+        f"{annotator_model_instruction}leave its provider unset because the harness "
+        "supplies the ViewAgent. "
         f"{worker_instruction}\n\n"
         "Do not add acceptance_view, a soft rubric, or predefined evaluation dimensions "
         "to SearchSpec. The harness may enable an independent ViewAgent after each "
@@ -1132,6 +1163,22 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "Evidence, apply the promotion patch to /testbed, record the Search result, "
         "and finish the Goal Plus record.\n\n"
         f"Public issue:\n{task['problem_statement']}\n"
+    )
+
+
+def swe_goal_plus_command_config(profile: dict[str, Any]) -> dict[str, str | int]:
+    """Return the exact typed config persisted for a SWE-bench Goal Plus cell."""
+
+    annotator = profile["goal_plus"]["evidence_annotator"]
+    return goal_plus_command_config(
+        max_parallel=profile["concurrency"],
+        strategy="random",
+        worker_model=profile["model"],
+        annotator_model=(
+            annotator["model"] if isinstance(annotator, dict) else None
+        ),
+        workspace_backend="git_worktree",
+        promotion_mode="apply",
     )
 
 

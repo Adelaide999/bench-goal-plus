@@ -21,7 +21,16 @@ Defaults are `T=300s`, `K=2`, model `gpt-5.6-luna`, and reasoning `high`. OpenEv
 
 `prepare` performs only task/config/workspace materialization. For Goal Plus it copies the portable project hook, skill, and MCP assets, but it does not create `.gp`, a Goal record, a frozen SearchSpec, a Search run, candidates, or sessions.
 
-Plain Codex receives one common task prompt. Codex + Goal Plus receives exactly the same common prompt with `$goal-plus mode=autonomous` prepended and a complete Goal Plus configuration appended; Pi uses its native `/goal-plus mode=autonomous` command. Goal intake, triage, spec discovery/freezing, candidate creation, worker inference, selection, and promotion therefore all happen inside `T`. Outside `T`, the controller may perform only deterministic process cleanup, idempotent closeout, and the common final evaluator. The manifest stores the common-prompt hash and Goal Plus transformation for audit.
+Plain Codex receives one common task prompt. Codex + Goal Plus receives exactly
+the same common prompt after a typed `$goal-plus` command that freezes
+`max_parallel=K`, workspace, promotion, strategy, and worker model; Pi uses the
+equivalent native `/goal-plus` command. The remaining suffix contains only
+SearchSpec fields outside the shared command schema. Goal intake, triage, spec
+discovery/freezing, candidate creation, worker inference, selection, and
+promotion therefore all happen inside `T`. Outside `T`, the controller may
+perform only deterministic process cleanup, idempotent closeout, and the common
+final evaluator. The manifest stores the common-prompt hash, typed command
+config, and Goal Plus transformation for audit.
 
 ## Prepare
 

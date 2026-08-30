@@ -127,6 +127,19 @@ GOAL_PLUS_BASE_REQUIRED_ASSETS = (
 GOAL_PLUS_CODEX_REQUIRED_ASSETS = (
     "src/goal_plus/server.py",
     "src/goal_plus/tools.py",
+    "src/goal_plus/goal_plus_stop_hook.py",
+    ".codex/config.example.toml",
+    ".codex/skills/goal-plus/SKILL.md",
+    ".codex/skills/goal-plus/agents/openai.yaml",
+    ".codex/skills/search/SKILL.md",
+    ".codex/agents/search_candidate_agent.toml",
+    ".codex/agents/goal_plus_final_checker.toml",
+)
+
+GOAL_PLUS_CODEX_HOOK_ASSETS = (
+    "hooks/hooks.json",
+    ".codex/hooks.example.json",
+    ".codex/hooks.json",
 )
 
 GOAL_PLUS_PI_REQUIRED_ASSETS = (
@@ -153,13 +166,14 @@ def goal_plus_runtime_asset_contract(
     alternatives: list[tuple[str, ...]] = []
     if "goal-plus-codex" in selected:
         required.extend(GOAL_PLUS_CODEX_REQUIRED_ASSETS)
+        alternatives.append(GOAL_PLUS_CODEX_HOOK_ASSETS)
     if selected & {"goal-plus-pi", "goal-plus-pi-provider"}:
         required.extend(GOAL_PLUS_PI_REQUIRED_ASSETS)
     return tuple(dict.fromkeys(required)), tuple(alternatives)
 
 
 def active_sforge_codex_runtime_contract() -> dict[str, Any]:
-    """Inspect the explicit-MCP contract used by the active SForge adapter."""
+    """Inspect the host-command authorization contract in active SForge."""
     try:
         from sforge.harness.agent.codex_goal_plus import (
             CODEX_GOAL_PLUS_MCP_OVERRIDES,
@@ -181,22 +195,66 @@ def active_sforge_codex_runtime_contract() -> dict[str, Any]:
             for template in (CodexGoalPlusAgent.run_cmd, CodexGoalPlusAgent.resume_cmd)
         )
         plugin_install = "install_codex_plugin.py" in commands
-        hooks_disabled = CodexGoalPlusAgent.stop_hook is None
+        hook_asset_install = all(
+            path in commands for path in GOAL_PLUS_CODEX_HOOK_ASSETS
+        )
+        project_hooks_enabled = bool(
+            CodexGoalPlusAgent.stop_hook == "codex-native-goal-plus"
+            and hook_asset_install
+        )
+        goal_command_prefix = CodexGoalPlusAgent.run_cmd.partition(
+            '"\\$goal-plus'
+        )[2].partition("$(cat")[0]
+        typed_command_config = all(
+            marker in goal_command_prefix
+            for marker in (
+                "mode=autonomous",
+                "max_parallel=__GOAL_PLUS_PARALLEL_NUM__",
+                "workspace_backend=git_worktree",
+                "promotion_mode=artifact_only",
+                "strategy=agent_guided",
+                "__GOAL_PLUS_ROLE_COMMAND_CONFIG__",
+            )
+        ) and " -- " not in goal_command_prefix
+        exact_start = bool(
+            goal_command_prefix.startswith(
+                " mode=autonomous max_parallel=__GOAL_PLUS_PARALLEL_NUM__ "
+            )
+            and typed_command_config
+        )
+        exact_resume = (
+            '"\\$goal-plus resume"' in CodexGoalPlusAgent.resume_cmd
+            and "Continue the active Goal Plus task"
+            not in CodexGoalPlusAgent.resume_cmd
+        )
         valid = bool(
-            explicit_mcp and plugins_disabled and not plugin_install and hooks_disabled
+            explicit_mcp
+            and plugins_disabled
+            and not plugin_install
+            and project_hooks_enabled
+            and exact_start
+            and typed_command_config
+            and exact_resume
         )
         return {
             "valid": valid,
-            "mode": "explicit-mcp",
+            "mode": "host-command-hooks-explicit-mcp",
             "explicit_mcp": explicit_mcp,
             "plugins_disabled": plugins_disabled,
             "plugin_install": plugin_install,
-            "hooks_disabled": hooks_disabled,
+            "project_hooks_enabled": project_hooks_enabled,
+            "hook_asset_install": hook_asset_install,
+            "exact_start": exact_start,
+            "typed_command_config": typed_command_config,
+            "exact_resume": exact_resume,
             "startup_timeout_seconds": 30 if explicit_mcp else None,
             "error": (
                 None
                 if valid
-                else "SForge Goal Plus Codex adapter is not isolated to explicit MCP"
+                else (
+                    "SForge Goal Plus Codex adapter does not require exact host "
+                    "commands with typed config through project hooks"
+                )
             ),
         }
     except (ImportError, AttributeError, TypeError) as exc:
@@ -653,7 +711,7 @@ def resolve_goal_plus_source(
         codex_runtime_compatibility = active_sforge_codex_runtime_contract()
         if not codex_runtime_compatibility["valid"]:
             errors.append(
-                "active SForge Codex adapter does not satisfy the explicit MCP contract"
+                "active SForge Codex adapter does not satisfy the host-command contract"
             )
     if missing_assets or missing_asset_alternatives:
         errors.append("Goal Plus source is missing required runtime assets")
@@ -2728,7 +2786,10 @@ def _check_tasks_and_resources(
         report.add(
             "network:offline-task-isolation",
             bool(isolation_probe["passed"]),
-            mechanism="SForge passwordless sudo iptables allowlist",
+            mechanism=(
+                "SForge host iptables allowlist; macOS enters the Docker VM "
+                "through a local-only privileged nsenter helper"
+            ),
             offline_task_count=len(offline_task_ids),
             sample_task=offline_task_ids[0],
             stderr=isolation_probe.get("stderr"),

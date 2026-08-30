@@ -6,6 +6,11 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from bench_goal_plus.goal_plus_command import (
+    goal_plus_command_config,
+    goal_plus_entrypoint,
+)
+
 from . import io
 from .context import current_paths
 from .environment import (
@@ -29,6 +34,33 @@ from .profiles import (
     validate_claude_thinking_contract,
     validate_pi_provider_model,
 )
+
+
+def _goal_plus_command_config(
+    *,
+    method: str,
+    model: str,
+    role_config: dict[str, Any],
+    profile: dict[str, Any],
+    concurrency: int,
+) -> dict[str, str | int]:
+    worker_model = str(role_config.get("worker_model") or model)
+    if method == "goal-plus-pi" and "/" not in worker_model:
+        worker_model = f"openai-codex/{worker_model}"
+    annotator_model = str(role_config.get("evidence_annotator_model") or model)
+    if (
+        method == "goal-plus-pi-provider"
+        and profile.get("evidence_annotator_model") is None
+    ):
+        annotator_model = str(model).partition("/")[2]
+    return goal_plus_command_config(
+        max_parallel=concurrency,
+        strategy="agent_guided",
+        worker_model=worker_model,
+        annotator_model=annotator_model,
+        workspace_backend="git_worktree",
+        promotion_mode="artifact_only",
+    )
 
 
 def _resolved_override_reasons(
@@ -320,6 +352,26 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                 ),
                 **(
                     {"goal_plus_source": goal_plus_source}
+                    if method in GOAL_PLUS_METHODS
+                    else {}
+                ),
+                **(
+                    {
+                        "goal_plus_config": {
+                            "entrypoint": goal_plus_entrypoint(
+                                "codex"
+                                if method == "goal-plus-codex"
+                                else "pi-rpc"
+                            ),
+                            "command_config": _goal_plus_command_config(
+                                method=method,
+                                model=model,
+                                role_config=role_config,
+                                profile=profile,
+                                concurrency=concurrency,
+                            ),
+                        }
+                    }
                     if method in GOAL_PLUS_METHODS
                     else {}
                 ),

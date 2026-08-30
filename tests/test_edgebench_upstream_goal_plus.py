@@ -41,7 +41,10 @@ class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
         command = agent.format_run_cmd("/tmp/prompt.md", model="gpt-test")
 
         self.assertIn(
-            "set budget.max_parallel to 2", command
+            "/goal-plus mode=autonomous max_parallel=2 "
+            "workspace_backend=git_worktree promotion_mode=artifact_only "
+            "strategy=agent_guided workers=openai-codex/gpt-test*2 ",
+            command,
         )
         self.assertIn("omit the deprecated budget.max_candidates field", command)
         self.assertIn('"max_runtime_seconds": 240', command)

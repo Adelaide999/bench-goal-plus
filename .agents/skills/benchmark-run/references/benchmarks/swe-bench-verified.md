@@ -120,6 +120,13 @@ rubric. The controller exports `/testbed/.gp` before container disposal.
 Missing Goal Plus evidence downgrades the cell to `partial` while preserving any complete official
 raw score.
 
+The initial exact host command must persist `max_parallel=K`,
+`workspace_backend=git_worktree`, `promotion_mode=apply`, `strategy=random`, and
+`workers=MODEL*K` as typed command config. When the profile enables its
+ViewAgent, `annotator=MODEL` is also required; disabled profiles omit it. Those
+values must match the frozen SearchSpec; prose-only `budget.max_parallel` or
+strategy instructions do not satisfy the launch contract.
+
 ## Debug container retention
 
 The exact task image is always retained: the controller invokes the official harness with

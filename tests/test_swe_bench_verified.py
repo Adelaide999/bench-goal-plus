@@ -202,7 +202,13 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             {"outer_deadline_at": "2026-08-04T12:00:00+00:00"},
         )
         joined = " ".join(command)
-        self.assertTrue(prompt.startswith("$goal-plus mode=autonomous"))
+        self.assertTrue(
+            prompt.startswith(
+                "$goal-plus mode=autonomous max_parallel=1 "
+                "workspace_backend=git_worktree promotion_mode=apply "
+                "strategy=random workers=gpt-5.6-sol*1"
+            )
+        )
         self.assertIn("strategy.worker_host=codex", prompt)
         self.assertIn("strategy.config.seed=1", prompt)
         self.assertIn("GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=0", command)
@@ -1042,7 +1048,14 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         prompt = runtime.build_goal_plus_prompt(
             {"problem_statement": "Public issue text"}, k2
         )
-        self.assertIn("budget.max_parallel=2", prompt)
+        self.assertTrue(
+            prompt.startswith(
+                "$goal-plus mode=autonomous max_parallel=2 "
+                "workspace_backend=git_worktree promotion_mode=apply "
+                "strategy=random workers=gpt-5.6-sol*2"
+            )
+        )
+        self.assertNotIn("Set budget.max_parallel", prompt)
         self.assertIn("Use exactly 2 fixed initial candidates", prompt)
         self.assertIn("reads a completed peer supplemental View", prompt)
 
@@ -1477,6 +1490,20 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
         self.assertEqual(manifest["budget"]["live_search_concurrency"], 2)
         self.assertEqual(manifest["budget"]["cell_concurrency"], 1)
+        self.assertEqual(
+            manifest["cells"][0]["goal_plus_config"],
+            {
+                "entrypoint": "$goal-plus",
+                "command_config": {
+                    "mode": "autonomous",
+                    "max_parallel": 2,
+                    "workspace_backend": "git_worktree",
+                    "promotion_mode": "apply",
+                    "strategy": "random",
+                    "workers": "gpt-5.6-sol*2",
+                },
+            },
+        )
 
     def test_pi_commands_inherit_only_the_credential_variable_name(self) -> None:
         profile = self.profile("sympy-16886-pi-smoke")
@@ -1609,9 +1636,16 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 )
 
             self.assertEqual(command[-1], prompt)
-            self.assertTrue(prompt.startswith("/goal-plus mode=autonomous"))
-            self.assertIn("budget.max_parallel=1", prompt)
-            self.assertIn("do not set the deprecated max_candidates", prompt)
+            self.assertTrue(
+                prompt.startswith(
+                    "/goal-plus mode=autonomous max_parallel=1 "
+                    "workspace_backend=git_worktree promotion_mode=apply "
+                    "strategy=random workers=zai/glm-5.2*1"
+                )
+            )
+            self.assertNotIn(" -- ", prompt.splitlines()[0])
+            self.assertNotIn("Set budget.max_parallel", prompt)
+            self.assertIn("Do not set the deprecated max_candidates", prompt)
             self.assertIn("Public issue text", prompt)
             self.assertIn("Do not add acceptance_view", prompt)
             self.assertIn("open-ended, task-specific observations", prompt)

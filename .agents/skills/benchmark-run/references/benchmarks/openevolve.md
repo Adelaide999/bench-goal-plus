@@ -39,6 +39,13 @@ prepare 必须：
 - 不调用模型；
 - 不预建 Goal Plus `.gp`、goal、spec、run、candidate 或 session。
 
+Goal Plus cell 使用 typed host command，显式冻结 `max_parallel=K`、
+`workspace_backend=git_worktree`、`promotion_mode=apply`、
+`strategy=agent_guided` 和
+`workers=MODEL*K`，并用 `annotator=MODEL` 固定已配置的 ViewAgent。目标正文只补充
+worker budget、verifier、edit surface、metric 和
+其他 SearchSpec-only 合同；不得再把 typed 字段仅作为 “Goal Plus configuration” prose。
+
 run 按 cell 保存失败，不删除 partial campaign。最终报告保留 native
 `combined_score`、metric direction、evaluator calls、可获得的 usage/cost coverage 和
 actual wall time。没有真实模型运行的 seed/materialization smoke 只能声明

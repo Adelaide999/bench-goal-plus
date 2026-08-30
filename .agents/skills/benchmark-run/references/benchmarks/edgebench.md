@@ -20,6 +20,8 @@ EdgeBench 保留 native SForge lifecycle。控制面负责选择 profile/preset�
 
 ## 已登记方法
 
+<!-- markdownlint-disable MD013 -->
+
 | Method | SForge agent | `K` 的含义 |
 | --- | --- | --- |
 | `plain-codex` | `codex` | 固定 `K=1`，一条 outer trajectory |
@@ -29,6 +31,8 @@ EdgeBench 保留 native SForge lifecycle。控制面负责选择 profile/preset�
 | `plain-pi-provider` | `pi-provider` | 固定 `K=1`，一条使用显式 `PROVIDER/MODEL` 的 outer trajectory |
 | `goal-plus-pi` | `pi-goal-plus` | 一个 outer run 内 `K` 个 Goal Plus workers |
 | `goal-plus-pi-provider` | `pi-goal-plus-provider` | 与上一行拓扑相同，但 outer/worker 都使用显式 `PROVIDER/MODEL` API 路径 |
+
+<!-- markdownlint-enable MD013 -->
 
 不要使用未登记的别名。method 必须在 plan 阶段通过 runner
 `supported_methods` 校验。`goal-plus-pi` 专指 `openai-codex` OAuth；Z.AI 或
@@ -49,6 +53,16 @@ model/reasoning、外部 API 配置和已解析的 Goal Plus source commit 完�
 `goal_plus_monitor_snapshot` MCP tool call。只有普通 shell tool roundtrip、只列出 MCP
 registration/resource，或通过手写 stdio client 调 server 都不能通过该 gate。端点更换后
 每次重新运行 setup/launch 都会重做语义探针；endpoint 和 credential 不写入 preset。
+
+这个 MCP 探针只验证工具连接，不能创建 Goal Plus。真实 cell 必须由 exact
+`$goal-plus ...` UserPromptSubmit 触发 project-local hook，hook 建立宿主授权后 Skill 才能解释
+工作流；`--disable plugins` 防止个人 plugin 改写入口。新 cell 的命令必须显式包含
+`mode=autonomous`、`max_parallel=K`、`workspace_backend=git_worktree`、
+`promotion_mode=artifact_only`、`strategy=agent_guided`、`workers=MODEL*K`，以及 profile
+显式配置时的 `annotator=MODEL`。其中
+`artifact_only` 表示 benchmark-native `sforge-goal-plus-submit` 独占回写和 Judge，不能再由
+Goal Plus runtime apply 一次。auto-resume 的用户输入必须严格等于 `$goal-plus resume`，不得换成
+“继续 Goal Plus”一类自然语言，也不得在 resume 命令后追加说明。
 
 当前十五分钟 VLIW preset：
 
@@ -98,9 +112,9 @@ method 和 model 决定；该字段不把 Pi campaign 变成 Codex campaign。
 ## Judge 资产完整性
 
 profiled `check` 会把精确 task revision、Work/Judge tag、image ID 与
-`experiments/edgebench/references/known-asset-issues.json` 核对。命中 blocking issue 时，即使
-镜像存在也必须失败关闭，不得 launch、不得把失败的 harness pass rate 当作 0–100 分，也
-不得把修补后的镜像重新标成原 tag。
+`experiments/edgebench/references/known-asset-issues.json` 核对。命中
+blocking issue 时，即使镜像存在也必须失败关闭，不得 launch、不得把失败的
+harness pass rate 当作 0–100 分，也不得把修补后的镜像重新标成原 tag。
 
 `order_addition_permutation_optimization` 的 Judge tag `f6f385925889` 已确认存在发布时的
 score-helper SHA 自检不一致。恢复正式测评需要上游发布新的 Judge tag，并由新的 task dataset
@@ -160,17 +174,18 @@ closeout message，再等待 final window，并在仍未终止时执行配置的
 不得用主工作区分析或独立优化填充等待时间。`worker_budget` 只进入 frozen spec、没有对应
 Codex host 操作证据，或父会话一直工作到外层 cutoff，都不算预算已执行。
 
-Codex `0.146.0` 的内置 collaboration schema 可能只暴露 `wait` 和 `close_agent`，而不暴露
+Codex `0.150.1` 的内置 collaboration schema 可能只暴露 `wait` 和 `close_agent`，而不暴露
 `send_message`/`interrupt_agent`。此时父会话仍须完成 initial wait 和 final wait，并只在 hard
 deadline 使用一次 `close_agent` 作为 hard-stop fallback。worker drain 后必须先读取
-`goal_plus_monitor_snapshot`；其中的 durable `verifier_ledger` 和 `verifier_candidate_ids` 是
-selection gate 的权威来源。`goal_plus_status` 不展示 Search verifier ledger，不能单独用于判定
-缺少 worker evidence。coverage 达到 `K/K` 后应立即执行 `search_select` 和 `search_promote`，
-期间不得进入主 workspace 自行分析或优化。
+`goal_plus_monitor_snapshot`；其中的 durable `verifier_ledger` 和
+`verifier_candidate_ids` 是 selection gate 的权威来源。`goal_plus_status` 不展示
+Search verifier ledger，不能单独用于判定缺少 worker evidence。coverage 达到
+`K/K` 后应立即执行 `search_select` 和 `search_promote`，期间不得进入主
+workspace 自行分析或优化。
 
 `T` 截止必须是 SForge 的真实 agent segment boundary，不能把同一个 Codex 进程直接允许运行
 到 `T + finalization_grace`。若 Goal Plus 在 `T` 时仍未终态，SForge 终止探索 segment，并用
-resume prompt 启动 finalization-only segment；该 segment 的第一个原生工具调用必须是
+精确 `$goal-plus resume` host command 启动 finalization-only segment；该 segment 的第一个原生工具调用必须是
 `goal_plus_monitor_snapshot`，且只能恢复 evidence、选优、提升、Judge、结果记录和终态报告。
 
 Goal Plus + Pi 不使用 Codex collaboration events，必须持久化至少 `K` 个 candidate-bound

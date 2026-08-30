@@ -196,11 +196,11 @@ class OpenEvolveComparisonTest(unittest.TestCase):
     def test_goal_plus_entrypoint_matches_worker_host(self) -> None:
         self.assertEqual(
             experiment.goal_plus_entrypoint("codex"),
-            "$goal-plus mode=autonomous",
+            "$goal-plus",
         )
         self.assertEqual(
             experiment.goal_plus_entrypoint("pi-rpc"),
-            "/goal-plus mode=autonomous",
+            "/goal-plus",
         )
         with self.assertRaisesRegex(ValueError, "unsupported Goal Plus worker host"):
             experiment.goal_plus_entrypoint("unknown")
@@ -239,17 +239,24 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             worker_host="pi-rpc",
             worker_model="bench-openai/gpt-5.6-luna",
         )
-        self.assertTrue(prompt.startswith("/goal-plus mode=autonomous"))
-        self.assertIn("budget.max_parallel=2", prompt)
+        self.assertTrue(
+            prompt.startswith(
+                "/goal-plus mode=autonomous max_parallel=2 "
+                "workspace_backend=git_worktree promotion_mode=apply "
+                "strategy=agent_guided "
+                "workers=bench-openai/gpt-5.6-luna*2 "
+                "annotator=bench-openai/gpt-5.6-luna"
+            )
+        )
+        self.assertNotIn(" -- ", prompt.splitlines()[0])
+        self.assertNotIn("`budget.max_parallel=2`", prompt)
         self.assertIn("omit deprecated `budget.max_candidates`", prompt)
         self.assertIn("240 seconds", prompt)
         self.assertIn("not hard-capped", prompt)
         self.assertIn("GOAL_PLUS_OUTER_DEADLINE_AT", prompt)
         self.assertIn('strategy.worker_host="pi-rpc"', prompt)
-        self.assertIn('strategy.name="agent_guided"', prompt)
-        self.assertIn(
-            'strategy.worker_launch.model="bench-openai/gpt-5.6-luna"', prompt
-        )
+        self.assertNotIn('strategy.name="agent_guided"', prompt)
+        self.assertIn("aligned with `command_config.workers`", prompt)
         self.assertIn('strategy.worker_launch.reasoning_effort="high"', prompt)
         self.assertIn("Metric: `combined_score` with direction `maximize`", prompt)
         self.assertIn("python3 .goal-plus-verifiers/primary_metric.py", prompt)
@@ -260,6 +267,32 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("pi_search_pool_open", prompt)
         self.assertIn("pi_search_pool_wait_any", prompt)
         self.assertNotIn("actual `spawn_agent` call", prompt)
+
+    def test_blind_goal_prompt_uses_artifact_only_promotion(self) -> None:
+        prompt = experiment.render_goal(
+            task_text="# Objective\nImprove it.",
+            artifact_name="candidate.py",
+            metric_name="public_format",
+            metric_direction="maximize",
+            wall_seconds=300,
+            closeout_seconds=60,
+            concurrency=2,
+            worker_host="pi-rpc",
+            worker_model="bench-openai/gpt-5.6-luna",
+            shared_dir_enabled=True,
+            evaluation_mode="blind",
+        )
+
+        self.assertTrue(
+            prompt.startswith(
+                "/goal-plus mode=autonomous max_parallel=2 "
+                "workspace_backend=git_worktree promotion_mode=artifact_only "
+            )
+        )
+        self.assertIn("`shared_dir.enabled=false`", prompt)
+        self.assertNotIn("`shared_dir.enabled=true`", prompt)
+        self.assertIn('`strategy.config.global_evidence_mode="independent"`', prompt)
+        self.assertIn("never receives the official evaluator or official metric", prompt)
 
     def test_pi_goal_prompt_names_pool_supervisor_minimum_lease(self) -> None:
         prompt = experiment.render_goal(
@@ -297,7 +330,10 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         )
         self.assertTrue(
             prompt.startswith(
-                "$goal-plus mode=autonomous\n\n"
+                "$goal-plus mode=autonomous max_parallel=2 "
+                "workspace_backend=git_worktree promotion_mode=apply "
+                "strategy=agent_guided workers=gpt-5.6-luna*2 "
+                "annotator=gpt-5.6-luna\n\n"
                 + common.rstrip()
                 + "\n\n# Goal Plus configuration"
             )
@@ -616,7 +652,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("deny `evaluate.py`", prompt)
         self.assertIn("`.goal-plus-verifiers/**`", prompt)
         self.assertIn("allow at most one changed file", prompt)
-        self.assertIn('workspace.backend="git_worktree"', prompt)
+        self.assertIn('use `source_path="."`', prompt)
+        self.assertIn("backend and promotion mode come from", prompt)
         self.assertIn("strategy.worker_budget.max_runtime_seconds=60", prompt)
         self.assertIn("total budget, not a success criterion", prompt)
 

@@ -16,6 +16,9 @@ subagent。Independent-parallel baseline 必须使用单独登记的方法或参
 iteration、token、cost coverage 和实际墙钟时间。
 Goal Plus 的新 SearchSpec 只用 `budget.max_parallel` 承载 `K`；
 `budget.max_candidates` 已弃用，不能与 `K` 分开配置。
+新 cell 的精确 `$goal-plus`/`/goal-plus` 命令还必须显式包含 `max_parallel=K`；runtime
+把它持久化为 `command_config` 并机械约束 ready SearchSpec。只在目标正文写
+`budget.max_parallel=K` 不构成 K 配置证据。
 
 自然语言中的“并发”“并行”“同时跑几个”没有默认归属。真实 launch 前必须把 `K` 和 `C`
 拆开显示，说明对应拓扑和 `K × C` 同时运行规模，并取得用户明确确认；不能根据单个数字猜测。
@@ -24,7 +27,8 @@ Goal Plus 的新 SearchSpec 只用 `budget.max_parallel` 承载 `K`；
 
 1. 识别 native scheduler，以及拥有可变环境的工作单元。
 2. 除非共享正是被测试的机制，否则每个 worker/lane 都必须拥有相互隔离、可重置的 workspace。
-3. `K` 必须由 controller/runtime 实际执行，不能只写在 prompt 中。
+3. `K` 必须进入 typed host command，并由 controller/runtime 实际执行；不能只写在
+   prompt prose 中。
 4. `C` 只能加在 task cell 之上。按 `K × C` 的任务拓扑计算主机容量，并保留 native
    CPU/memory quota。
 5. 一个 campaign 只使用一个 controller；不得通过重复启动 controller 伪造 `C`。

@@ -1429,6 +1429,21 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertFalse(goal_plus["supplemental_evaluation_enabled"])
         self.assertNotIn("shared_dir_enabled", plain)
         self.assertNotIn("supplemental_evaluation_enabled", plain)
+        self.assertEqual(
+            goal_plus["goal_plus_config"],
+            {
+                "entrypoint": "$goal-plus",
+                "command_config": {
+                    "mode": "autonomous",
+                    "max_parallel": 2,
+                    "workspace_backend": "git_worktree",
+                    "promotion_mode": "artifact_only",
+                    "strategy": "agent_guided",
+                    "workers": "gpt-test*2",
+                    "annotator": "gpt-test",
+                },
+            },
+        )
         self.assertFalse(plain["internet"])
         self.assertEqual(plain["eval_interval_seconds"], 1800)
         self.assertEqual(plain["submission_cooldown"], 120)
@@ -1550,6 +1565,21 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertNotIn("one hour", serialized)
         self.assertNotIn("one-hour", serialized)
         self.assertNotIn("K=2", serialized)
+        self.assertEqual(
+            cell["goal_plus_config"],
+            {
+                "entrypoint": "/goal-plus",
+                "command_config": {
+                    "mode": "autonomous",
+                    "max_parallel": 1,
+                    "workspace_backend": "git_worktree",
+                    "promotion_mode": "artifact_only",
+                    "strategy": "agent_guided",
+                    "workers": "worker-provider/worker-model*1",
+                    "annotator": "annotation-provider/annotation-model",
+                },
+            },
+        )
         campaign = EDGE.read_json(destination / "campaign.json")
         for payload in (cell, campaign):
             self.assertEqual(
@@ -2389,7 +2419,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             if command[-1] == "--version":
                 return {
                     "returncode": 0,
-                    "stdout": "codex-cli 0.146.0",
+                    "stdout": "codex-cli 0.150.1",
                     "stderr": "",
                 }
             captured["command"] = command
@@ -2487,7 +2517,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             if command[-1] == "--version":
                 return {
                     "returncode": 0,
-                    "stdout": "codex-cli 0.146.0",
+                    "stdout": "codex-cli 0.150.1",
                     "stderr": "",
                 }
             captured["command"] = command
@@ -2625,7 +2655,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             if command[-1] == "--version":
                 return {
                     "returncode": 0,
-                    "stdout": "codex-cli 0.146.0",
+                    "stdout": "codex-cli 0.150.1",
                     "stderr": "",
                 }
             stdout = "\n".join(
@@ -2812,6 +2842,54 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
         self.assertFalse(missing["valid"])
         self.assertIn("src/goal_plus/server.py", missing["missing_assets"])
+
+    def test_codex_goal_plus_source_requires_host_authorization_assets(self) -> None:
+        root = self.test_paths.goal_plus_root
+        env = {
+            "SFORGE_GOAL_PLUS_SOURCE_DIR": str(root),
+            "SFORGE_GOAL_PLUS_EXPECTED_REF": "master",
+        }
+
+        metadata = root / ".codex" / "skills" / "goal-plus" / "agents" / "openai.yaml"
+        metadata.unlink()
+        self._commit_goal_plus_fixture("remove explicit-only skill metadata")
+        missing_metadata = EDGE_ENV.resolve_goal_plus_source(
+            env, methods=["goal-plus-codex"]
+        )
+        self.assertFalse(missing_metadata["valid"])
+        self.assertIn(
+            ".codex/skills/goal-plus/agents/openai.yaml",
+            missing_metadata["missing_assets"],
+        )
+
+    def test_codex_goal_plus_source_requires_a_project_hook_layout(self) -> None:
+        root = self.test_paths.goal_plus_root
+        env = {
+            "SFORGE_GOAL_PLUS_SOURCE_DIR": str(root),
+            "SFORGE_GOAL_PLUS_EXPECTED_REF": "master",
+        }
+
+        (root / "hooks" / "hooks.json").unlink()
+        self._commit_goal_plus_fixture("remove project hooks")
+        missing_hooks = EDGE_ENV.resolve_goal_plus_source(
+            env, methods=["goal-plus-codex"]
+        )
+        self.assertFalse(missing_hooks["valid"])
+        self.assertEqual(
+            missing_hooks["missing_asset_alternatives"],
+            [list(EDGE_ENV.GOAL_PLUS_CODEX_HOOK_ASSETS)],
+        )
+
+    def test_active_codex_goal_plus_adapter_requires_exact_host_commands(self) -> None:
+        contract = EDGE_ENV.active_sforge_codex_runtime_contract()
+
+        self.assertTrue(contract["valid"], contract)
+        self.assertEqual(contract["mode"], "host-command-hooks-explicit-mcp")
+        self.assertTrue(contract["project_hooks_enabled"])
+        self.assertTrue(contract["exact_start"])
+        self.assertTrue(contract["typed_command_config"])
+        self.assertTrue(contract["exact_resume"])
+        self.assertFalse(contract["plugin_install"])
 
     def test_goal_plus_source_checks_active_sforge_runtime_compatibility(self) -> None:
         root = self.test_paths.goal_plus_root
