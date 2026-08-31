@@ -27,14 +27,20 @@ python3 scripts/repro_env.py bootstrap --only autolab
 python3 scripts/repro_env.py doctor --only autolab
 ```
 
-The ZSoft adapters run in blind evaluation mode. Workers see only the public
-task material and `format_valid` checker, and the Pi tool proxy returns only
-minimal context and opaque verifier receipts. Candidate histories, pass/fail,
-metrics, Global Evidence, official commands, and benchmark roots remain
-controller-only. After deterministic public-compliance selection and complete
-Goal Plus promotion/closeout, the controller makes one official final call.
-`goal-plus-codex` is rejected for ZSoft; use the Bubblewrap-backed
-`goal-plus-pi` method.
+ZSoft has no visible/blind option: official evaluation is always controller-only.
+Workers see the public task material and `format_valid` checker, while the Pi
+tool proxy returns minimal candidate-local context, opaque direct verifier
+receipts, and a schema-filtered Global Evidence view of settled public-verifier
+Evidence from every candidate. Objective peer Views are available as reference;
+when `--shared-dir` is enabled, verified shared-tool metadata and bounded
+stage/copy operations are available through the same session-bound proxy. Full
+candidate histories, official metrics and commands, ground truth, benchmark
+roots, peer workspaces, and transcripts remain controller-only. After
+deterministic public-compliance selection and complete Goal Plus
+promotion/closeout, the controller makes one official final call. It does not
+score or export official F1/success for intermediate rounds. Plain,
+`goal-plus-codex`, and SkyDiscover methods are rejected for ZSoft; use the
+Bubblewrap-backed `goal-plus-pi` method.
 
 The upstream keys are `ale_bench`, `autolab`, `frontier_cs`,
 `frontier_engineering`, `heurigym`, and `zsoft_l1`. OpenEvolve and Goal Plus

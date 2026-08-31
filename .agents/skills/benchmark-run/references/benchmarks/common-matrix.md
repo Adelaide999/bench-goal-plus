@@ -50,6 +50,18 @@ Goal Plus cell 的精确宿主命令必须显式包含 `max_parallel=K`、
 manifest 的 `command_config`，不能只出现在目标
 正文。其余 adapter/evaluator/SearchSpec-only 合同仍由共享 `render_goal` 正文生成。
 
+使用非默认 Pi provider 时，统一入口必须显式传递 provider 契约，base URL 只按环境
+变量名引用，不把值写入 campaign：
+
+```bash
+python3 scripts/bench.py plan \
+  --benchmark <id> --method goal-plus-pi --model <model-id> \
+  --pi-provider-id <provider> --pi-api <wire-api> \
+  --pi-api-key-env <key-env> --pi-api-base-env <base-url-env> \
+   --reasoning-effort medium --wall-time-seconds 300 \
+   --live-search-concurrency 1
+```
+
 common runner 当前不声明 detached controller。长任务应在受管理的 Agent/session 中运行，
 不能自行拼 `nohup` 或多个 controller。
 

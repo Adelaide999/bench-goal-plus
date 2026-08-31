@@ -85,6 +85,17 @@ class CommonMatrixRunner(BenchmarkRunner):
             command.extend(
                 ["--worker-min-runtime-seconds", str(spec.worker_min_runtime_seconds)]
             )
+        if spec.pi_provider_id is not None:
+            command.extend(
+                [
+                    "--pi-provider-id",
+                    spec.pi_provider_id,
+                    "--pi-api",
+                    str(spec.pi_api),
+                    "--pi-api-key-env",
+                    str(spec.pi_api_key_env),
+                ]
+            )
         campaign = CampaignRef(
             campaign_id=spec.campaign_id,
             path=destination,
@@ -100,7 +111,7 @@ class CommonMatrixRunner(BenchmarkRunner):
             raise UnsupportedOperation("common-matrix controller does not support detach")
         if not spec.model:
             raise ContractError("common-matrix run requires model")
-        return [
+        command = [
             str(managed_python()),
             str(self.definition.controller.relative_to(ROOT)),
             "run",
@@ -109,6 +120,20 @@ class CommonMatrixRunner(BenchmarkRunner):
             "--model",
             spec.model,
         ]
+        if spec.pi_provider_id is not None:
+            command.extend(
+                [
+                    "--pi-provider-id",
+                    spec.pi_provider_id,
+                    "--pi-api",
+                    str(spec.pi_api),
+                    "--pi-api-key-env",
+                    str(spec.pi_api_key_env),
+                    "--pi-api-base-env",
+                    str(spec.pi_api_base_env),
+                ]
+            )
+        return command
 
     def resume_command(self, state: dict, campaign: CampaignRef) -> list[str]:
         if not self.definition.capabilities.resume:
@@ -116,7 +141,7 @@ class CommonMatrixRunner(BenchmarkRunner):
         model = (state.get("resolved_spec") or {}).get("model")
         if not model:
             raise ContractError("agent state does not record the campaign model")
-        return [
+        command = [
             str(managed_python()),
             str(self.definition.controller.relative_to(ROOT)),
             "run",
@@ -125,6 +150,21 @@ class CommonMatrixRunner(BenchmarkRunner):
             "--model",
             str(model),
         ]
+        provider = (state.get("resolved_spec") or {}).get("pi_provider")
+        if isinstance(provider, dict) and provider.get("id"):
+            command.extend(
+                [
+                    "--pi-provider-id",
+                    str(provider["id"]),
+                    "--pi-api",
+                    str(provider["api"]),
+                    "--pi-api-key-env",
+                    str(provider["api_key_env"]),
+                    "--pi-api-base-env",
+                    str(provider["api_base_env"]),
+                ]
+            )
+        return command
 
     def status(self, campaign: CampaignRef) -> StatusSnapshot:
         manifest_path = campaign.path / "campaign.json"

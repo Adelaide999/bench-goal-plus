@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Blind adapter for the cybergym-zsoft-detect static detection benchmark.
+"""Adapter for the cybergym-zsoft-detect static detection benchmark.
 
 Worker-visible validation checks only the public finding format. The trusted
 benchmark controller runs the benchmark-owned scorer once after selection.
@@ -46,16 +46,14 @@ ARTIFACT_NAME = "submission"
 PRIMARY_METRIC = "f1"
 GOAL_PLUS_PROCESS_METRIC = PUBLIC_METRIC
 PUBLIC_FORMAT_METRIC = PUBLIC_METRIC
-EVALUATION_MODE = "blind"
-BLIND_EVALUATION = True
+CONTROLLER_ONLY_OFFICIAL_EVALUATION = True
 DIRECTION = "maximize"
 CASE_SET_DESCRIPTION = (
-    "one blind zsoft-detect project bench: static findings on a pinned commit"
+    "one zsoft-detect project bench: static findings on a pinned commit"
 )
 CODEX_SANDBOX = "workspace-write"
 PI_WORKER_SANDBOX = {
     "engine": "bubblewrap",
-    "evaluation_mode": EVALUATION_MODE,
     "workspace_access": "read_only",
     "read_only_workspace_paths": ["source", "schemas"],
     "writable_workspace_paths": [ARTIFACT_NAME],
@@ -307,7 +305,7 @@ def materialize_workspace(
         "source_revision": commit,
         "source_materialization": source_materialization,
         "framework_version": _framework_version(benchmark_root),
-        "evaluation_mode": EVALUATION_MODE,
+        "controller_only_official_evaluation": True,
         "public_validation_kind": DETECT_VALIDATION_KIND,
         "primary_metric": GOAL_PLUS_PROCESS_METRIC,
         "direction": DIRECTION,

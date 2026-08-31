@@ -22,7 +22,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from bench_artifacts import read_json as load_json  # noqa: E402
-from bench_artifacts import utc_now, write_json  # noqa: E402
+from bench_artifacts import (  # noqa: E402
+    utc_now,
+    write_json,
+    write_json_atomic,
+)
 from bench_goal_plus.codex_provider import (  # noqa: E402
     codex_responses_provider_args,
 )
@@ -69,7 +73,7 @@ DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_WALL_TIME_SECONDS = 300
 DEFAULT_CONCURRENCY = 2
 DEFAULT_REASONING_EFFORT = "high"
-BLIND_SELECTION_RULE = "lowest_candidate_id_latest_compliant_iteration"
+PUBLIC_GATE_SELECTION_RULE = "lowest_candidate_id_latest_compliant_iteration"
 REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 CODEX_SANDBOX = "danger-full-access"
 CODEX_PROVIDER_ID = "bench_proxy"
@@ -232,7 +236,7 @@ def render_common_task_prompt(
     )
 
 
-def render_blind_task_prompt(
+def render_controller_only_task_prompt(
     task_text: str,
     wall_seconds: int,
     closeout_seconds: int,
@@ -242,8 +246,9 @@ def render_blind_task_prompt(
         f"{task_text.strip()}\n\n"
         "# Common experiment contract\n\n"
         f"- Total outer wall-clock budget: {wall_seconds} seconds.\n"
-        f"- Use about {exploration_seconds} seconds for independent exploration and reserve "
-        f"{closeout_seconds} seconds to leave the selected artifact ready for controller closeout.\n"
+        f"- Use about {exploration_seconds} seconds for exploration and reserve "
+        f"{closeout_seconds} seconds to leave all committed candidate artifacts ready for "
+        "controller closeout.\n"
         "- Use only `python3 public_check.py` for public format and structure diagnostics. "
         "The checker provides no behavioral quality signal.\n"
         "- Hidden evaluation is unavailable during exploration and selection. Do not infer, "
@@ -272,7 +277,7 @@ def render_goal(
     coordination_condition: str | None = None,
     search_space_mode: str | None = None,
     shared_dir_enabled: bool = False,
-    evaluation_mode: str = "visible",
+    controller_only_official_evaluation: bool = False,
 ) -> str:
     """Add the host-native Goal Plus entrypoint and config to the common prompt."""
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
@@ -291,8 +296,6 @@ def render_goal(
         raise ValueError("verifier timeout must be positive")
     if search_space_mode not in {None, "observe", "enforce"}:
         raise ValueError(f"unsupported search-space mode: {search_space_mode}")
-    if evaluation_mode not in {"visible", "blind"}:
-        raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
     if coordination_condition in {"B3", "B4"} and search_space_mode is None:
         raise ValueError(
             f"{coordination_condition} requires an explicit search-space mode"
@@ -305,7 +308,7 @@ def render_goal(
         annotator_model=worker_model,
         workspace_backend="git_worktree",
         promotion_mode=(
-            "artifact_only" if evaluation_mode == "blind" else "apply"
+            "artifact_only" if controller_only_official_evaluation else "apply"
         ),
     )
     coordination_text = ""
@@ -330,12 +333,17 @@ def render_goal(
         if worker_host == "pi-rpc"
         else "SubagentStop blocks an early worker return"
     )
+    pool_close_target = (
+        "returning control for host closeout"
+        if controller_only_official_evaluation
+        else "selection"
+    )
     initial_launch_contract = (
         "- After the one initial `search_plan_next` call, call `search_start_batch` "
         "once, then open exactly one `pi_search_pool_open` for the returned launch "
         "payloads. Treat the pool's persisted jobs and native session ids as the "
         "only evidence that workers started; use `pi_search_pool_wait_any`, continue "
-        "ready candidates while useful, and close the pool before selection.\n"
+        f"ready candidates while useful, and close the pool before {pool_close_target}.\n"
         if worker_host == "pi-rpc"
         else "- A successful `search_start_agent_session` only allocates a durable "
         "Goal Plus session and returns a launch payload; it does not start a Codex "
@@ -347,8 +355,10 @@ def render_goal(
         "failure instead of simulating worker progress.\n"
     )
     common_prompt = (
-        render_blind_task_prompt(task_text, wall_seconds, closeout_seconds)
-        if evaluation_mode == "blind"
+        render_controller_only_task_prompt(
+            task_text, wall_seconds, closeout_seconds
+        )
+        if controller_only_official_evaluation
         else render_common_task_prompt(task_text, wall_seconds, closeout_seconds)
     )
     edit_surface_limit = (
@@ -357,21 +367,32 @@ def render_goal(
         if artifact_is_directory
         else "allow at most one changed file.\n"
     )
-    if evaluation_mode == "blind":
+    if controller_only_official_evaluation:
         return (
             f"{goal_plus_command}\n\n"
             f"{common_prompt.rstrip()}\n\n"
             "# Goal Plus configuration\n\n"
             "Use the current workspace and construct a public-format-only Goal Plus search "
-            "from the configuration below. The benchmark-owned Pi boundary keeps worker "
-            "feedback opaque; Goal Plus remains an unmodified generic runtime and never "
-            "receives the official evaluator or official metric.\n\n"
+            "from the configuration below. The benchmark-owned Pi boundary keeps the "
+            "official evaluator and official metric outside every worker trajectory; Goal "
+            "Plus receives only the public verifier and its safe shared Evidence.\n\n"
             "- Honor every leading typed command field in the SearchSpec and omit "
             "deprecated `budget.max_candidates`.\n"
+            "- After triage and before freezing the SearchSpec, call "
+            "`goal_plus_upsert_work_items` with one required `route=\"search\"` item "
+            "for this benchmark Search. After linking the run, record "
+            "`search_routed` for that item and leave its result acceptance to the host "
+            "controller closeout.\n"
             f"- Set `strategy.worker_host=\"{worker_host}\"` and "
             "`strategy.orchestration_mode=\"parallel_loops\"`.\n"
-            + "- Set top-level `shared_dir.enabled=false` and "
-            "`strategy.config.global_evidence_mode=\"independent\"`.\n"
+            + "- Set `strategy.config.global_evidence_mode=\"manual\"` so every worker can "
+            "read settled public-verifier Evidence from the other candidates as reference.\n"
+            + (
+                "- Set top-level `shared_dir.enabled=true` so verified shared tools can be "
+                "published and copied through the runtime's bounded shared-tool contract.\n"
+                if shared_dir_enabled
+                else ""
+            )
             + f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
             "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "
             "lineages while useful work and outer time remain.\n"
@@ -394,9 +415,12 @@ def render_goal(
             f"policy `final_only`, timeout {verifier_timeout_seconds} seconds.\n"
             "- Promotion verifier: the same command, role `promotion_gate`, feedback policy "
             f"`final_only`, timeout {verifier_timeout_seconds} seconds.\n"
-            "- The benchmark-owned Pi shim makes verifier feedback, worker context history, "
-            "`results.tsv`, Git administration, and Global Evidence opaque to workers. "
-            "Workers must not request or infer those values.\n"
+            "- The benchmark-owned Pi shim keeps full verifier responses, worker histories, "
+            "`results.tsv`, Git administration, and official results opaque. It exposes a "
+            "schema-filtered Global Evidence view containing only public `format_valid` "
+            "Evidence, objective Views, and verified shared-tool metadata. Read it before "
+            "the first material change and periodically thereafter; treat peer information "
+            "as reference and independently verify it against the public task.\n"
             "- Each worker must commit its latest artifact and submit its own final process "
             "verifier result. Do not run duplicate parent-side process verification when "
             "matching durable evidence already exists.\n"
@@ -413,11 +437,13 @@ def render_goal(
             "Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as the authoritative upper deadline.\n"
             "- Predeclare the controller-checked selection rule: among candidates with a publicly compliant "
             "`process_passed` iteration, choose the lowest candidate ID and that candidate's latest "
-            "such commit. Compliance is determined only by the public format checker and is "
-            "never disclosed to workers. Goal Plus may settle only on this public gate; after "
-            "closeout the benchmark controller independently rejects any selection that does "
-            "not match this rule before invoking the official evaluator. Promote the selected "
-            "commit, complete the full goal audit, and write the final Goal Plus report.\n"
+            "such commit. Compliance is determined only by the public format checker; its "
+            "binary public signal may appear in Global Evidence, but no official metric may "
+            "enter Search state. Goal Plus may settle only on this public gate. Do not "
+            "call `search_select`, `search_promote`, or record a final Search result from the "
+            "agent process. The host controller applies the frozen rule, performs the sole "
+            "promotion gate, completes the goal audit, and writes the final Goal Plus report "
+            "inside the reserved closeout window before invoking the official evaluator.\n"
         )
     return (
         f"{goal_plus_command}\n\n"
@@ -483,12 +509,12 @@ def render_plain_prompt(
     task_text: str,
     wall_seconds: int,
     closeout_seconds: int,
-    evaluation_mode: str = "visible",
+    controller_only_official_evaluation: bool = False,
 ) -> str:
-    if evaluation_mode == "blind":
-        return render_blind_task_prompt(task_text, wall_seconds, closeout_seconds)
-    if evaluation_mode != "visible":
-        raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
+    if controller_only_official_evaluation:
+        return render_controller_only_task_prompt(
+            task_text, wall_seconds, closeout_seconds
+        )
     return render_common_task_prompt(task_text, wall_seconds, closeout_seconds)
 
 
@@ -1818,10 +1844,149 @@ def _goal_plus_runtime_types() -> tuple[type[Any], type[Any], type[Any]]:
     return FileGoalPlusRuntime, FileSearchRuntime, SearchTools
 
 
-def _validate_existing_blind_selection(
-    run_path: Path, selection: dict[str, Any]
+def _ensure_controller_search_work_item(
+    goal_runtime: Any, goal_plus_id: str, run_id: str
+) -> str:
+    """Return the auditable work item that controller closeout will resolve."""
+    goal = goal_runtime.status(goal_plus_id)
+    current_items = [
+        item
+        for item in goal.work_items
+        if item.goal_revision == goal.goal_revision
+    ]
+    linked_items = [
+        item
+        for item in current_items
+        if item.route == "search" and item.search_run_id == run_id
+    ]
+    if len(linked_items) > 1:
+        raise RuntimeError(
+            f"Goal Plus {goal_plus_id} has multiple work items for Search run {run_id}"
+        )
+    if linked_items:
+        linked_item = linked_items[0]
+        if linked_item.status in {"planned", "blocked", "failed"}:
+            goal_runtime.record_work_event(
+                goal_plus_id,
+                linked_item.work_item_id,
+                "search_routed",
+                "Controller closeout resumed the linked fixed-budget Search run.",
+                search_run_id=run_id,
+                evidence=[{"type": "search_run", "run_id": run_id}],
+            )
+        return linked_item.work_item_id
+
+    unbound_search_items = [
+        item
+        for item in current_items
+        if item.route == "search"
+        and item.status in {"planned", "blocked", "failed"}
+        and item.search_run_id is None
+    ]
+    if len(unbound_search_items) > 1:
+        raise RuntimeError(
+            f"Goal Plus {goal_plus_id} has ambiguous unbound Search work items"
+        )
+    if unbound_search_items:
+        work_item_id = unbound_search_items[0].work_item_id
+    elif current_items:
+        raise RuntimeError(
+            f"Goal Plus {goal_plus_id} has no work item for Search run {run_id}"
+        )
+    else:
+        work_item_id = "benchmark_search"
+        goal_runtime.upsert_work_items(
+            goal_plus_id,
+            [
+                {
+                    "work_item_id": work_item_id,
+                    "title": "Run benchmark Search",
+                    "objective": (
+                        "Run the fixed-budget candidate search and let controller closeout "
+                        "apply the frozen selection and promotion contract."
+                    ),
+                    "route": "search",
+                    "depends_on": [],
+                    "scope": [run_id],
+                    "acceptance": [
+                        "The linked Search run is selected and promoted",
+                        "The controller promotion verifier passes",
+                        "The Goal Plus Search result is recorded",
+                    ],
+                    "required": True,
+                }
+            ],
+        )
+
+    goal_runtime.record_work_event(
+        goal_plus_id,
+        work_item_id,
+        "search_routed",
+        "Controller closeout adopted the linked fixed-budget Search run.",
+        search_run_id=run_id,
+        evidence=[{"type": "search_run", "run_id": run_id}],
+    )
+    return work_item_id
+
+
+def _accept_controller_search_work_item(
+    goal_runtime: Any,
+    goal_plus_id: str,
+    work_item_id: str,
+    *,
+    run_id: str,
+    candidate_id: str,
+    selected_score: Any,
 ) -> None:
-    expected: tuple[str, int, str] | None = None
+    evidence = [
+        {
+            "type": "controller_closeout",
+            "run_id": run_id,
+            "selected_candidate_id": candidate_id,
+            "selected_score": selected_score,
+        }
+    ]
+    goal = goal_runtime.status(goal_plus_id)
+    item = next(
+        item
+        for item in goal.work_items
+        if item.goal_revision == goal.goal_revision
+        and item.work_item_id == work_item_id
+    )
+    if item.status == "active":
+        goal_runtime.record_work_event(
+            goal_plus_id,
+            work_item_id,
+            "result",
+            "Controller selected and promoted the verifier-backed Search result.",
+            search_run_id=run_id,
+            evidence=evidence,
+        )
+        goal = goal_runtime.status(goal_plus_id)
+        item = next(
+            item
+            for item in goal.work_items
+            if item.goal_revision == goal.goal_revision
+            and item.work_item_id == work_item_id
+        )
+    if item.status == "result_ready":
+        goal_runtime.record_work_event(
+            goal_plus_id,
+            work_item_id,
+            "accepted",
+            "Controller verified the Search selection, promotion, and recorded result.",
+            search_run_id=run_id,
+            evidence=evidence,
+        )
+    elif item.status != "accepted":
+        raise RuntimeError(
+            f"Goal Plus work item {work_item_id} cannot be accepted from {item.status}"
+        )
+
+
+def _expected_public_gate_selection(run_path: Path) -> dict[str, Any]:
+    expected: dict[str, Any] | None = None
+    compliant_scores: set[float] = set()
     candidates = [
         load_json(candidate_path)
         for candidate_path in (run_path.parent / "candidates").glob(
@@ -1834,7 +1999,7 @@ def _validate_existing_blind_selection(
         or not isinstance(candidate.get("iterations"), list)
         for candidate in candidates
     ):
-        raise RuntimeError("blind candidate evidence is malformed")
+        raise RuntimeError("public-gate candidate evidence is malformed")
     for candidate in sorted(candidates, key=lambda item: item["candidate_id"]):
         compliant = [
             iteration
@@ -1846,32 +2011,54 @@ def _validate_existing_blind_selection(
             and iteration.get("git_artifact_clean") is True
             and not iteration.get("touched_denied_files", False)
             and not iteration.get("changed_outside_allowed", False)
+            and iteration.get("disposition") not in {"discard", "failure"}
+            and type(iteration.get("score")) in {int, float}
         ]
         if compliant:
             latest = max(compliant, key=lambda item: item["iteration"])
-            expected = (
-                str(candidate["candidate_id"]),
-                int(latest["iteration"]),
-                str(latest["git_head"]),
-            )
-            break
+            compliant_scores.update(float(item["score"]) for item in compliant)
+            if expected is None:
+                expected = {
+                    "selected_candidate_id": str(candidate["candidate_id"]),
+                    "selected_score": float(latest["score"]),
+                    "selected_iteration": int(latest["iteration"]),
+                    "selected_git_head": str(latest["git_head"]),
+                }
     if expected is None:
         raise RuntimeError("no publicly compliant candidate iteration is available")
-    actual = (
-        selection.get("selected_candidate_id"),
-        selection.get("selected_iteration"),
-        selection.get("selected_git_head"),
-    )
-    if actual != expected:
-        raise RuntimeError("existing promotion violates the frozen blind selection rule")
+    if len(compliant_scores) != 1:
+        raise RuntimeError("public gate produced non-uniform passing scores")
+    return expected
+
+
+def _prepare_public_gate_selection(run_path: Path) -> dict[str, Any]:
+    """Make the generic selector's tie-break match the frozen public-gate rule."""
+    expected = _expected_public_gate_selection(run_path)
+    run_data = load_json(run_path)
+    run_data["best_candidate_id"] = expected["selected_candidate_id"]
+    run_data["best_score"] = expected["selected_score"]
+    write_json_atomic(run_path, run_data)
+    return expected
+
+
+def _validate_existing_public_gate_selection(
+    run_path: Path,
+    selection: dict[str, Any],
+    *,
+    expected: dict[str, Any] | None = None,
+) -> None:
+    if expected is None:
+        expected = _expected_public_gate_selection(run_path)
+    if any(selection.get(key) != expected[key] for key in expected):
+        raise RuntimeError(
+            "existing selection or promotion violates the frozen public-gate selection rule"
+        )
 
 
 def finalize_goal_plus_search(
-    workspace: Path, evaluation_mode: str = "visible"
+    workspace: Path, deterministic_public_gate: bool = False
 ) -> dict[str, Any]:
-    """Controller-owned post-deadline drain/select/promote, outside search T."""
-    if evaluation_mode not in {"visible", "blind"}:
-        raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
+    """Controller-owned drain, selection, and promotion after agent execution."""
     FileGoalPlusRuntime, FileSearchRuntime, SearchTools = _goal_plus_runtime_types()
 
     started = time.monotonic()
@@ -1898,6 +2085,12 @@ def finalize_goal_plus_search(
         for run_id, goal_ids in goals_by_run.items():
             run_path = root / "runs" / run_id / "run.json"
             run_data = load_json(run_path)
+            work_items_by_goal = {
+                goal_plus_id: _ensure_controller_search_work_item(
+                    goal_runtime, goal_plus_id, run_id
+                )
+                for goal_plus_id in goal_ids
+            }
             initial_state = run_data.get("state")
             candidate_paths = sorted(
                 (run_path.parent / "candidates").glob("*/candidate.json")
@@ -1905,21 +2098,31 @@ def finalize_goal_plus_search(
             if not candidate_paths:
                 continue
             verified_in_closeout: list[str] = []
+            public_gate_expected: dict[str, Any] | None = None
             existing = _existing_promotion(run_path)
             if existing is not None:
                 run_data, candidate_id, selection, promotion = existing
-                if evaluation_mode == "blind":
-                    _validate_existing_blind_selection(run_path, selection)
-                    selection["selection_rule"] = BLIND_SELECTION_RULE
+                if deterministic_public_gate:
+                    _validate_existing_public_gate_selection(run_path, selection)
+                    selection["selection_rule"] = PUBLIC_GATE_SELECTION_RULE
             else:
                 try:
-                    selected = _existing_selection(run_path)
-                    if selected is None:
-                        if evaluation_mode == "blind":
-                            selection = tools.search_select(run_id)
-                            _validate_existing_blind_selection(run_path, selection)
-                            selection["selection_rule"] = BLIND_SELECTION_RULE
-                        else:
+                    if deterministic_public_gate:
+                        # Selection may append a controller-verifier iteration. The
+                        # deadline snapshot, not that closeout side effect, is authoritative.
+                        public_gate_expected = _prepare_public_gate_selection(run_path)
+                        selection = tools.search_select(run_id)
+                        _validate_existing_public_gate_selection(
+                            run_path,
+                            selection,
+                            expected=public_gate_expected,
+                        )
+                        selection["selection_rule"] = PUBLIC_GATE_SELECTION_RULE
+                        candidate_id = selection["selected_candidate_id"]
+                        run_data = load_json(run_path)
+                    else:
+                        selected = _existing_selection(run_path)
+                        if selected is None:
                             for candidate_path in candidate_paths:
                                 candidate = load_json(candidate_path)
                                 if not candidate.get("iterations"):
@@ -1932,23 +2135,24 @@ def finalize_goal_plus_search(
                                         candidate["candidate_id"]
                                     )
                             selection = tools.search_select(run_id)
-                        candidate_id = selection["selected_candidate_id"]
-                        run_data = load_json(run_path)
-                    else:
-                        run_data, candidate_id, selection = selected
-                        if evaluation_mode == "blind":
-                            _validate_existing_blind_selection(run_path, selection)
-                            selection["selection_rule"] = BLIND_SELECTION_RULE
+                            candidate_id = selection["selected_candidate_id"]
+                            run_data = load_json(run_path)
+                        else:
+                            run_data, candidate_id, selection = selected
                     promotion = tools.search_promote(run_id, candidate_id)
                 except RuntimeError:
                     existing = _existing_promotion(run_path)
                     if existing is not None:
                         run_data, candidate_id, selection, promotion = existing
-                        if evaluation_mode == "blind":
-                            _validate_existing_blind_selection(run_path, selection)
-                            selection["selection_rule"] = BLIND_SELECTION_RULE
+                        if deterministic_public_gate:
+                            _validate_existing_public_gate_selection(
+                                run_path,
+                                selection,
+                                expected=public_gate_expected,
+                            )
+                            selection["selection_rule"] = PUBLIC_GATE_SELECTION_RULE
                     else:
-                        if evaluation_mode == "blind":
+                        if deterministic_public_gate:
                             raise
                         selected = _existing_selection(run_path)
                         if selected is None:
@@ -1969,6 +2173,14 @@ def finalize_goal_plus_search(
                         promotion_artifact_path=promotion["artifact_path"],
                         summary="Controller finalized the drained fixed-budget Search run.",
                     )
+                _accept_controller_search_work_item(
+                    goal_runtime,
+                    goal_plus_id,
+                    work_items_by_goal[goal_plus_id],
+                    run_id=run_id,
+                    candidate_id=candidate_id,
+                    selected_score=selection.get("selected_score"),
+                )
                 goal = goal_runtime.status(goal_plus_id)
                 if goal.status != "complete":
                     goal_runtime.set_status(

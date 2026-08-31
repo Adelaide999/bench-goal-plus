@@ -37,6 +37,13 @@ def add_start_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", action="append", type=int, default=[])
     parser.add_argument("--model")
     parser.add_argument("--reasoning-effort", choices=("low", "medium", "high", "xhigh"))
+    parser.add_argument("--pi-provider-id")
+    parser.add_argument(
+        "--pi-api",
+        choices=("openai-responses", "openai-completions", "anthropic-messages"),
+    )
+    parser.add_argument("--pi-api-key-env")
+    parser.add_argument("--pi-api-base-env")
     parser.add_argument("--wall-time-seconds", type=int)
     parser.add_argument("--live-search-concurrency", type=int)
     parser.add_argument("--cell-concurrency", type=int)
@@ -130,6 +137,10 @@ def spec_from_args(agent: BenchmarkAgent, args: argparse.Namespace):
         seeds=args.seed,
         model=args.model,
         reasoning_effort=args.reasoning_effort,
+        pi_provider_id=args.pi_provider_id,
+        pi_api=args.pi_api,
+        pi_api_key_env=args.pi_api_key_env,
+        pi_api_base_env=args.pi_api_base_env,
         wall_time_seconds=args.wall_time_seconds,
         live_search_concurrency=args.live_search_concurrency,
         cell_concurrency=args.cell_concurrency,

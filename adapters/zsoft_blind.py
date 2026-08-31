@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-contained public structure checks for blind ZSoft workspaces."""
+"""Self-contained public structure checks for ZSoft workspaces."""
 
 from __future__ import annotations
 
@@ -234,9 +234,9 @@ def diagnostics_valid(diagnostics: dict[str, Any]) -> bool:
 
 
 def ensure_single_final_claim(mode: str, budget: dict[str, Any]) -> None:
-    """Fail closed before a repeated blind official-evaluator invocation."""
+    """Fail closed before a repeated official-evaluator invocation."""
     if mode == "final" and budget.get("final_claimed") != 1:
-        raise RuntimeError("blind official final evaluation may only be claimed once")
+        raise RuntimeError("official final evaluation may only be claimed once")
 
 
 def _safe_artifact_path(workspace: Path, value: Any) -> Path:
