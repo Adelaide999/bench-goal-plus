@@ -287,7 +287,9 @@ model 和 credential source；它不会把 Pi provider 错配为 `openai-codex`�
 原生支持，不需要 Skill 在容器里手工拼安装命令，也不允许 Skill 启动 Goal Plus。
 Codex 的启动链固定为精确 `$goal-plus ...` UserPromptSubmit、project-local hooks
 授权、显式 Goal Plus MCP；恢复只能提交精确 `$goal-plus resume`。普通自然语言、
-Skill、plugin 和 MCP create/update 工具都没有启动或恢复权限。当前真实路径是：
+Skill、plugin 和 MCP create/update 工具都没有启动或恢复权限。Pi 的启动链同样固定为
+精确 `/goal-plus ...` extension command；通过 `pi -c` 新进程恢复 native session 时，
+只能提交无附加文本的 `/goal-plus resume`。当前真实路径是：
 
 - 默认情况下 controller 使用 registry 声明的 Muyuan `master` checkout。临时实验分支
   不修改 registry，而是显式设置 `SFORGE_GOAL_PLUS_SOURCE_DIR` 为外部 checkout 中的
