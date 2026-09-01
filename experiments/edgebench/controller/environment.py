@@ -2551,7 +2551,10 @@ def _check_auth(
     needs_pi = any(agent.startswith("pi") for agent in agents)
     needs_pi_oauth = needs_pi and api_protocol != "pi-provider"
     needs_claude = "claude-code" in agents
-    custom_base_without_key = bool(api_base_url) and not bool(api_key)
+    pi_oauth_only = needs_pi_oauth and not (needs_codex or needs_claude)
+    custom_base_without_key = (
+        bool(api_base_url) and not bool(api_key) and not pi_oauth_only
+    )
     auth_ready = (
         (not needs_codex or bool(api_key) or auth.is_file())
         and (not needs_pi_oauth or bool(pi_auth_status["valid"]))
@@ -2567,7 +2570,7 @@ def _check_auth(
             if pi_provider_status is not None
             else (
                 "pi-oauth"
-                if needs_pi_oauth and not (needs_codex or needs_claude)
+                if pi_oauth_only
                 else "api_key" if api_key else "host_login"
             )
         ),

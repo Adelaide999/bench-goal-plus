@@ -2215,6 +2215,39 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertTrue(status["valid"])
         self.assertEqual(status["path"], auth)
 
+    def test_pi_oauth_accepts_an_api_base_override_without_api_key(self) -> None:
+        report = EDGE_ENV.DoctorReport("pi-oauth-proxy")
+        profile = {"methods": ["goal-plus-pi"], "model": "gpt-5.6-sol"}
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "SFORGE_AGENT_API_BASE_URL": (
+                    "http://host.docker.internal:19090/backend-api"
+                )
+            },
+            clear=True,
+        ), mock.patch.object(
+            EDGE_ENV,
+            "resolve_pi_auth",
+            return_value={"valid": True, "path": "/tmp/pi-auth.json"},
+        ):
+            protocol, api_config, host_preflight_ready = EDGE_ENV._check_auth(
+                report, profile
+            )
+
+        auth_check = next(
+            check for check in report.checks if check["name"] == "auth:agent"
+        )
+        self.assertTrue(auth_check["passed"])
+        self.assertEqual(auth_check["mode"], "pi-oauth")
+        self.assertEqual(protocol, "openai")
+        self.assertEqual(
+            api_config["api_base_url"],
+            "http://host.docker.internal:19090/backend-api",
+        )
+        self.assertTrue(host_preflight_ready)
+
     def test_pi_provider_validates_registry_model_and_credential_env(self) -> None:
         models = self.temp / "models.json"
         models.write_text(
