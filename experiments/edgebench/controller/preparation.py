@@ -29,6 +29,7 @@ from .profiles import (
     api_protocol_for_methods,
     load_official_codex_protocol,
     official_task_protocol,
+    methods_require_codex,
     profile_task_protocol,
     protocol_diff,
     validate_claude_thinking_contract,
@@ -216,7 +217,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         pi_provider_contract = pi_provider_bundle_contract(bundle)
 
     codex_contract: dict[str, Any] | None = None
-    if api_protocol == "openai":
+    if api_protocol == "openai" and methods_require_codex(methods):
         codex_contract = codex_provider_contract(resolved_execution_profile)
         if not codex_contract["valid"]:
             raise ValueError(

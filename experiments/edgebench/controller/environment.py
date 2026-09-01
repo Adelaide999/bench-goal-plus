@@ -37,6 +37,7 @@ from .profiles import (
     GOAL_PLUS_METHODS,
     METHODS,
     api_protocol_for_methods,
+    methods_require_codex,
     load_official_codex_protocol,
     pi_provider_role_model_refs,
     profile_task_protocol,
@@ -2546,7 +2547,7 @@ def _check_auth(
     )
     api_key = api_config["api_key"]
     api_base_url = api_config["api_base_url"]
-    needs_codex = any(agent.startswith("codex") for agent in agents)
+    needs_codex = methods_require_codex(profile["methods"])
     needs_pi = any(agent.startswith("pi") for agent in agents)
     needs_pi_oauth = needs_pi and api_protocol != "pi-provider"
     needs_claude = "claude-code" in agents

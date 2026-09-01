@@ -31,6 +31,7 @@ from experiments.edgebench.controller import io as EDGE_IO
 from experiments.edgebench.controller import cli as EDGE_CLI
 from experiments.edgebench.controller import environment as EDGE_ENV
 from experiments.edgebench.controller import evidence as EDGE_EVIDENCE
+from experiments.edgebench.controller import profiles as EDGE_PROFILES
 from experiments.edgebench.controller import reporting as EDGE_REPORTING
 from experiments.edgebench.controller import runtime as EDGE_RUNTIME
 
@@ -755,6 +756,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             EDGE.METHODS["plain-pi-provider"]["api_protocol"], "pi-provider"
         )
         self.assertEqual(EDGE.METHODS["goal-plus-pi"]["agent"], "pi-goal-plus")
+        self.assertFalse(EDGE_PROFILES.methods_require_codex(["goal-plus-pi"]))
+        self.assertTrue(EDGE_PROFILES.methods_require_codex(["goal-plus-codex"]))
         self.assertEqual(
             EDGE.METHODS["goal-plus-pi-provider"]["agent"],
             "pi-goal-plus-provider",
@@ -3722,6 +3725,56 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 )
 
         docker_probe.assert_not_called()
+
+    def test_pi_oauth_runtime_does_not_run_codex_host_preflight(self) -> None:
+        profile = {
+            **self.profile(),
+            "methods": ["goal-plus-pi"],
+            "api_protocol": "openai",
+            "model": "gpt-5.6-sol",
+            "reasoning_effort": "medium",
+            "goal_plus_source": {
+                "source_dir": str(self.test_paths.goal_plus_root),
+                "expected_ref": "master",
+                "commit": EDGE.git_head(self.test_paths.goal_plus_root),
+            },
+        }
+        resolved_source = {
+            "valid": True,
+            "source_kind": "external",
+            "source_path": "goal-plus",
+            "checkout_root": "checkout",
+            "expected_ref": "master",
+            "branch": "master",
+            "commit": profile["goal_plus_source"]["commit"],
+            "dirty": False,
+            "missing_assets": [],
+            "missing_asset_alternatives": [],
+            "codex_runtime_compatibility": None,
+            "pi_runtime_compatibility": {"valid": True},
+            "error": None,
+        }
+        codex_contract = mock.Mock(side_effect=AssertionError("Codex contract used"))
+        codex_probe = mock.Mock(side_effect=AssertionError("Codex probe used"))
+
+        with mock.patch.object(
+            EDGE_RUNTIME, "resolve_goal_plus_source", return_value=resolved_source
+        ), mock.patch.object(
+            EDGE_RUNTIME, "codex_provider_contract", codex_contract
+        ), mock.patch.object(
+            EDGE_RUNTIME, "codex_host_provider_probe", codex_probe
+        ), mock.patch.object(
+            EDGE_RUNTIME,
+            "start_or_reuse_judge",
+            side_effect=RuntimeError("reached Judge startup"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "reached Judge startup"):
+                EDGE_RUNTIME.prepare_runtime_resources(
+                    self.temp / "campaign", profile, {}
+                )
+
+        codex_contract.assert_not_called()
+        codex_probe.assert_not_called()
 
     def test_changed_external_provider_config_stops_before_host_pi_or_docker(
         self,

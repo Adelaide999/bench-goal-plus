@@ -75,6 +75,11 @@ LEGACY_PAPER_PROTOCOL_ISSUES = {
     "schemathesis_datagen_pipeline": "Internet access used by the agent; no official cooldown",
     "schemathesis_reporting_observability": "Internet access used by the agent; no official cooldown",
 }
+
+
+def methods_require_codex(methods: Iterable[str]) -> bool:
+    """Return whether any selected method launches a Codex-family agent."""
+    return any(str(METHODS[method]["agent"]).startswith("codex") for method in methods)
 OFFICIAL_PROTOCOL_FIELDS = frozenset(
     {
         "agent",

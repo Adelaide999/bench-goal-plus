@@ -46,6 +46,7 @@ from .profiles import (
     GOAL_PLUS_METHODS,
     METHODS,
     api_protocol_for_methods,
+    methods_require_codex,
     pi_provider_role_model_refs,
 )
 
@@ -901,7 +902,7 @@ def prepare_runtime_resources(
             "contract": preflight["contract"],
             "probes": preflight["probes"],
         }
-    if api_protocol == "openai":
+    if api_protocol == "openai" and methods_require_codex(profile["methods"]):
         current_codex_contract = codex_provider_contract(profile)
         if not current_codex_contract["valid"]:
             raise RuntimeError(
