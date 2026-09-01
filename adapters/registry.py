@@ -41,7 +41,6 @@ class BenchmarkAdapterModule(Protocol):
     CASE_SET_DESCRIPTION: str
     CODEX_SANDBOX: str
     DIRECTION: Literal["minimize", "maximize"]
-    EVALUATION_MODE: Literal["visible", "blind"]
     GOAL_PLUS_PROCESS_METRIC: str
     PRIMARY_METRIC: str
     TASK_ID: str
@@ -84,7 +83,9 @@ class LoadedAdapter:
 
     def manifest_contract(self) -> dict[str, Any]:
         list_task_ids = getattr(self.module, "list_task_ids", None)
-        evaluation_mode = getattr(self.module, "EVALUATION_MODE", "visible")
+        controller_only_official_evaluation = getattr(
+            self.module, "CONTROLLER_ONLY_OFFICIAL_EVALUATION", False
+        )
         process_metric = getattr(
             self.module, "GOAL_PLUS_PROCESS_METRIC", self.module.PRIMARY_METRIC
         )
@@ -97,7 +98,9 @@ class LoadedAdapter:
             "artifact_name": self.module.ARTIFACT_NAME,
             "primary_metric": self.module.PRIMARY_METRIC,
             "goal_plus_process_metric": process_metric,
-            "evaluation_mode": evaluation_mode,
+            "controller_only_official_evaluation": (
+                controller_only_official_evaluation
+            ),
             "direction": self.module.DIRECTION,
             "upstream_subdir": getattr(self.module, "UPSTREAM_SUBDIR", None),
             "workspace_isolation": "one Git workspace per long-lived lane",
@@ -165,11 +168,13 @@ def _validate_module(definition: AdapterDefinition, module: ModuleType) -> None:
         raise AdapterContractError(
             f"adapter {definition.adapter_id} has invalid direction {module.DIRECTION!r}"
         )
-    evaluation_mode = getattr(module, "EVALUATION_MODE", "visible")
-    if evaluation_mode not in {"visible", "blind"}:
+    controller_only_official_evaluation = getattr(
+        module, "CONTROLLER_ONLY_OFFICIAL_EVALUATION", False
+    )
+    if type(controller_only_official_evaluation) is not bool:
         raise AdapterContractError(
-            f"adapter {definition.adapter_id} has invalid evaluation mode "
-            f"{evaluation_mode!r}"
+            f"adapter {definition.adapter_id} controller-only official evaluation "
+            "flag must be boolean"
         )
     process_metric = getattr(module, "GOAL_PLUS_PROCESS_METRIC", module.PRIMARY_METRIC)
     if not isinstance(process_metric, str) or not process_metric:

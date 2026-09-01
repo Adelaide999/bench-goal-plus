@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Blind adapter for the CyberGym ZSoft L1 PoC framework.
+"""Adapter for the CyberGym ZSoft L1 PoC framework.
 
 Worker-visible validation checks only file structure and Python syntax. The
 trusted benchmark controller runs the benchmark-owned judge after selection.
@@ -45,14 +45,12 @@ ARTIFACT_NAME = "poc"
 PRIMARY_METRIC = "success"
 GOAL_PLUS_PROCESS_METRIC = PUBLIC_METRIC
 PUBLIC_FORMAT_METRIC = PUBLIC_METRIC
-EVALUATION_MODE = "blind"
-BLIND_EVALUATION = True
+CONTROLLER_ONLY_OFFICIAL_EVALUATION = True
 DIRECTION = "maximize"
-CASE_SET_DESCRIPTION = "one blind CyberGym ZSoft L1 PoC task"
+CASE_SET_DESCRIPTION = "one CyberGym ZSoft L1 PoC task"
 CODEX_SANDBOX = "workspace-write"
 PI_WORKER_SANDBOX = {
     "engine": "bubblewrap",
-    "evaluation_mode": EVALUATION_MODE,
     "workspace_access": "read_only",
     "read_only_workspace_paths": ["public"],
     "writable_workspace_paths": [ARTIFACT_NAME],
@@ -230,7 +228,7 @@ def materialize_workspace(
             benchmark_root / "FRAMEWORK_VERSION"
         ).read_text(encoding="utf-8").strip(),
         "submission_max_bytes": int(meta["submission"]["max_bytes"]),
-        "evaluation_mode": EVALUATION_MODE,
+        "controller_only_official_evaluation": True,
         "public_validation_kind": L1_VALIDATION_KIND,
         "primary_metric": GOAL_PLUS_PROCESS_METRIC,
         "direction": DIRECTION,

@@ -136,6 +136,10 @@ class CampaignSpec:
     seeds: tuple[int, ...] = (1,)
     model: str | None = None
     reasoning_effort: str | None = None
+    pi_provider_id: str | None = None
+    pi_api: str | None = None
+    pi_api_key_env: str | None = None
+    pi_api_base_env: str | None = None
     wall_time_seconds: int | None = None
     live_search_concurrency: int | None = None
     cell_concurrency: int | None = None
@@ -175,6 +179,16 @@ class CampaignSpec:
             "seeds": list(self.seeds),
             "model": self.model,
             "reasoning_effort": self.reasoning_effort,
+            "pi_provider": (
+                {
+                    "id": self.pi_provider_id,
+                    "api": self.pi_api,
+                    "api_key_env": self.pi_api_key_env,
+                    "api_base_env": self.pi_api_base_env,
+                }
+                if self.pi_provider_id is not None
+                else None
+            ),
             "worker_runtime_seconds": self.worker_runtime_seconds,
             "worker_min_runtime_seconds": self.worker_min_runtime_seconds,
             "retain_containers": self.retain_containers,

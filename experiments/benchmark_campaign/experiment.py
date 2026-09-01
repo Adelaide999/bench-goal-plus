@@ -248,7 +248,8 @@ def run_campaign(args: argparse.Namespace) -> int:
     campaign_dir = args.campaign.expanduser().absolute()
     campaign_path = campaign_dir / "campaign.json"
     campaign = read_json(campaign_path)
-    api_base = args.api_base or os.environ.get("OPENAI_BASE_URL")
+    api_base_env = args.pi_api_base_env or "OPENAI_BASE_URL"
+    api_base = args.api_base or os.environ.get(api_base_env)
     if args.model != campaign["model"]:
         raise ValueError(
             f"model mismatch: campaign uses {campaign['model']}, got {args.model}"
@@ -820,6 +821,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--pi-api-key-env", default=standalone.PI_API_KEY_ENV
     )
+    run_parser.add_argument("--pi-api-base-env", default="OPENAI_BASE_URL")
     run_parser.add_argument("--conditions", nargs="+", choices=tuple(CONDITIONS))
     run_parser.add_argument("--fail-fast", action="store_true")
 

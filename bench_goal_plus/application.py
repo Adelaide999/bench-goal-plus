@@ -109,6 +109,10 @@ class BenchmarkAgent:
         seeds: Iterable[int] = (),
         model: str | None = None,
         reasoning_effort: str | None = None,
+        pi_provider_id: str | None = None,
+        pi_api: str | None = None,
+        pi_api_key_env: str | None = None,
+        pi_api_base_env: str | None = None,
         wall_time_seconds: int | None = None,
         live_search_concurrency: int | None = None,
         cell_concurrency: int | None = None,
@@ -286,6 +290,44 @@ class BenchmarkAgent:
                 f"runner {runner_definition.runner_id} does not support method(s): "
                 f"{rejected}; supported: {supported}"
             )
+        pi_provider = {
+            "--pi-provider-id": pi_provider_id,
+            "--pi-api": pi_api,
+            "--pi-api-key-env": pi_api_key_env,
+            "--pi-api-base-env": pi_api_base_env,
+        }
+        if any(value is not None for value in pi_provider.values()):
+            missing = [flag for flag, value in pi_provider.items() if value is None]
+            if missing:
+                raise ContractError(
+                    "explicit Pi provider selection requires " + ", ".join(missing)
+                )
+            if (
+                runner_definition.kind != "common-matrix"
+                or not selected_methods
+                or any(not method.endswith("-pi") for method in selected_methods)
+            ):
+                raise ContractError(
+                    "explicit Pi provider selection requires a common-matrix Pi method"
+                )
+            if not pi_provider_id or "/" in pi_provider_id:
+                raise ContractError("Pi provider id must be non-empty and cannot contain '/'")
+            if pi_api not in {
+                "openai-responses",
+                "openai-completions",
+                "anthropic-messages",
+            }:
+                raise ContractError(f"unsupported Pi API: {pi_api}")
+            if not model or "/" in model:
+                raise ContractError(
+                    "explicit Pi provider selection requires a bare --model ID"
+                )
+            for flag, value in (
+                ("--pi-api-key-env", pi_api_key_env),
+                ("--pi-api-base-env", pi_api_base_env),
+            ):
+                if not value or not value.replace("_", "A").isalnum():
+                    raise ContractError(f"{flag} must name an environment variable")
         if live_search_concurrency is not None and live_search_concurrency > 1:
             non_goal_plus_methods = [
                 method
@@ -335,6 +377,10 @@ class BenchmarkAgent:
             seeds=selected_seeds,
             model=model,
             reasoning_effort=reasoning_effort,
+            pi_provider_id=pi_provider_id,
+            pi_api=pi_api,
+            pi_api_key_env=pi_api_key_env,
+            pi_api_base_env=pi_api_base_env,
             wall_time_seconds=wall_time_seconds,
             live_search_concurrency=live_search_concurrency,
             cell_concurrency=cell_concurrency,

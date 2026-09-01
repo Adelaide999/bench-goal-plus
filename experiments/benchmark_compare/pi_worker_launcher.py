@@ -53,25 +53,27 @@ _WORKER_TOOLS = {
 }
 _SESSION_SCOPED_TOOLS = _WORKER_TOOLS - {"search_list_iterations"}
 _TOOL_PROXY_BIN = Path(__file__).resolve().parent / "bin" / "goal-plus-pi-tool"
+_HOST_TOOL_BIN = (
+    Path(__file__).resolve().parent / "main-bin" / "goal-plus-pi-tool"
+)
 _SANDBOX_TOOL_BIN = Path("/opt/bench-goal-plus/bin")
 _SANDBOX_GIT_DIR = Path("/opt/bench-goal-plus/git-admin")
 _BLIND_PUBLIC_METRIC = "format_valid"
 _BLIND_RESPONSE_REJECTED = {
     "ok": False,
-    "error": "blind worker tool response is unavailable",
+    "error": "worker tool response is unavailable",
 }
 _BLIND_BLOCKED_TOOLS = {
-    "search_copy_shared_tool",
     "search_get_evidence_detail",
-    "search_get_global_evidence",
-    "search_stage_shared_tool",
 }
 _BLIND_SYSTEM_PROMPT = (
-    "This is a benchmark-owned blind Search worker. The official evaluator and "
-    "official metric are unavailable during the worker trajectory. Treat Goal Plus "
-    "verifier and iteration responses as opaque submission receipts only. Do not "
-    "infer evaluation outcomes from timing, Git metadata, workspace state, or tool "
-    "errors. Work only from the public task files and source mounted in this sandbox."
+    "This ZSoft Search worker has a permanent benchmark-owned confidentiality "
+    "boundary. The official evaluator and official metric never enter the worker "
+    "trajectory. Treat direct verifier and iteration responses as opaque submission "
+    "receipts. Global Evidence contains only schema-filtered public format-check "
+    "Evidence and safe peer Views; use it as reference and independently verify it. "
+    "Do not infer official outcomes from timing, Git metadata, workspace state, or "
+    "tool errors. Work only from public task files and source mounted in this sandbox."
 )
 _OPAQUE_RESULTS_LEDGER = "iteration\tcommit\tstate\n"
 _BLIND_CONTEXT_SOURCE_FIELDS = {
@@ -80,7 +82,6 @@ _BLIND_CONTEXT_SOURCE_FIELDS = {
     "candidate_id",
     "candidate_task",
     "directive",
-    "evaluation_mode",
     "host",
     "host_handle",
     "iteration_count",
@@ -212,7 +213,6 @@ _BLIND_ITERATION_SOURCE_FIELDS = {
     "shared_tool_staged_bytes",
     "shared_tool_staged_entries",
     "shared_tool_staged_file_count",
-    "shared_tools",
     "state",
     "summary",
     "toolization_advisories",
@@ -234,6 +234,79 @@ _BLIND_ITERATION_LEGACY_FIELDS = _BLIND_ITERATION_SOURCE_FIELDS - {
     "run_id",
     "state",
 }
+_GLOBAL_EVIDENCE_FIELDS = {
+    "candidate_id",
+    "commit",
+    "disposition",
+    "iteration",
+    "score",
+    "shared_tools",
+    "view",
+    "view_created_at",
+}
+_GLOBAL_EVIDENCE_DISPOSITIONS = {"keep", "retain", "discard", "failure"}
+_SHARED_TOOL_FIELDS = {
+    "candidate_id",
+    "capability_ids",
+    "coverage_keys",
+    "created_at",
+    "entrypoint",
+    "family_id",
+    "files",
+    "iteration",
+    "name",
+    "publication_intent",
+    "size_bytes",
+    "snapshot_hash",
+    "source_commit",
+    "source_relative_path",
+    "summary",
+    "supersedes_tool_id",
+    "tool_id",
+    "tool_view",
+    "version",
+}
+_TOOL_VIEW_FIELDS = {
+    "adoption_steps",
+    "capabilities",
+    "dependencies",
+    "entrypoint",
+    "evidence_scope",
+    "inputs",
+    "limitations",
+    "outputs",
+    "snapshot_hash",
+    "source_commit",
+    "summary",
+    "tool_id",
+    "when_to_use",
+}
+_STAGED_SHARED_TOOL_FIELDS = {
+    "capability_ids",
+    "coverage_keys",
+    "entrypoint",
+    "file_count",
+    "files",
+    "name",
+    "path_count",
+    "publication_intent",
+    "size_bytes",
+    "source_paths",
+    "staged_name",
+    "staging_path",
+    "supersedes_tool_id",
+}
+_COPIED_SHARED_TOOL_FIELDS = {
+    "agent_session_id",
+    "candidate_base_git_head",
+    "copied_at",
+    "inbox_path",
+    "receipt_id",
+    "snapshot_hash",
+    "source_commit",
+    "tool_id",
+}
+_HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _INVALID_BLIND_RESPONSE = object()
 
 
@@ -362,7 +435,6 @@ class SandboxPolicy:
     read_only_workspace_paths: tuple[str, ...]
     writable_workspace_paths: tuple[str, ...]
     pass_env: tuple[str, ...]
-    evaluation_mode: str = "visible"
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str]) -> SandboxPolicy:
@@ -377,7 +449,6 @@ class SandboxPolicy:
             raise TypeError(f"{SANDBOX_POLICY_ENV} must be a JSON object")
         allowed = {
             "engine",
-            "evaluation_mode",
             "workspace_access",
             "read_only_workspace_paths",
             "writable_workspace_paths",
@@ -392,12 +463,6 @@ class SandboxPolicy:
         if engine != "bubblewrap":
             raise ValueError(
                 f"{SANDBOX_POLICY_ENV}.engine must be 'bubblewrap', got {engine!r}"
-            )
-        evaluation_mode = payload.get("evaluation_mode", "visible")
-        if evaluation_mode not in {"visible", "blind"}:
-            raise ValueError(
-                f"{SANDBOX_POLICY_ENV}.evaluation_mode must be 'visible' or "
-                f"'blind', got {evaluation_mode!r}"
             )
         workspace_access = payload.get("workspace_access")
         if workspace_access != "read_only":
@@ -448,7 +513,6 @@ class SandboxPolicy:
             read_only_workspace_paths=tuple(read_only_paths),
             writable_workspace_paths=tuple(writable_paths),
             pass_env=tuple(pass_env),
-            evaluation_mode=evaluation_mode,
         )
 
 
@@ -509,7 +573,6 @@ def _blind_context_response(
         or result["run_id"] != context.run_id
         or result["candidate_id"] != context.candidate_id
         or result["workspace"] != str(context.workspace)
-        or result.get("evaluation_mode", "blind") != "blind"
         or result["metric_name"] != _BLIND_PUBLIC_METRIC
         or result["metric_direction"] != "maximize"
     ):
@@ -624,6 +687,230 @@ def _blind_iteration_receipts(
     return receipts
 
 
+def _is_string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _is_safe_relative_path(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts
+
+
+def _project_tool_view(result: Any, tool: dict[str, Any]) -> dict[str, Any] | object:
+    if not isinstance(result, dict) or set(result) != _TOOL_VIEW_FIELDS:
+        return _INVALID_BLIND_RESPONSE
+    if (
+        result.get("tool_id") != tool.get("tool_id")
+        or result.get("snapshot_hash") != tool.get("snapshot_hash")
+        or result.get("source_commit") != tool.get("source_commit")
+    ):
+        return _INVALID_BLIND_RESPONSE
+    for field in (
+        "adoption_steps",
+        "capabilities",
+        "dependencies",
+        "inputs",
+        "limitations",
+        "outputs",
+    ):
+        if not _is_string_list(result.get(field)):
+            return _INVALID_BLIND_RESPONSE
+    for field in ("evidence_scope", "summary", "tool_id", "when_to_use"):
+        if not isinstance(result.get(field), str) or not result[field]:
+            return _INVALID_BLIND_RESPONSE
+    if result.get("entrypoint") is not None and not isinstance(
+        result["entrypoint"], str
+    ):
+        return _INVALID_BLIND_RESPONSE
+    return dict(result)
+
+
+def _project_shared_tool(
+    result: Any, evidence_candidate_id: str
+) -> dict[str, Any] | object:
+    if not isinstance(result, dict) or set(result) != _SHARED_TOOL_FIELDS:
+        return _INVALID_BLIND_RESPONSE
+    if (
+        result.get("candidate_id") != evidence_candidate_id
+        or not isinstance(result.get("tool_id"), str)
+        or not result["tool_id"]
+        or not isinstance(result.get("family_id"), str)
+        or not result["family_id"]
+        or type(result.get("version")) is not int
+        or result["version"] < 1
+        or type(result.get("iteration")) is not int
+        or result["iteration"] < 1
+        or not isinstance(result.get("snapshot_hash"), str)
+        or _HEX_DIGEST.fullmatch(result["snapshot_hash"]) is None
+        or type(result.get("size_bytes")) is not int
+        or result["size_bytes"] < 0
+        or not isinstance(result.get("created_at"), str)
+        or not _is_safe_relative_path(result.get("source_relative_path"))
+    ):
+        return _INVALID_BLIND_RESPONSE
+    source_commit = result.get("source_commit")
+    if source_commit is not None and (
+        not isinstance(source_commit, str)
+        or _GIT_COMMIT.fullmatch(source_commit) is None
+    ):
+        return _INVALID_BLIND_RESPONSE
+    for field in ("capability_ids", "coverage_keys", "files"):
+        if not _is_string_list(result.get(field)):
+            return _INVALID_BLIND_RESPONSE
+    if not all(_is_safe_relative_path(value) for value in result["files"]):
+        return _INVALID_BLIND_RESPONSE
+    for field in ("entrypoint", "summary", "supersedes_tool_id"):
+        if result.get(field) is not None and not isinstance(result[field], str):
+            return _INVALID_BLIND_RESPONSE
+    if result.get("publication_intent") not in {
+        "new",
+        "capability_extension",
+        "adoption_fix",
+        "contract_change",
+    }:
+        return _INVALID_BLIND_RESPONSE
+    tool_view = _project_tool_view(result.get("tool_view"), result)
+    if tool_view is _INVALID_BLIND_RESPONSE:
+        return _INVALID_BLIND_RESPONSE
+    return {**result, "tool_view": tool_view}
+
+
+def _blind_global_evidence(result: Any) -> list[dict[str, Any]] | object:
+    if not isinstance(result, list):
+        return _INVALID_BLIND_RESPONSE
+    projected: list[dict[str, Any]] = []
+    for entry in result:
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != _GLOBAL_EVIDENCE_FIELDS
+        ):
+            return _INVALID_BLIND_RESPONSE
+        candidate_id = entry.get("candidate_id")
+        score = entry.get("score")
+        view = entry.get("view")
+        view_created_at = entry.get("view_created_at")
+        if (
+            not isinstance(candidate_id, str)
+            or _PATH_ID.fullmatch(candidate_id) is None
+            or type(entry.get("iteration")) is not int
+            or entry["iteration"] < 1
+            or not isinstance(entry.get("commit"), str)
+            or _GIT_COMMIT.fullmatch(entry["commit"]) is None
+            or entry.get("disposition") not in _GLOBAL_EVIDENCE_DISPOSITIONS
+            or (
+                score is not None
+                and (
+                    type(score) not in {int, float}
+                    or float(score) not in {0.0, 1.0}
+                )
+            )
+            or (view is not None and not isinstance(view, str))
+            or (view_created_at is not None and not isinstance(view_created_at, str))
+            or ((view is None) != (view_created_at is None))
+            or not isinstance(entry.get("shared_tools"), list)
+        ):
+            return _INVALID_BLIND_RESPONSE
+        shared_tools: list[dict[str, Any]] = []
+        for tool in entry["shared_tools"]:
+            projected_tool = _project_shared_tool(tool, candidate_id)
+            if projected_tool is _INVALID_BLIND_RESPONSE:
+                return _INVALID_BLIND_RESPONSE
+            shared_tools.append(projected_tool)
+        projected_entry = dict(entry)
+        projected_entry["shared_tools"] = shared_tools
+        projected.append(projected_entry)
+    return projected
+
+
+def _blind_staged_shared_tool(
+    result: Any, context: LaunchContext
+) -> dict[str, Any] | object:
+    if not isinstance(result, dict) or set(result) != _STAGED_SHARED_TOOL_FIELDS:
+        return _INVALID_BLIND_RESPONSE
+    staged_name = result.get("staged_name")
+    if (
+        not isinstance(staged_name, str)
+        or _PATH_ID.fullmatch(staged_name) is None
+        or staged_name in {".", ".."}
+        or not _is_string_list(result.get("source_paths"))
+        or not _is_string_list(result.get("files"))
+        or any(
+            type(result.get(field)) is not int or result[field] < 0
+            for field in ("file_count", "path_count", "size_bytes")
+        )
+        or not _is_string_list(result.get("capability_ids"))
+        or not _is_string_list(result.get("coverage_keys"))
+    ):
+        return _INVALID_BLIND_RESPONSE
+    expected = context.workspace / ".tmp" / "share-out" / staged_name
+    staging_path = result.get("staging_path")
+    try:
+        staging_matches = (
+            isinstance(staging_path, str)
+            and Path(staging_path).resolve(strict=True) == expected.resolve(strict=True)
+        )
+    except (OSError, RuntimeError):
+        staging_matches = False
+    if not staging_matches:
+        return _INVALID_BLIND_RESPONSE
+    if not all(
+        _is_safe_relative_path(value) and value.startswith(".tmp/tool-drafts/")
+        for value in result["source_paths"]
+    ) or not all(_is_safe_relative_path(value) for value in result["files"]):
+        return _INVALID_BLIND_RESPONSE
+    projected = dict(result)
+    projected.pop("staging_path")
+    projected["staged"] = True
+    return projected
+
+
+def _blind_copied_shared_tool(
+    result: Any, context: LaunchContext
+) -> dict[str, Any] | object:
+    if not isinstance(result, dict) or set(result) != _COPIED_SHARED_TOOL_FIELDS:
+        return _INVALID_BLIND_RESPONSE
+    receipt_id = result.get("receipt_id")
+    if (
+        result.get("agent_session_id") != context.agent_session_id
+        or not isinstance(receipt_id, str)
+        or _PATH_ID.fullmatch(receipt_id) is None
+        or not isinstance(result.get("tool_id"), str)
+        or not result["tool_id"]
+        or not isinstance(result.get("snapshot_hash"), str)
+        or _HEX_DIGEST.fullmatch(result["snapshot_hash"]) is None
+        or not isinstance(result.get("candidate_base_git_head"), str)
+        or _GIT_COMMIT.fullmatch(result["candidate_base_git_head"]) is None
+        or not isinstance(result.get("copied_at"), str)
+    ):
+        return _INVALID_BLIND_RESPONSE
+    source_commit = result.get("source_commit")
+    if source_commit is not None and (
+        not isinstance(source_commit, str)
+        or _GIT_COMMIT.fullmatch(source_commit) is None
+    ):
+        return _INVALID_BLIND_RESPONSE
+    relative_inbox = Path(".tmp") / "shared-tools" / receipt_id
+    expected = context.workspace / relative_inbox
+    inbox_path = result.get("inbox_path")
+    try:
+        inbox_matches = (
+            isinstance(inbox_path, str)
+            and Path(inbox_path).resolve(strict=True) == expected.resolve(strict=True)
+            and expected.is_dir()
+        )
+    except (OSError, RuntimeError):
+        inbox_matches = False
+    if not inbox_matches:
+        return _INVALID_BLIND_RESPONSE
+    projected = dict(result)
+    projected.pop("agent_session_id")
+    projected.pop("candidate_base_git_head")
+    projected["inbox_path"] = relative_inbox.as_posix()
+    return projected
+
+
 def _blind_tool_response(
     tool: str, result: Any, context: LaunchContext
 ) -> Any:
@@ -633,6 +920,12 @@ def _blind_tool_response(
         return _blind_verifier_receipt(result, context)
     if tool == "search_list_iterations":
         return _blind_iteration_receipts(result, context)
+    if tool == "search_get_global_evidence":
+        return _blind_global_evidence(result)
+    if tool == "search_stage_shared_tool":
+        return _blind_staged_shared_tool(result, context)
+    if tool == "search_copy_shared_tool":
+        return _blind_copied_shared_tool(result, context)
     return _INVALID_BLIND_RESPONSE
 
 
@@ -647,15 +940,23 @@ class WorkerToolProxy:
         root: Path,
         context: LaunchContext,
         socket_dir: Path,
-        evaluation_mode: str = "visible",
+        environment: Mapping[str, str],
     ) -> None:
         self.root = root
         self.context = context
         self.socket_dir = socket_dir
         self.socket_path = socket_dir / "tool.sock"
-        if evaluation_mode not in {"visible", "blind"}:
-            raise ValueError(f"unsupported proxy evaluation mode: {evaluation_mode}")
-        self.evaluation_mode = evaluation_mode
+        self.host_environment = dict(environment)
+        for name in (
+            "GIT_DIR",
+            "GIT_OPTIONAL_LOCKS",
+            "GIT_WORK_TREE",
+            "GOAL_PLUS_PI_ROLE",
+            "GOAL_PLUS_PI_WORKER_CONTINUE_UNTIL_MS",
+            LEGACY_GOAL_PLUS_WORKER_LAUNCHER_ENV,
+            TOOL_SOCKET_ENV,
+        ):
+            self.host_environment.pop(name, None)
         self._server: _ThreadingUnixServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -672,16 +973,8 @@ class WorkerToolProxy:
                     try:
                         request = json.loads(raw.decode("utf-8"))
                         response = proxy.dispatch(request)
-                    except Exception as exc:  # noqa: BLE001
-                        response = (
-                            dict(_BLIND_RESPONSE_REJECTED)
-                            if proxy.evaluation_mode == "blind"
-                            else {
-                                "ok": False,
-                                "error": str(exc),
-                                "error_type": type(exc).__name__,
-                            }
-                        )
+                    except Exception:  # noqa: BLE001
+                        response = dict(_BLIND_RESPONSE_REJECTED)
                 self.wfile.write(
                     (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
                 )
@@ -705,20 +998,32 @@ class WorkerToolProxy:
         if not isinstance(args, dict):
             raise TypeError("proxy tool args must be a JSON object")
         self._authorize(str(tool), args)
-        if self.evaluation_mode == "blind" and tool in _BLIND_BLOCKED_TOOLS:
+        if tool in _BLIND_BLOCKED_TOOLS:
             return dict(_BLIND_RESPONSE_REJECTED)
-        from goal_plus.pi_tool import call_pi_tool
 
         try:
-            result = call_pi_tool(self.root, str(tool), args)
-        except Exception:  # blind workers must not receive raw host exceptions
-            if self.evaluation_mode == "blind":
+            completed = subprocess.run(
+                [
+                    str(_HOST_TOOL_BIN),
+                    "--root",
+                    str(self.root),
+                    str(tool),
+                ],
+                cwd=self.root,
+                env=self.host_environment,
+                input=json.dumps(args, ensure_ascii=False, separators=(",", ":")),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if completed.returncode != 0:
                 return dict(_BLIND_RESPONSE_REJECTED)
-            raise
-        if self.evaluation_mode == "blind":
-            result = _blind_tool_response(str(tool), result, self.context)
-            if result is _INVALID_BLIND_RESPONSE:
-                return dict(_BLIND_RESPONSE_REJECTED)
+            result = json.loads(completed.stdout)
+        except Exception:  # workers must not receive raw host exceptions
+            return dict(_BLIND_RESPONSE_REJECTED)
+        result = _blind_tool_response(str(tool), result, self.context)
+        if result is _INVALID_BLIND_RESPONSE:
+            return dict(_BLIND_RESPONSE_REJECTED)
         return {
             "ok": True,
             "result": result,
@@ -738,12 +1043,11 @@ class WorkerToolProxy:
         ):
             raise PermissionError("Pi worker proxy rejected a different candidate_id")
         if (
-            self.evaluation_mode == "blind"
-            and tool == "search_list_iterations"
+            tool == "search_list_iterations"
             and args.get("agent_session_id") != self.context.agent_session_id
         ):
             raise PermissionError(
-                "blind Pi iteration listing requires the bound agent_session_id"
+                "Pi iteration listing requires the bound agent_session_id"
             )
         if tool == "search_run_verifier" and args.get("scope", "process") != "process":
             raise PermissionError("Pi workers may only run process verifiers")
@@ -782,7 +1086,7 @@ class BubblewrapWorker:
             root=self.root,
             context=context,
             socket_dir=proxy_base / f"bgp-pi-{uuid.uuid4().hex[:16]}",
-            evaluation_mode=policy.evaluation_mode,
+            environment=self.environment,
         )
         self.private_git_admin: PrivateGitAdmin | None = None
 
@@ -850,7 +1154,6 @@ class BubblewrapWorker:
             "ALL",
             "--hostname",
             "zsoft-goal-plus-worker",
-            "--clearenv",
             "--proc",
             "/proc",
             "--dev",
@@ -905,14 +1208,13 @@ class BubblewrapWorker:
             readonly=True,
             created=created,
         )
-        if self.policy.evaluation_mode == "blind":
-            _mount_blind_workspace_metadata(
-                args,
-                workspace=self.context.workspace,
-                private_git_admin=self.private_git_admin,
-                private_root=self.proxy.socket_dir,
-                created=created,
-            )
+        _mount_private_workspace_metadata(
+            args,
+            workspace=self.context.workspace,
+            private_git_admin=self.private_git_admin,
+            private_root=self.proxy.socket_dir,
+            created=created,
+        )
         _add_bind(
             args,
             isolated_session,
@@ -976,8 +1278,6 @@ class BubblewrapWorker:
             socket_path=self.proxy.socket_path,
             private_git_admin=self.private_git_admin,
         )
-        for name, value in sandbox_env.items():
-            args.extend(["--setenv", name, value])
         args.extend(
             [
                 "--chdir",
@@ -1432,7 +1732,7 @@ def _prepare_private_git_admin(
     )
 
 
-def _mount_blind_workspace_metadata(
+def _mount_private_workspace_metadata(
     args: list[str],
     *,
     workspace: Path,
@@ -1441,10 +1741,10 @@ def _mount_blind_workspace_metadata(
     created: set[str],
 ) -> None:
     if private_git_admin is None:
-        raise RuntimeError("blind worker requires a candidate-private Git view")
+        raise RuntimeError("ZSoft worker requires a candidate-private Git view")
     results_path = workspace / "results.tsv"
     if results_path.is_symlink() or not results_path.is_file():
-        raise RuntimeError("blind worker results.tsv must be a regular file")
+        raise RuntimeError("ZSoft worker results.tsv must be a regular file")
     opaque_results = private_root / "opaque-results.tsv"
     opaque_results.write_text(_OPAQUE_RESULTS_LEDGER, encoding="utf-8")
     opaque_results.chmod(0o400)
@@ -1452,7 +1752,7 @@ def _mount_blind_workspace_metadata(
 
     workspace_git = workspace / ".git"
     if workspace_git.is_symlink() or not workspace_git.exists():
-        raise RuntimeError("blind worker workspace must have Git metadata")
+        raise RuntimeError("ZSoft worker workspace must have Git metadata")
     if workspace_git.is_dir():
         _add_bind(
             args,
@@ -1476,7 +1776,7 @@ def _mount_blind_workspace_metadata(
             created=created,
         )
     else:
-        raise RuntimeError("blind worker workspace Git metadata is unsupported")
+        raise RuntimeError("ZSoft worker workspace Git metadata is unsupported")
 
 
 def _sandbox_environment(

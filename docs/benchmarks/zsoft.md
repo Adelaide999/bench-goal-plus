@@ -15,9 +15,11 @@ the two benchmark directories and records the resolved commit in each campaign.
 The representative task is `civetweb-detect`. Preparation checks out the pinned
 project revision, exports only the public benchmark contract, and creates an
 empty `submission/` directory. Agents write one schema-valid JSON finding per
-file. The official deterministic scorer returns precision, recall, F1, TP, FP,
-and FN. Campaign selection maximizes F1, while the complete score payload is
-retained for analysis.
+file. Goal Plus selection uses only the public `format_valid` gate and a frozen
+candidate-id tie-break. After selection and closeout, the official deterministic
+scorer runs once for the selected artifact and returns precision, recall, F1,
+TP, FP, and FN. The complete final score payload is retained for analysis;
+intermediate rounds are not officially scored or exported.
 
 Detect uses a directory artifact, so the common runner permits multiple changed
 files inside `submission/`. The benchmark repository commit and audited project
@@ -33,9 +35,13 @@ and `schemas/` are explicitly validated and kept read-only. The benchmark
 repository, cases, scorer source, sibling runs, `.gp` state, runtime Git history,
 and the rest of the host home directory are not mounted. A bench-owned CLI shim
 sends the worker's limited Goal Plus calls over a session-bound host socket, so
-verifier execution remains outside the sandbox and score-bearing responses stay
-opaque. The policy and environment-variable names, but never their values, are
-recorded in the experiment manifest.
+verifier execution remains outside the sandbox and direct score-bearing
+responses stay opaque. The proxy exposes only a field-validated Global Evidence
+view derived from the public `format_valid` verifier. This lets workers use safe
+peer Evidence and objective Views as reference without exposing ground truth or
+official F1. With `--shared-dir`, verified shared tools use the same bounded
+proxy path. The policy and environment-variable names, but never their values,
+are recorded in the experiment manifest.
 Declared read-only workspace entries must be real directories; symlinked source
 or public bundles fail closed before worker startup.
 
@@ -72,7 +78,8 @@ L1 has the same host-filesystem risk as Detect: each upstream task directory
 contains private reference PoCs, negative PoCs, judge code, and fix patches.
 Goal Plus Pi therefore uses the same Bubblewrap boundary for L1, exposing only
 the candidate workspace with `public/` remounted read-only; private task and
-judge directories are not mounted.
+judge directories are not mounted. Workers can reference peer public-verifier
+Evidence, but no per-round or final `success` value enters Search state.
 
 ## Run
 

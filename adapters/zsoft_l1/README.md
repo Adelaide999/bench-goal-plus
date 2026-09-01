@@ -21,11 +21,14 @@ The adapter:
   trusted controller after selection, promotion, and Goal Plus closeout;
 - requires Goal Plus Pi workers to use Bubblewrap with only the candidate
   workspace mounted and `public/` read-only; upstream `private/`, judge, and
-  reference-PoC files, histories, and verifier results remain host-only;
+  reference-PoC files, full histories, and official results remain host-only.
+  Workers may read only schema-filtered Global Evidence derived from the public
+  `format_valid` verifier and, when enabled, verified shared-tool Views;
 - reports the official final `success` in {0, 1}, maximize, only after
   closeout. The full EvaluationResult is preserved under `zsoft_result` in the
-  controller-owned final report. A second final claim is rejected before the
-  Docker judge is invoked.
+  controller-owned final report. Intermediate candidate rounds are never sent
+  to the Docker judge. A second final claim is rejected before the judge is
+  invoked.
 
 Constants:
 
@@ -42,8 +45,10 @@ The reproducible-environment bootstrap owns the default sparse checkout.
 `BENCH_GOAL_PLUS_ZSOFT_ROOT` may select another clean checkout for controlled
 experiments; the path must remain under this repository.
 
-Blind Goal Plus runs support only `goal-plus-pi`. `goal-plus-codex` is rejected
-before preparation because it lacks the required Bubblewrap worker boundary.
+ZSoft official evaluation is permanently controller-only and is not a
+configurable run mode. The common runner accepts only `goal-plus-pi` for this
+adapter; Plain, `goal-plus-codex`, and SkyDiscover methods are rejected before
+preparation because they lack the required Bubblewrap worker boundary.
 
 ## Smoke
 

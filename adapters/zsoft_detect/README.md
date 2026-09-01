@@ -23,12 +23,15 @@ The adapter:
   the trusted controller after selection, promotion, and Goal Plus closeout;
 - requires Goal Plus Pi workers to use the adapter-declared Bubblewrap policy:
   only the candidate workspace is mounted, with `source/` read-only, while
-  scorer, ground-truth, histories, verifier results, and controller runtime
-  remain host-only;
+  scorer, ground-truth, full histories, official results, and controller runtime
+  remain host-only. Workers may read only schema-filtered Global Evidence
+  derived from the public `format_valid` verifier and, when enabled, verified
+  shared-tool Views;
 - reports the official final `f1`, maximize, only after closeout; the raw
   precision/recall/TP/FP/FN payload is preserved under `zsoft_score` in the
-  controller-owned final report. A second final claim is rejected before the
-  scorer is invoked.
+  controller-owned final report. Intermediate candidate rounds are never sent
+  to the official scorer. A second final claim is rejected before the scorer is
+  invoked.
 
 Constants:
 
@@ -44,8 +47,10 @@ scoring. Its pinned SWE-agent profile is exposed only through the dedicated
 `zsoft-detect-swe-agent` target and `zsoft-swe-agent` method; OpenCode and xiaoO
 are not registered methods.
 
-Blind Goal Plus runs support only `goal-plus-pi`. `goal-plus-codex` is rejected
-before preparation because it lacks the required Bubblewrap worker boundary.
+ZSoft official evaluation is permanently controller-only and is not a
+configurable run mode. The common runner accepts only `goal-plus-pi` for this
+adapter; Plain, `goal-plus-codex`, and SkyDiscover methods are rejected before
+preparation because they lack the required Bubblewrap worker boundary.
 
 The reproducible-environment bootstrap owns the default sparse checkout.
 `BENCH_GOAL_PLUS_ZSOFT_ROOT` may select another clean checkout for controlled

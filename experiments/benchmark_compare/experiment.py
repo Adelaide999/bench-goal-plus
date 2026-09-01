@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -34,7 +33,6 @@ from bench_goal_plus.goal_plus_command import (  # noqa: E402
 )
 from bench_runtime_paths import (  # noqa: E402
     configure_temp_environment,
-    temporary_directory,
 )
 from adapters.registry import (  # noqa: E402
     adapter_modules,
@@ -53,7 +51,7 @@ from experiments.benchmark_compare.pi_worker_launcher import (  # noqa: E402
     SANDBOX_POLICY_ENV,
 )
 from experiments.openevolve_compare.experiment import (  # noqa: E402
-    BLIND_SELECTION_RULE,
+    PUBLIC_GATE_SELECTION_RULE,
     DEFAULT_REASONING_EFFORT,
     PI_APIS,
     PI_API_KEY_ENV,
@@ -94,6 +92,15 @@ DEFAULT_CONCURRENCY = 2
 DEFAULT_SOFT_CLOSEOUT_SECONDS = 60
 DEFAULT_HARD_KILL_GRACE_SECONDS = 30
 DEFAULT_WORKER_RUNTIME_SECONDS = 120
+CONTROLLER_ONLY_CLOSEOUT_ENV = "BENCH_GOAL_PLUS_CONTROLLER_ONLY_CLOSEOUT"
+GOAL_PLUS_EXTERNAL_EVIDENCE_DIR_ENV = "GOAL_PLUS_EXTERNAL_EVIDENCE_DIR"
+GOAL_PLUS_GLOBAL_EVIDENCE_MODE_ENV = "GOAL_PLUS_GLOBAL_EVIDENCE_MODE"
+GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED_ENV = (
+    "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED"
+)
+GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED_ENV = (
+    "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED"
+)
 METHODS = (
     "plain-codex",
     "plain-pi",
@@ -101,6 +108,7 @@ METHODS = (
     "goal-plus-pi",
     *sky_backend.METHODS,
 )
+CONTROLLER_ONLY_METHODS = frozenset({"goal-plus-pi"})
 SKYDISCOVER_EDIT_PROTOCOL = """
 
 ## SkyDiscover candidate response contract
@@ -119,6 +127,13 @@ PI_TOOL_PROXY = (
     ROOT / "experiments" / "benchmark_compare" / "bin" / "goal-plus-pi-tool"
 )
 PI_SHIM = ROOT / "experiments" / "benchmark_compare" / "pi-shim" / "pi"
+PI_MAIN_TOOL_SHIM = (
+    ROOT
+    / "experiments"
+    / "benchmark_compare"
+    / "main-bin"
+    / "goal-plus-pi-tool"
+)
 
 
 @dataclass(frozen=True)
@@ -222,7 +237,7 @@ def configure_adapter(
     global ADAPTER_CONTRACT
     global ARTIFACT_NAME, BENCHMARK_NAME, CASE_SET_DESCRIPTION
     global CODEX_SANDBOX, DIRECTION, GOAL_PLUS_MCP_ENV_VARS
-    global EVALUATION_MODE, GOAL_PLUS_PROCESS_METRIC
+    global CONTROLLER_ONLY_OFFICIAL_EVALUATION, GOAL_PLUS_PROCESS_METRIC
     global PI_WORKER_SANDBOX
     global PRIMARY_METRIC, TASK_ID, UPSTREAM_KEY
     global LOCAL_SOURCE_RELATIVE, UPSTREAM_SUBDIR
@@ -236,7 +251,9 @@ def configure_adapter(
     GOAL_PLUS_MCP_ENV_VARS = tuple(getattr(module, "GOAL_PLUS_MCP_ENV_VARS", ()))
     PI_WORKER_SANDBOX = getattr(module, "PI_WORKER_SANDBOX", None)
     DIRECTION = module.DIRECTION
-    EVALUATION_MODE = getattr(module, "EVALUATION_MODE", "visible")
+    CONTROLLER_ONLY_OFFICIAL_EVALUATION = getattr(
+        module, "CONTROLLER_ONLY_OFFICIAL_EVALUATION", False
+    )
     GOAL_PLUS_PROCESS_METRIC = getattr(
         module, "GOAL_PLUS_PROCESS_METRIC", module.PRIMARY_METRIC
     )
@@ -256,6 +273,18 @@ def configure_adapter(
 
 
 configure_adapter("heurigym")
+
+
+def validate_controller_only_method(method: str) -> None:
+    if (
+        CONTROLLER_ONLY_OFFICIAL_EVALUATION
+        and method not in CONTROLLER_ONLY_METHODS
+    ):
+        supported = ", ".join(sorted(CONTROLLER_ONLY_METHODS))
+        raise ValueError(
+            "controller-only official evaluation rejects method "
+            f"{method!r}; supported methods: {supported}"
+        )
 
 
 def _pi_worker_sandbox_policy(api_key_env: str) -> dict[str, Any] | None:
@@ -314,7 +343,12 @@ def _configure_pi_worker_sandbox_environment(
         )
     if shutil.which("bwrap", path=environment.get("PATH")) is None:
         raise RuntimeError("ZSoft Goal Plus Pi worker sandbox requires bwrap")
-    for executable in (PI_WORKER_LAUNCHER, PI_TOOL_PROXY, PI_SHIM):
+    for executable in (
+        PI_WORKER_LAUNCHER,
+        PI_TOOL_PROXY,
+        PI_SHIM,
+        PI_MAIN_TOOL_SHIM,
+    ):
         if not executable.is_file() or not os.access(executable, os.X_OK):
             raise RuntimeError(
                 f"ZSoft Pi worker launcher asset is unavailable: {executable}"
@@ -325,8 +359,12 @@ def _configure_pi_worker_sandbox_environment(
     environment[SANDBOX_POLICY_ENV] = json.dumps(
         worker_sandbox, separators=(",", ":")
     )
-    environment["PATH"] = (
-        str(PI_SHIM.parent) + os.pathsep + environment.get("PATH", "")
+    environment["PATH"] = os.pathsep.join(
+        (
+            str(PI_SHIM.parent),
+            str(PI_MAIN_TOOL_SHIM.parent),
+            environment.get("PATH", ""),
+        )
     )
     manifest["pi_worker_sandbox"] = {
         **worker_sandbox,
@@ -372,11 +410,7 @@ def prepare(args: argparse.Namespace) -> int:
         task_id=getattr(args, "task_id", None),
         module_name=getattr(args, "adapter_module", None),
     )
-    if EVALUATION_MODE == "blind" and args.method == "goal-plus-codex":
-        raise ValueError(
-            "blind ZSoft evaluation rejects goal-plus-codex at prepare: "
-            "only goal-plus-pi has the required Bubblewrap worker boundary"
-        )
+    validate_controller_only_method(args.method)
     is_sky = sky_backend.is_method(args.method)
     condition = resolve_condition(
         method=args.method,
@@ -393,8 +427,6 @@ def prepare(args: argparse.Namespace) -> int:
         "goal-plus-pi",
     }:
         raise ValueError("--shared-dir requires a Goal Plus method")
-    if EVALUATION_MODE == "blind" and getattr(args, "shared_dir", False):
-        raise ValueError("blind ZSoft evaluation requires shared_dir to remain disabled")
     if args.iterations_ceiling < 1:
         raise ValueError("iterations ceiling must be positive")
     if args.llm_max_tokens < 1:
@@ -502,7 +534,9 @@ def prepare(args: argparse.Namespace) -> int:
             task_text,
             args.wall_time_seconds,
             args.soft_closeout_seconds,
-            evaluation_mode=EVALUATION_MODE,
+            controller_only_official_evaluation=(
+                CONTROLLER_ONLY_OFFICIAL_EVALUATION
+            ),
         )
         prompt_contract = {
             "mode": f"{args.method.replace('-', '_')}_common_prompt",
@@ -546,7 +580,9 @@ def prepare(args: argparse.Namespace) -> int:
             coordination_condition=condition.condition_id if condition else None,
             search_space_mode=condition.search_space_mode if condition else None,
             shared_dir_enabled=getattr(args, "shared_dir", False),
-            evaluation_mode=EVALUATION_MODE,
+            controller_only_official_evaluation=(
+                CONTROLLER_ONLY_OFFICIAL_EVALUATION
+            ),
         )
         (workspace / "GOAL.md").write_text(goal_prompt)
         workspaces.append(workspace)
@@ -557,7 +593,9 @@ def prepare(args: argparse.Namespace) -> int:
             task_text,
             args.wall_time_seconds,
             args.soft_closeout_seconds,
-            evaluation_mode=EVALUATION_MODE,
+            controller_only_official_evaluation=(
+                CONTROLLER_ONLY_OFFICIAL_EVALUATION
+            ),
         )
         prompt_contract = {
             "mode": "natural_goal_plus_entry",
@@ -583,7 +621,9 @@ def prepare(args: argparse.Namespace) -> int:
             "worker_model": worker_model,
             "metric_name": GOAL_PLUS_PROCESS_METRIC,
             "metric_direction": DIRECTION,
-            "evaluation_mode": EVALUATION_MODE,
+            "controller_only_official_evaluation": (
+                CONTROLLER_ONLY_OFFICIAL_EVALUATION
+            ),
             "artifact_name": ARTIFACT_NAME,
             "artifact_is_directory": (workspace / ARTIFACT_NAME).is_dir(),
             "shared_dir_enabled": getattr(args, "shared_dir", False),
@@ -696,7 +736,9 @@ def prepare(args: argparse.Namespace) -> int:
             "artifact_name": ARTIFACT_NAME,
             "primary_metric": PRIMARY_METRIC,
             "goal_plus_process_metric": GOAL_PLUS_PROCESS_METRIC,
-            "evaluation_mode": EVALUATION_MODE,
+            "controller_only_official_evaluation": (
+                CONTROLLER_ONLY_OFFICIAL_EVALUATION
+            ),
             "direction": DIRECTION,
             "codex_sandbox": CODEX_SANDBOX,
             "upstream_key": UPSTREAM_KEY,
@@ -811,6 +853,21 @@ def evaluate_with_controller_runtime(
             os.environ["GOAL_PLUS_VERIFIER_TMPDIR"] = previous
 
 
+def controller_only_official_evaluation(manifest: dict[str, Any]) -> bool:
+    prepared = (manifest.get("task") or {}).get(
+        "controller_only_official_evaluation"
+    )
+    if type(prepared) is not bool:
+        raise RuntimeError(
+            "prepared task is missing its controller-only official evaluation contract"
+        )
+    if prepared != CONTROLLER_ONLY_OFFICIAL_EVALUATION:
+        raise RuntimeError(
+            "prepared official evaluation contract does not match the adapter"
+        )
+    return prepared
+
+
 @contextmanager
 def controller_subprocess_environment(
     *, runtime_bin_dir: Path, verifier_tmpdir: Path
@@ -847,353 +904,6 @@ def copy_artifact(source: Path, destination: Path) -> None:
         shutil.copytree(source, destination)
         return
     shutil.copy2(source, destination)
-
-
-ROUND_F1_COLUMNS = (
-    "run_id",
-    "candidate_id",
-    "iteration",
-    "git_head",
-    "artifact_hash",
-    "snapshot_sha256",
-    "format_valid",
-    "valid",
-    "f1",
-    "precision",
-    "recall",
-    "tp",
-    "fp",
-    "fn",
-    "score_source",
-)
-
-
-def _materialize_git_directory(
-    repository: Path,
-    git_head: str,
-    artifact_name: str,
-    destination: Path,
-) -> str:
-    """Materialize direct regular files from one committed artifact tree."""
-    if len(git_head) != 40 or any(
-        char not in "0123456789abcdef" for char in git_head
-    ):
-        raise ValueError(f"invalid iteration Git head: {git_head!r}")
-    verified = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repository),
-            "rev-parse",
-            "--verify",
-            f"{git_head}^{{commit}}",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    if verified != git_head:
-        raise RuntimeError("iteration Git head did not resolve exactly")
-    tree = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repository),
-            "ls-tree",
-            "-rz",
-            "--full-tree",
-            git_head,
-            "--",
-            artifact_name,
-        ],
-        capture_output=True,
-        check=True,
-    ).stdout
-    destination.mkdir(mode=0o700)
-    digest = hashlib.sha256()
-    digest.update(b"bench-goal-plus-round-artifact-v1\0")
-    seen: set[str] = set()
-    for raw_entry in tree.split(b"\0"):
-        if not raw_entry:
-            continue
-        header, separator, raw_path = raw_entry.partition(b"\t")
-        if not separator:
-            raise RuntimeError("malformed Git tree entry")
-        mode, object_type, object_id = header.decode("ascii").split(" ")
-        path = raw_path.decode("utf-8")
-        relative = Path(path)
-        if (
-            mode not in {"100644", "100755"}
-            or object_type != "blob"
-            or len(relative.parts) != 2
-            or relative.parts[0] != artifact_name
-            or relative.parts[1] in {"", ".", ".."}
-            or relative.parts[1] in seen
-        ):
-            raise RuntimeError(f"unsafe committed artifact entry: {path!r}")
-        seen.add(relative.parts[1])
-        payload = subprocess.run(
-            ["git", "-C", str(repository), "cat-file", "blob", object_id],
-            capture_output=True,
-            check=True,
-        ).stdout
-        name = relative.parts[1]
-        name_bytes = name.encode("utf-8")
-        digest.update(len(name_bytes).to_bytes(8, "big"))
-        digest.update(name_bytes)
-        digest.update(len(payload).to_bytes(8, "big"))
-        digest.update(payload)
-        output = destination / name
-        output.write_bytes(payload)
-        output.chmod(0o600)
-    return digest.hexdigest()
-
-
-def export_posthoc_detect_round_f1(
-    *,
-    run_dir: Path,
-    workspace: Path,
-    benchmark_root: Path,
-    final_evaluation: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Score committed Detect iterations only after every agent has exited."""
-    started = time.monotonic()
-    run_dir = Path(run_dir).resolve(strict=True)
-    workspace = Path(workspace).resolve(strict=True)
-    report_path = run_dir / "round-f1.tsv"
-    if workspace == run_dir or run_dir not in workspace.parents:
-        raise RuntimeError("round scoring requires a cell-owned workspace")
-    task_path = workspace / "task.json"
-    if not task_path.is_file():
-        raise FileNotFoundError(task_path)
-
-    analysis_root = run_dir / "controller-runtime" / "round-f1"
-    analysis_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    rows: list[dict[str, Any]] = []
-    cache: dict[str, dict[str, Any]] = {}
-    official_calls = 0
-    error_rows: list[dict[str, Any]] = []
-    search_runs = workspace / ".gp" / "runs"
-    for search_run in sorted(search_runs.glob("run_*")):
-        if not search_run.is_dir() or search_run.is_symlink():
-            continue
-        run_id = search_run.name
-        for candidate_path in sorted(
-            (search_run / "candidates").glob("*/candidate.json")
-        ):
-            candidate = load_json(candidate_path)
-            candidate_id = candidate.get("candidate_id")
-            iterations = candidate.get("iterations")
-            if (
-                not isinstance(candidate_id, str)
-                or candidate_path.parent.name != candidate_id
-                or not isinstance(iterations, list)
-            ):
-                raise RuntimeError("malformed candidate iteration metadata")
-            repository = search_run / "workspace" / candidate_id
-            if not repository.is_dir() or repository.is_symlink():
-                raise RuntimeError(
-                    f"candidate workspace is unavailable: {candidate_id}"
-                )
-            for iteration in sorted(
-                iterations,
-                key=lambda item: (
-                    item.get("iteration", -1) if isinstance(item, dict) else -1
-                ),
-            ):
-                if not isinstance(iteration, dict):
-                    raise RuntimeError("malformed iteration metadata")
-                iteration_number = iteration.get("iteration")
-                git_head = iteration.get("git_head")
-                if type(iteration_number) is not int or not isinstance(
-                    git_head, str
-                ):
-                    raise RuntimeError("iteration is missing its Git provenance")
-                row = {
-                    "run_id": run_id,
-                    "candidate_id": candidate_id,
-                    "iteration": iteration_number,
-                    "git_head": git_head,
-                    "artifact_hash": iteration.get("artifact_hash") or "",
-                }
-                try:
-                    with temporary_directory(
-                        prefix=f"{candidate_id}-{iteration_number:04d}-",
-                        namespace="benchmark-compare/round-f1",
-                    ) as temporary:
-                        evaluation_workspace = temporary / "workspace"
-                        evaluation_workspace.mkdir(mode=0o700)
-                        shutil.copy2(
-                            task_path, evaluation_workspace / "task.json"
-                        )
-                        snapshot_sha256 = _materialize_git_directory(
-                            repository,
-                            git_head,
-                            ARTIFACT_NAME,
-                            evaluation_workspace / ARTIFACT_NAME,
-                        )
-                        evaluation = cache.get(snapshot_sha256)
-                        if evaluation is None:
-                            evaluation = evaluate_with_controller_runtime(
-                                evaluation_workspace,
-                                "final",
-                                analysis_root / "scores" / snapshot_sha256,
-                                benchmark_root,
-                            )
-                            cache[snapshot_sha256] = evaluation
-                            score_source = "official_evaluator"
-                            official_calls += 1
-                        else:
-                            score_source = "artifact_cache"
-                    score = evaluation.get("zsoft_score") or {}
-                    row.update(
-                        {
-                            "snapshot_sha256": snapshot_sha256,
-                            "format_valid": evaluation.get("format_valid"),
-                            "valid": evaluation.get("valid"),
-                            "f1": evaluation.get("f1"),
-                            "precision": score.get("precision"),
-                            "recall": score.get("recall"),
-                            "tp": score.get("tp"),
-                            "fp": score.get("fp"),
-                            "fn": score.get("fn"),
-                            "score_source": score_source,
-                        }
-                    )
-                except Exception as exc:
-                    row.update(
-                        {
-                            "snapshot_sha256": "",
-                            "format_valid": "",
-                            "valid": False,
-                            "f1": "",
-                            "precision": "",
-                            "recall": "",
-                            "tp": "",
-                            "fp": "",
-                            "fn": "",
-                            "score_source": "error",
-                        }
-                    )
-                    error_rows.append(
-                        {
-                            "run_id": run_id,
-                            "candidate_id": candidate_id,
-                            "iteration": iteration_number,
-                            "error": f"{type(exc).__name__}: {exc}",
-                        }
-                    )
-                rows.append(row)
-
-    def tsv(value: Any) -> str:
-        if value is None:
-            return ""
-        if value is True:
-            return "true"
-        if value is False:
-            return "false"
-        return (
-            str(value)
-            .replace("\t", " ")
-            .replace("\r", " ")
-            .replace("\n", " ")
-        )
-
-    temporary_report = report_path.with_suffix(".tsv.tmp")
-    with temporary_report.open("w", encoding="utf-8", newline="") as report:
-        report.write("\t".join(ROUND_F1_COLUMNS) + "\n")
-        for row in rows:
-            report.write(
-                "\t".join(tsv(row.get(column)) for column in ROUND_F1_COLUMNS)
-            )
-            report.write("\n")
-    temporary_report.chmod(0o600)
-    os.replace(temporary_report, report_path)
-    latest_f1: dict[tuple[str, str], tuple[int, float]] = {}
-    for row in rows:
-        f1 = row.get("f1")
-        if not isinstance(f1, (int, float)):
-            continue
-        key = (str(row["run_id"]), str(row["candidate_id"]))
-        current = latest_f1.get(key)
-        if current is None or int(row["iteration"]) > current[0]:
-            latest_f1[key] = (int(row["iteration"]), float(f1))
-    final_f1 = None
-    if final_evaluation is not None and isinstance(
-        final_evaluation.get("f1"), (int, float)
-    ):
-        final_f1 = float(final_evaluation["f1"])
-    updated_reports = []
-    for search_run in sorted(search_runs.glob("run_*")):
-        report = search_run / "report.md"
-        candidate_scores = {
-            candidate_id: score
-            for (run_id, candidate_id), (_, score) in latest_f1.items()
-            if run_id == search_run.name
-        }
-        if report.is_file() and candidate_scores:
-            _update_detect_report_latest_f1(report, candidate_scores, final_f1)
-            updated_reports.append(str(report))
-    return {
-        "completed": not error_rows,
-        "report_path": str(report_path),
-        "row_count": len(rows),
-        "official_evaluator_calls": official_calls,
-        "artifact_cache_hits": len(rows) - official_calls - len(error_rows),
-        "duration_seconds": time.monotonic() - started,
-        "timing_scope": "posthoc_after_agent_exit",
-        "visible_to_workers": False,
-        "affects_online_selection": False,
-        "updated_report_paths": updated_reports,
-        "errors": error_rows,
-    }
-
-
-def _update_detect_report_latest_f1(
-    report_path: Path,
-    candidate_scores: dict[str, float],
-    final_f1: float | None,
-) -> None:
-    """Relabel the terminal report after hidden scores can no longer affect search."""
-    lines = report_path.read_text(encoding="utf-8").splitlines()
-    output: list[str] = []
-    in_ledgers = False
-    inserted_note = False
-    for line in lines:
-        if line.startswith("- Metric: "):
-            output.append(
-                "- Search metric: `format_valid` (maximize; online public gate only)"
-            )
-            output.append(
-                "- Final benchmark metric: `f1` (maximize; controller-only posthoc)"
-            )
-            if final_f1 is not None:
-                output.append(f"- Final benchmark F1: `{final_f1}`")
-            continue
-        if line == "## Results Ledgers":
-            in_ledgers = True
-            output.append(line)
-            continue
-        if in_ledgers and line.startswith("## "):
-            in_ledgers = False
-        if in_ledgers and not inserted_note and line.startswith("Each candidate"):
-            output.append(
-                "Latest Score is the final iteration's official posthoc F1. "
-                "It was computed after all agents exited and did not affect selection."
-            )
-            inserted_note = True
-            continue
-        if in_ledgers and line.startswith("| `"):
-            fields = line.split("|")
-            if len(fields) >= 8:
-                candidate_id = fields[1].strip().strip("`")
-                if candidate_id in candidate_scores:
-                    fields[5] = f" {candidate_scores[candidate_id]} "
-                    line = "|".join(fields)
-        output.append(line)
-    temporary = report_path.with_suffix(".md.tmp")
-    temporary.write_text("\n".join(output) + "\n", encoding="utf-8")
-    os.replace(temporary, report_path)
 
 
 def condition_incomplete_reason(
@@ -1314,9 +1024,7 @@ def execute_plain(
     budget = manifest["budget"]
     benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
     benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
-    evaluation_mode = (manifest.get("task") or {}).get(
-        "evaluation_mode", "visible"
-    )
+    controller_only = controller_only_official_evaluation(manifest)
     is_pi = manifest["method"] == "plain-pi"
     pi_provider_id, pi_api, pi_api_key_env = pi_provider_config(args)
     workspaces = [Path(path) for path in manifest["workspaces"]]
@@ -1337,7 +1045,7 @@ def execute_plain(
             (workspace / "TASK.md").read_text(),
             budget["wall_time_seconds"],
             budget["soft_closeout_seconds"],
-            evaluation_mode=evaluation_mode,
+            controller_only_official_evaluation=controller_only,
         )
         (lane_dir / "prompt.md").write_text(prompt)
         lane_environment = environment.copy()
@@ -1416,12 +1124,12 @@ def execute_plain(
         lane_dir = lanes_root / lane_name
         lane_evaluation = evaluate(
             workspace,
-            "public" if evaluation_mode == "blind" else "final",
+            "public" if controller_only else "final",
             benchmark_root,
         )
         write_json(
             lane_dir
-            / ("public-eval.json" if evaluation_mode == "blind" else "final-eval.json"),
+            / ("public-eval.json" if controller_only else "final-eval.json"),
             lane_evaluation,
         )
         candidate = lane_dir / ARTIFACT_NAME
@@ -1445,14 +1153,14 @@ def execute_plain(
     selection_pool = valid_lane_results or lane_results
     selected = (
         min(selection_pool, key=lambda item: item["lane"])
-        if evaluation_mode == "blind"
+        if controller_only
         else min(
             selection_pool,
             key=lambda item: score_order_key(item["evaluation"]),
         )
     )
     selected_evaluation = selected["evaluation"]
-    if evaluation_mode == "blind":
+    if controller_only:
         selected_evaluation = evaluate(
             Path(selected["workspace"]), "final", benchmark_root
         )
@@ -1477,14 +1185,14 @@ def execute_plain(
         "lane_count": len(lane_results),
         "total_claimed": (
             setup_calls + len(lane_results) + 1
-            if evaluation_mode == "blind"
+            if controller_only
             else sum(
                 item["evaluation"]["budget"]["total_claimed"]
                 for item in lane_results
             )
         ),
         "setup_claimed_before_t": setup_calls,
-        "controller_final_claimed": 1 if evaluation_mode == "blind" else len(lane_results),
+        "controller_final_claimed": 1 if controller_only else len(lane_results),
     }
     bad = [
         lane["name"]
@@ -1502,16 +1210,19 @@ def execute_plain(
     return control
 
 
-def _blind_closeout_incomplete_reason(closeout: Any) -> str | None:
+def _controller_only_closeout_incomplete_reason(closeout: Any) -> str | None:
     if not isinstance(closeout, dict) or closeout.get("completed") is not True:
         error = closeout.get("error") if isinstance(closeout, dict) else None
-        return f"blind Goal Plus closeout did not complete: {error or 'unknown error'}"
+        return (
+            "controller-only Goal Plus closeout did not complete: "
+            f"{error or 'unknown error'}"
+        )
     runs = closeout.get("runs")
     if not isinstance(runs, list) or not runs:
-        return "blind Goal Plus closeout has no completed Search run"
+        return "controller-only Goal Plus closeout has no completed Search run"
     for item in runs:
         if not isinstance(item, dict):
-            return "blind Goal Plus closeout contains malformed Search evidence"
+            return "controller-only Goal Plus closeout contains malformed Search evidence"
         selection = item.get("selection")
         promotion = item.get("promotion")
         goal_statuses = item.get("goal_statuses")
@@ -1519,23 +1230,42 @@ def _blind_closeout_incomplete_reason(closeout: Any) -> str | None:
             not isinstance(selection, dict)
             or not isinstance(selection.get("selected_candidate_id"), str)
             or not selection["selected_candidate_id"]
-            or selection.get("selection_rule") != BLIND_SELECTION_RULE
+            or selection.get("selection_rule") != PUBLIC_GATE_SELECTION_RULE
         ):
-            return "blind Goal Plus closeout lacks deterministic selection evidence"
+            return (
+                "controller-only Goal Plus closeout lacks deterministic selection evidence"
+            )
         if (
             not isinstance(promotion, dict)
             or not isinstance(promotion.get("artifact_path"), str)
             or not promotion["artifact_path"]
             or item.get("final_state") != "promoted"
         ):
-            return "blind Goal Plus closeout lacks completed promotion evidence"
+            return "controller-only Goal Plus closeout lacks completed promotion evidence"
         if (
             not isinstance(goal_statuses, dict)
             or not goal_statuses
             or any(status != "complete" for status in goal_statuses.values())
         ):
-            return "blind Goal Plus closeout lacks complete Goal Plus terminal evidence"
+            return (
+                "controller-only Goal Plus closeout lacks complete Goal Plus terminal evidence"
+            )
     return None
+
+
+def _goal_plus_agent_wall_time_seconds(
+    budget: dict[str, Any], controller_only: bool
+) -> int:
+    wall_time = int(budget["wall_time_seconds"])
+    if not controller_only:
+        return wall_time
+    closeout_reserve = int(budget["soft_closeout_seconds"])
+    agent_wall_time = wall_time - closeout_reserve
+    if agent_wall_time < 1:
+        raise ValueError(
+            "controller-only Goal Plus closeout reserve must fit inside wall time"
+        )
+    return agent_wall_time
 
 
 def execute_goal_plus(
@@ -1548,10 +1278,17 @@ def execute_goal_plus(
     benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
     benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
     workspace = Path(manifest["workspace"])
-    evaluation_mode = (manifest.get("task") or {}).get(
-        "evaluation_mode", "visible"
-    )
+    controller_only = controller_only_official_evaluation(manifest)
     is_pi = manifest.get("method", "goal-plus-codex") == "goal-plus-pi"
+    if is_pi and controller_only:
+        environment[CONTROLLER_ONLY_CLOSEOUT_ENV] = "1"
+    else:
+        environment.pop(CONTROLLER_ONLY_CLOSEOUT_ENV, None)
+    if controller_only:
+        environment.pop(GOAL_PLUS_EXTERNAL_EVIDENCE_DIR_ENV, None)
+        environment[GOAL_PLUS_GLOBAL_EVIDENCE_MODE_ENV] = "manual"
+        environment[GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED_ENV] = "0"
+        environment[GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED_ENV] = "0"
     pi_provider_id, pi_api, pi_api_key_env = pi_provider_config(args)
     if (workspace / ".gp").exists():
         raise RuntimeError("standard Goal Plus run must start without .gp")
@@ -1603,7 +1340,7 @@ def execute_goal_plus(
         shared_dir_enabled=bool(
             (manifest.get("goal_plus_config") or {}).get("shared_dir_enabled")
         ),
-        evaluation_mode=evaluation_mode,
+        controller_only_official_evaluation=controller_only,
     )
     (run_dir / "prompt.md").write_text(prompt)
     reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)
@@ -1663,6 +1400,9 @@ def execute_goal_plus(
         )
         stdin_text = prompt
         recorded_command = command_for_manifest(command, args.api_base)
+    agent_wall_time_seconds = _goal_plus_agent_wall_time_seconds(
+        budget, controller_only
+    )
     control = run_controlled(
         command,
         cwd=workspace,
@@ -1670,9 +1410,13 @@ def execute_goal_plus(
         stdin_text=stdin_text,
         stdout_path=run_dir / "events.jsonl",
         stderr_path=run_dir / "stderr.log",
-        wall_time_seconds=budget["wall_time_seconds"],
+        wall_time_seconds=agent_wall_time_seconds,
         hard_kill_grace_seconds=budget["hard_kill_grace_seconds"],
         recorded_command=recorded_command,
+    )
+    control["agent_wall_time_seconds"] = agent_wall_time_seconds
+    control["controller_closeout_reserve_seconds"] = (
+        budget["soft_closeout_seconds"] if controller_only else 0
     )
     if is_pi:
         control["pi_pool_cleanup"] = close_pi_pools(
@@ -1684,10 +1428,10 @@ def execute_goal_plus(
             verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
         ):
             closeout = finalize_goal_plus_search(
-                workspace, evaluation_mode=evaluation_mode
+                workspace, deterministic_public_gate=controller_only
             )
     except Exception as exc:
-        if evaluation_mode != "blind":
+        if not controller_only:
             raise
         closeout = {
             "completed": False,
@@ -1695,13 +1439,13 @@ def execute_goal_plus(
             "error": f"{type(exc).__name__}: {exc}",
         }
     control["goal_plus_controller_closeout"] = closeout
-    blind_closeout_reason = (
-        _blind_closeout_incomplete_reason(closeout)
-        if evaluation_mode == "blind"
+    controller_only_closeout_reason = (
+        _controller_only_closeout_incomplete_reason(closeout)
+        if controller_only
         else None
     )
     final: dict[str, Any] | None = None
-    if blind_closeout_reason is None:
+    if controller_only_closeout_reason is None:
         final = evaluate_with_controller_runtime(
             workspace,
             "final",
@@ -1712,7 +1456,7 @@ def execute_goal_plus(
         copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
     else:
         control["official_evaluation_withheld"] = True
-        control["result_incomplete_reason"] = blind_closeout_reason
+        control["result_incomplete_reason"] = controller_only_closeout_reason
     if is_pi:
         control["pi"] = parse_pi_events(run_dir / "events.jsonl")
     else:
@@ -1721,21 +1465,6 @@ def execute_goal_plus(
     control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
         workspace
     )
-    if BENCHMARK_NAME == "zsoft-detect" and evaluation_mode == "blind":
-        try:
-            control["posthoc_round_scoring"] = export_posthoc_detect_round_f1(
-                run_dir=run_dir,
-                workspace=workspace,
-                benchmark_root=benchmark_root,
-                final_evaluation=final,
-            )
-        except Exception as exc:
-            control["posthoc_round_scoring"] = {
-                "completed": False,
-                "visible_to_workers": False,
-                "affects_online_selection": False,
-                "error": f"{type(exc).__name__}: {exc}",
-            }
     goal_runs = control["goal_plus"]["runs"]
     process_calls = sum(
         item.get("process_verifier_command_count", 0) for item in goal_runs
@@ -1781,8 +1510,8 @@ def execute_goal_plus(
             "Goal Plus controller closeout failed: "
             + control["goal_plus_controller_closeout"].get("error", "unknown error")
         )
-    if blind_closeout_reason is not None:
-        control["result_incomplete_reason"] = blind_closeout_reason
+    if controller_only_closeout_reason is not None:
+        control["result_incomplete_reason"] = controller_only_closeout_reason
     if control["hard_killed"]:
         control["result_incomplete_reason"] = "Goal Plus exceeded hard-kill grace"
     if final is not None and final.get("valid") is not True:
@@ -1931,6 +1660,7 @@ def execute(args: argparse.Namespace) -> int:
         task_id=manifest.get("benchmark_task_selector"),
         module_name=manifest.get("benchmark_adapter_module"),
     )
+    validate_controller_only_method(manifest["method"])
     if manifest["status"] != "prepared":
         raise RuntimeError(f"run is not prepared: {manifest['status']}")
     if args.model != manifest["model"]:
@@ -2027,6 +1757,7 @@ def seed_smoke(args: argparse.Namespace) -> int:
         task_id=manifest.get("benchmark_task_selector"),
         module_name=manifest.get("benchmark_adapter_module"),
     )
+    validate_controller_only_method(manifest["method"])
     benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
     benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
     results = []
@@ -2061,14 +1792,13 @@ def repair_closeout(args: argparse.Namespace) -> int:
         task_id=manifest.get("benchmark_task_selector"),
         module_name=manifest.get("benchmark_adapter_module"),
     )
+    validate_controller_only_method(manifest["method"])
     if manifest["method"] not in {"goal-plus-codex", "goal-plus-pi"}:
         raise ValueError("closeout is only valid for Goal Plus runs")
     benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
     benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
     workspace = Path(manifest["workspace"])
-    evaluation_mode = (manifest.get("task") or {}).get(
-        "evaluation_mode", "visible"
-    )
+    controller_only = controller_only_official_evaluation(manifest)
     control = dict(manifest.get("execution") or {})
     if manifest["method"] == "goal-plus-pi":
         control["pi_pool_cleanup_repair"] = close_pi_pools(
@@ -2080,10 +1810,10 @@ def repair_closeout(args: argparse.Namespace) -> int:
             verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
         ):
             closeout = finalize_goal_plus_search(
-                workspace, evaluation_mode=evaluation_mode
+                workspace, deterministic_public_gate=controller_only
             )
     except Exception as exc:
-        if evaluation_mode != "blind":
+        if not controller_only:
             raise
         closeout = {
             "completed": False,
@@ -2091,13 +1821,13 @@ def repair_closeout(args: argparse.Namespace) -> int:
             "error": f"{type(exc).__name__}: {exc}",
         }
     control["goal_plus_controller_closeout_repair"] = closeout
-    blind_closeout_reason = (
-        _blind_closeout_incomplete_reason(closeout)
-        if evaluation_mode == "blind"
+    controller_only_closeout_reason = (
+        _controller_only_closeout_incomplete_reason(closeout)
+        if controller_only
         else None
     )
     final: dict[str, Any] | None = None
-    if blind_closeout_reason is None:
+    if controller_only_closeout_reason is None:
         final = evaluate_with_controller_runtime(
             workspace,
             "final",
@@ -2156,8 +1886,8 @@ def repair_closeout(args: argparse.Namespace) -> int:
                 "error", "unknown error"
             )
         )
-    if blind_closeout_reason is not None:
-        reason = blind_closeout_reason
+    if controller_only_closeout_reason is not None:
+        reason = controller_only_closeout_reason
     if final is not None and final.get("valid") is not True:
         reason = "official final evaluator rejected the artifact"
     if control.get("hard_killed"):
