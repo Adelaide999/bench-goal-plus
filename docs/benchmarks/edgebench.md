@@ -70,7 +70,9 @@ profiles 是 `vliw-pi-sol-medium-local-smoke` 和
 lease、每条 worker 至少 1 次正式 verifier、30 秒 verifier timeout 和 300 秒
 finalization grace。Pi 需要 host
 `~/.pi/agent/auth.json`（或 `SFORGE_PI_AUTH_FILE`）中的 `openai-codex` 登录。
-这些 Pi profiles 当前是 wiring-ready，不代表已取得真实 E2E pass evidence。
+该 Goal Plus Pi profile 已于 2026-09-01 以 `T=600`、`K=2`、`C=1`、`R=1`
+完成本地 E2E：两条 worker 均有正式 verifier evidence，promotion、Judge 和
+completion evidence 全部通过。该 smoke 不等同于官方 12 小时、3 trajectories 结果。
 
 `goal-plus-pi-provider` 用于 Pi built-in provider 或 models registry 中的显式 API provider，
 不是“本地模型”含义。它不读取 `openai-codex` OAuth，要求 profile 的 model 使用
