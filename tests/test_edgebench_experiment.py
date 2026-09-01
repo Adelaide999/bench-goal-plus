@@ -2891,6 +2891,18 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertTrue(contract["exact_resume"])
         self.assertFalse(contract["plugin_install"])
 
+    def test_active_pi_goal_plus_adapter_requires_exact_host_commands(self) -> None:
+        contract = EDGE_ENV.active_sforge_pi_runtime_contract()
+
+        self.assertTrue(contract["valid"], contract)
+        self.assertEqual(contract["mode"], "pi-extension-exact-host-command")
+        self.assertTrue(contract["exact_start"])
+        self.assertTrue(contract["typed_command_config"])
+        self.assertTrue(contract["extension_loaded"])
+        self.assertTrue(contract["reasoning_explicit"])
+        self.assertTrue(contract["promotion_sync_persisted"])
+        self.assertTrue(contract["exact_resume"])
+
     def test_goal_plus_source_checks_active_sforge_runtime_compatibility(self) -> None:
         root = self.test_paths.goal_plus_root
         env = {
@@ -2914,6 +2926,20 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertFalse(incompatible["valid"])
         self.assertEqual(
             incompatible["codex_runtime_compatibility"]["mode"],
+            "plugin",
+        )
+
+        with mock.patch.object(
+            EDGE_ENV,
+            "active_sforge_pi_runtime_contract",
+            return_value=incompatible_adapter,
+        ):
+            incompatible = EDGE_ENV.resolve_goal_plus_source(
+                env, methods=["goal-plus-pi"]
+            )
+        self.assertFalse(incompatible["valid"])
+        self.assertEqual(
+            incompatible["pi_runtime_compatibility"]["mode"],
             "plugin",
         )
 
@@ -3612,6 +3638,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "missing_assets": [],
                 "missing_asset_alternatives": [],
                 "codex_runtime_compatibility": None,
+                "pi_runtime_compatibility": {"valid": True},
                 "error": None,
             },
         ), mock.patch.object(
@@ -3671,6 +3698,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "missing_assets": [],
                 "missing_asset_alternatives": [],
                 "codex_runtime_compatibility": None,
+                "pi_runtime_compatibility": None,
                 "error": None,
             },
         ), mock.patch.object(

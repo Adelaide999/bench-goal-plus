@@ -135,8 +135,10 @@ Common/OpenEvolve 和 SWE-bench Verified 使用 run-local source，配置
 `promotion_mode=artifact_only`，避免 runtime apply 与 benchmark bridge 双重回写。具体
 strategy 仍由对应 runner reference 冻结。Skill、MCP 或普通自然语言都不能代替精确宿主
 命令创建 Goal Plus 记录。需要重新提交宿主命令来恢复记录时，只能使用无附加文本的
-`$goal-plus resume` 或 `/goal-plus resume`；Pi `-c` 等同一 native session continuation
-不是第二次 Goal Plus 启动，不得再提交一个新 `/goal-plus` goal。
+`$goal-plus resume` 或 `/goal-plus resume`。同一 Pi 进程内继续当前 session 时可以普通
+follow-up；EdgeBench 通过 `pi -c` 启动新进程恢复 native session 时，extension 会重新加载，
+因此必须把无附加文本的 `/goal-plus resume` 作为该进程唯一的新用户输入。两种情况都不得
+提交一个新的 `/goal-plus` goal。
 
 ## 交付
 

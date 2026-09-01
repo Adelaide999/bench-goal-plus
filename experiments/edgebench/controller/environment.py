@@ -264,6 +264,83 @@ def active_sforge_codex_runtime_contract() -> dict[str, Any]:
         }
 
 
+def active_sforge_pi_runtime_contract() -> dict[str, Any]:
+    """Inspect the Pi host-command start and cross-process resume contract."""
+    try:
+        from sforge.harness.agent.pi_goal_plus import PiGoalPlusAgent
+
+        start_prefix = PiGoalPlusAgent.run_cmd.partition('"/goal-plus')[2].partition(
+            "$(cat"
+        )[0]
+        typed_command_config = all(
+            marker in start_prefix
+            for marker in (
+                "mode=autonomous",
+                "max_parallel=__GOAL_PLUS_PARALLEL_NUM__",
+                "workspace_backend=git_worktree",
+                "promotion_mode=artifact_only",
+                "strategy=agent_guided",
+                "__GOAL_PLUS_ROLE_COMMAND_CONFIG__",
+            )
+        ) and " -- " not in start_prefix
+        exact_start = bool(
+            start_prefix.startswith(
+                " mode=autonomous max_parallel=__GOAL_PLUS_PARALLEL_NUM__ "
+            )
+            and typed_command_config
+        )
+        extension_loaded = all(
+            "-e /opt/goal-plus/.pi/extensions/goal-plus.ts" in template
+            for template in (PiGoalPlusAgent.run_cmd, PiGoalPlusAgent.resume_cmd)
+        )
+        reasoning_explicit = all(
+            '--thinking "$SFORGE_PI_REASONING_EFFORT"' in template
+            for template in (PiGoalPlusAgent.run_cmd, PiGoalPlusAgent.resume_cmd)
+        )
+        promotion_sync_persisted = all(
+            marker in PiGoalPlusAgent.resume_cmd
+            for marker in (
+                "sforge-goal-plus-submit --details --if-new",
+                "edgebench-resume-sync.log",
+            )
+        )
+        exact_resume = bool(
+            PiGoalPlusAgent.resume_cmd.endswith('"/goal-plus resume"')
+            and "Continue working" not in PiGoalPlusAgent.resume_cmd
+        )
+        valid = bool(
+            exact_start
+            and typed_command_config
+            and extension_loaded
+            and reasoning_explicit
+            and promotion_sync_persisted
+            and exact_resume
+        )
+        return {
+            "valid": valid,
+            "mode": "pi-extension-exact-host-command",
+            "exact_start": exact_start,
+            "typed_command_config": typed_command_config,
+            "extension_loaded": extension_loaded,
+            "reasoning_explicit": reasoning_explicit,
+            "promotion_sync_persisted": promotion_sync_persisted,
+            "exact_resume": exact_resume,
+            "error": (
+                None
+                if valid
+                else (
+                    "SForge Goal Plus Pi adapter does not require exact host "
+                    "commands for start and cross-process resume"
+                )
+            ),
+        }
+    except (ImportError, AttributeError, TypeError) as exc:
+        return {
+            "valid": False,
+            "error": f"cannot inspect the active SForge Pi adapter: {exc}",
+        }
+
+
 def resolve_codex_runtime_archive(
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -713,6 +790,13 @@ def resolve_goal_plus_source(
             errors.append(
                 "active SForge Codex adapter does not satisfy the host-command contract"
             )
+    pi_runtime_compatibility: dict[str, Any] | None = None
+    if methods is None or set(methods) & {"goal-plus-pi", "goal-plus-pi-provider"}:
+        pi_runtime_compatibility = active_sforge_pi_runtime_contract()
+        if not pi_runtime_compatibility["valid"]:
+            errors.append(
+                "active SForge Pi adapter does not satisfy the host-command contract"
+            )
     if missing_assets or missing_asset_alternatives:
         errors.append("Goal Plus source is missing required runtime assets")
     return {
@@ -733,6 +817,7 @@ def resolve_goal_plus_source(
         "missing_assets": missing_assets,
         "missing_asset_alternatives": missing_asset_alternatives,
         "codex_runtime_compatibility": codex_runtime_compatibility,
+        "pi_runtime_compatibility": pi_runtime_compatibility,
         "error": "; ".join(errors) if errors else None,
     }
 
@@ -2416,6 +2501,7 @@ def _check_checkouts_and_runtime(report: DoctorReport, profile: dict[str, Any]) 
                 "missing_asset_alternatives"
             ],
             codex_runtime_compatibility=goal_source["codex_runtime_compatibility"],
+            pi_runtime_compatibility=goal_source["pi_runtime_compatibility"],
             error=goal_source["error"],
         )
     report.add(

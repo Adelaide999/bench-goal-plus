@@ -55,6 +55,18 @@ class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
         self.assertIn("SFORGE_AGENT_HARD_DEADLINE", command)
         self.assertEqual(agent.get_finalization_grace_seconds(), 120)
 
+    def test_pi_goal_plus_cross_process_resume_reauthorizes_exactly(self) -> None:
+        agent = PiGoalPlusAgent(SForgeConfig())
+
+        command = agent.format_run_cmd(
+            "/tmp/prompt.md", model="gpt-test", resume=True
+        )
+
+        self.assertIn("sforge-goal-plus-submit --details --if-new", command)
+        self.assertIn("edgebench-resume-sync.log", command)
+        self.assertTrue(command.endswith('"/goal-plus resume"'))
+        self.assertNotIn("Continue working", command)
+
 
 if __name__ == "__main__":
     unittest.main()

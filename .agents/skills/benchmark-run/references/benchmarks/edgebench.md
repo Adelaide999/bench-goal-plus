@@ -61,8 +61,10 @@ registration/resource，或通过手写 stdio client 调 server 都不能通过�
 `promotion_mode=artifact_only`、`strategy=agent_guided`、`workers=MODEL*K`，以及 profile
 显式配置时的 `annotator=MODEL`。其中
 `artifact_only` 表示 benchmark-native `sforge-goal-plus-submit` 独占回写和 Judge，不能再由
-Goal Plus runtime apply 一次。auto-resume 的用户输入必须严格等于 `$goal-plus resume`，不得换成
-“继续 Goal Plus”一类自然语言，也不得在 resume 命令后追加说明。
+Goal Plus runtime apply 一次。Codex auto-resume 的用户输入必须严格等于
+`$goal-plus resume`；Pi 通过 `pi -c` 新进程恢复 native session 时，用户输入必须严格等于
+`/goal-plus resume`。不得换成“继续 Goal Plus”一类自然语言，也不得在 resume 命令后追加
+说明。resume 前的 promotion/Judge bridge 输出应独立持久化，不得拼进宿主命令。
 
 当前十五分钟 VLIW preset：
 

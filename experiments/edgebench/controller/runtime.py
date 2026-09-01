@@ -863,6 +863,7 @@ def prepare_runtime_resources(
                 "missing_assets",
                 "missing_asset_alternatives",
                 "codex_runtime_compatibility",
+                "pi_runtime_compatibility",
             )
         }
     if api_protocol == "pi-provider":
