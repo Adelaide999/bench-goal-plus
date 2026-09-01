@@ -2665,11 +2665,17 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
             def docker_checked(command: list[str], *, timeout: int = 120) -> str:
                 del timeout
+                if "pkill" in " ".join(command):
+                    sequence.append("terminate-pi")
                 if "diff" in command:
                     return "diff --git a/a b/a\n"
                 if "status" in command:
                     return " M a"
                 return ""
+
+            def closeout(*_args, **_kwargs):
+                sequence.append("closeout")
+                return {"completed": True}
 
             def export_state(*_args, **_kwargs):
                 sequence.append("export")
@@ -2702,12 +2708,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 mock.patch.object(
                     runtime,
                     "_run",
-                    return_value=subprocess.CompletedProcess(["outer"], 0, "", ""),
+                    side_effect=subprocess.TimeoutExpired(["outer"], 300),
                 ),
                 mock.patch.object(
                     runtime,
                     "_goal_plus_closeout",
-                    return_value={"completed": True},
+                    side_effect=closeout,
                 ),
                 mock.patch.object(
                     runtime, "_export_goal_plus_state", side_effect=export_state
@@ -2721,8 +2727,11 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             ):
                 result = runtime._run_agent(campaign, manifest, cell)
 
-            self.assertEqual(sequence, ["export", "dispose"])
+            self.assertEqual(
+                sequence, ["terminate-pi", "closeout", "export", "dispose"]
+            )
             self.assertEqual(result["state"], "completed")
+            self.assertTrue(result["timed_out"])
             self.assertTrue(result["patch_exists"])
             self.assertEqual(result["goal_plus"]["actual_subagent_count"], 1)
 
