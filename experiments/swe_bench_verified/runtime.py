@@ -2069,7 +2069,12 @@ def _run_agent(
             stderr = _text(error.stderr)
             timed_out = True
             trajectory_runtime_seconds = time.monotonic() - trajectory_started
-            if method == "goal-plus-codex":
+            if method in {"goal-plus-codex", "goal-plus-pi"}:
+                terminate_command = (
+                    "pkill -TERM -x codex 2>/dev/null || true"
+                    if method == "goal-plus-codex"
+                    else "pkill -TERM -f '/opt/pi/dist/[c]li.js' 2>/dev/null || true"
+                )
                 _docker_checked(
                     [
                         "docker",
@@ -2077,7 +2082,7 @@ def _run_agent(
                         container_id,
                         "sh",
                         "-lc",
-                        "pkill -TERM -x codex 2>/dev/null || true",
+                        terminate_command,
                     ],
                     timeout=30,
                 )
