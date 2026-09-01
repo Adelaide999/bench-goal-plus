@@ -67,7 +67,8 @@ Runner 当前声明六个 canonical methods：`plain-codex`、
 `goal-plus-pi-provider`。Pi 的最小
 profiles 是 `vliw-pi-sol-medium-local-smoke` 和
 `vliw-goal-plus-pi-sol-medium-local-smoke`；后者固定 `K=2`、240 秒 worker
-lease 和 120 秒 finalization grace。Pi 需要 host
+lease、每条 worker 至少 1 次正式 verifier、30 秒 verifier timeout 和 300 秒
+finalization grace。Pi 需要 host
 `~/.pi/agent/auth.json`（或 `SFORGE_PI_AUTH_FILE`）中的 `openai-codex` 登录。
 这些 Pi profiles 当前是 wiring-ready，不代表已取得真实 E2E pass evidence。
 
