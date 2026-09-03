@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ from experiments.aibench_coding.cli import build_parser
 from experiments.aibench_coding.config import (
     AIBenchContractError,
     load_profile,
+    pi_api,
     resolve_profile,
     split_model,
 )
@@ -32,6 +34,24 @@ class AIBenchCodingContractTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def _zai_profile(self, methods: list[str]) -> dict[str, object]:
+        _path, profile = load_profile("smoke")
+        profile["methods"] = methods
+        profile["model"] = (
+            "zai/glm-5.2"
+            if any("pi" in method for method in methods)
+            else "glm-5.2"
+        )
+        profile["agent_provider"] = {
+            "id": "zai",
+            "name": "Z.AI Anthropic-compatible API",
+            "auth_mode": "anthropic-compatible",
+            "base_url_env": "ZAI_BASE_URL",
+            "api_key_env": "ZAI_API_KEY",
+            "wire_api": "anthropic-messages",
+        }
+        return profile
 
     def test_catalog_exposes_four_methods_and_native_capabilities(self) -> None:
         catalog = Catalog()
@@ -95,6 +115,67 @@ class AIBenchCodingContractTest(unittest.TestCase):
         }
         with self.assertRaisesRegex(AIBenchContractError, "openai-compatible"):
             resolve_profile(oauth)
+
+    def test_pi_accepts_anthropic_messages_provider(self) -> None:
+        profile = self._zai_profile(["goal-plus-pi"])
+
+        resolved = resolve_profile(profile)
+
+        self.assertEqual(split_model(resolved), ("zai", "glm-5.2"))
+        self.assertEqual(pi_api(resolved), "anthropic-messages")
+
+    def test_codex_rejects_anthropic_messages_provider(self) -> None:
+        profile = self._zai_profile(["goal-plus-codex"])
+
+        with self.assertRaisesRegex(
+            AIBenchContractError, "Codex methods require openai-compatible responses"
+        ):
+            resolve_profile(profile)
+
+    def test_runtime_passes_anthropic_messages_to_pi(self) -> None:
+        profile = self._zai_profile(["goal-plus-pi"])
+        run_dir = self.root / "cell"
+        run_dir.mkdir()
+        captured_command: list[str] = []
+
+        def fake_run(command: list[str], **kwargs: object) -> object:
+            del kwargs
+            captured_command.extend(command)
+            (run_dir / "experiment.json").write_text(
+                json.dumps({"status": "finished"}), encoding="utf-8"
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"ZAI_BASE_URL": "https://example.invalid", "ZAI_API_KEY": "key"},
+                clear=False,
+            ),
+            mock.patch.object(
+                runtime,
+                "_sandbox_binaries",
+                return_value=(Path("/codex"), Path("/pi")),
+            ),
+            mock.patch.object(runtime.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(
+                runtime.shutil, "which", side_effect=lambda name: f"/bin/{name}"
+            ),
+        ):
+            result = runtime._run_cell(
+                profile,
+                {"run_dir": str(run_dir), "method": "goal-plus-pi"},
+            )
+
+        self.assertEqual(
+            captured_command[captured_command.index("--pi-api") + 1],
+            "anthropic-messages",
+        )
+        self.assertEqual(
+            captured_command[captured_command.index("--pi-provider-id") + 1],
+            "zai",
+        )
+        self.assertEqual(result["state"], "completed")
 
     def test_cli_accepts_native_runner_override_contract(self) -> None:
         args = build_parser().parse_args(

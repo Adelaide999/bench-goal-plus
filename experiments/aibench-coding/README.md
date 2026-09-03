@@ -45,7 +45,8 @@ python3 scripts/bench.py plan --benchmark aibench-coding --profile smoke \
 
 `setup`/`doctor` requires Linux, Bubblewrap, the exact managed source branch,
 the locked aibench grading runtime, selected Agent binaries, and inherited
-OpenAI-compatible provider variables. Runs are foreground-only and
+provider variables. Codex uses OpenAI Responses; Pi profiles may use either
+OpenAI Responses or Anthropic Messages. Runs are foreground-only and
 non-resumable. `finish` consumes terminal evidence without re-running the
 official grader.
 
