@@ -20,6 +20,9 @@ from experiments.aibench_coding.config import (
 from experiments.benchmark_compare import experiment as benchmark_compare
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class AIBenchCodingContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(
@@ -48,6 +51,26 @@ class AIBenchCodingContractTest(unittest.TestCase):
         target = catalog.targets["aibench-coding"]
         self.assertTrue(target.local_asset_inventory)
         self.assertEqual(target.docker.requirement, "not_required")
+
+    def test_registry_promotes_only_the_evidenced_goal_plus_codex_method(self) -> None:
+        registry = json.loads(
+            (ROOT / "benchmarks" / "registry.json").read_text(encoding="utf-8")
+        )
+        item = next(
+            entry for entry in registry["items"] if entry["id"] == "aibench-coding"
+        )
+        evidence_path = item["stage_evidence"]["goal_plus_codex"][0]
+        summary = json.loads((ROOT / evidence_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(item["stages"]["goal_plus_codex"], "pass")
+        self.assertEqual(item["stages"]["plain_codex"], "partial")
+        self.assertEqual(item["stages"]["plain_pi"], "partial")
+        self.assertEqual(item["stages"]["goal_plus_pi"], "partial")
+        self.assertEqual(item["stages"]["campaign_ready"], "partial")
+        self.assertEqual(summary["method"]["id"], "goal-plus-codex")
+        self.assertEqual(summary["status"], "completed")
+        self.assertTrue(summary["result"]["score_valid"])
+        self.assertTrue(summary["execution"]["topology"]["matches_k"])
 
     def test_profile_and_provider_model_route_are_frozen(self) -> None:
         _path, profile = load_profile("smoke")
