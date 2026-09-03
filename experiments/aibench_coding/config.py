@@ -85,31 +85,21 @@ def _validate_provider(profile_id: str, provider: Any) -> None:
             f"{profile_id}: agent_provider must use the exact provider contract"
         )
     auth_mode = provider["auth_mode"]
-    if auth_mode not in {"openai-compatible", "codex-oauth"}:
+    if auth_mode != "openai-compatible":
         raise AIBenchContractError(
-            f"{profile_id}: unsupported agent_provider.auth_mode"
+            f"{profile_id}: agent_provider.auth_mode must be openai-compatible"
         )
     if not isinstance(provider["id"], str) or not provider["id"]:
         raise AIBenchContractError(f"{profile_id}: agent_provider.id is required")
-    if auth_mode == "openai-compatible":
-        if provider["wire_api"] != "responses":
-            raise AIBenchContractError(
-                f"{profile_id}: agent_provider.wire_api must be responses"
-            )
-        for field in ("base_url_env", "api_key_env"):
-            if ENV_NAME.fullmatch(str(provider[field])) is None:
-                raise AIBenchContractError(
-                    f"{profile_id}: agent_provider.{field} must be an environment name"
-                )
-    elif (
-        provider["id"] != "openai-codex"
-        or provider["wire_api"] != "codex-chatgpt"
-        or provider["base_url_env"] is not None
-        or provider["api_key_env"] is not None
-    ):
+    if provider["wire_api"] != "responses":
         raise AIBenchContractError(
-            f"{profile_id}: codex-oauth provider contract is invalid"
+            f"{profile_id}: agent_provider.wire_api must be responses"
         )
+    for field in ("base_url_env", "api_key_env"):
+        if ENV_NAME.fullmatch(str(provider[field])) is None:
+            raise AIBenchContractError(
+                f"{profile_id}: agent_provider.{field} must be an environment name"
+            )
 
 
 def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
@@ -151,10 +141,6 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
     if not isinstance(model, str) or not model.strip():
         raise AIBenchContractError(f"{profile_id}: model is required")
     if any(method in PI_METHODS for method in methods):
-        if profile["agent_provider"]["auth_mode"] != "openai-compatible":
-            raise AIBenchContractError(
-                f"{profile_id}: Pi methods require openai-compatible auth"
-            )
         provider_id, separator, model_id = model.partition("/")
         if not separator or not provider_id or not model_id:
             raise AIBenchContractError(
@@ -163,7 +149,6 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
     _validate_provider(profile_id, profile.get("agent_provider"))
     if (
         any("codex" in method for method in methods)
-        and profile["agent_provider"]["auth_mode"] == "openai-compatible"
         and profile["agent_provider"]["api_key_env"] != "OPENAI_API_KEY"
     ):
         raise AIBenchContractError(
@@ -261,7 +246,7 @@ def preserve_conflict(path: Path) -> Path | None:
     raise RuntimeError(f"cannot preserve conflicting campaign path: {path}")
 
 
-def split_model(profile: dict[str, Any], method: str) -> tuple[str, str]:
+def split_model(profile: dict[str, Any]) -> tuple[str, str]:
     provider_id = str(profile["agent_provider"]["id"])
     model = str(profile["model"])
     selected_provider, separator, model_id = model.partition("/")

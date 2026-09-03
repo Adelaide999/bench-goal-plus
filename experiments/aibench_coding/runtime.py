@@ -293,36 +293,22 @@ def doctor(
             }
         )
     provider = profile["agent_provider"]
-    if provider["auth_mode"] == "codex-oauth":
-        codex = shutil.which("codex")
-        auth_ok, auth_detail = (
-            _capture([codex, "login", "status"]) if codex else (False, "codex missing")
-        )
-        checks.append(
+    checks.extend(
+        [
+            {
+                "kind": "provider",
+                "name": "base-url",
+                "environment": provider["base_url_env"],
+                "passed": bool(os.environ.get(provider["base_url_env"])),
+            },
             {
                 "kind": "credential",
-                "name": "codex-oauth",
-                "detail": auth_detail,
-                "passed": auth_ok and "logged in" in auth_detail.lower(),
-            }
-        )
-    else:
-        checks.extend(
-            [
-                {
-                    "kind": "provider",
-                    "name": "base-url",
-                    "environment": provider["base_url_env"],
-                    "passed": bool(os.environ.get(provider["base_url_env"])),
-                },
-                {
-                    "kind": "credential",
-                    "name": "api-key",
-                    "environment": provider["api_key_env"],
-                    "passed": bool(os.environ.get(provider["api_key_env"])),
-                },
-            ]
-        )
+                "name": "api-key",
+                "environment": provider["api_key_env"],
+                "passed": bool(os.environ.get(provider["api_key_env"])),
+            },
+        ]
+    )
     payload = {
         "schema_version": 1,
         "benchmark": "aibench-coding",
@@ -386,7 +372,7 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
     )
     for task_id in profile["task_ids"]:
         for method in profile["methods"]:
-            provider_id, model_id = split_model(profile, method)
+            provider_id, model_id = split_model(profile)
             for seed in profile["seeds"]:
                 cell_id = sanitize_id(f"{task_id}-{method}-seed-{seed}")
                 run_dir = destination / "cells" / cell_id
@@ -397,12 +383,6 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
                     "seed": seed,
                     "run_dir": str(run_dir),
                     "state": "preparing",
-                    "expected_outer_trajectories": (
-                        profile["concurrency"] if method.startswith("plain-") else 1
-                    ),
-                    "expected_subagents": (
-                        profile["concurrency"] if method in GOAL_PLUS_METHODS else 0
-                    ),
                     "error": None,
                 }
                 campaign["cells"].append(cell)
@@ -463,7 +443,6 @@ def _sandbox_binaries(run_dir: Path) -> tuple[Path, Path]:
 
 
 def _agent_environment(
-    campaign: Path,
     run_dir: Path,
     profile: dict[str, Any],
     method: str,
@@ -500,7 +479,6 @@ def _agent_environment(
             "AIBENCH_METHOD": method,
             "AIBENCH_HIDDEN_CHECKOUT": str(UPSTREAM_CHECKOUT),
             "AIBENCH_CELL_ROOT": str(run_dir),
-            "AIBENCH_CAMPAIGN_ROOT": str(campaign),
             "AIBENCH_REAL_CODEX_BIN": str(Path(real_codex or "")),
             "AIBENCH_REAL_PI_BIN": str(Path(real_pi or "")),
             "PYTHONDONTWRITEBYTECODE": "1",
@@ -508,31 +486,19 @@ def _agent_environment(
     )
     if real_pi is not None:
         environment[REAL_PI_BIN_ENV] = real_pi
-    if provider["auth_mode"] == "codex-oauth":
-        codex_home = Path(
-            os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
-        ).expanduser()
-        auth_file = codex_home / "auth.json"
-        if not auth_file.is_file():
-            raise FileNotFoundError(f"Codex OAuth auth file is missing: {auth_file}")
-        environment["AIBENCH_CODEX_AUTH_FILE"] = str(auth_file.absolute())
     return environment
 
 
 def _run_cell(
-    campaign: Path,
     profile: dict[str, Any],
     cell: dict[str, Any],
 ) -> dict[str, Any]:
     run_dir = Path(cell["run_dir"])
     codex_wrapper, pi_wrapper = _sandbox_binaries(run_dir)
-    provider_id, model_id = split_model(profile, cell["method"])
+    provider_id, model_id = split_model(profile)
     provider = profile["agent_provider"]
-    api_auth = provider["auth_mode"] == "openai-compatible"
-    base_url = os.environ.get(provider["base_url_env"]) if api_auth else None
-    if api_auth and (
-        not base_url or not os.environ.get(provider["api_key_env"])
-    ):
+    base_url = os.environ.get(provider["base_url_env"])
+    if not base_url or not os.environ.get(provider["api_key_env"]):
         raise RuntimeError("profile-selected provider URL and credential are required")
     command = [
         sys.executable,
@@ -551,14 +517,14 @@ def _run_cell(
         "--pi-api",
         "openai-responses",
         "--pi-api-key-env",
-        provider["api_key_env"] or "OPENAI_API_KEY",
+        provider["api_key_env"],
+        "--api-base",
+        base_url,
     ]
-    if base_url is not None:
-        command.extend(["--api-base", base_url])
     completed = subprocess.run(
         command,
         cwd=ROOT,
-        env=_agent_environment(campaign, run_dir, profile, cell["method"]),
+        env=_agent_environment(run_dir, profile, cell["method"]),
         capture_output=True,
         text=True,
         check=False,
@@ -600,7 +566,7 @@ def execute_campaign(destination: Path) -> int:
         for cell in pending:
             cell["state"] = "running"
             cell["started_at"] = utc_now()
-            futures[pool.submit(_run_cell, destination, profile, cell)] = cell
+            futures[pool.submit(_run_cell, profile, cell)] = cell
         write_json(campaign_path, campaign)
         for future in as_completed(futures):
             cell = futures[future]

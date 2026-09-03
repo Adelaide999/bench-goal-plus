@@ -101,10 +101,10 @@
     }
   },
   "reproduction": {
-    "check": "python3 scripts/bench.py check --preset aibench-coding-goal-plus-codex-oauth-smoke",
-    "setup": "python3 scripts/bench.py setup --preset aibench-coding-goal-plus-codex-oauth-smoke",
-    "plan": "python3 scripts/bench.py plan --benchmark aibench-coding --profile codex-oauth-smoke --method goal-plus-codex --model bench-openai/gpt-5.6-sol --reasoning-effort medium --wall-time-seconds 1800 --live-search-concurrency 1 --cell-concurrency 1 --seed 1 --campaign-id <new-campaign-id>",
-    "launch": "python3 scripts/bench.py launch --benchmark aibench-coding --profile codex-oauth-smoke --method goal-plus-codex --model bench-openai/gpt-5.6-sol --reasoning-effort medium --wall-time-seconds 1800 --live-search-concurrency 1 --cell-concurrency 1 --seed 1 --campaign-id <new-campaign-id>",
+    "check": "python3 scripts/bench.py check --benchmark aibench-coding --profile smoke",
+    "setup": "python3 scripts/bench.py setup --benchmark aibench-coding --profile smoke --method goal-plus-codex --model bench-openai/gpt-5.6-sol",
+    "plan": "python3 scripts/bench.py plan --benchmark aibench-coding --profile smoke --method goal-plus-codex --model bench-openai/gpt-5.6-sol --reasoning-effort medium --wall-time-seconds 1800 --live-search-concurrency 1 --cell-concurrency 1 --seed 1 --campaign-id <new-campaign-id>",
+    "launch": "python3 scripts/bench.py launch --benchmark aibench-coding --profile smoke --method goal-plus-codex --model bench-openai/gpt-5.6-sol --reasoning-effort medium --wall-time-seconds 1800 --live-search-concurrency 1 --cell-concurrency 1 --seed 1 --campaign-id <new-campaign-id>",
     "finish": "python3 scripts/bench.py finish --campaign runs/aibench-coding/<new-campaign-id>"
   },
   "limitations": [

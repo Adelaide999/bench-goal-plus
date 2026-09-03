@@ -90,27 +90,6 @@ def build_command(arguments: list[str]) -> list[str]:
     writable_root.mkdir(parents=True, exist_ok=True)
     temporary = writable_root / "tmp"
     temporary.mkdir(parents=True, exist_ok=True)
-    auth_file = os.environ.get("AIBENCH_CODEX_AUTH_FILE")
-    if role == "codex" and auth_file:
-        auth_source = _required_path("AIBENCH_CODEX_AUTH_FILE")
-        codex_home = Path(
-            os.environ.get("CODEX_HOME", str(writable_root / ".codex"))
-        ).absolute()
-        if codex_home != cell_root and cell_root not in codex_home.parents:
-            raise RuntimeError("isolated CODEX_HOME must remain inside the prepared cell")
-        codex_home.mkdir(parents=True, exist_ok=True)
-        auth_target = codex_home / "auth.json"
-        auth_target.touch(exist_ok=True)
-        command.extend(
-            [
-                "--ro-bind",
-                str(auth_source),
-                str(auth_target),
-                "--setenv",
-                "CODEX_HOME",
-                str(codex_home),
-            ]
-        )
     command.extend(
         [
             "--chdir",

@@ -75,19 +75,26 @@ class AIBenchCodingContractTest(unittest.TestCase):
     def test_profile_and_provider_model_route_are_frozen(self) -> None:
         _path, profile = load_profile("smoke")
         self.assertEqual(profile["expected_case_set_fingerprint"], "9149d02169845dc5")
+        self.assertEqual(profile["agent_provider"]["auth_mode"], "openai-compatible")
         self.assertEqual(
-            split_model(profile, "plain-codex"),
-            ("bench-openai", "gpt-5.6-sol"),
-        )
-        self.assertEqual(
-            split_model(profile, "goal-plus-pi"),
+            split_model(profile),
             ("bench-openai", "gpt-5.6-sol"),
         )
         with self.assertRaises(AIBenchContractError):
             resolve_profile(profile, methods=["plain-pi"], model="gpt-5.6-sol")
-        _path, oauth = load_profile("codex-oauth-smoke")
-        self.assertEqual(oauth["methods"], ["goal-plus-codex"])
-        self.assertEqual(oauth["agent_provider"]["auth_mode"], "codex-oauth")
+        oauth = json.loads(json.dumps(profile))
+        oauth["methods"] = ["goal-plus-codex"]
+        oauth["model"] = "gpt-5.6-sol"
+        oauth["agent_provider"] = {
+            "id": "openai-codex",
+            "name": "Codex ChatGPT OAuth",
+            "auth_mode": "codex-oauth",
+            "base_url_env": None,
+            "api_key_env": None,
+            "wire_api": "codex-chatgpt",
+        }
+        with self.assertRaisesRegex(AIBenchContractError, "openai-compatible"):
+            resolve_profile(oauth)
 
     def test_cli_accepts_native_runner_override_contract(self) -> None:
         args = build_parser().parse_args(
@@ -308,42 +315,6 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertIn(("--tmpfs", str(cell.parent)), pairs)
         self.assertIn(("--bind", str(workspace)), pairs)
         self.assertEqual(command[-3:], [str(binary), "exec", "--json"])
-
-    def test_bubblewrap_mounts_codex_oauth_read_only(self) -> None:
-        campaign = self.root / "campaign"
-        cell = campaign / "cells" / "cell-1"
-        workspace = cell / "workspace"
-        hidden = self.root / "aibench-checkout"
-        binary = self.root / "codex"
-        auth = self.root / "auth.json"
-        codex_home = cell / "controller-runtime" / "codex-home"
-        workspace.mkdir(parents=True)
-        hidden.mkdir()
-        binary.write_text("", encoding="utf-8")
-        auth.write_text('{"token":"not-copied"}', encoding="utf-8")
-        environment = {
-            "AIBENCH_AGENT_ROLE": "codex",
-            "AIBENCH_METHOD": "goal-plus-codex",
-            "AIBENCH_REAL_CODEX_BIN": str(binary),
-            "AIBENCH_HIDDEN_CHECKOUT": str(hidden),
-            "AIBENCH_CELL_ROOT": str(cell),
-            "AIBENCH_CODEX_AUTH_FILE": str(auth),
-            "CODEX_HOME": str(codex_home),
-        }
-        previous = Path.cwd()
-        try:
-            os.chdir(workspace)
-            with (
-                mock.patch.dict(os.environ, environment, clear=False),
-                mock.patch.object(sandbox.shutil, "which", return_value="/usr/bin/bwrap"),
-            ):
-                command = sandbox.build_command(["exec"])
-        finally:
-            os.chdir(previous)
-        auth_target = codex_home / "auth.json"
-        self.assertIn(("--ro-bind", str(auth)), list(zip(command, command[1:])))
-        self.assertIn(str(auth_target), command)
-        self.assertEqual(auth_target.read_text(encoding="utf-8"), "")
 
     def _write_cell(
         self,

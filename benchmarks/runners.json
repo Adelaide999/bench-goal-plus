@@ -748,30 +748,6 @@
       }
     },
     {
-      "id": "aibench-coding-goal-plus-codex-oauth-smoke",
-      "description": "One valid _clean2026 Goal Plus + Codex smoke using the host Codex ChatGPT OAuth login with T=300, K=1, C=1, R=1.",
-      "benchmarks": ["aibench-coding"],
-      "profile": "codex-oauth-smoke",
-      "campaign_id_template": "aibench-coding-goal-plus-codex-oauth-sol-medium-5m-k1-c1-r1-{timestamp}",
-      "expected_profile": {
-        "task_count": 1,
-        "methods": ["goal-plus-codex"],
-        "model": "gpt-5.6-sol",
-        "reasoning_effort": "medium",
-        "agent_provider": {
-          "id": "openai-codex",
-          "name": "Codex ChatGPT OAuth",
-          "auth_mode": "codex-oauth",
-          "base_url_env": null,
-          "api_key_env": null,
-          "wire_api": "codex-chatgpt"
-        },
-        "wall_time_seconds": 300,
-        "concurrency": 1,
-        "cell_concurrency": 1
-      }
-    },
-    {
       "id": "zsoft-detect-civetweb-swe-agent-smoke",
       "description": "One-project ZSoft Detect native SWE-agent smoke using the upstream Bubblewrap launcher and exact provider usage, with T=300, K=1, C=1, R=1.",
       "benchmarks": [

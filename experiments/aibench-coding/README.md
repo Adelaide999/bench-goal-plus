@@ -49,10 +49,6 @@ OpenAI-compatible provider variables. Runs are foreground-only and
 non-resumable. `finish` consumes terminal evidence without re-running the
 official grader.
 
-For a Codex-only host smoke, profile `codex-oauth-smoke` reuses the existing
-ChatGPT login. The host auth file is mounted read-only into the isolated
-run-local `CODEX_HOME`; its contents are never copied into campaign state.
-
 The initial integration remains `partial` until a real Linux+bwrap campaign is
 archived for each method. For `K>1`, the report exposes selected-result success
 but deliberately leaves pass@K/pass^K unset because unselected trajectories are
