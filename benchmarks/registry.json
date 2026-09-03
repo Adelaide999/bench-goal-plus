@@ -611,6 +611,45 @@
       ]
     },
     {
+      "id": "aibench-coding",
+      "display_name": "aibench AI-Coding-Assist",
+      "kind": "benchmark",
+      "gate_set": "benchmark_methods",
+      "priority": 4,
+      "repositories": [
+        {
+          "role": "benchmark-and-data",
+          "upstream_url": "https://gitcode.com/caohaotiantian/muyuan.git",
+          "subdirectory": "benchmarks/coding",
+          "tracking_branch": "coding-benchmark",
+          "license": "LicenseRef-Proprietary"
+        }
+      ],
+      "data_url": "https://gitcode.com/caohaotiantian/muyuan/tree/coding-benchmark/benchmarks/coding/benchmarks/ai_coding/cases/_clean2026",
+      "local_path": "third_party/aibench-coding/benchmarks/coding",
+      "docker_requirement": "not_required",
+      "docker_scope": "The native adapter uses the locked upstream Python grading runtime on Linux. Bubblewrap, not Docker, isolates agents from hidden cases and gold files.",
+      "stages": {
+        "source_forked": "partial",
+        "environment": "partial",
+        "official_verifier": "partial",
+        "native_baseline": "todo",
+        "plain_codex": "partial",
+        "goal_plus_codex": "partial",
+        "plain_pi": "partial",
+        "goal_plus_pi": "partial",
+        "matched_baseline": "todo",
+        "campaign_ready": "partial"
+      },
+      "evidence": [],
+      "next_action": "Run the aibench-coding-smoke preset on a Linux+bwrap host, archive one exact-revision hidden-grade campaign for each method, then promote only the evidenced method stages.",
+      "blockers": [
+        "No real-model Linux+bwrap campaign has been archived for the new adapter.",
+        "The _clean2026 revision contains 45 cases but only 38 pass the upstream validity gate; the initial profile uses valid-only selection.",
+        "For K>1, only the selected result receives hidden grading, so pass@K and pass^K remain unavailable even though task-level K topology is checked."
+      ]
+    },
+    {
       "id": "zsoft-l1",
       "display_name": "ZSoft L1 PoC",
       "kind": "benchmark",
