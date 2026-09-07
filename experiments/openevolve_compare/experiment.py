@@ -300,10 +300,6 @@ def render_goal(
         )
     if evaluation_mode not in {"visible", "blind"}:
         raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
-    if controller_only_official_evaluation and evaluation_mode != "blind":
-        raise ValueError(
-            "controller-only official evaluation requires blind worker feedback"
-        )
     if evaluation_mode == "blind":
         controller_only_official_evaluation = True
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
@@ -388,7 +384,7 @@ def render_goal(
         render_controller_only_task_prompt(
             task_text, wall_seconds, closeout_seconds
         )
-        if controller_only_official_evaluation
+        if evaluation_mode == "blind"
         else render_common_task_prompt(task_text, wall_seconds, closeout_seconds)
     )
     edit_surface_limit = (
@@ -417,7 +413,7 @@ def render_goal(
             f"process iteration records `{target_metric}={target_score:g}`. Treat that stop "
             "as expected; selection, promotion, and final verification still run afterward.\n"
         )
-    if controller_only_official_evaluation:
+    if evaluation_mode == "blind":
         return (
             f"{goal_plus_command}\n\n"
             f"{common_prompt.rstrip()}\n\n"
@@ -563,8 +559,15 @@ def render_plain_prompt(
     wall_seconds: int,
     closeout_seconds: int,
     controller_only_official_evaluation: bool = False,
+    evaluation_mode: str | None = None,
 ) -> str:
-    if controller_only_official_evaluation:
+    if evaluation_mode is None:
+        evaluation_mode = (
+            "blind" if controller_only_official_evaluation else "visible"
+        )
+    if evaluation_mode not in {"visible", "blind"}:
+        raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
+    if evaluation_mode == "blind":
         return render_controller_only_task_prompt(
             task_text, wall_seconds, closeout_seconds
         )

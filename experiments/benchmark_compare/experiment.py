@@ -662,7 +662,7 @@ def prepare(args: argparse.Namespace) -> int:
             controller_only_official_evaluation=(
                 CONTROLLER_ONLY_OFFICIAL_EVALUATION
             ),
-            search_scheduler=search_scheduler,
+            evaluation_mode=EVALUATION_MODE,
         )
         prompt_contract = {
             "mode": f"{args.method.replace('-', '_')}_common_prompt",
@@ -725,6 +725,7 @@ def prepare(args: argparse.Namespace) -> int:
             controller_only_official_evaluation=(
                 CONTROLLER_ONLY_OFFICIAL_EVALUATION
             ),
+            evaluation_mode=EVALUATION_MODE,
         )
         prompt_contract = {
             "mode": "natural_goal_plus_entry",
@@ -1808,6 +1809,7 @@ def execute_plain(
             budget["wall_time_seconds"],
             budget["soft_closeout_seconds"],
             controller_only_official_evaluation=controller_only,
+            evaluation_mode=EVALUATION_MODE,
         )
         (lane_dir / "prompt.md").write_text(prompt)
         lane_environment = environment.copy()
@@ -2263,7 +2265,9 @@ def execute_goal_plus(
         ):
             closeout = finalize_goal_plus_search(
                 workspace,
-                deterministic_public_gate=controller_only,
+                deterministic_public_gate=(
+                    controller_only and EVALUATION_MODE == "blind"
+                ),
                 verify_unsettled_candidates=not control.get(
                     "early_stop_triggered", False
                 ),
@@ -2711,7 +2715,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
         ):
             closeout = finalize_goal_plus_search(
                 workspace,
-                deterministic_public_gate=controller_only,
+                deterministic_public_gate=(
+                    controller_only and EVALUATION_MODE == "blind"
+                ),
                 require_uniform_public_scores=EVALUATION_MODE == "blind",
             )
     except Exception as exc:

@@ -380,6 +380,27 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn('`strategy.config.global_evidence_mode="independent"`', prompt)
         self.assertIn("never receives the official evaluator or official metric", prompt)
 
+    def test_controller_only_visible_goal_uses_public_ranking_signal(self) -> None:
+        prompt = experiment.render_goal(
+            task_text="# Objective\nImprove it.",
+            artifact_name="submission",
+            artifact_is_directory=True,
+            metric_name="visible_test_score",
+            metric_direction="maximize",
+            wall_seconds=300,
+            closeout_seconds=60,
+            concurrency=2,
+            worker_host="pi-rpc",
+            worker_model="zai/glm-5.2",
+            controller_only_official_evaluation=True,
+            evaluation_mode="visible",
+        )
+
+        self.assertIn("promotion_mode=artifact_only", prompt)
+        self.assertIn("Metric: `visible_test_score`", prompt)
+        self.assertIn("role `ranking_signal`", prompt)
+        self.assertNotIn("public format gate only", prompt)
+
     def test_pi_goal_prompt_names_pool_supervisor_minimum_lease(self) -> None:
         prompt = experiment.render_goal(
             task_text="# Objective\nImprove it.",
