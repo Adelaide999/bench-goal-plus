@@ -6,6 +6,10 @@ import argparse
 import json
 from pathlib import Path
 
+from bench_goal_plus.search_scheduler import (
+    add_internal_search_scheduler_argument,
+    search_scheduler_from_namespace,
+)
 from bench_runtime_paths import configure_temp_environment
 
 from .config import SUPPORTED_METHODS, campaign_dir, load_profile, resolve_profile
@@ -38,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--concurrency", type=int)
     prepare.add_argument("--cell-concurrency", type=int)
     prepare.add_argument("--retain-containers", action="store_true")
+    add_internal_search_scheduler_argument(prepare)
 
     run = children.add_parser("run")
     run.add_argument("--campaign", required=True)
@@ -84,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.retain_containers:
             parser.error("aibench-coding does not own retainable containers")
+        search_scheduler = search_scheduler_from_namespace(args)
+        if search_scheduler is not None:
+            search_scheduler.validate_max_candidates(resolved["concurrency"])
+            resolved["search_scheduler"] = search_scheduler.as_dict()
         from .runtime import prepare
 
         destination = prepare(args.campaign_id, resolved, profile_path)

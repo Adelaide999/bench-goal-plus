@@ -37,11 +37,12 @@ Use only the unified entrypoint:
 
 ```bash
 python3 scripts/bench.py catalog
-python3 scripts/bench.py plan --benchmark aibench-coding --profile smoke \
-  --method plain-codex --model bench-openai/gpt-5.6-sol \
-  --wall-time-seconds 300 --live-search-concurrency 1 \
-  --cell-concurrency 1 --seed 1
+python3 scripts/bench.py check --preset aibench-coding-smoke
+python3 scripts/bench.py plan --preset aibench-coding-smoke
 ```
+
+Use `--benchmark aibench-coding --profile smoke` instead of the preset only
+when overriding its methods, model, budget, concurrency, or seeds.
 
 `setup`/`doctor` requires Linux, Bubblewrap, the exact managed source branch,
 the locked aibench grading runtime, selected Agent binaries, and inherited

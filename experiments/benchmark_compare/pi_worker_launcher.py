@@ -1102,6 +1102,25 @@ class WorkerToolProxy:
             pass
 
 
+def _bwrap_supports_option(
+    executable: str,
+    option: str,
+    environment: Mapping[str, str],
+) -> bool:
+    completed = subprocess.run(
+        [executable, "--help"],
+        env=dict(environment),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"failed to inspect Bubblewrap options: {completed.stderr.strip()}"
+        )
+    return option in f"{completed.stdout}\n{completed.stderr}".split()
+
+
 class BubblewrapWorker:
     def __init__(
         self,
@@ -1185,24 +1204,29 @@ class BubblewrapWorker:
             "--unshare-all",
             "--share-net",
             "--unshare-user",
-            "--disable-userns",
-            "--cap-drop",
-            "ALL",
-            "--hostname",
-            "zsoft-goal-plus-worker",
-            "--proc",
-            "/proc",
-            "--dev",
-            "/dev",
-            "--tmpfs",
-            "/tmp",
-            "--dir",
-            "/run",
-            "--dir",
-            "/home",
-            "--dir",
-            "/home/pi",
         ]
+        if _bwrap_supports_option(bwrap, "--disable-userns", self.environment):
+            args.append("--disable-userns")
+        args.extend(
+            [
+                "--cap-drop",
+                "ALL",
+                "--hostname",
+                "zsoft-goal-plus-worker",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+                "--dir",
+                "/run",
+                "--dir",
+                "/home",
+                "--dir",
+                "/home/pi",
+            ]
+        )
         created = {"/proc", "/dev", "/tmp", "/run", "/home", "/home/pi"}
         _mount_system(args)
         if not _is_system_path(pi_runtime):
@@ -1430,6 +1454,11 @@ def _safe_name(value: str) -> str:
 def _executable_runtime_root(executable: Path) -> Path:
     if executable.parent.name == "bin":
         return executable.parent.parent.resolve()
+    if (
+        executable.parent.name == ".bin"
+        and executable.parent.parent.name == "node_modules"
+    ):
+        return executable.parent.parent.parent.resolve()
     return executable.resolve()
 
 

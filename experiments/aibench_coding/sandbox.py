@@ -9,6 +9,9 @@ import sys
 from pathlib import Path
 
 
+XDG_RUNTIME_DESTINATION = "/tmp/aibench-xdg-runtime"
+
+
 def _required_path(name: str, *, directory: bool = False) -> Path:
     value = os.environ.get(name)
     if not value:
@@ -90,6 +93,13 @@ def build_command(arguments: list[str]) -> list[str]:
     writable_root.mkdir(parents=True, exist_ok=True)
     temporary = writable_root / "tmp"
     temporary.mkdir(parents=True, exist_ok=True)
+    if method == "goal-plus-pi":
+        xdg_runtime = writable_root / "xdg-runtime"
+        if xdg_runtime.is_symlink():
+            raise RuntimeError("aibench XDG runtime directory must not be a symlink")
+        xdg_runtime.mkdir(parents=True, exist_ok=True)
+        xdg_runtime.chmod(0o700)
+        command.extend(["--bind", str(xdg_runtime), XDG_RUNTIME_DESTINATION])
     command.extend(
         [
             "--chdir",
@@ -106,13 +116,12 @@ def build_command(arguments: list[str]) -> list[str]:
             "--setenv",
             "TEMP",
             str(temporary),
-            "--setenv",
-            "PYTHONDONTWRITEBYTECODE",
-            "1",
-            "--",
-            str(real_binary),
-            *arguments,
         ]
+    )
+    if method == "goal-plus-pi":
+        command.extend(["--setenv", "XDG_RUNTIME_DIR", XDG_RUNTIME_DESTINATION])
+    command.extend(
+        ["--setenv", "PYTHONDONTWRITEBYTECODE", "1", "--", str(real_binary), *arguments]
     )
     return command
 
