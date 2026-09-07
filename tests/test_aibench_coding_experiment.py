@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from adapters.registry import load_adapter_module
 from bench_goal_plus.catalog import Catalog
 from bench_goal_plus.search_scheduler import (
     GoalPlusSearchScheduler,
@@ -324,6 +325,12 @@ class AIBenchCodingContractTest(unittest.TestCase):
 
     def test_all_four_methods_use_controller_only_hidden_evaluation(self) -> None:
         self.assertEqual(task_adapter.EVALUATION_MODE, "visible")
+        loaded = load_adapter_module(
+            "aibench-coding-native", "experiments.aibench_coding.task_adapter"
+        )
+        self.assertTrue(
+            loaded.manifest_contract()["controller_only_official_evaluation"]
+        )
         self.assertTrue(
             {
                 "plain-codex",
