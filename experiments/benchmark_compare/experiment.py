@@ -2170,9 +2170,12 @@ def execute_goal_plus(
             (manifest.get("goal_plus_config") or {}).get("shared_dir_enabled")
         ),
         controller_only_official_evaluation=controller_only,
+        evaluation_mode=EVALUATION_MODE,
         search_scheduler=search_scheduler,
         early_stop_contract=early_stop,
     )
+    if prompt != (workspace / "GOAL.md").read_text():
+        raise RuntimeError("runtime Goal Plus prompt differs from prepared GOAL.md")
     (run_dir / "prompt.md").write_text(prompt)
     reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)
     if is_pi:
