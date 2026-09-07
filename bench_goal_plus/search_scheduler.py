@@ -12,7 +12,6 @@ from .errors import ContractError
 
 
 SEARCH_SCHEDULER_FIELDS = (
-    "host",
     "model",
     "reasoning_effort",
     "timeout_seconds",
@@ -100,7 +99,6 @@ def parse_max_candidates(value: str) -> int | None:
 class GoalPlusSearchScheduler:
     """Scheduler payload plus its independent cumulative candidate limit."""
 
-    host: str
     model: str
     reasoning_effort: str
     timeout_seconds: int
@@ -109,7 +107,7 @@ class GoalPlusSearchScheduler:
     max_candidates: int | None = None
 
     def __post_init__(self) -> None:
-        for field in ("host", "model", "reasoning_effort", "reward", "allocation"):
+        for field in ("model", "reasoning_effort", "reward", "allocation"):
             if not isinstance(getattr(self, field), str):
                 raise ContractError(f"Search Scheduler {field} must be a string")
         if not isinstance(self.timeout_seconds, int) or isinstance(
@@ -135,6 +133,8 @@ class GoalPlusSearchScheduler:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "GoalPlusSearchScheduler":
+        if "host" in value:
+            raise ContractError("Search Scheduler host is inherited from the Main Agent; omit host")
         missing = [field for field in SEARCH_SCHEDULER_FIELDS if field not in value]
         if missing:
             raise ContractError(
@@ -142,7 +142,6 @@ class GoalPlusSearchScheduler:
                 + ", ".join(missing)
             )
         return cls(
-            host=value["host"],
             model=value["model"],
             reasoning_effort=value["reasoning_effort"],
             timeout_seconds=value["timeout_seconds"],
@@ -181,7 +180,6 @@ def add_search_scheduler_arguments(parser: argparse.ArgumentParser) -> None:
             "no cumulative limit"
         ),
     )
-    parser.add_argument("--search-scheduler-host")
     parser.add_argument("--search-scheduler-model")
     parser.add_argument("--search-scheduler-reasoning-effort")
     parser.add_argument("--search-scheduler-timeout-seconds", type=int)
@@ -195,7 +193,6 @@ def add_internal_search_scheduler_argument(parser: argparse.ArgumentParser) -> N
 
 def resolve_search_scheduler(
     *,
-    host: str | None,
     model: str | None,
     reasoning_effort: str | None,
     timeout_seconds: int | None,
@@ -204,7 +201,6 @@ def resolve_search_scheduler(
     max_candidates: int | None,
 ) -> GoalPlusSearchScheduler | None:
     fields = {
-        "host": host,
         "model": model,
         "reasoning_effort": reasoning_effort,
         "timeout_seconds": timeout_seconds,
@@ -225,7 +221,6 @@ def resolve_search_scheduler(
             + ", ".join(missing)
         )
     return GoalPlusSearchScheduler(
-        host=host,
         model=model,
         reasoning_effort=reasoning_effort,
         timeout_seconds=timeout_seconds,
@@ -245,7 +240,6 @@ def search_scheduler_from_namespace(
     if internal is not None:
         return search_scheduler_from_json(internal)
     return resolve_search_scheduler(
-        host=getattr(args, "search_scheduler_host", None),
         model=getattr(args, "search_scheduler_model", None),
         reasoning_effort=getattr(args, "search_scheduler_reasoning_effort", None),
         timeout_seconds=getattr(args, "search_scheduler_timeout_seconds", None),

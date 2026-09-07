@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +28,9 @@ class EdgeBenchPaths:
     @classmethod
     def from_root(cls, root: Path) -> "EdgeBenchPaths":
         resolved = root.resolve()
-        edge_root = resolved / "third_party" / "edgebench"
+        edge_root = Path(os.environ.get(
+            "SFORGE_EDGEBENCH_SOURCE_DIR", resolved / "third_party" / "edgebench"
+        )).expanduser().resolve()
         venv = resolved / ".bench-env" / "venv"
         venv_bin = venv / ("Scripts" if sys.platform == "win32" else "bin")
         return cls(

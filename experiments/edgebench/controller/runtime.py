@@ -67,7 +67,7 @@ def build_sforge_command(destination: Path, cell: dict[str, Any]) -> list[str]:
         "--log-dir",
         str(cell_path / "sforge"),
         "--tasks-dir",
-        str(paths.tasks_dir),
+        str(cell.get("task_assets_dir") or paths.tasks_dir),
         "--silent",
         "run",
         "--backend",
@@ -411,7 +411,7 @@ def start_or_reuse_judge(
         "--log-dir",
         str(destination / "judge"),
         "--tasks-dir",
-        str(paths.tasks_dir),
+        str(io.read_json(destination / "profile.json").get("task_assets_dir") or paths.tasks_dir),
         "serve",
         "--host",
         "127.0.0.1",
@@ -824,7 +824,7 @@ def prepare_pi_provider_runtime(
             )
         resolved_provider_urls.append(base_url)
     resources.runtime_api_base_urls = list(dict.fromkeys(resolved_provider_urls))
-    probe_image = task_images(str(profile["task_ids"][0]))[0]
+    probe_image = task_images(str(profile["task_ids"][0]), profile)[0]
     for base_url in resources.runtime_api_base_urls:
         probe = docker_endpoint_reachability_probe(probe_image, base_url)
         if not probe["passed"]:
@@ -1028,7 +1028,7 @@ def prepare_runtime_resources(
                     f"(HTTP {api_probe.get('status')})"
                 )
         if resources.api_key and resources.runtime_api_base_url:
-            probe_image = task_images(str(profile["task_ids"][0]))[0]
+            probe_image = task_images(str(profile["task_ids"][0]), profile)[0]
             container_probe = (
                 docker_endpoint_reachability_probe(
                     probe_image, resources.runtime_api_base_url
@@ -1078,7 +1078,7 @@ def prepare_runtime_resources(
                 f"http://{resources.bridge_host}:{int(metadata['listen_port'])}"
             )
             judge_probe = docker_http_probe(
-                task_images(str(profile["task_ids"][0]))[0],
+                task_images(str(profile["task_ids"][0]), profile)[0],
                 resources.judge_container_url + "/openapi.json",
             )
             if not judge_probe["passed"]:

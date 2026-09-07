@@ -380,6 +380,10 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         self.assertEqual(
             doctor[doctor.index("--method") + 1], "goal-plus-codex"
         )
+        self.assertFalse(any(
+            "scripts/repro_env.py" in command and "doctor" in command
+            for command in self.executor.commands
+        ))
 
     def test_profiled_check_fails_closed_for_unsupported_runner(self) -> None:
         with self.assertRaisesRegex(UnsupportedOperation, "target local-vliw"):

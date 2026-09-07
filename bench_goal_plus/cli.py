@@ -148,7 +148,6 @@ def spec_from_args(agent: BenchmarkAgent, args: argparse.Namespace):
         cell_concurrency=args.cell_concurrency,
         worker_runtime_seconds=args.worker_runtime_seconds,
         worker_min_runtime_seconds=args.worker_min_runtime_seconds,
-        search_scheduler_host=args.search_scheduler_host,
         search_scheduler_model=args.search_scheduler_model,
         search_scheduler_reasoning_effort=args.search_scheduler_reasoning_effort,
         search_scheduler_timeout_seconds=args.search_scheduler_timeout_seconds,

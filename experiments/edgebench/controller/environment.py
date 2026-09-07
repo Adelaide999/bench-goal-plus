@@ -144,6 +144,9 @@ GOAL_PLUS_CODEX_HOOK_ASSETS = (
 )
 
 GOAL_PLUS_PI_REQUIRED_ASSETS = (
+    "install.sh",
+    "scripts/install.py",
+    "package.json",
     ".pi/extensions/goal-plus.ts",
     ".pi/prompts/goal-plus.md",
     ".pi/skills/goal-plus/SKILL.md",
@@ -293,8 +296,11 @@ def active_sforge_pi_runtime_contract() -> dict[str, Any]:
             )
             and typed_command_config
         )
-        extension_loaded = all(
-            "-e /opt/goal-plus/.pi/extensions/goal-plus.ts" in template
+        extension_loaded = any(
+            "/opt/goal-plus/install.sh --pi" in command
+            for command in PiGoalPlusAgent.install_cmds
+        ) and all(
+            "--no-extensions" not in template and "--no-skills" not in template
             for template in (PiGoalPlusAgent.run_cmd, PiGoalPlusAgent.resume_cmd)
         )
         reasoning_explicit = all(
@@ -1665,7 +1671,7 @@ def require_api_only_network(
     task_contracts: list[dict[str, Any]] = []
     open_network: list[dict[str, str]] = []
     for task_id in profile["task_ids"]:
-        config = task_config(str(task_id))
+        config = task_config(str(task_id), profile)
         effective = profile_task_protocol(profile, protocol, str(task_id), config)
         source = (
             f"profiles/{profile['id']}.protocol_overrides.internet"
@@ -2042,18 +2048,26 @@ def sforge_iptables_permission_probe() -> dict[str, Any]:
     }
 
 
-def task_config(task_id: str) -> dict[str, Any]:
-    path = current_paths().tasks_dir / f"{task_id}.json"
+def task_directory(profile: dict[str, Any] | None = None) -> Path:
+    return Path((profile or {}).get("task_assets_dir") or current_paths().tasks_dir)
+
+
+def task_config(task_id: str, profile: dict[str, Any] | None = None) -> dict[str, Any]:
+    path = task_directory(profile) / f"{task_id}.json"
     if not path.is_file():
         raise FileNotFoundError(f"task definition missing: {path}; run provision first")
     return io.read_json(path)
 
 
-def task_images(task_id: str) -> tuple[str, str]:
-    config = task_config(task_id)
+def task_images(task_id: str, profile: dict[str, Any] | None = None) -> tuple[str, str]:
+    config = task_config(task_id, profile)
+    namespace = "edgebench"
+    if (profile or {}).get("task_assets_dir"):
+        metadata = yaml.safe_load((task_directory(profile) / "BENCHMARK.yaml").read_text())
+        namespace = metadata["name"]
     return (
-        f"edgebench.work.{task_id}:{config['work']['image_tag']}",
-        f"edgebench.judge.{task_id}:{config['judge']['image_tag']}",
+        f"{namespace}.work.{task_id}:{config['work']['image_tag']}",
+        f"{namespace}.judge.{task_id}:{config['judge']['image_tag']}",
     )
 
 
@@ -2105,9 +2119,9 @@ def rust_image_runtime_probe(image: str, version: str) -> dict[str, Any]:
     )
 
 
-def dataset_revision(task_id: str) -> str | None:
+def dataset_revision(task_id: str, profile: dict[str, Any] | None = None) -> str | None:
     metadata = (
-        current_paths().tasks_dir
+        task_directory(profile)
         / ".cache"
         / "huggingface"
         / "download"
@@ -2268,9 +2282,9 @@ def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
     tasks: list[dict[str, Any]] = []
     for raw_task_id in profile["task_ids"]:
         task_id = str(raw_task_id)
-        task_path = current_paths().tasks_dir / f"{task_id}.json"
+        task_path = task_directory(profile) / f"{task_id}.json"
         try:
-            actual_revision = dataset_revision(task_id)
+            actual_revision = dataset_revision(task_id, profile)
         except (OSError, UnicodeError) as exc:
             actual_revision = None
             revision_error: str | None = str(exc)
@@ -2289,7 +2303,7 @@ def local_asset_inventory(profile: dict[str, Any]) -> dict[str, Any]:
             task["revision_error"] = revision_error
         if task_path.is_file():
             try:
-                references = task_images(task_id)
+                references = task_images(task_id, profile)
             except (OSError, UnicodeError, KeyError, TypeError, ValueError) as exc:
                 task["task_error"] = str(exc)
             else:
@@ -2397,6 +2411,8 @@ def ensure_local_task_exclude() -> None:
 
 
 def provision(profile: dict[str, Any]) -> int:
+    if profile.get("task_assets_dir"):
+        raise ValueError("local task assets must be inventoried and used with --skip-provision")
     paths = current_paths()
     if not paths.sforge.is_file():
         raise FileNotFoundError(
@@ -2733,7 +2749,7 @@ def _check_auth(
     return api_protocol, api_config, host_preflight_ready
 
 
-def _docker_details(report: DoctorReport) -> dict[str, Any]:
+def _docker_details(report: DoctorReport, profile: dict[str, Any]) -> dict[str, Any]:
     docker_info = io.run_capture(["docker", "info", "--format", "{{json .}}"])
     details: dict[str, Any] = {}
     if docker_info["returncode"] == 0:
@@ -2748,10 +2764,12 @@ def _docker_details(report: DoctorReport) -> dict[str, Any]:
         architecture=architecture or None,
         stderr=docker_info["stderr"][-400:] or None,
     )
+    required = profile.get("execution_platform", "linux/amd64")
+    actual = "linux/" + {"x86_64": "amd64", "aarch64": "arm64"}.get(architecture, architecture)
     report.add(
-        "docker:linux-amd64",
-        architecture in {"amd64", "x86_64"},
-        required="linux/amd64",
+        "docker:native-platform",
+        actual == required and details.get("OSType") == "linux",
+        required=required,
         actual=architecture or None,
     )
     return details
@@ -2769,11 +2787,11 @@ def _check_tasks_and_resources(
     effective_protocols: list[dict[str, Any]] = []
     offline_task_ids: list[str] = []
     for task_id in profile["task_ids"]:
-        task_path = paths.tasks_dir / f"{task_id}.json"
+        task_path = task_directory(profile) / f"{task_id}.json"
         report.add(
             f"task:{task_id}", task_path.is_file(), path=io.portable_path(task_path)
         )
-        actual_revision = dataset_revision(task_id)
+        actual_revision = dataset_revision(task_id, profile)
         report.add(
             f"dataset-revision:{task_id}",
             actual_revision == profile["dataset_revision"],
@@ -2782,7 +2800,10 @@ def _check_tasks_and_resources(
         )
         if not task_path.is_file():
             continue
-        config = task_config(task_id)
+        config = task_config(task_id, profile)
+        required_platform = profile.get("execution_platform", "linux/amd64")
+        report.add(f"platform:{task_id}", config.get("platform") == required_platform,
+                   required=required_platform, actual=config.get("platform"))
         if official_protocol is not None:
             try:
                 effective = profile_task_protocol(
@@ -2813,9 +2834,15 @@ def _check_tasks_and_resources(
                     key: value for key, value in rust_archive.items() if key != "passed"
                 },
             )
-        for image_index, image in enumerate(task_images(task_id)):
+        for image_index, image in enumerate(task_images(task_id, profile)):
             inspected = io.run_capture(["docker", "image", "inspect", image])
             report.add(f"image:{image}", inspected["returncode"] == 0, image=image)
+            if inspected["returncode"] == 0:
+                image_info = json.loads(inspected["stdout"])[0]
+                image_platform = f"{image_info.get('Os')}/{image_info.get('Architecture')}"
+                report.add(f"image-platform:{image}", image_platform == required_platform,
+                           required=required_platform, actual=image_platform,
+                           image_id=image_info.get("Id"))
             if (
                 image_index == 0
                 and inspected["returncode"] == 0
@@ -2970,7 +2997,7 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             ),
         )
         return report.payload()
-    docker_details = _docker_details(report)
+    docker_details = _docker_details(report, profile)
     _check_tasks_and_resources(report, profile, official_protocol, docker_details)
     return report.payload()
 

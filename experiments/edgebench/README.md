@@ -5,6 +5,9 @@
 branch、固定 data revision，生成实验单元，启动/监控进程，并把 SForge raw
 artifact 汇总成同口径表；campaign manifest 记录实际 source commit。
 
+本地 ARM64 VLIW 镜像的构建和验证记录见 [ARM64 VLIW](arm64-vliw.md)；
+该实验镜像不改变现有 amd64 campaign 的平台合同。
+
 ## 代码边界
 
 用户和仓内调度器继续调用 `experiments/edgebench/experiment.py`；它只是兼容入口，

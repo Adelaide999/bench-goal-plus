@@ -119,7 +119,6 @@ class BenchmarkAgent:
         cell_concurrency: int | None = None,
         worker_runtime_seconds: int | None = None,
         worker_min_runtime_seconds: int | None = None,
-        search_scheduler_host: str | None = None,
         search_scheduler_model: str | None = None,
         search_scheduler_reasoning_effort: str | None = None,
         search_scheduler_timeout_seconds: int | None = None,
@@ -153,7 +152,6 @@ class BenchmarkAgent:
         selected_seeds = tuple(seeds) or (1,)
         selected_conditions = tuple(conditions)
         requested_search_scheduler = resolve_search_scheduler(
-            host=search_scheduler_host,
             model=search_scheduler_model,
             reasoning_effort=search_scheduler_reasoning_effort,
             timeout_seconds=search_scheduler_timeout_seconds,
@@ -475,6 +473,10 @@ class BenchmarkAgent:
             skip_bootstrap=skip_bootstrap,
             skip_provision=skip_provision,
             bootstrap_targets=self._bootstrap_targets_for_methods(targets, methods),
+            runner_owns_doctor=all(
+                self.catalog.runners[target.runner_id].kind == "native-profile"
+                for target in targets
+            ),
         ))
         groups: dict[str, list[TargetDefinition]] = {}
         for target in targets:
@@ -521,7 +523,7 @@ class BenchmarkAgent:
             "commands": [command_text(item) for item in commands],
         }
         self.executor.execute(commands, dry_run=dry_run)
-        if not dry_run and not (ROOT / ".bench-env/state.json").is_file():
+        if not dry_run and not skip_bootstrap and not (ROOT / ".bench-env/state.json").is_file():
             raise ContractError("setup completed without .bench-env/state.json")
         return result
 
@@ -559,6 +561,7 @@ class BenchmarkAgent:
             bootstrap_targets=self._bootstrap_targets_for_methods(
                 spec.targets, spec.methods
             ),
+            runner_owns_doctor=spec.runner.kind == "native-profile",
         ))
         setup_commands.extend(
             runner.provision_commands(spec, skip_provision=skip_provision)

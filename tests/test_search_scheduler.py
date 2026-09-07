@@ -27,7 +27,6 @@ from experiments.openevolve_compare.experiment import goal_plus_incomplete_reaso
 
 
 SCHEDULER_ARGUMENTS = {
-    "search_scheduler_host": "pi-rpc",
     "search_scheduler_model": "bench-openai/gpt-5.6-sol",
     "search_scheduler_reasoning_effort": "low",
     "search_scheduler_timeout_seconds": 180,
@@ -60,8 +59,6 @@ class SearchSchedulerContractTest(unittest.TestCase):
                 "2",
                 "--max-candidates",
                 "null",
-                "--search-scheduler-host",
-                "pi-rpc",
                 "--search-scheduler-model",
                 "bench-openai/gpt-5.6-sol",
                 "--search-scheduler-reasoning-effort",
@@ -76,7 +73,7 @@ class SearchSchedulerContractTest(unittest.TestCase):
         )
 
         self.assertIsNone(args.max_candidates)
-        self.assertEqual(args.search_scheduler_host, "pi-rpc")
+        self.assertFalse(hasattr(args, "search_scheduler_host"))
 
     def test_unbounded_config_reaches_common_runner_without_mapping_to_k(self) -> None:
         spec = self.agent.resolve_spec(
@@ -101,7 +98,7 @@ class SearchSchedulerContractTest(unittest.TestCase):
         config_index = command[0].index("--search-scheduler-config-json") + 1
         frozen = json.loads(command[0][config_index])
         self.assertIsNone(frozen["max_candidates"])
-        self.assertEqual(frozen["search_scheduler"]["host"], "pi-rpc")
+        self.assertNotIn("host", frozen["search_scheduler"])
         self.assertEqual(
             frozen["search_scheduler"]["reward"],
             "evidence_llm_value/v1 @prompt rubric要关注修改代码量",
@@ -123,6 +120,27 @@ class SearchSchedulerContractTest(unittest.TestCase):
         )
 
         self.assertNotIn("search_scheduler", spec.as_dict())
+
+    def test_scheduler_payload_matches_current_goal_plus_schema(self) -> None:
+        from goal_plus.models import SearchSpec
+
+        config = GoalPlusSearchScheduler(
+            model="bench-openai/gpt-5.6-sol", reasoning_effort="low",
+            timeout_seconds=180, reward="evidence_llm_value/v3",
+            allocation="value_guided_replace/v2",
+        )
+        parsed = SearchSpec.model_validate({
+            "objective": "Test the benchmark Scheduler contract", "source_path": ".",
+            "metric_name": "score", "metric_direction": "maximize",
+            "edit_surface": {"allow": ["solution.py"]},
+            "process_verifiers": [{"name": "score", "role": "ranking_signal", "command": ["python", "score.py"]}],
+            "budget": {"max_parallel": 2}, "workspace": {"backend": "git_worktree"},
+            "strategy": {"orchestration_mode": "adaptive_search", "search_scheduler": config.scheduler_spec},
+        })
+        self.assertEqual(parsed.strategy.search_scheduler.model_dump(), config.scheduler_spec)
+        legacy = {"search_scheduler": {**config.scheduler_spec, "host": "pi-rpc"}}
+        with self.assertRaisesRegex(ContractError, "omit host"):
+            search_scheduler_from_json(legacy)
 
     def test_candidate_limit_is_independent_but_must_cover_live_k(self) -> None:
         with self.assertRaisesRegex(ContractError, "at least K"):
@@ -155,7 +173,6 @@ class SearchSchedulerContractTest(unittest.TestCase):
 
     def test_custom_scheduler_policy_strings_are_forwarded(self) -> None:
         config = GoalPlusSearchScheduler(
-            host="custom-host",
             model="custom/model",
             reasoning_effort="custom-effort",
             timeout_seconds=180,
@@ -211,7 +228,6 @@ class SearchSchedulerContractTest(unittest.TestCase):
 
     def test_prompt_freezes_exact_scheduler_and_unbounded_limit(self) -> None:
         config = GoalPlusSearchScheduler(
-            host="pi-rpc",
             model="bench-openai/gpt-5.6-sol",
             reasoning_effort="low",
             timeout_seconds=180,
@@ -225,13 +241,12 @@ class SearchSchedulerContractTest(unittest.TestCase):
         self.assertIn("budget.max_candidates=null", text)
         self.assertIn('strategy.orchestration_mode="adaptive_search"', text)
         self.assertIn('workspace.backend="git_worktree"', text)
-        self.assertIn('"host":"pi-rpc"', text)
+        self.assertNotIn('"host":', text)
         self.assertIn("independent live-worker limit", text)
         self.assertEqual(search_scheduler_from_json(config.to_json()), config)
 
     def test_edgebench_bridge_keeps_structured_manifest_and_safe_prompt_value(self) -> None:
         config = GoalPlusSearchScheduler(
-            host="pi-rpc",
             model="bench-openai/gpt-5.6-sol",
             reasoning_effort="low",
             timeout_seconds=180,
@@ -282,7 +297,6 @@ class SearchSchedulerContractTest(unittest.TestCase):
                     "run_id": "run_0001",
                     "search_scheduler_enabled": True,
                     "search_scheduler": {
-                        "host": "pi-rpc",
                         "model": "bench-openai/gpt-5.6-sol",
                         "reasoning_effort": "low",
                         "timeout_seconds": 180,
@@ -335,7 +349,6 @@ class SearchSchedulerContractTest(unittest.TestCase):
                 "search_scheduler": {
                     "max_candidates": None,
                     "search_scheduler": {
-                        "host": "pi-rpc",
                         "model": "bench-openai/gpt-5.6-sol",
                         "reasoning_effort": "low",
                         "timeout_seconds": 180,
@@ -364,7 +377,6 @@ class SearchSchedulerContractTest(unittest.TestCase):
                             "max_candidates": None,
                             "orchestration_mode": "adaptive_search",
                             "search_scheduler": {
-                                "host": "pi-rpc",
                                 "model": "bench-openai/gpt-5.6-sol",
                                 "reasoning_effort": "low",
                                 "timeout_seconds": 180,
@@ -463,7 +475,6 @@ class SearchSchedulerContractTest(unittest.TestCase):
                             "strategy": {
                                 "orchestration_mode": "adaptive_search",
                                 "search_scheduler": {
-                                    "host": "pi-rpc",
                                     "model": "bench-openai/gpt-5.6-sol",
                                     "reasoning_effort": "low",
                                     "timeout_seconds": 180,

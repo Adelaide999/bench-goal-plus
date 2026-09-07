@@ -37,6 +37,7 @@ from bench_goal_plus.goal_plus_command import (  # noqa: E402
     goal_plus_entrypoint,
     render_goal_plus_command,
 )
+from bench_goal_plus.goal_plus_evidence import frozen_worker_host  # noqa: E402
 from bench_goal_plus.search_scheduler import (  # noqa: E402
     GoalPlusSearchScheduler,
     add_internal_search_scheduler_argument,
@@ -433,7 +434,6 @@ def render_goal(
             "for this benchmark Search. After linking the run, record "
             "`search_routed` for that item and leave its result acceptance to the host "
             "controller closeout.\n"
-            f"- Set `strategy.worker_host=\"{worker_host}\"`.\n"
             + "- Set `strategy.config.global_evidence_mode=\"manual\"` so every worker can "
             "read settled public-verifier Evidence from the other candidates as reference.\n"
             + (
@@ -501,16 +501,13 @@ def render_goal(
         "Use the current workspace and construct the verifier-backed Goal Plus search from "
         "the configuration below. Goal Plus owns intake, triage, SearchSpec freezing, candidate "
         "workspaces, selection, promotion, and final reporting.\n\n"
-        "- Honor every leading typed command field in the SearchSpec and omit "
-        "deprecated `budget.max_candidates`.\n"
+        "- Honor every leading typed command field in the SearchSpec.\n"
         + render_search_scheduler_instructions(search_scheduler)
         + "- After triage and before freezing the SearchSpec, call "
         "`goal_plus_upsert_work_items` with one required `route=\"search\"` item "
         "for this benchmark Search. After linking the run, record "
         "`search_routed` for that item and leave its result acceptance to the host "
         "controller closeout.\n"
-        + f"- Set `strategy.worker_host=\"{worker_host}\"` and "
-        "`strategy.orchestration_mode=\"parallel_loops\"`.\n"
         + (
             "- Set top-level `shared_dir.enabled=true`.\n"
             if shared_dir_enabled
@@ -1518,10 +1515,11 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
         if isinstance(frozen_spec_id, str):
             frozen_spec_path = root / "specs" / frozen_spec_id / "frozen_spec.json"
             if frozen_spec_path.is_file():
-                spec = load_json(frozen_spec_path).get("spec") or {}
+                frozen = load_json(frozen_spec_path)
+                spec = frozen.get("spec") or {}
                 metric_direction = spec.get("metric_direction")
                 strategy = spec.get("strategy") or {}
-                worker_host = strategy.get("worker_host")
+                worker_host = frozen_worker_host(frozen)
                 worker_budget = strategy.get("worker_budget")
                 search_scheduler_spec = strategy.get("search_scheduler")
                 search_scheduler_enabled = search_scheduler_spec is not None

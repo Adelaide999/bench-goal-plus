@@ -15,6 +15,8 @@ benchmark 的控制面仓库，主要服务 Goal Plus 相关项目。
 当前重点路径包括 EdgeBench + Codex，以及单题 SWE-bench Verified Plain Codex/Pi smoke。
 Goal Plus 可以作为其中一种运行方法和证据机制，但不是仓库本身的架构。
 
+Goal Plus 接口升级见 [Main 宿主绑定与配置迁移](docs/goal-plus-host-binding.md)。
+
 ## 快速开始
 
 所有用户操作都从仓库根目录使用同一个入口：

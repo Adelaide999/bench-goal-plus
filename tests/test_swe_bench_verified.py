@@ -209,7 +209,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "strategy=random workers=gpt-5.6-sol*1"
             )
         )
-        self.assertIn("strategy.worker_host=codex", prompt)
+        self.assertNotIn("strategy.worker_host", prompt)
         self.assertIn("strategy.config.seed=1", prompt)
         self.assertIn("GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=0", command)
         self.assertIn("gpt-5.6-sol", command)
@@ -270,9 +270,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             },
         )
         spec = {
+            "workspace": {"backend": "git_worktree"},
             "budget": {"max_parallel": max_parallel},
             "strategy": {
-                "worker_host": worker_host,
                 "orchestration_mode": "parallel_loops",
                 "worker_budget": {
                     "max_runtime_seconds": 1500,
@@ -289,7 +289,6 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 **(
                     {
                         "evidence_annotator": {
-                            "host": "codex",
                             "model": None,
                             "reasoning_effort": None,
                             "timeout_seconds": 300,
@@ -338,6 +337,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         write_json(
             root / "specs/spec_test/frozen_spec.json",
             {
+                "native_host": "codex" if worker_host == "codex" else "pi",
                 "spec": spec,
                 "verifier_hashes": {
                     ".goal-plus-verifiers/visible_test_verifier.py": (
@@ -1651,7 +1651,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn("Do not add acceptance_view", prompt)
             self.assertIn("open-ended, task-specific observations", prompt)
             self.assertIn("do not choose a winner", prompt)
-            self.assertIn("strategy.evidence_annotator.host=codex", prompt)
+            self.assertNotIn("strategy.evidence_annotator.host", prompt)
             self.assertIn("never change candidate settlement", prompt)
             self.assertIn("or the official binary result", prompt)
             self.assertIn("repository's native test instructions", prompt)

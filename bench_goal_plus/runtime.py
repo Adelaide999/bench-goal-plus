@@ -60,6 +60,7 @@ class RuntimeManager:
         skip_bootstrap: bool,
         skip_provision: bool,
         bootstrap_targets: tuple[str, ...] | None = None,
+        runner_owns_doctor: bool = False,
     ) -> list[list[str]]:
         commands: list[list[str]] = []
         docker_targets = [
@@ -82,7 +83,8 @@ class RuntimeManager:
             doctor.append("--exact-only")
         for upstream in upstreams:
             doctor.extend(["--only", upstream])
-        commands.append(doctor)
+        if not runner_owns_doctor:
+            commands.append(doctor)
         for target in targets:
             if (
                 target.docker.owner == "adapter"

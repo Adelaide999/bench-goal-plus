@@ -255,7 +255,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("240 seconds", prompt)
         self.assertIn("not hard-capped", prompt)
         self.assertIn("GOAL_PLUS_OUTER_DEADLINE_AT", prompt)
-        self.assertIn('strategy.worker_host="pi-rpc"', prompt)
+        self.assertNotIn("strategy.worker_host", prompt)
         self.assertNotIn('strategy.name="agent_guided"', prompt)
         self.assertIn("aligned with `command_config.workers`", prompt)
         self.assertIn('strategy.worker_launch.reasoning_effort="high"', prompt)

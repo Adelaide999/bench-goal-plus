@@ -1106,8 +1106,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "after this Goal Plus session.\n\n"
         "Freeze exactly one SearchSpec discovered from the public issue and repository. "
         "Honor every leading typed command field. Use source_path=/testbed, "
-        "metric_name=visible_test_score, direction=maximize, "
-        f"strategy.worker_host={worker_host}. "
+        "metric_name=visible_test_score, direction=maximize. "
         + render_search_scheduler_instructions(
             search_scheduler_from_json(profile.get("search_scheduler"))
         )
@@ -1118,8 +1117,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "strategy.config.closeout_reserve_seconds="
         f"{goal_plus['closeout_reserve_seconds']} and strategy.config.seed="
         f"{profile.get('seed', 1)}. {candidate_instruction}"
-        "Set strategy.evidence_annotator.host=codex and "
-        "strategy.evidence_annotator.timeout_seconds="
+        "Set strategy.evidence_annotator.timeout_seconds="
         f"{annotator_timeout}; "
         f"{annotator_model_instruction}leave its provider unset because the harness "
         "supplies the ViewAgent. "

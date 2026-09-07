@@ -1,14 +1,64 @@
 from __future__ import annotations
 
+import base64
+import subprocess
 import unittest
 
 from sforge.harness.agent.factory import get_agent_class
 from sforge.harness.agent.pi import PiAgent
 from sforge.harness.agent.pi_goal_plus import PiGoalPlusAgent
+from sforge.harness.agent.pi_goal_plus_provider import PiGoalPlusProviderAgent
+from sforge.harness.agent.codex_goal_plus import CodexGoalPlusAgent
+from sforge.harness.agent.codex_goal_plus_solo import CodexGoalPlusSoloAgent
 from sforge.harness.config import SForgeConfig
+from sforge.harness.agent.goal_plus_runtime import goal_plus_search_mode_config
+from bench_goal_plus.search_scheduler import GoalPlusSearchScheduler, render_search_scheduler_instructions
 
 
 class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
+    def test_scheduler_instructions_reach_all_native_adapters_as_literal_text(self) -> None:
+        config = GoalPlusSearchScheduler(
+            model="test/model", reasoning_effort="low", timeout_seconds=60,
+            reward="evidence_llm_value/v3 @prompt literal $(exit 41) `exit 42`",
+            allocation="value_guided_replace/v2",
+        )
+        instructions = render_search_scheduler_instructions(config)
+        values = {"SFORGE_GOAL_PLUS_SEARCH_SCHEDULER_INSTRUCTIONS_B64":
+                  base64.urlsafe_b64encode(instructions.encode()).decode()}
+        fragment = goal_plus_search_mode_config(values)
+        result = subprocess.run(["bash", "-c", f'printf "%s" "{fragment}"'],
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout, instructions)
+        for agent_class in (PiGoalPlusAgent, PiGoalPlusProviderAgent, CodexGoalPlusAgent):
+            with self.subTest(agent=agent_class.name):
+                command = agent_class(SForgeConfig(agent_extra_env=values)).format_run_cmd(
+                    "prompt.md", model="test/model",
+                )
+                self.assertIn(fragment, command)
+                self.assertNotIn("parallel_loops", command)
+                self.assertNotIn("__GOAL_PLUS_SEARCH_MODE_CONFIG__", command)
+
+    def test_invalid_scheduler_encoding_is_rejected_before_launch(self) -> None:
+        for encoded in ("!invalid", "", "AA=="):
+            with self.subTest(encoded=encoded), self.assertRaises(ValueError):
+                goal_plus_search_mode_config({
+                    "SFORGE_GOAL_PLUS_SEARCH_SCHEDULER_INSTRUCTIONS_B64": encoded,
+                })
+
+    def test_all_goal_plus_agents_inherit_native_host(self) -> None:
+        for agent_class, model in (
+            (PiGoalPlusAgent, "gpt-test"),
+            (PiGoalPlusProviderAgent, "zai/glm-test"),
+            (CodexGoalPlusAgent, "gpt-test"),
+            (CodexGoalPlusSoloAgent, "gpt-test"),
+        ):
+            with self.subTest(agent=agent_class.name):
+                command = agent_class(SForgeConfig()).format_run_cmd("prompt.md", model=model)
+                self.assertNotIn("strategy.worker_host", command)
+                self.assertNotIn("agent_profile", command)
+                self.assertNotIn("evidence_annotator.host", command)
+                self.assertIn("parallel_loops", command)
+
     def test_pi_methods_pin_reasoning_and_register_goal_plus_host(self) -> None:
         plain = PiAgent(SForgeConfig())
         goal_plus = PiGoalPlusAgent(SForgeConfig())

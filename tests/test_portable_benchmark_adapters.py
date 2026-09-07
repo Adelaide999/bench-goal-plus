@@ -577,10 +577,11 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             (spec_dir / "frozen_spec.json").write_text(
                 json.dumps(
                     {
+                        "native_host": "pi",
                         "spec": {
                             "metric_direction": "minimize",
+                            "workspace": {"backend": "git_worktree"},
                             "strategy": {
-                                "worker_host": "pi-rpc",
                                 "worker_budget": {
                                     "min_runtime_seconds": 150,
                                     "min_verifier_runs": 1,

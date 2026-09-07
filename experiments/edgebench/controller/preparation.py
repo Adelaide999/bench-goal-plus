@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import shutil
 from typing import Any
 
 from bench_goal_plus.goal_plus_command import (
@@ -267,10 +268,14 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             f"campaign already exists and will not be overwritten: {destination}"
         )
     destination.mkdir(parents=True)
+    if profile.get("task_assets_dir"):
+        assets = destination / "tasks"
+        shutil.copytree(profile["task_assets_dir"], assets)
+        profile = {**profile, "task_assets_dir": str(assets)}
 
     cells: list[dict[str, Any]] = []
     for task_id in profile["task_ids"]:
-        config = task_config(task_id)
+        config = task_config(task_id, profile)
         official_effective = official_task_protocol(official_protocol, task_id, config)
         profile_effective = profile_task_protocol(
             profile, official_protocol, task_id, config
@@ -338,6 +343,9 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             )
             cell = {
                 "schema_version": 1,
+                **({"task_assets_dir": profile["task_assets_dir"],
+                    "execution_platform": profile["execution_platform"]}
+                   if profile.get("task_assets_dir") else {}),
                 "cell_id": cell_id,
                 "task_id": task_id,
                 "method": method,

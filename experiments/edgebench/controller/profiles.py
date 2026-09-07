@@ -228,6 +228,17 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
     unknown = set(profile["methods"]) - set(METHODS)
     if unknown:
         raise ValueError("unknown EdgeBench method(s): " + ", ".join(sorted(unknown)))
+    platform = profile.get("execution_platform", "linux/amd64")
+    if platform not in {"linux/amd64", "linux/arm64"}:
+        raise ValueError("unsupported execution_platform")
+    if platform == "linux/arm64":
+        if profile["task_ids"] != ["vliw_kernel_optimization"] or not set(profile["methods"]) <= {
+            "plain-pi", "plain-pi-provider", "goal-plus-pi", "goal-plus-pi-provider"
+        } or not profile.get("task_assets_dir"):
+            raise ValueError("ARM64 currently requires explicit local VLIW assets and Pi")
+    if profile.get("task_assets_dir"):
+        assets = Path(profile["task_assets_dir"]).expanduser()
+        profile["task_assets_dir"] = str((paths.root / assets).resolve())
     goal_plus_methods = set(profile["methods"]) & GOAL_PLUS_METHODS
     if goal_plus_methods:
         global_evidence_mode = profile.get("global_evidence_mode", "manual")

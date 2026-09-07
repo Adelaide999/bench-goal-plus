@@ -1,0 +1,35 @@
+{
+  "kind": "local-image-reconstruction",
+  "benchmark": "edgebench",
+  "task_id": "vliw_kernel_optimization",
+  "dataset_revision": "47846a4c3669ad447e0ea984833b0d352460c5f9",
+  "platform": "linux/arm64",
+  "python_version": "3.11.15",
+  "dockerfile": "docker/edgebench-vliw-arm64.Dockerfile",
+  "work": {
+    "source": "seededge/edgebench.work.vliw_kernel_optimization@sha256:f4e9334beef8b304fd942b44ad3ec6a01c7369c305d5afc8b394075d0aff3b58",
+    "tag": "edgebench-arm64-local.work.vliw_kernel_optimization:9fa380a0ebef",
+    "image_id": "sha256:6f9d4e3750e1b2c676e2d4a7d1ed26f58fc55477d0adbc929328a7df5da7aa2f",
+    "source_files_sha256_matched": 49,
+    "hidden_cases_absent": true,
+    "public_cases_passed": 4,
+    "public_cases_total": 4
+  },
+  "judge": {
+    "source": "seededge/edgebench.judge.vliw_kernel_optimization@sha256:3aa13f35dc05dcf33df7cad2c8c21908f02d8d72dde80857286397cfd984b2f9",
+    "tag": "edgebench-arm64-local.judge.vliw_kernel_optimization:5cdef0021634",
+    "image_id": "sha256:252d0f1542671a5fcbc27b5928f902752bf8334c72dcfa46fc47f9306745a28f",
+    "source_files_sha256_matched": 9,
+    "command_source": "unchanged pinned task judge.eval_cmd",
+    "submission_source": "unchanged original Work solution.py, mounted read-only",
+    "passed": 9,
+    "total_tests": 9,
+    "valid": true,
+    "score_cycles": 147734
+  },
+  "network_during_validation": "none",
+  "x86_execution_comparison": "not run: exec format error; no x86 emulation configured",
+  "agent_campaign": "not run; registered native runner remains amd64-only",
+  "local_artifacts": ".tmp/vliw-arm64-build/",
+  "pushed": false
+}

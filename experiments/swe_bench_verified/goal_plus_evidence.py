@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from bench_goal_plus.goal_plus_evidence import frozen_worker_host
 from bench_goal_plus.search_scheduler import (
     GoalPlusSearchScheduler,
     summarize_worker_concurrency,
@@ -765,7 +766,7 @@ def collect_goal_plus_state(
                 "search_scheduler_enabled": (
                     strategy.get("search_scheduler") is not None
                 ),
-                "worker_host": strategy.get("worker_host"),
+                "worker_host": frozen_worker_host(frozen),
                 "orchestration_mode": strategy.get("orchestration_mode"),
                 "worker_budget": worker_budget,
                 "strategy_config": strategy_config,
@@ -1401,7 +1402,7 @@ def collect_goal_plus_state(
         ),
         "view_agent_contract": _check(
             (
-                "independent codex host"
+                "host inherited from the frozen Main Agent"
                 if expected_evidence_annotator_enabled
                 else "disabled"
             ),
@@ -1413,8 +1414,8 @@ def collect_goal_plus_state(
                     and isinstance(
                         selected_run.get("evidence_annotator_spec"), dict
                     )
-                    and selected_run["evidence_annotator_spec"].get("host")
-                    == "codex"
+                    and "host" not in selected_run["evidence_annotator_spec"]
+                    and selected_run.get("worker_host") == expected_worker_host
                 )
             ),
         ),
