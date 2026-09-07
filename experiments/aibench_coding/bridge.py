@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -59,7 +60,7 @@ def _submission_root(path: Path) -> Path:
 
 def materialize(args: argparse.Namespace) -> dict[str, Any]:
     from aibench.validity import case_fingerprint
-    from aibench.workspace import materialize_workspace
+    from aibench.workspace import materialize_workspace, safe_relpath
 
     source_root = args.source_root.resolve()
     case, raw, set_fingerprint = _select(source_root, args.case_set, args.case_id)
@@ -71,6 +72,22 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
         allow_network=False,
     )
     metadata = raw.get("metadata") or {}
+    case_files = {str(safe_relpath(item.path)): item.content for item in case.files}
+    protected_files = []
+    for declared in case.grader.protected_paths:
+        relative = str(safe_relpath(declared))
+        try:
+            content = case_files[relative]
+        except KeyError as error:
+            raise RuntimeError(
+                f"protected path is absent from case context: {declared}"
+            ) from error
+        protected_files.append(
+            {
+                "path": relative,
+                "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            }
+        )
     return {
         "schema_version": 1,
         "case_id": case.case_id,
@@ -81,6 +98,7 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
         "language": case.language,
         "prompt": str(raw.get("prompt") or ""),
         "grader_command": str((raw.get("grader") or {}).get("command") or ""),
+        "protected_files": protected_files,
         "validity_ok": metadata.get("validity_ok"),
         "materialization": result.to_dict(),
     }

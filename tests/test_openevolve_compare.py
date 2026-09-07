@@ -18,6 +18,91 @@ from experiments.openevolve_compare import experiment  # noqa: E402
 
 
 class OpenEvolveComparisonTest(unittest.TestCase):
+    @staticmethod
+    def _write_public_gate_candidate(
+        root: Path, candidate_id: str, iterations: list[dict[str, object]]
+    ) -> Path:
+        path = root / "candidates" / candidate_id / "candidate.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"candidate_id": candidate_id, "iterations": iterations})
+            + "\n"
+        )
+        return path
+
+    @staticmethod
+    def _public_gate_iteration(iteration: int, score: float) -> dict[str, object]:
+        return {
+            "iteration": iteration,
+            "score": score,
+            "process_passed": True,
+            "git_head": f"{iteration:040x}",
+            "git_artifact_clean": True,
+            "touched_denied_files": False,
+            "changed_outside_allowed": False,
+            "disposition": "keep",
+        }
+
+    def test_visible_public_gate_allows_nonuniform_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir) / "run_test"
+            run_dir.mkdir()
+            run_path = run_dir / "run.json"
+            run_path.write_text("{}\n")
+            self._write_public_gate_candidate(
+                run_dir,
+                "c001",
+                [
+                    self._public_gate_iteration(1, 0.5),
+                    self._public_gate_iteration(2, 0.75),
+                ],
+            )
+            self._write_public_gate_candidate(
+                run_dir,
+                "c002",
+                [self._public_gate_iteration(1, 1.0)],
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "non-uniform"):
+                experiment._expected_public_gate_selection(run_path)
+            selected = experiment._expected_public_gate_selection(
+                run_path, require_uniform_scores=False
+            )
+
+        self.assertEqual(selected["selected_candidate_id"], "c001")
+        self.assertEqual(selected["selected_iteration"], 2)
+        self.assertEqual(selected["selected_score"], 0.75)
+
+    def test_closeout_verifies_candidates_only_when_public_gate_is_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir) / "run_test"
+            run_dir.mkdir()
+            paths = [
+                self._write_public_gate_candidate(run_dir, candidate_id, [])
+                for candidate_id in ("c001", "c002")
+            ]
+            tools = mock.Mock()
+
+            verified = experiment._verify_unsettled_public_gate_candidates(
+                tools, "run_test", paths
+            )
+
+            self.assertEqual(verified, ["c001", "c002"])
+            self.assertEqual(tools.search_run_verifier.call_count, 2)
+            tools.reset_mock()
+            self._write_public_gate_candidate(
+                run_dir,
+                "c002",
+                [self._public_gate_iteration(1, 0.5)],
+            )
+            self.assertEqual(
+                experiment._verify_unsettled_public_gate_candidates(
+                    tools, "run_test", paths
+                ),
+                [],
+            )
+            tools.search_run_verifier.assert_not_called()
+
     def test_canonical_methods_and_experiment_defaults(self) -> None:
         self.assertEqual(
             experiment.METHODS,

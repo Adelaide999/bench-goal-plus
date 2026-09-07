@@ -2351,7 +2351,43 @@ def _accept_controller_closeout_items(
             )
 
 
-def _expected_public_gate_selection(run_path: Path) -> dict[str, Any]:
+def _public_gate_compliant_iterations(candidate: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        iteration
+        for iteration in candidate.get("iterations", [])
+        if isinstance(iteration, dict)
+        and iteration.get("process_passed") is True
+        and type(iteration.get("iteration")) is int
+        and isinstance(iteration.get("git_head"), str)
+        and iteration.get("git_artifact_clean") is True
+        and not iteration.get("touched_denied_files", False)
+        and not iteration.get("changed_outside_allowed", False)
+        and iteration.get("disposition") not in {"discard", "failure"}
+        and type(iteration.get("score")) in {int, float}
+    ]
+
+
+def _verify_unsettled_public_gate_candidates(
+    tools: Any, run_id: str, candidate_paths: list[Path]
+) -> list[str]:
+    candidates = [load_json(path) for path in candidate_paths]
+    if any(_public_gate_compliant_iterations(candidate) for candidate in candidates):
+        return []
+    candidate_ids = [candidate.get("candidate_id") for candidate in candidates]
+    if any(not isinstance(candidate_id, str) for candidate_id in candidate_ids):
+        raise RuntimeError("public-gate candidate evidence is malformed")
+    for candidate_id in candidate_ids:
+        tools.search_run_verifier(
+            run_id,
+            candidate_id,
+            hypothesis="controller post-deadline public verification",
+        )
+    return candidate_ids
+
+
+def _expected_public_gate_selection(
+    run_path: Path, *, require_uniform_scores: bool = True
+) -> dict[str, Any]:
     expected: dict[str, Any] | None = None
     compliant_scores: set[float] = set()
     candidates = [
@@ -2368,19 +2404,7 @@ def _expected_public_gate_selection(run_path: Path) -> dict[str, Any]:
     ):
         raise RuntimeError("public-gate candidate evidence is malformed")
     for candidate in sorted(candidates, key=lambda item: item["candidate_id"]):
-        compliant = [
-            iteration
-            for iteration in candidate.get("iterations", [])
-            if isinstance(iteration, dict)
-            and iteration.get("process_passed") is True
-            and type(iteration.get("iteration")) is int
-            and isinstance(iteration.get("git_head"), str)
-            and iteration.get("git_artifact_clean") is True
-            and not iteration.get("touched_denied_files", False)
-            and not iteration.get("changed_outside_allowed", False)
-            and iteration.get("disposition") not in {"discard", "failure"}
-            and type(iteration.get("score")) in {int, float}
-        ]
+        compliant = _public_gate_compliant_iterations(candidate)
         if compliant:
             latest = max(compliant, key=lambda item: item["iteration"])
             compliant_scores.update(float(item["score"]) for item in compliant)
@@ -2393,14 +2417,18 @@ def _expected_public_gate_selection(run_path: Path) -> dict[str, Any]:
                 }
     if expected is None:
         raise RuntimeError("no publicly compliant candidate iteration is available")
-    if len(compliant_scores) != 1:
+    if require_uniform_scores and len(compliant_scores) != 1:
         raise RuntimeError("public gate produced non-uniform passing scores")
     return expected
 
 
-def _prepare_public_gate_selection(run_path: Path) -> dict[str, Any]:
+def _prepare_public_gate_selection(
+    run_path: Path, *, require_uniform_scores: bool
+) -> dict[str, Any]:
     """Make the generic selector's tie-break match the frozen public-gate rule."""
-    expected = _expected_public_gate_selection(run_path)
+    expected = _expected_public_gate_selection(
+        run_path, require_uniform_scores=require_uniform_scores
+    )
     run_data = load_json(run_path)
     run_data["best_candidate_id"] = expected["selected_candidate_id"]
     run_data["best_score"] = expected["selected_score"]
@@ -2413,9 +2441,12 @@ def _validate_existing_public_gate_selection(
     selection: dict[str, Any],
     *,
     expected: dict[str, Any] | None = None,
+    require_uniform_scores: bool = True,
 ) -> None:
     if expected is None:
-        expected = _expected_public_gate_selection(run_path)
+        expected = _expected_public_gate_selection(
+            run_path, require_uniform_scores=require_uniform_scores
+        )
     if any(selection.get(key) != expected[key] for key in expected):
         raise RuntimeError(
             "existing selection or promotion violates the frozen public-gate selection rule"
@@ -2426,6 +2457,7 @@ def finalize_goal_plus_search(
     workspace: Path,
     deterministic_public_gate: bool = False,
     verify_unsettled_candidates: bool = True,
+    require_uniform_public_scores: bool = True,
 ) -> dict[str, Any]:
     """Controller-owned drain, selection, and promotion after agent execution."""
     FileGoalPlusRuntime, FileSearchRuntime, SearchTools = _goal_plus_runtime_types()
@@ -2466,19 +2498,33 @@ def finalize_goal_plus_search(
             if existing is not None:
                 run_data, candidate_id, selection, promotion = existing
                 if deterministic_public_gate:
-                    _validate_existing_public_gate_selection(run_path, selection)
+                    _validate_existing_public_gate_selection(
+                        run_path,
+                        selection,
+                        require_uniform_scores=require_uniform_public_scores,
+                    )
                     selection["selection_rule"] = PUBLIC_GATE_SELECTION_RULE
             else:
                 try:
                     if deterministic_public_gate:
+                        if verify_unsettled_candidates:
+                            verified_in_closeout.extend(
+                                _verify_unsettled_public_gate_candidates(
+                                    tools, run_id, candidate_paths
+                                )
+                            )
                         # Selection may append a controller-verifier iteration. The
                         # deadline snapshot, not that closeout side effect, is authoritative.
-                        public_gate_expected = _prepare_public_gate_selection(run_path)
+                        public_gate_expected = _prepare_public_gate_selection(
+                            run_path,
+                            require_uniform_scores=require_uniform_public_scores,
+                        )
                         selection = tools.search_select(run_id)
                         _validate_existing_public_gate_selection(
                             run_path,
                             selection,
                             expected=public_gate_expected,
+                            require_uniform_scores=require_uniform_public_scores,
                         )
                         selection["selection_rule"] = PUBLIC_GATE_SELECTION_RULE
                         candidate_id = selection["selected_candidate_id"]
@@ -2513,6 +2559,7 @@ def finalize_goal_plus_search(
                                 run_path,
                                 selection,
                                 expected=public_gate_expected,
+                                require_uniform_scores=require_uniform_public_scores,
                             )
                             selection["selection_rule"] = PUBLIC_GATE_SELECTION_RULE
                     else:

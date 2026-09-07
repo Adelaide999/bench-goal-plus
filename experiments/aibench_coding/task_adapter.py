@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -46,9 +47,11 @@ GOAL_PLUS_PROCESS_METRIC = "visible_test_score"
 DIRECTION = "maximize"
 CODEX_SANDBOX = "workspace-write"
 CONTROLLER_ONLY_OFFICIAL_EVALUATION = True
+EVALUATION_MODE = "visible"
 OFFICIAL_BENCHMARK_COMPARABLE = True
 PI_WORKER_SANDBOX = {
     "engine": "bubblewrap",
+    "evaluation_mode": "visible",
     "workspace_access": "read_only",
     "read_only_workspace_paths": [],
     "writable_workspace_paths": [ARTIFACT_NAME],
@@ -171,6 +174,7 @@ def materialize_workspace(source_root: Path, workspace: Path) -> dict[str, Any]:
             "language",
             "prompt",
             "grader_command",
+            "protected_files",
             "validity_ok",
         )
     }
@@ -224,7 +228,46 @@ def _visible_ratio(output: str, language: str, returncode: int) -> float:
     return counts.get("passed", 0) / total if total else float(returncode == 0)
 
 
+def _protected_path_violation(
+    workspace: Path, metadata: dict[str, Any]
+) -> str | None:
+    submission = (workspace / ARTIFACT_NAME).resolve(strict=True)
+    protected = metadata.get("protected_files")
+    if not isinstance(protected, list):
+        return "protected_path_metadata_invalid"
+    for item in protected:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            return "protected_path_metadata_invalid"
+        declared = item["path"]
+        expected = item["sha256"]
+        if not isinstance(declared, str) or not isinstance(expected, str):
+            return "protected_path_metadata_invalid"
+        relative = Path(declared)
+        if relative.is_absolute() or ".." in relative.parts:
+            return "protected_path_metadata_invalid"
+        target = workspace / ARTIFACT_NAME / relative
+        if target.is_symlink():
+            return f"protected_path_modified: {declared}"
+        if not target.is_file():
+            return f"protected_path_deleted: {declared}"
+        try:
+            target.resolve(strict=True).relative_to(submission)
+        except (OSError, RuntimeError, ValueError):
+            return f"protected_path_modified: {declared}"
+        if hashlib.sha256(target.read_bytes()).hexdigest() != expected:
+            return f"protected_path_modified: {declared}"
+    return None
+
+
 def _public_evaluation(workspace: Path, metadata: dict[str, Any]) -> dict[str, Any]:
+    violation = _protected_path_violation(workspace, metadata)
+    if violation is not None:
+        return {
+            "valid": False,
+            "value": None,
+            "diagnostics": violation,
+            "integrity_violation": violation,
+        }
     command = shlex.split(str(metadata["grader_command"]))
     if not command:
         raise RuntimeError("aibench public grader command is empty")
@@ -319,6 +362,7 @@ def evaluate_workspace(workspace: Path, source_root: Path, mode: str) -> dict[st
         },
         "grade": result.get("grade"),
         "diagnostics": result.get("diagnostics"),
+        "integrity_violation": result.get("integrity_violation"),
         "unauthorized_changes": unauthorized,
         "runtime_seconds": time.monotonic() - started,
         "evaluated_at": utc_now(),

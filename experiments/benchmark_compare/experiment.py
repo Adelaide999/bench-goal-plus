@@ -2267,6 +2267,7 @@ def execute_goal_plus(
                 verify_unsettled_candidates=not control.get(
                     "early_stop_triggered", False
                 ),
+                require_uniform_public_scores=EVALUATION_MODE == "blind",
             )
     except Exception as exc:
         closeout = {
@@ -2709,7 +2710,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
             verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
         ):
             closeout = finalize_goal_plus_search(
-                workspace, deterministic_public_gate=controller_only
+                workspace,
+                deterministic_public_gate=controller_only,
+                require_uniform_public_scores=EVALUATION_MODE == "blind",
             )
     except Exception as exc:
         if not controller_only:

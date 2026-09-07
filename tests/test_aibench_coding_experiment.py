@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -322,6 +323,7 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertEqual(args.reasoning_effort, "high")
 
     def test_all_four_methods_use_controller_only_hidden_evaluation(self) -> None:
+        self.assertEqual(task_adapter.EVALUATION_MODE, "visible")
         self.assertTrue(
             {
                 "plain-codex",
@@ -333,6 +335,9 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertEqual(
             task_adapter.PI_WORKER_SANDBOX["writable_workspace_paths"],
             ["submission"],
+        )
+        self.assertEqual(
+            task_adapter.PI_WORKER_SANDBOX["evaluation_mode"], "visible"
         )
 
     def test_goal_plus_pi_worker_uses_unwrapped_binary_inside_worker_sandbox(
@@ -388,6 +393,7 @@ class AIBenchCodingContractTest(unittest.TestCase):
             "language": "python",
             "prompt": "Repair build.py.",
             "grader_command": "true",
+            "protected_files": [],
             "validity_ok": True,
         }
 
@@ -419,6 +425,47 @@ class AIBenchCodingContractTest(unittest.TestCase):
             ),
         )
         self.assertFalse((workspace / ".gp").exists())
+
+    def test_public_evaluation_rejects_protected_path_before_tests(self) -> None:
+        source = self.root / "checkout" / "benchmarks" / "coding"
+        source.mkdir(parents=True)
+        workspace = self.root / "workspace"
+
+        original_test = "def test_build(): pass\n"
+
+        def fake_bridge(_command: list[str], _source: Path, timeout: int = 300) -> dict:
+            del timeout
+            submission = workspace / "submission"
+            submission.mkdir()
+            (submission / "build.py").write_text("value = 1\n", encoding="utf-8")
+            (submission / "test_build.py").write_text(original_test, encoding="utf-8")
+            metadata = self._metadata()
+            metadata["protected_files"] = [
+                {
+                    "path": "test_build.py",
+                    "sha256": hashlib.sha256(original_test.encode()).hexdigest(),
+                }
+            ]
+            return metadata
+
+        with (
+            mock.patch.object(task_adapter, "_bridge", side_effect=fake_bridge),
+            mock.patch.object(task_adapter, "git_commit", return_value="b" * 40),
+        ):
+            task_adapter.materialize_workspace(source, workspace)
+            (workspace / "submission" / "test_build.py").write_text(
+                "def test_build(): assert True\n", encoding="utf-8"
+            )
+            with mock.patch.object(task_adapter, "_visible_ratio") as visible_ratio:
+                report = task_adapter.evaluate_workspace(workspace, source, "public")
+
+        visible_ratio.assert_not_called()
+        self.assertFalse(report["valid"])
+        self.assertIsNone(report["primary_metric"]["value"])
+        self.assertEqual(
+            report["integrity_violation"],
+            "protected_path_modified: test_build.py",
+        )
 
     def test_bridge_environment_prefers_locked_runtime(self) -> None:
         source = self.root / "source"
