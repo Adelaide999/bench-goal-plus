@@ -52,7 +52,9 @@ def build_command(arguments: list[str]) -> list[str]:
     }:
         raise RuntimeError("AIBENCH_METHOD is invalid")
     real_binary = _required_path(f"AIBENCH_REAL_{role.upper()}_BIN")
-    hidden_checkout = _required_path("AIBENCH_HIDDEN_CHECKOUT", directory=True)
+    hidden_checkout = _required_path(
+        "AIBENCH_HIDDEN_CHECKOUT", directory=True
+    ).resolve(strict=True)
     cell_root = _required_path("AIBENCH_CELL_ROOT", directory=True)
     cells_root = cell_root.parent
     workspace = Path.cwd().absolute()

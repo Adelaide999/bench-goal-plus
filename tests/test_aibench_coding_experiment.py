@@ -554,6 +554,42 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertIn(("--bind", str(workspace)), pairs)
         self.assertEqual(command[-3:], [str(binary), "exec", "--json"])
 
+    def test_bubblewrap_masks_symlinked_hidden_checkout_target(self) -> None:
+        cell = self.root / "campaign" / "cells" / "cell-1"
+        workspace = cell / "workspace"
+        hidden = self.root / "hidden-real"
+        hidden_link = self.root / "hidden-link"
+        binary = self.root / "pi"
+        workspace.mkdir(parents=True)
+        hidden.mkdir()
+        hidden_link.symlink_to(hidden, target_is_directory=True)
+        binary.write_text("", encoding="utf-8")
+        environment = {
+            "AIBENCH_AGENT_ROLE": "pi",
+            "AIBENCH_METHOD": "goal-plus-pi",
+            "AIBENCH_REAL_PI_BIN": str(binary),
+            "AIBENCH_HIDDEN_CHECKOUT": str(hidden_link),
+            "AIBENCH_CELL_ROOT": str(cell),
+        }
+        previous = Path.cwd()
+        try:
+            os.chdir(workspace)
+            with (
+                mock.patch.dict(os.environ, environment, clear=False),
+                mock.patch.object(sandbox.shutil, "which", return_value="/usr/bin/bwrap"),
+            ):
+                command = sandbox.build_command([])
+        finally:
+            os.chdir(previous)
+
+        tmpfs_targets = [
+            command[index + 1]
+            for index, value in enumerate(command[:-1])
+            if value == "--tmpfs"
+        ]
+        self.assertIn(str(hidden.resolve()), tmpfs_targets)
+        self.assertNotIn(str(hidden_link.absolute()), tmpfs_targets)
+
     def test_goal_plus_pi_binds_private_short_xdg_runtime(self) -> None:
         command, cell, *_ = self._sandbox_command(
             "pi", "goal-plus-pi", ["--mode", "rpc"]
