@@ -400,6 +400,9 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("Metric: `visible_test_score`", prompt)
         self.assertIn("role `ranking_signal`", prompt)
         self.assertNotIn("public format gate only", prompt)
+        self.assertIn("This fixed-budget benchmark uses host-owned closeout", prompt)
+        self.assertIn("do not call `search_select`", prompt)
+        self.assertIn("`goal_plus_set_status`", prompt)
 
     def test_pi_goal_prompt_names_pool_supervisor_minimum_lease(self) -> None:
         prompt = experiment.render_goal(

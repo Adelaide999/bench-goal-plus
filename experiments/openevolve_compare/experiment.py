@@ -413,6 +413,15 @@ def render_goal(
             f"process iteration records `{target_metric}={target_score:g}`. Treat that stop "
             "as expected; selection, promotion, and final verification still run afterward.\n"
         )
+    controller_closeout_text = (
+        "- This fixed-budget benchmark uses host-owned closeout. Leave the Goal active and "
+        "the linked Search unsettled after worker coordination; do not call `search_select`, "
+        "`search_promote`, `goal_plus_record_search_result`, `goal_plus_set_status`, or "
+        "`search_report`. The host controller drains workers and performs those steps after "
+        "the exploration budget.\n"
+        if controller_only_official_evaluation
+        else ""
+    )
     if evaluation_mode == "blind":
         return (
             f"{goal_plus_command}\n\n"
@@ -539,6 +548,7 @@ def render_goal(
         f"{early_stop_text}"
         f"- `strategy.config.closeout_reserve_seconds={closeout_seconds}` so host "
         "supervisors stop worker continuation before final completion work.\n"
+        f"{controller_closeout_text}"
         f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
         f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
         "Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as the authoritative upper deadline.\n"
