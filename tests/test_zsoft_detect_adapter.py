@@ -325,6 +325,25 @@ class AdapterContractTest(unittest.TestCase):
         self.assertNotIn(adapter.PRIMARY_METRIC, report)
         self.assertIn("symlink", json.dumps(report["public_diagnostics"]))
 
+    def test_official_empty_submission_seed_is_scored_only_in_final_mode(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        workspace = tmp / "workspace"
+        (workspace / adapter.ARTIFACT_NAME).mkdir(parents=True)
+        (workspace / "task.json").write_text(json.dumps({
+            "task_id": "civetweb-detect", "project_id": "civetweb",
+            "commit": adapter.project_commit("civetweb"),
+        }))
+        public = adapter.evaluate_workspace(workspace, adapter.ZSOFT_ROOT, "public")
+        self.assertTrue(public["valid"])
+        self.assertNotIn("f1", public)
+        final = adapter.evaluate_workspace(workspace, adapter.ZSOFT_ROOT, "final")
+        self.assertTrue(final["valid"], final["message"])
+        self.assertEqual(final["f1"], 0.0)
+        self.assertEqual(final["zsoft_score"]["f1"], 0.0)
+        self.assertEqual(final["primary_metric"]["direction"], "maximize")
+        self.assertFalse((workspace / "submission/score.json").exists())
+
     def test_adapter_cli_evaluates_candidate_submission(self) -> None:
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
@@ -363,12 +382,12 @@ class AdapterContractTest(unittest.TestCase):
 
     def test_git_commit_supports_shared_runtime_checkouts(self) -> None:
         self.assertRegex(
-            adapter.git_commit(adapter.ZSOFT_ROOT.parent / "muyuan"),
+            adapter.git_commit(ROOT),
             r"^[0-9a-f]{40}$",
         )
         self.assertRegex(adapter.git_commit(adapter.ZSOFT_ROOT), r"^[0-9a-f]{40}$")
 
-    def test_posthoc_round_f1_is_outside_worker_workspace_and_updates_report(
+    def test_posthoc_selection_is_outside_worker_workspace_and_preserves_search_report(
         self,
     ) -> None:
         tmp = Path(tempfile.mkdtemp())
@@ -450,13 +469,18 @@ class AdapterContractTest(unittest.TestCase):
                 {
                     "candidate_id": "c001",
                     "iterations": [
-                        {"iteration": 1, "git_head": first, "artifact_hash": "a"},
+                        {"iteration": 1, "git_head": first, "artifact_hash": "a",
+                         "score": 1.0, "process_passed": True, "git_artifact_clean": True},
                         {
                             "iteration": 2,
                             "git_head": second,
                             "artifact_hash": "b",
+                            "score": 1.0, "process_passed": True,
+                            "artifact_clean": True, "git_artifact_clean": None,
+                            "disposition": "discard",
                         },
-                        {"iteration": 3, "git_head": third, "artifact_hash": "b"},
+                        {"iteration": 3, "git_head": third, "artifact_hash": "b",
+                         "score": 1.0, "process_passed": True, "git_artifact_clean": True},
                     ],
                 }
             ),
@@ -488,10 +512,13 @@ class AdapterContractTest(unittest.TestCase):
             ).read_text()
             f1 = 0.25 if "first" in payload else 0.75
             return {
+                "mode": "final",
                 "valid": True,
                 "format_valid": True,
                 "f1": f1,
+                "primary_metric": {"name": "f1", "direction": "maximize", "value": f1},
                 "zsoft_score": {
+                    "f1": f1,
                     "precision": f1,
                     "recall": f1,
                     "tp": 1,
@@ -507,26 +534,50 @@ class AdapterContractTest(unittest.TestCase):
             "evaluate_with_controller_runtime",
             side_effect=score_snapshot,
         ) as evaluator:
-            summary = benchmark_experiment.export_posthoc_detect_round_f1(
+            summary = benchmark_experiment.finalize_posthoc_official_selection(
                 run_dir=run_dir,
                 workspace=workspace,
                 benchmark_root=tmp / "benchmark",
-                final_evaluation={"f1": 0.75},
+                closeout={"completed": True, "runs": [
+                    {"run_id": "run_fixture", "final_state": "promoted"}
+                ]},
+                contract=adapter.GOAL_PLUS_POSTHOC_SELECTION_CONTRACT,
+                worker_shutdown_verified=True,
             )
 
         self.assertTrue(summary["completed"])
-        self.assertEqual(summary["row_count"], 3)
+        self.assertEqual(summary["eligible_iteration_count"], 3)
         self.assertEqual(summary["official_evaluator_calls"], 2)
         self.assertEqual(summary["artifact_cache_hits"], 1)
         self.assertEqual(evaluator.call_count, 2)
-        report = (run_dir / "round-f1.tsv").read_text(encoding="utf-8")
-        self.assertIn("\tc001\t3\t", report)
-        self.assertIn("\t0.75\t0.75\t0.75\t", report)
-        self.assertFalse((workspace / "round-f1.tsv").exists())
+        self.assertEqual(summary["scores"][1]["iteration"], 2)
+        self.assertEqual(summary["scores"][1]["f1"], 0.75)
+        report = json.loads((run_dir / "posthoc-candidate-scores.json").read_text())
+        self.assertEqual(report["selected"]["iteration"], 3)
+        self.assertEqual(report["selected"]["f1"], 0.75)
+        final = json.loads((run_dir / "final-eval.json").read_text())
+        self.assertEqual(final["f1"], 0.75)
+        self.assertFalse((workspace / "posthoc-candidate-scores.json").exists())
         search_report = (search_run / "report.md").read_text(encoding="utf-8")
-        self.assertIn("Final benchmark metric: `f1`", search_report)
-        self.assertIn("Final benchmark F1: `0.75`", search_report)
-        self.assertIn("| deadbeef | 0.75 | pass |", search_report)
+        self.assertIn("Metric: `format_valid`", search_report)
+        self.assertNotIn("0.75", search_report)
+
+    def test_posthoc_requires_public_process_and_clean_artifact(self) -> None:
+        eligible = {
+            "iteration": 1, "git_head": "a" * 40, "score": 1.0,
+            "process_passed": True, "artifact_clean": True,
+            "git_artifact_clean": None, "disposition": "discard",
+        }
+        self.assertTrue(benchmark_experiment._publicly_compliant_iteration(eligible))
+        for changed in (
+            {"process_passed": False}, {"artifact_clean": False, "git_artifact_clean": True},
+            {"touched_denied_files": True}, {"changed_outside_allowed": True},
+            {"score": None}, {"score": float("nan")},
+        ):
+            with self.subTest(changed=changed):
+                self.assertFalse(benchmark_experiment._publicly_compliant_iteration(
+                    {**eligible, **changed}
+                ))
 
 
 if __name__ == "__main__":

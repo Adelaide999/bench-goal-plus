@@ -1,6 +1,6 @@
 # ZSoft L1 PoC adapter
 
-Wraps the CyberGym ZSoft L1 PoC framework vendored at
+Wraps the CyberGym ZSoft L1 PoC framework checked out at
 `third_party/zsoft-bench/benchmarks/vulnerability/zsoft-l1`
 (sparse checkout of `gitcode.com/linmalin/muyuan-sec.git` branch
 `linmalin-zsoft-benchmarks-mr`,
@@ -16,6 +16,9 @@ The adapter:
 - keeps `public_check.py` as a local format gate, then runs `python3 -m
   zsoft_poc evaluate <task-id> <file> --submission-kind final` as the
   controller-owned process verifier for every submitted Goal Plus iteration;
+- freezes the selected task's official evaluator timeout plus the existing
+  CLI/cleanup margin for its process verifier: the 180-second ASan sample uses
+  360 seconds, while a 900-second task uses 1080 seconds;
 - records only binary `success` in Search evidence. Once a clean, settled
   iteration records `success=1`, the campaign controller stops exploration,
   selects and promotes that verifier-backed candidate, and runs the final
@@ -39,9 +42,10 @@ Constants:
 - the campaign records the managed Muyuan checkout commit, while the pinned
   per-task subject ref is recorded in each workspace as `source_revision`.
 
-Docker is required (`docker compose` must be available). On this host the
-Docker Hub mirror `docker.m.daocloud.io` is needed for base images such as
-`gcc:14-bookworm` — pull and `docker tag` them before the first `prepare`.
+Docker is required (`docker compose` must be available). Task preparation must
+produce the upstream image references before campaign preparation. Missing
+images or Bubblewrap remain environment failures; model-free unit checks do
+not prove the protected worker or Docker judge lifecycle.
 
 The reproducible-environment bootstrap owns the default sparse checkout.
 `BENCH_GOAL_PLUS_ZSOFT_ROOT` may select another clean checkout for controlled

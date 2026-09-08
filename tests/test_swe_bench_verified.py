@@ -7,7 +7,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
 
@@ -36,6 +38,40 @@ from scripts import benchmark_report
 
 
 class SweBenchVerifiedContractTest(unittest.TestCase):
+    def test_arm_profile_matches_image_architecture_and_rejects_codex(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-arm64-smoke")
+        image = {"Architecture": "arm64", "Os": "linux", "Id": "sha256:fixture"}
+        def capture(command, **kwargs):
+            output = json.dumps([image]) if command[1:3] == ["image", "inspect"] else ""
+            return subprocess.CompletedProcess(command, 0, output, "")
+        with mock.patch.object(environment, "run_capture", side_effect=capture):
+            self.assertTrue(environment.image_inventory(profile)["ok"])
+            image["Architecture"] = "amd64"
+            self.assertFalse(environment.image_inventory(profile)["ok"])
+        profile["methods"] = ["goal-plus-codex"]
+        with self.assertRaisesRegex(SweBenchContractError, "ARM64 currently requires Pi"):
+            validate_profile(profile["id"], profile)
+
+    def test_arm_official_adapter_uses_official_evaluator_and_exact_image(self) -> None:
+        from experiments.swe_bench_verified.official_instance import evaluate
+        with self.temporary_directory() as directory:
+            root = Path(directory)
+            instances, predictions = root / "instances.json", root / "predictions.json"
+            write_json(instances, [{"instance_id": "fixture"}])
+            write_json(predictions, [{"instance_id": "fixture", "model_patch": "patch"}])
+            spec = mock.Mock(instance_image_key="official-arm-image")
+            with mock.patch("swebench.harness.test_spec.test_spec.make_test_spec", return_value=spec) as make, \
+                    mock.patch("swebench.harness.run_evaluation.run_instance", return_value=("fixture", {})) as run, \
+                    mock.patch("docker.from_env") as docker:
+                evaluate(instances, predictions, image="official-arm-image", architecture="arm64", run_id="run", timeout=60)
+                self.assertEqual(make.call_args.kwargs["arch"], "arm64")
+                run.assert_called_once_with(spec, {"instance_id": "fixture", "model_patch": "patch"}, False, False, docker.return_value, "run", 60)
+                docker.return_value.close.assert_called_once()
+                run.reset_mock()
+                with self.assertRaisesRegex(ValueError, "official image differs"):
+                    evaluate(instances, predictions, image="wrong-image", architecture="arm64", run_id="run", timeout=60)
+                run.assert_not_called()
+
     def temporary_directory(self) -> tempfile.TemporaryDirectory[str]:
         return tempfile.TemporaryDirectory(dir=ensure_temp_root("test-swe-bench-verified"))
 
@@ -176,6 +212,78 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertNotIn("/opt/pi/dist", codex_script)
         self.assertNotIn("/opt/goal-plus-bin/pi", codex_script)
 
+    def test_arm_goal_plus_routes_closeout_to_its_own_python(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-arm64-smoke")
+        runtime_info = environment.resolve_goal_plus_runtime(profile)
+        runtime_info["outer_deadline_at"] = "2026-09-08T12:00:00+00:00"
+        runtime_info["main_session_id"] = "fixture-main"
+        runtime_info["goal_prompt"] = "/opt/prompt.txt"
+        env = environment.goal_plus_runtime_environment(runtime_info)
+        self.assertEqual(env["GOAL_PLUS_BASE_PYTHON"], "/opt/goal-plus-python/bin/python3")
+        self.assertNotIn("PATH", env)
+        with mock.patch.object(runtime, "_run", return_value=subprocess.CompletedProcess(
+            [], 0, '{"completed": true}', ""
+        )) as run:
+            self.assertTrue(runtime._goal_plus_closeout("fixture-container", profile, runtime_info)["completed"])
+        command = run.call_args.args[0]
+        interpreter = command[command.index("fixture-container") + 1]
+        self.assertEqual(interpreter, "/opt/goal-plus-runtime/venv/bin/python")
+        self.assertIn(f"GOAL_PLUS_PYTHON={interpreter}", command)
+        script = environment.goal_plus_install_script()
+        self.assertIn('PYTHON="$GOAL_PLUS_PYTHON" /opt/goal-plus/install.sh --pi', script)
+        syntax = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
+        self.assertEqual(syntax.returncode, 0, syntax.stderr)
+        command = runtime._agent_command("fixture-container", profile, runtime_info)
+        shell = command[command.index("fixture-container") + 1:]
+        self.assertEqual(shell[:2], ["bash", "-c"])
+        self.assertIn("conda activate testbed", shell[2])
+        self.assertIn('exec "$@"', shell[2])
+
+    def test_swe_closeout_uses_publication_and_reuses_completed_apply(self) -> None:
+        from experiments.swe_bench_verified import goal_plus_controller as controller
+
+        with self.temporary_directory() as directory:
+            source = Path(directory).resolve()
+            root = source / ".gp"
+            run_path = root / "runs/run_fixture/run.json"
+            write_json(run_path, {"source_path": str(source)})
+            write_json(run_path.parent / "candidates/c001/candidate.json", {"candidate_id": "c001", "iterations": [{}]})
+            write_json(root / "goal-plus/gp_0001/goal.json", {})
+            patch = run_path.parent / "promotion/selected.patch"
+            goal = SimpleNamespace(goal_plus_id="gp_0001", status="complete",
+                                   linked_search=SimpleNamespace(run_id="run_fixture", selected_candidate_id="c001"))
+            goal_runtime, search_runtime, search_tools = mock.Mock(), mock.Mock(), mock.Mock()
+            goal_runtime.status.return_value = goal
+            modules = {
+                "goal_plus.evidence_annotator": SimpleNamespace(drain_evidence_annotations=mock.Mock(return_value=0)),
+                "goal_plus.goal_plus": SimpleNamespace(FileGoalPlusRuntime=mock.Mock(return_value=goal_runtime)),
+                "goal_plus.runtime": SimpleNamespace(FileSearchRuntime=mock.Mock(return_value=search_runtime)),
+                "goal_plus.tools": SimpleNamespace(SearchTools=mock.Mock(return_value=search_tools)),
+            }
+            promotion = ({}, "c001", {"selected_score": 1.0}, {"artifact_path": str(patch)})
+            with mock.patch.dict(sys.modules, modules), \
+                    mock.patch.object(controller, "_close_pi_pools", return_value=[]), \
+                    mock.patch.object(controller, "_existing_promotion", return_value=promotion):
+                search_runtime.promotion_record.return_value = SimpleNamespace(state="applied")
+                result = controller.closeout(root, source, pool_timeout_seconds=10)
+                self.assertTrue(result["completed"], result)
+                search_tools.search_apply_promotion.assert_not_called()
+                goal_runtime.set_status.assert_not_called()
+
+                goal.status = "active"
+                search_runtime.promotion_record.return_value = SimpleNamespace(state="prepared")
+                search_tools.search_apply_promotion.return_value = {"state": "awaiting_main_integration"}
+                result = controller.closeout(root, source, pool_timeout_seconds=10)
+                self.assertFalse(result["completed"])
+                self.assertIn("publication has not been applied", result["error"])
+                goal_runtime.set_status.assert_not_called()
+
+                search_tools.search_apply_promotion.return_value = {"state": "applied"}
+                result = controller.closeout(root, source, pool_timeout_seconds=10)
+                self.assertTrue(result["completed"], result)
+                search_tools.search_apply_promotion.assert_called_with("run_fixture")
+                goal_runtime.set_status.assert_called_once()
+
     def test_goal_plus_codex_project_assets_follow_latest_muyuan_layout(self) -> None:
         script = runtime.goal_plus_codex_project_asset_script()
 
@@ -239,6 +347,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         supplemental_evaluation: bool = False,
         evidence_annotations: bool = False,
         worker_host: str = "pi-rpc",
+        worker_model: str | None = None,
         worker_min_runtime_seconds: int | None = None,
         worker_min_verifier_runs: int | None = None,
         candidate_count: int = 1,
@@ -285,7 +394,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                         else {}
                     ),
                 },
-                "config": {"closeout_reserve_seconds": 300},
+                "config": {"reserve_closeout_seconds": 300},
                 **(
                     {
                         "evidence_annotator": {
@@ -480,6 +589,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             write_json(
                 root / f"runs/{run_id}/agent_sessions/{agent_session_id}.json",
                 {
+                    "selected_model": {"model": worker_model or ("gpt-5.6-sol" if worker_host == "codex" else "zai/glm-5.2")},
                     "agent_session_id": agent_session_id,
                     "created_at": "2026-08-06T12:00:00Z",
                     "updated_at": "2026-08-06T12:10:00Z",
@@ -554,6 +664,51 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             state["completion"]["checks"]["worker_topology"]["actual"],
             "codex/parallel_loops",
         )
+
+    def test_completion_requires_current_frozen_closeout_reserve_key(self) -> None:
+        with self.temporary_directory() as directory:
+            root = Path(directory)
+            self.write_goal_plus_state(root)
+            expected = dict(expected_k=1, expected_worker_runtime_seconds=1500,
+                            expected_closeout_reserve_seconds=300,
+                            expected_visible_verifier_timeout_seconds=300)
+            state = goal_plus_evidence.collect_goal_plus_state(root, **expected)
+            self.assertTrue(state["completion"]["checks"]["closeout_reserve"]["passed"])
+            path = root / "specs/spec_test/frozen_spec.json"
+            frozen = read_json(path)
+            frozen["spec"]["strategy"]["config"] = {"closeout_reserve_seconds": 300}
+            write_json(path, frozen)
+            state = goal_plus_evidence.collect_goal_plus_state(root, **expected)
+            self.assertFalse(state["completion"]["checks"]["closeout_reserve"]["passed"])
+
+    def test_completion_rejects_worker_model_substitution(self) -> None:
+        with self.temporary_directory() as directory:
+            root = Path(directory)
+            self.write_goal_plus_state(root)
+            path = root / "runs/run_test/agent_sessions/agent_0.json"
+            session = read_json(path)
+            expected = dict(expected_k=1, expected_worker_runtime_seconds=1500,
+                            expected_closeout_reserve_seconds=300,
+                            expected_visible_verifier_timeout_seconds=300,
+                            expected_worker_model="zai/glm-5.3-flash")
+            for model, passed in (("zai/glm-5.3", False), ("zai/glm-5.3-flash", True), (None, False)):
+                session["selected_model"] = {"model": model}
+                write_json(path, session)
+                state = goal_plus_evidence.collect_goal_plus_state(root, **expected)
+                self.assertEqual(state["completion"]["checks"]["worker_model"]["passed"], passed)
+
+    def test_native_pi_route_materializes_exact_model_config(self) -> None:
+        profile = self.profile("sympy-16886-goal-plus-pi-arm64-smoke")
+        runtime_info = {"custom_provider": False, "provider": "zai",
+                        "model_id": "glm-5.3-flash", "credential_env": "ZAI_API_KEY"}
+        with self.temporary_directory() as directory, \
+                mock.patch.object(environment, "resolve_goal_plus_runtime", return_value=runtime_info), \
+                mock.patch("bench_goal_plus.pi_models.native_catalog_model", return_value={"id": "glm-5.3-flash"}) as model:
+            with environment.routed_pi_runtime(profile, Path(directory), goal_plus=True) as routed:
+                provider = read_json(routed["models_file"])["providers"]["zai"]
+            model.assert_called_once_with("zai", "glm-5.3-flash", "openai-completions")
+            self.assertEqual(provider["models"], [{"id": "glm-5.3-flash"}])
+            self.assertEqual(provider["apiKey"], "$ZAI_API_KEY")
 
     def test_goal_plus_k2_requires_peer_comparison_and_search_influence(self) -> None:
         with self.temporary_directory() as temporary:
@@ -810,6 +965,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 state_root,
                 supplemental_evaluation=True,
                 evidence_annotations=True,
+                worker_model=profile["model"],
                 worker_host="codex",
             )
             patch_file = campaign / "cells/goal-plus-codex/model.patch"
@@ -1393,6 +1549,24 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(run[-2:], ["--campaign", campaign.campaign_id])
         self.assertNotIn("--detach", run)
 
+    def test_doctor_accepts_resolved_model_and_reasoning_from_unified_plan(self) -> None:
+        from experiments.swe_bench_verified import cli
+
+        agent = BenchmarkAgent(catalog=Catalog())
+        spec = agent.resolve_spec(
+            target_ids=("swe-bench-verified",),
+            profile="sympy-16886-goal-plus-pi-smoke",
+            methods=("goal-plus-pi",),
+            model="zai/glm-5.3-flash",
+            reasoning_effort="low",
+        )
+        command = create_runner(spec.runner).provision_commands(spec, skip_provision=True)[0]
+        with mock.patch.object(cli, "doctor", return_value=0) as doctor:
+            self.assertEqual(cli.main(command[command.index("doctor"):]), 0)
+        resolved = doctor.call_args.args[0]
+        self.assertEqual(resolved["model"], "zai/glm-5.3-flash")
+        self.assertEqual(resolved["reasoning_effort"], "low")
+
     def test_unproven_runner_rejects_retained_containers_during_plan(self) -> None:
         agent = BenchmarkAgent(catalog=Catalog())
         with self.assertRaisesRegex(ContractError, "does not support retained"):
@@ -1682,10 +1856,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn(
                 "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=0", command
             )
-            self.assertIn(
-                'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH; exec "$@"',
-                command,
-            )
+            shell = command[command.index("container-id") + 3]
+            self.assertIn("conda activate testbed", shell)
+            self.assertIn("PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH", shell)
+            self.assertTrue(shell.endswith('exec "$@"'))
             self.assertIn("ZAI_API_KEY", command)
             self.assertFalse(any(secret in argument for argument in command))
 
@@ -2453,12 +2627,39 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "profile_snapshot": profile,
                 "source": {"goal_plus_commit": "a" * 40},
             }
+            source = campaign / "fixture-source"
+            source.mkdir()
+
+            def git(*args: str) -> str:
+                return subprocess.check_output(
+                    ["git", "-C", str(source), *args], text=True, stderr=subprocess.DEVNULL
+                ).strip()
+
+            git("init")
+            git("config", "user.email", "fixture@example.invalid")
+            git("config", "user.name", "Fixture")
+            (source / "repair.py").write_text("old\n")
+            git("add", ".")
+            git("commit", "-m", "base")
+            profile["tasks"][0]["base_commit"] = git("rev-parse", "HEAD")
+            for directory in (".gp", ".codex", ".goal-plus-verifiers"):
+                (source / directory).mkdir()
+                (source / directory / "fixture.txt").write_text("runner asset\n")
+            git("add", ".")
+            git("commit", "-m", "freeze assets")
+            (source / "repair.py").write_text("fixed\n")
             sequence: list[str] = []
 
             def docker_checked(command: list[str], *, timeout: int = 120) -> str:
                 del timeout
                 if "diff" in command:
-                    return "diff --git a/a b/a\n"
+                    args = command[command.index("diff"):]
+                    patch = git(*args)
+                    self.assertIn("repair.py", patch)
+                    self.assertNotIn("runner asset", patch)
+                    (source / "repair.py").write_text("old\n")
+                    self.assertEqual(git(*args), "")
+                    return patch
                 if "status" in command:
                     return " M a"
                 return ""
@@ -2482,8 +2683,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
             with (
                 mock.patch.object(
-                    runtime, "resolve_goal_plus_runtime", return_value=runtime_info
-                ),
+                    runtime, "routed_pi_runtime", return_value=nullcontext(runtime_info)
+                ) as route,
                 mock.patch.object(
                     runtime,
                     "_create_agent_container",
@@ -2514,6 +2715,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 result = runtime._run_agent(campaign, manifest, cell)
 
             self.assertEqual(sequence, ["export", "dispose"])
+            route.assert_called_once_with(profile, campaign, goal_plus=True)
             self.assertEqual(result["state"], "completed")
             self.assertTrue(result["patch_exists"])
             self.assertEqual(result["goal_plus"]["actual_subagent_count"], 1)
@@ -2950,6 +3152,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 state_root,
                 supplemental_evaluation=True,
                 evidence_annotations=True,
+                worker_model=profile["model"],
             )
             patch_file = campaign / "cells/goal-plus-pi/model.patch"
             patch_file.write_text("diff --git a/a b/a\n", encoding="utf-8")

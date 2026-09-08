@@ -34,6 +34,9 @@ _RESERVED_ENV_NAMES = {
     "GIT_DIR",
     "GIT_OPTIONAL_LOCKS",
     "GIT_WORK_TREE",
+    "GOAL_PLUS_AGENT_SESSION_ID",
+    "GOAL_PLUS_PI_ROLE",
+    "GOAL_PLUS_ROOT",
     "HOME",
     "PATH",
     "TMPDIR",
@@ -51,7 +54,7 @@ _WORKER_TOOLS = {
     "search_run_verifier",
     "search_list_iterations",
 }
-_SESSION_SCOPED_TOOLS = _WORKER_TOOLS - {"search_list_iterations"}
+_SESSION_SCOPED_TOOLS = _WORKER_TOOLS
 _TOOL_PROXY_BIN = Path(__file__).resolve().parent / "bin" / "goal-plus-pi-tool"
 _HOST_TOOL_BIN = (
     Path(__file__).resolve().parent / "main-bin" / "goal-plus-pi-tool"
@@ -81,68 +84,57 @@ _BLIND_CONTEXT_SOURCE_FIELDS = {
     "best_iteration",
     "candidate_id",
     "candidate_task",
-    "directive",
-    "evaluation_mode",
+    "execution_generation",
     "host",
-    "host_handle",
+    "inner_agent",
     "iteration_count",
     "latest_result",
     "metric_direction",
     "metric_name",
-    "model_provenance",
     "objective",
     "recent_iterations",
+    "reference_workspaces",
     "result_count",
+    "result_ledger_source",
     "results_tsv",
     "resume",
-    "run_budget",
     "run_id",
-    "selected_model",
     "supplemental_evaluation_enabled",
     "tool_family_catalog",
-    "workspace",
+    "workspace_access",
+    "workspace_ledger_projection",
 }
 _BLIND_CANDIDATE_TASK_SOURCE_FIELDS = {
+    "acceptance",
     "allowed_files",
-    "base_candidate_id",
-    "candidate_id",
     "denied_files",
-    "expected_artifacts",
     "hypothesis",
     "instructions",
-    "model_provenance",
-    "parent_candidate_ids",
-    "parent_id",
-    "plan_id",
-    "proposal",
-    "run_id",
-    "selected_model",
+    "process_environment",
     "share_out_dir",
-    "stop_conditions",
-    "strategy_metadata",
     "workspace",
-    "workspace_backend",
-    "workspace_base_revision",
-    "workspace_branch",
     "task_skill_paths",
 }
 _BLIND_CANDIDATE_TASK_OUTPUT_FIELDS = {
     "allowed_files",
-    "candidate_id",
     "denied_files",
-    "expected_artifacts",
-    "run_id",
     "workspace",
 }
 _BLIND_VERIFIER_SOURCE_FIELDS = {
+    "allocation_decision",
     "agent_session_id",
     "aggregate_score",
+    "attempt_artifact_ref",
+    "attempt_id",
+    "attempt_iteration",
+    "best_artifact_ref",
     "best_git_head",
     "best_iteration",
     "candidate_id",
     "changed_outside_allowed",
     "commit",
     "disposition",
+    "failure_class",
     "global_evidence_entry_count",
     "global_evidence_injected",
     "global_evidence_snapshot",
@@ -153,6 +145,8 @@ _BLIND_VERIFIER_SOURCE_FIELDS = {
     "process_passed",
     "promotion_passed",
     "run_id",
+    "schedule_task_id",
+    "scheduler_status",
     "shared_tool_consumed_entries",
     "shared_tool_deduplicated_entries",
     "shared_tool_errors",
@@ -167,6 +161,7 @@ _BLIND_VERIFIER_SOURCE_FIELDS = {
     "validity_passed",
     "verifier_results",
     "workspace_git_head_after_settlement",
+    "workspace_artifact_after_settlement",
 }
 _BLIND_VERIFIER_RECEIPT_FIELDS = {
     "agent_session_id",
@@ -177,11 +172,17 @@ _BLIND_VERIFIER_RECEIPT_FIELDS = {
     "state",
 }
 _BLIND_ITERATION_SOURCE_FIELDS = {
+    "allocation_decision_error",
+    "allocation_decision_id",
     "adopted_tools",
     "adoption_confounded",
     "adapter_version",
     "agent_session_id",
     "artifact_hash",
+    "artifact_clean",
+    "artifact_ref",
+    "artifact_status",
+    "attempt_base_artifact_ref",
     "attempt_base_git_head",
     "attempt_changed_files",
     "candidate_id",
@@ -198,14 +199,21 @@ _BLIND_ITERATION_SOURCE_FIELDS = {
     "hypothesis",
     "iteration",
     "ledger_git_head",
+    "ledger_artifact_ref",
     "log_paths",
     "metrics",
     "model_provenance",
     "process_passed",
+    "provider_request_ids",
+    "restored_to_artifact_ref",
     "restored_to_git_head",
     "restored_to_iteration",
     "run_id",
     "score",
+    "schedule_task_id",
+    "scheduler_error",
+    "scheduler_status",
+    "settlement_id",
     "selected_model",
     "shared_tool_consumed_entries",
     "shared_tool_deduplicated_entries",
@@ -214,12 +222,14 @@ _BLIND_ITERATION_SOURCE_FIELDS = {
     "shared_tool_staged_bytes",
     "shared_tool_staged_entries",
     "shared_tool_staged_file_count",
+    "shared_tools",
     "state",
     "summary",
     "toolization_advisories",
     "toolization_decision",
     "touched_denied_files",
     "workspace_git_head_after_settlement",
+    "workspace_artifact_after_settlement",
 }
 _BLIND_ITERATION_RECEIPT_FIELDS = {
     "agent_session_id",
@@ -236,10 +246,14 @@ _BLIND_ITERATION_LEGACY_FIELDS = _BLIND_ITERATION_SOURCE_FIELDS - {
     "state",
 }
 _GLOBAL_EVIDENCE_FIELDS = {
+    "annotation_result_available",
+    "artifact_availability",
+    "artifact_ref",
     "candidate_id",
     "commit",
     "disposition",
     "iteration",
+    "reference_available",
     "score",
     "shared_tools",
     "view",
@@ -573,7 +587,6 @@ def _blind_context_response(
         "agent_session_id",
         "run_id",
         "candidate_id",
-        "workspace",
         "candidate_task",
         "metric_name",
         "metric_direction",
@@ -584,8 +597,6 @@ def _blind_context_response(
         result["agent_session_id"] != context.agent_session_id
         or result["run_id"] != context.run_id
         or result["candidate_id"] != context.candidate_id
-        or result["workspace"] != str(context.workspace)
-        or result.get("evaluation_mode", "blind") != "blind"
         or result["metric_name"] != _BLIND_PUBLIC_METRIC
         or result["metric_direction"] != "maximize"
     ):
@@ -595,8 +606,6 @@ def _blind_context_response(
     if (
         not isinstance(candidate_task, dict)
         or not set(candidate_task) <= _BLIND_CANDIDATE_TASK_SOURCE_FIELDS
-        or candidate_task.get("run_id") != context.run_id
-        or candidate_task.get("candidate_id") != context.candidate_id
         or candidate_task.get("workspace") != str(context.workspace)
     ):
         return _INVALID_BLIND_RESPONSE
@@ -832,6 +841,11 @@ def _blind_global_evidence(result: Any) -> list[dict[str, Any]] | object:
                 return _INVALID_BLIND_RESPONSE
             shared_tools.append(projected_tool)
         projected_entry = dict(entry)
+        for field in (
+            "annotation_result_available", "artifact_availability",
+            "artifact_ref", "reference_available",
+        ):
+            projected_entry.pop(field)
         projected_entry["shared_tools"] = shared_tools
         projected.append(projected_entry)
     return projected
@@ -951,9 +965,14 @@ def _run_host_tool(
     tool: str,
     args: dict[str, Any],
     environment: Mapping[str, str],
+    *,
+    host_capability: str | None = None,
 ) -> Any:
+    command = [str(_HOST_TOOL_BIN), "--root", str(root), tool]
+    if host_capability is not None:
+        command.extend(["--host-entrypoint", "--host-capability", host_capability])
     completed = subprocess.run(
-        [str(_HOST_TOOL_BIN), "--root", str(root), tool],
+        command,
         cwd=root,
         env=environment,
         input=json.dumps(args, ensure_ascii=False, separators=(",", ":")),
@@ -988,17 +1007,19 @@ class WorkerToolProxy:
             "GIT_DIR",
             "GIT_OPTIONAL_LOCKS",
             "GIT_WORK_TREE",
-            "GOAL_PLUS_PI_ROLE",
             "GOAL_PLUS_PI_WORKER_CONTINUE_UNTIL_MS",
             LEGACY_GOAL_PLUS_WORKER_LAUNCHER_ENV,
             TOOL_SOCKET_ENV,
         ):
             self.host_environment.pop(name, None)
+        self.host_environment["GOAL_PLUS_PI_ROLE"] = "worker"
+        self.host_environment["GOAL_PLUS_AGENT_SESSION_ID"] = context.agent_session_id
         self._server: _ThreadingUnixServer | None = None
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         self.socket_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
+        (self.socket_dir / "runtime/runs").mkdir(parents=True)
         proxy = self
 
         class Handler(socketserver.StreamRequestHandler):
@@ -1036,6 +1057,8 @@ class WorkerToolProxy:
     def dispatch(self, request: Any) -> dict[str, Any]:
         if not isinstance(request, dict):
             raise TypeError("proxy request must be a JSON object")
+        if request.get("host_entrypoint") is True:
+            return self._dispatch_host_callback(request)
         tool = request.get("tool")
         args = request.get("args")
         if tool not in _WORKER_TOOLS:
@@ -1053,6 +1076,8 @@ class WorkerToolProxy:
                 args,
                 self.host_environment,
             )
+            if tool == "search_get_agent_context" and self.evaluation_mode == "visible":
+                self._project_worker_generation(result)
         except Exception:  # workers must not receive raw host exceptions
             return dict(_BLIND_RESPONSE_REJECTED)
         if self.evaluation_mode == "blind":
@@ -1064,6 +1089,79 @@ class WorkerToolProxy:
             "result": result,
         }
 
+    def _project_worker_generation(self, result: Any) -> None:
+        if (
+            not isinstance(result, dict)
+            or result.get("agent_session_id") != self.context.agent_session_id
+            or result.get("run_id") != self.context.run_id
+            or result.get("candidate_id") != self.context.candidate_id
+            or type(result.get("execution_generation")) is not int
+            or result["execution_generation"] < 0
+            or not isinstance(result.get("candidate_task"), dict)
+            or result["candidate_task"].get("workspace") != str(self.context.workspace)
+        ):
+            raise ValueError("worker generation requires a bound host context")
+        destination = (
+            self.socket_dir / "runtime/runs" / self.context.run_id
+            / "candidates" / self.context.candidate_id / "candidate.json"
+        )
+        projection = {"execution_generation": result["execution_generation"]}
+        if destination.exists():
+            if json.loads(destination.read_text(encoding="utf-8")) != projection:
+                raise ValueError("worker generation changed within one sandbox launch")
+            return
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(projection), encoding="utf-8")
+
+    def _dispatch_host_callback(self, request: dict[str, Any]) -> dict[str, Any]:
+        tool = request.get("tool")
+        args = request.get("args")
+        token = request.get("host_capability")
+        if (
+            tool != "goal_plus_host_kick_internal_agents"
+            or not isinstance(args, dict)
+            or not set(args) <= {"run_id", "owner_pid"}
+            or args.get("run_id") != self.context.run_id
+            or not isinstance(token, str)
+            or re.fullmatch(r"[0-9a-f-]{36}", token) is None
+        ):
+            raise PermissionError("Pi worker host callback requires its bound run")
+        source = self.socket_dir / "runtime/host-entrypoint/pi" / f"{token}.json"
+        destination = self.root / "host-entrypoint/pi" / f"{token}.json"
+        created = False
+        try:
+            # Transfer only this worker's one-time native callback capability.
+            if not source.resolve(strict=True).is_relative_to(self.socket_dir.resolve(strict=True)):
+                raise ValueError("host callback capability escapes the worker proxy")
+            descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    raise ValueError("host callback capability must be a regular file")
+                payload = stream.read(_MAX_PROXY_REQUEST_BYTES + 1)
+            if len(payload) > _MAX_PROXY_REQUEST_BYTES:
+                raise ValueError("host callback capability exceeds its size limit")
+            decoded = json.loads(payload)
+            if not isinstance(decoded, dict) or set(decoded) != {"token", "issued_at_ms"}:
+                raise ValueError("invalid host callback capability")
+            if decoded["token"] != token:
+                raise ValueError("host callback capability identity mismatch")
+            source.unlink()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            created = True
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(decoded, stream)
+            _run_host_tool(
+                self.root, tool, {"run_id": self.context.run_id},
+                self.host_environment, host_capability=token,
+            )
+            return {"ok": True, "result": {"ok": True, "run_id": self.context.run_id}}
+        except Exception:
+            return dict(_BLIND_RESPONSE_REJECTED)
+        finally:
+            if created:
+                destination.unlink(missing_ok=True)
+
     def _authorize(self, tool: str, args: dict[str, Any]) -> None:
         if (
             tool in _SESSION_SCOPED_TOOLS
@@ -1073,16 +1171,16 @@ class WorkerToolProxy:
         if "run_id" in args and args["run_id"] != self.context.run_id:
             raise PermissionError("Pi worker proxy rejected a different run_id")
         if (
-            tool in {"search_run_verifier", "search_list_iterations"}
+            tool == "search_run_verifier"
             and args.get("candidate_id") != self.context.candidate_id
         ):
             raise PermissionError("Pi worker proxy rejected a different candidate_id")
         if (
             tool == "search_list_iterations"
-            and args.get("agent_session_id") != self.context.agent_session_id
+            and set(args) != {"agent_session_id"}
         ):
             raise PermissionError(
-                "Pi iteration listing requires the bound agent_session_id"
+                "Pi iteration listing accepts only the bound agent_session_id"
             )
         if tool == "search_run_verifier" and args.get("scope", "process") != "process":
             raise PermissionError("Pi workers may only run process verifiers")
@@ -1265,6 +1363,10 @@ class BubblewrapWorker:
             readonly=False,
             created=created,
         )
+        generation_root = self.proxy.socket_dir / "runtime/runs"
+        _add_bind(
+            args, generation_root, generation_root, readonly=True, created=created,
+        )
         _add_bind(
             args,
             extension_bundle,
@@ -1312,6 +1414,8 @@ class BubblewrapWorker:
             policy=self.policy,
             pi_runtime=pi_runtime,
             socket_path=self.proxy.socket_path,
+            runtime_root=self.proxy.socket_dir / "runtime",
+            agent_session_id=self.context.agent_session_id,
             private_git_admin=self.private_git_admin,
         )
         args.extend(
@@ -1821,6 +1925,8 @@ def _sandbox_environment(
     policy: SandboxPolicy,
     pi_runtime: Path,
     socket_path: Path,
+    runtime_root: Path,
+    agent_session_id: str,
     private_git_admin: PrivateGitAdmin | None,
 ) -> dict[str, str]:
     runtime_bin = pi_runtime / "bin" if pi_runtime.is_dir() else pi_runtime.parent
@@ -1843,6 +1949,9 @@ def _sandbox_environment(
             )
         ),
         TOOL_SOCKET_ENV: str(socket_path),
+        "GOAL_PLUS_ROOT": str(runtime_root),
+        "GOAL_PLUS_PI_ROLE": "worker",
+        "GOAL_PLUS_AGENT_SESSION_ID": agent_session_id,
     }
     if private_git_admin is not None:
         result.update(
@@ -1854,7 +1963,6 @@ def _sandbox_environment(
         )
     inherited_names = {
         "PI_CODING_AGENT_DIR",
-        "GOAL_PLUS_PI_ROLE",
         "GOAL_PLUS_PI_MODEL",
         "GOAL_PLUS_PI_WORKER_CONTINUE_UNTIL_MS",
         *policy.pass_env,

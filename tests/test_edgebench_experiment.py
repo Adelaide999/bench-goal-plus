@@ -3796,6 +3796,20 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         codex_probe = mock.Mock(side_effect=AssertionError("Codex probe used"))
 
         with mock.patch.object(
+            EDGE_RUNTIME,
+            "resolve_agent_api_config",
+            return_value={"api_key": None, "api_base_url": None},
+        ), mock.patch.object(
+            EDGE_RUNTIME, "resolve_profile_api_endpoints", return_value=[]
+        ), mock.patch.object(
+            EDGE_RUNTIME,
+            "docker_endpoint_reachability_probe",
+            side_effect=AssertionError("OAuth must not probe an API-key endpoint"),
+        ), mock.patch.object(
+            EDGE_RUNTIME,
+            "docker_http_probe",
+            side_effect=AssertionError("OAuth must not probe an API-key endpoint"),
+        ), mock.patch.object(
             EDGE_RUNTIME, "resolve_goal_plus_source", return_value=resolved_source
         ), mock.patch.object(
             EDGE_RUNTIME, "codex_provider_contract", codex_contract

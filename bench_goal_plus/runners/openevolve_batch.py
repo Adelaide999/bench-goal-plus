@@ -21,6 +21,14 @@ DEFAULT_METHODS = (
 )
 
 
+def pi_provider_args(spec: CampaignSpec) -> list[str]:
+    if spec.pi_provider_id is None:
+        return []
+    return ["--pi-provider-id", spec.pi_provider_id, "--pi-api", str(spec.pi_api),
+            "--pi-api-key-env", str(spec.pi_api_key_env),
+            "--pi-api-base-env", str(spec.pi_api_base_env)]
+
+
 class OpenEvolveBatchRunner(BenchmarkRunner):
     def provision_commands(
         self, spec: CampaignSpec, *, skip_provision: bool
@@ -73,6 +81,9 @@ class OpenEvolveBatchRunner(BenchmarkRunner):
             str(destination),
         ]
         command.extend(internal_search_scheduler_args(spec.search_scheduler))
+        command.extend(pi_provider_args(spec))
+        if spec.task_id is not None:
+            command.extend(["--task-id", spec.task_id])
         return [command], CampaignRef(
             campaign_id=spec.campaign_id,
             path=destination,
@@ -96,6 +107,7 @@ class OpenEvolveBatchRunner(BenchmarkRunner):
         ]
         if spec.methods:
             command.extend(["--methods", *spec.methods])
+        command.extend(pi_provider_args(spec))
         return command
 
     def resume_command(self, state: dict, campaign: CampaignRef) -> list[str]:

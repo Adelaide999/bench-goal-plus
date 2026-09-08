@@ -612,6 +612,10 @@ if {
         --method goal-plus-pi \
         --model deepseek-v4-flash \
         --reasoning-effort high \
+        --pi-provider-id deepseek \
+        --pi-api openai-completions \
+        --pi-api-key-env DEEPSEEK_API_KEY \
+        --pi-api-base-env DEEPSEEK_BASE_URL \
         --skip-bootstrap \
         --skip-provision
 } >"$PREFLIGHT_LOG" 2>&1; then

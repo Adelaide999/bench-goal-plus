@@ -79,13 +79,8 @@ PI_WORKER_SANDBOX = {
 }
 OFFICIAL_EVALUATOR_TIMEOUT_SECONDS = 900
 VERIFIER_TIMEOUT_SECONDS = OFFICIAL_EVALUATOR_TIMEOUT_SECONDS + 180
-# The Goal Plus process verifier only runs the controller's public structural check
-# (read + UTF-8 + ast.parse), which is near-instant; it never runs the official oracle.
-# The hostile outer-deadline check sums process_verifiers timeouts and reserves them as
-# wall-clock budget, so an over-large value falsely fails runs that reached the verifier
-# late in the worker budget. Keep it small so the reservation is real, while the official
-# evaluator keeps its own generous OFFICIAL_EVALUATOR_TIMEOUT_SECONDS budget in closeout.
-PROCESS_VERIFIER_TIMEOUT_SECONDS = 120
+# Each Search iteration executes the same differential judge as final evaluation.
+PROCESS_VERIFIER_TIMEOUT_SECONDS = VERIFIER_TIMEOUT_SECONDS
 
 ACTIVE_TASK_ID = TASK_ID
 
@@ -127,6 +122,8 @@ def list_task_ids() -> list[str]:
 
 def configure_task(task_id: str | None) -> None:
     global ACTIVE_TASK_ID, TASK_ID
+    global OFFICIAL_EVALUATOR_TIMEOUT_SECONDS, VERIFIER_TIMEOUT_SECONDS
+    global PROCESS_VERIFIER_TIMEOUT_SECONDS
     if task_id is None:
         ACTIVE_TASK_ID = DEFAULT_TASK_ID
     elif (BENCHMARK_ROOT / "tasks" / task_id / "task.json").is_file():
@@ -134,6 +131,9 @@ def configure_task(task_id: str | None) -> None:
     else:
         raise AdapterError(f"unknown zsoft-l1 task: {task_id}")
     TASK_ID = ACTIVE_TASK_ID
+    OFFICIAL_EVALUATOR_TIMEOUT_SECONDS = _task_evaluator_timeout(task_metadata(TASK_ID))
+    VERIFIER_TIMEOUT_SECONDS = OFFICIAL_EVALUATOR_TIMEOUT_SECONDS + 180
+    PROCESS_VERIFIER_TIMEOUT_SECONDS = VERIFIER_TIMEOUT_SECONDS
 
 
 def _resolve_benchmark_root(source_root: Path) -> Path:
@@ -151,6 +151,13 @@ def task_metadata(
 ) -> dict[str, Any]:
     path = benchmark_root / "tasks" / task_id / "task.json"
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _task_evaluator_timeout(metadata: dict[str, Any]) -> int:
+    value = metadata["evaluator"]["timeout_seconds"]
+    if type(value) is not int or value < 1:
+        raise AdapterError("ZSoft task evaluator timeout must be a positive integer")
+    return value
 
 
 def task_text(task_id: str, benchmark_root: Path = BENCHMARK_ROOT) -> str:
@@ -374,7 +381,7 @@ def evaluate_workspace(
                 str(staged),
                 "--submission-kind",
                 "final",
-                timeout=OFFICIAL_EVALUATOR_TIMEOUT_SECONDS + 120,
+                timeout=_task_evaluator_timeout(task_metadata(task_id, benchmark_root)) + 120,
                 benchmark_root=benchmark_root,
             )
             (call_dir / "evaluate.stdout").write_text(

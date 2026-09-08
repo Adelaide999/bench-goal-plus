@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
@@ -20,6 +22,7 @@ from bench_goal_plus.loopback_bridge import (
     loopback_target,
     start_socket_bridge,
 )
+from bench_goal_plus.upstreams import external_goal_plus_source, external_swebench_source
 from bench_runtime_paths import (
     configure_temp_environment,
     ensure_temp_root,
@@ -174,7 +177,9 @@ def image_inventory(profile: dict[str, Any]) -> dict[str, Any]:
             containers_result.returncode == 0
             and all(
                 item.get("present")
-                and item.get("architecture") == "amd64"
+                and item.get("architecture") == (
+                    "arm64" if profile.get("architecture") == "arm64" else "amd64"
+                )
                 and item.get("os") == "linux"
                 for item in images
             )
@@ -442,6 +447,16 @@ def routed_pi_runtime(
         resolve_goal_plus_runtime(profile) if goal_plus else resolve_pi_runtime(profile)
     )
     if not runtime["custom_provider"]:
+        if runtime["provider"] == "zai":
+            from bench_goal_plus.pi_models import native_catalog_model
+
+            models_file = destination / "provider-runtime" / "models.json"
+            write_json(models_file, {"providers": {"zai": {
+                "baseUrl": "https://api.z.ai/api/coding/paas/v4", "api": "openai-completions",
+                "apiKey": f"${runtime['credential_env']}", "authHeader": True,
+                "models": [native_catalog_model("zai", runtime["model_id"], "openai-completions")],
+            }}})
+            runtime["models_file"] = models_file
         yield runtime
         return
     if not runtime.get("api_base_url") or not runtime["credential_present"]:
@@ -506,22 +521,32 @@ def goal_plus_install_script(*, include_pi: bool = True) -> str:
     commands = [
         "export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH",
         "mkdir -p /opt/goal-plus-runtime /opt/goal-plus-bin",
-        f'python -c "{installer}"',
-        "printf '#!/bin/sh\\nexec python -m goal_plus.server \"$@\"\\n' "
-        "> /opt/goal-plus-bin/goal-plus",
-        "chmod 0555 /opt/goal-plus-bin/goal-plus",
     ]
+    if include_pi:
+        commands.extend([
+            '"${GOAL_PLUS_BASE_PYTHON:-python}" -m venv /opt/goal-plus-runtime/venv',
+            "export GOAL_PLUS_PYTHON=/opt/goal-plus-runtime/venv/bin/python",
+            "export PATH=/opt/goal-plus-runtime/venv/bin:$PATH",
+        ])
+    commands.append(f'"${{GOAL_PLUS_PYTHON:-python}}" -c "{installer}"')
     if include_pi:
         commands.extend(
             [
                 "mkdir -p /opt/pi-home/.pi/agent",
                 "ln -sf /opt/pi/dist/cli.js /opt/goal-plus-bin/pi",
+                'PIP_NO_CACHE_DIR=1 PYTHON="$GOAL_PLUS_PYTHON" /opt/goal-plus/install.sh --pi',
+                'for entry in /opt/goal-plus-runtime/venv/bin/goal-plus*; do ln -sf "$entry" /opt/goal-plus-bin/; done',
             ]
         )
+    else:
+        commands.extend([
+            "printf '#!/bin/sh\\nexec python -m goal_plus.server \"$@\"\\n' > /opt/goal-plus-bin/goal-plus",
+            "chmod 0555 /opt/goal-plus-bin/goal-plus",
+        ])
     return " && ".join(commands)
 
 
-def goal_plus_runtime_environment() -> dict[str, str]:
+def goal_plus_runtime_environment(runtime: dict[str, Any] | None = None) -> dict[str, str]:
     return {
         "HOME": "/opt/agent-tmp",
         "TMPDIR": "/opt/agent-tmp",
@@ -529,6 +554,12 @@ def goal_plus_runtime_environment() -> dict[str, str]:
         "TEMP": "/opt/agent-tmp",
         "PIP_CACHE_DIR": "/opt/pip-cache",
         "PYTHONPATH": "/opt/goal-plus-runtime:/opt/goal-plus/src",
+        "GOAL_PLUS_PYTHON": (
+            "/opt/goal-plus-runtime/venv/bin/python" if (runtime or {}).get("goal_plus_install_pi") else "python"
+        ),
+        "GOAL_PLUS_BASE_PYTHON": (
+            "/opt/goal-plus-python/bin/python3" if (runtime or {}).get("goal_plus_python_root") else "python"
+        ),
     }
 
 
@@ -540,6 +571,7 @@ def resolve_goal_plus_runtime(profile: dict[str, Any]) -> dict[str, Any]:
     )
     runtime.update(
         {
+            "goal_plus_install_pi": True,
             "goal_plus_root": GOAL_PLUS_ROOT,
             "goal_plus_dependency_lock": GOAL_PLUS_DEPENDENCY_LOCK,
             "goal_plus_visible_verifier": GOAL_PLUS_VISIBLE_VERIFIER,
@@ -558,6 +590,8 @@ def resolve_goal_plus_runtime(profile: dict[str, Any]) -> dict[str, Any]:
             ),
         }
     )
+    if profile.get("architecture") == "arm64":
+        runtime["goal_plus_python_root"] = Path(sys.executable).resolve().parent.parent
     return runtime
 
 
@@ -882,7 +916,9 @@ def _goal_plus_container_probe(
                 "dst=/opt/runtime/codex.tgz,readonly",
             ]
         )
-    for name, value in goal_plus_runtime_environment().items():
+    if runtime.get("goal_plus_python_root"):
+        command.extend(["--mount", f"type=bind,src={runtime['goal_plus_python_root']},dst=/opt/goal-plus-python,readonly"])
+    for name, value in goal_plus_runtime_environment(runtime).items():
         command.extend(["-e", f"{name}={value}"])
     for name in environment_names:
         command.extend(["-e", name])
@@ -920,7 +956,7 @@ def _goal_plus_container_probe(
                 else ""
             )
             + goal_plus_install_script()
-            + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
+            + " && \"$GOAL_PLUS_PYTHON\" -c \"import fastmcp, goal_plus, plotly, pydantic\""
             + " && pi --version"
             + (
                 " && /opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex --version"
@@ -928,7 +964,7 @@ def _goal_plus_container_probe(
                 else ""
             )
             + " && python -m goal_plus.pi_tool --help >/dev/null"
-            + " && python /opt/swebench-goal-plus-controller.py --help >/dev/null",
+            + " && \"$GOAL_PLUS_PYTHON\" /opt/swebench-goal-plus-controller.py --help >/dev/null",
         ]
     )
     return run_capture(command, timeout=600)
@@ -1007,8 +1043,10 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             docker_architecture = None
     checks.append(
         _check(
-            "docker:linux-amd64",
-            docker_info.returncode == 0 and docker_architecture == "x86_64",
+            "docker:linux-architecture",
+            docker_info.returncode == 0 and docker_architecture == (
+                "aarch64" if profile.get("architecture") == "arm64" else "x86_64"
+            ),
             architecture=docker_architecture,
         )
     )
@@ -1022,8 +1060,9 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             "checkout:swebench",
             bool(
                 SWEBENCH_ROOT.is_dir()
-                and branch == "main"
-                and upstream == "origin/main"
+                and (external_swebench_source() is not None or (
+                    branch == "main" and upstream == "origin/main"
+                ))
                 and head
                 and dirty == ""
             ),
@@ -1042,6 +1081,13 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         checks.append(
             _check(f"package:{name}", version is not None, version=version)
         )
+    installed_swebench = importlib.util.find_spec("swebench")
+    installed_root = (
+        Path(installed_swebench.origin).resolve().parent.parent
+        if installed_swebench is not None and installed_swebench.origin else None
+    )
+    checks.append(_check("package:swebench-source", installed_root == SWEBENCH_ROOT.resolve(),
+                         installed_root=str(installed_root), selected_root=str(SWEBENCH_ROOT)))
 
     method = profile["methods"][0]
     task = profile["tasks"][0]
@@ -1256,9 +1302,10 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                     "checkout:goal-plus",
                     bool(
                         runtime["goal_plus_root"].is_dir()
-                        and goal_plus_branch == expected_goal_plus_branch
-                        and goal_plus_upstream
-                        == f"origin/{expected_goal_plus_branch}"
+                        and (external_goal_plus_source() is not None or (
+                            goal_plus_branch == expected_goal_plus_branch
+                            and goal_plus_upstream == f"origin/{expected_goal_plus_branch}"
+                        ))
                         and goal_plus_head
                         and goal_plus_dirty == ""
                     ),
@@ -1563,7 +1610,9 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                     checks.append(_check("pi:container-model", False, error=detail))
         else:
             if paths_present and runtime["credential_present"]:
-                probe = _pi_container_probe(image, runtime)
+                with temporary_directory(prefix="pi-native-doctor-", namespace="swe-bench-verified") as destination:
+                    with routed_pi_runtime(profile, destination, goal_plus=method == "goal-plus-pi") as routed:
+                        probe = _pi_container_probe(image, routed)
                 pi_model_ready = bool(
                     probe.returncode == 0
                     and str(runtime["model_id"]) in probe.stdout
@@ -1618,8 +1667,10 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
             )
             checkout_valid = bool(
                 runtime["goal_plus_root"].is_dir()
-                and goal_plus_branch == expected_goal_plus_branch
-                and goal_plus_upstream == f"origin/{expected_goal_plus_branch}"
+                and (external_goal_plus_source() is not None or (
+                    goal_plus_branch == expected_goal_plus_branch
+                    and goal_plus_upstream == f"origin/{expected_goal_plus_branch}"
+                ))
                 and goal_plus_head
                 and goal_plus_dirty == ""
             )

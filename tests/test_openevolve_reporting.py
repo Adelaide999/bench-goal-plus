@@ -74,8 +74,8 @@ class OpenEvolveReportingTest(unittest.TestCase):
             json.dumps(
                 {
                     "lanes": [
-                        {"evaluation": {"primary_metric": {"value": 10.0}}},
-                        {"evaluation": {"primary_metric": {"value": 8.0}}},
+                        {"evaluation": {"primary_metric": {"name": "cost", "direction": "minimize", "value": 10.0}}},
+                        {"evaluation": {"primary_metric": {"name": "cost", "direction": "minimize", "value": 8.0}}},
                     ]
                 }
             )
@@ -134,6 +134,21 @@ class OpenEvolveReportingTest(unittest.TestCase):
             )
         )
         return campaign, run
+
+    def test_public_seed_is_not_subtracted_from_a_different_official_metric(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _campaign, run = self.make_campaign(Path(temp_dir))
+            (run / "seed-evals.json").write_text(json.dumps({"lanes": [{
+                "evaluation": {"primary_metric": {"name": "format_valid", "direction": "maximize", "value": 1.0}}
+            }]}))
+            (run / "final-eval.json").write_text(json.dumps({
+                "valid": True, "primary_metric": {"name": "f1", "direction": "maximize", "value": 0.14}
+            }))
+            record = reporting.collect_run(run)
+            self.assertEqual(record["score"]["final"], 0.14)
+            self.assertEqual(record["score"]["seed_values"], [])
+            self.assertIsNone(record["score"]["seed_best"])
+            self.assertIsNone(record["score"]["directional_gain"])
 
     def test_collects_dynamic_methods_pending_cells_and_directional_gain(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -451,7 +451,7 @@ def run_campaign(args: argparse.Namespace) -> int:
     unknown = (selected or set()) - set(campaign.get("conditions") or [])
     if unknown:
         raise ValueError(f"conditions not in campaign: {', '.join(sorted(unknown))}")
-    api_base = None
+    api_base = args.api_base or os.environ.get("OPENAI_BASE_URL")
     if runtime_provider is not None:
         api_base = args.api_base or os.environ.get(runtime_provider["api_base_env"])
         if not api_base:

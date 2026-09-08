@@ -9,13 +9,14 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 from bench_artifacts import sanitize_id, utc_now
-from bench_goal_plus.upstreams import registered_upstream_branch
-from bench_runtime_paths import configure_temp_environment
+from bench_goal_plus.upstreams import external_goal_plus_source, registered_upstream_branch
+from bench_runtime_paths import configure_temp_environment, ensure_temp_root
 from experiments.benchmark_compare import experiment as standalone
 from experiments.benchmark_compare.pi_worker_launcher import REAL_PI_BIN_ENV
 
@@ -234,13 +235,17 @@ def doctor(
         )
     )
     if any(method in GOAL_PLUS_METHODS for method in profile["methods"]):
-        checks.append(
-            _checkout_check(
-                "goal_plus",
-                GOAL_PLUS_ROOT.parents[1],
-                registered_upstream_branch("goal_plus", repository_root=ROOT),
+        external = external_goal_plus_source()
+        if external is not None:
+            checks.append({"kind": "runtime-source", "name": "goal_plus", **external, "passed": True})
+        else:
+            checks.append(
+                _checkout_check(
+                    "goal_plus",
+                    GOAL_PLUS_ROOT,
+                    registered_upstream_branch("goal_plus", repository_root=ROOT),
+                )
             )
-        )
     if "javascript" in _selected_languages(profile):
         node = shutil.which("node")
         node_ok, node_version = _capture([node, "--version"]) if node else (False, "")
@@ -329,7 +334,7 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
     backup = preserve_conflict(destination)
     destination.mkdir(parents=True)
     source_commit = _git(UPSTREAM_CHECKOUT, "rev-parse", "HEAD")
-    goal_plus_commit = _git(GOAL_PLUS_ROOT.parents[1], "rev-parse", "HEAD")
+    goal_plus_commit = _git(GOAL_PLUS_ROOT, "rev-parse", "HEAD")
     campaign = {
         "schema_version": 1,
         "campaign_id": campaign_id,
@@ -358,6 +363,7 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
             "case_set": profile["case_set"],
             "case_set_fingerprint": profile["expected_case_set_fingerprint"],
             "goal_plus_commit": goal_plus_commit,
+            "goal_plus_source": external_goal_plus_source(),
         },
         "preserved_conflict": str(backup) if backup else None,
         "secret_policy": "provider URL and credential values are inherited, not serialized",
@@ -396,7 +402,7 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
                             method=method,
                             model=model_id,
                             pi_provider_id=provider_id,
-                            pi_api="openai-responses",
+                            pi_api=f"openai-{profile['agent_provider']['wire_api']}",
                             pi_api_key_env=profile["agent_provider"]["api_key_env"],
                             wall_time_seconds=profile["wall_time_seconds"],
                             concurrency=profile["concurrency"],
@@ -455,6 +461,11 @@ def _agent_environment(
     }
     allowed = {
         "PATH",
+        "HOME",
+        "XDG_RUNTIME_DIR",
+        "PI_CODING_AGENT_DIR",
+        "BENCH_GOAL_PLUS_SOURCE_DIR",
+        "BENCH_GOAL_PLUS_EXPECTED_REF",
         "LANG",
         "LC_ALL",
         "SSL_CERT_FILE",
@@ -486,6 +497,10 @@ def _agent_environment(
     )
     if real_pi is not None:
         environment[REAL_PI_BIN_ENV] = real_pi
+    if method == "goal-plus-pi":
+        proxy_runtime = tempfile.mkdtemp(prefix="ab-", dir=ensure_temp_root())
+        environment["AIBENCH_PROXY_RUNTIME_DIR"] = proxy_runtime
+        environment["XDG_RUNTIME_DIR"] = proxy_runtime
     return environment
 
 
@@ -515,7 +530,7 @@ def _run_cell(
         "--pi-provider-id",
         provider_id,
         "--pi-api",
-        "openai-responses",
+        f"openai-{provider['wire_api']}",
         "--pi-api-key-env",
         provider["api_key_env"],
         "--api-base",

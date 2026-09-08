@@ -27,6 +27,11 @@ class BenchmarkRunner(ABC):
         )
 
     def runtime_metadata(self, spec: CampaignSpec) -> dict:
+        from ..upstreams import external_goal_plus_source
+
+        if any(method.startswith("goal-plus-") for method in spec.methods):
+            if source := external_goal_plus_source():
+                return {"runtime_sources": {"goal_plus": source}}
         return {}
 
     @abstractmethod

@@ -46,9 +46,11 @@ GOAL_PLUS_PROCESS_METRIC = "visible_test_score"
 DIRECTION = "maximize"
 CODEX_SANDBOX = "workspace-write"
 CONTROLLER_ONLY_OFFICIAL_EVALUATION = True
+EVALUATION_MODE = "visible"
 OFFICIAL_BENCHMARK_COMPARABLE = True
 PI_WORKER_SANDBOX = {
     "engine": "bubblewrap",
+    "evaluation_mode": EVALUATION_MODE,
     "workspace_access": "read_only",
     "read_only_workspace_paths": [],
     "writable_workspace_paths": [ARTIFACT_NAME],
@@ -126,7 +128,9 @@ def _task_text(metadata: dict[str, Any]) -> str:
         f"Solve aibench case `{metadata['case_id']}` in `submission/`.\n\n"
         f"{metadata['prompt']}\n\n"
         "# Verification\n\n"
-        "Run `python3 evaluate.py` for public tests. The controller runs hidden "
+        "Main and Plain agents run `python3 evaluate.py` for public tests. "
+        "Isolated Goal Plus candidates call `search_run_verifier` for those tests; "
+        "the test runtime is available through that host tool. The controller runs hidden "
         "tests exactly once after selection. Do not inspect parent directories or "
         "benchmark metadata. Leave the complete solution under `submission/`.\n"
     )
@@ -179,7 +183,8 @@ def materialize_workspace(source_root: Path, workspace: Path) -> dict[str, Any]:
     (workspace / "AGENTS.md").write_text(
         "# aibench task rules\n\n"
         "- Edit only files below `submission/`.\n"
-        "- Use `python3 evaluate.py` for public feedback.\n"
+        "- Main and Plain agents use `python3 evaluate.py` for public feedback; "
+        "isolated Goal Plus candidates use `search_run_verifier`.\n"
         "- Do not inspect parent directories, benchmark cases, or hidden tests.\n",
         encoding="utf-8",
     )

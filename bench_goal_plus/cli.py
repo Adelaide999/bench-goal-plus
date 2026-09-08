@@ -20,6 +20,16 @@ def add_selection(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--profile")
 
 
+def add_pi_provider_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--pi-provider-id")
+    parser.add_argument(
+        "--pi-api",
+        choices=("openai-responses", "openai-completions", "anthropic-messages"),
+    )
+    parser.add_argument("--pi-api-key-env")
+    parser.add_argument("--pi-api-base-env")
+
+
 def add_start_arguments(parser: argparse.ArgumentParser) -> None:
     add_selection(parser)
     parser.add_argument(
@@ -38,13 +48,7 @@ def add_start_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", action="append", type=int, default=[])
     parser.add_argument("--model")
     parser.add_argument("--reasoning-effort", choices=("low", "medium", "high", "xhigh"))
-    parser.add_argument("--pi-provider-id")
-    parser.add_argument(
-        "--pi-api",
-        choices=("openai-responses", "openai-completions", "anthropic-messages"),
-    )
-    parser.add_argument("--pi-api-key-env")
-    parser.add_argument("--pi-api-base-env")
+    add_pi_provider_arguments(parser)
     parser.add_argument("--wall-time-seconds", type=int)
     parser.add_argument("--live-search-concurrency", type=int)
     parser.add_argument("--cell-concurrency", type=int)
@@ -76,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--asset-pack", action="append", default=[])
     setup.add_argument("--method", action="append", default=[])
     setup.add_argument("--model")
+    add_pi_provider_arguments(setup)
     setup.add_argument(
         "--reasoning-effort", choices=("low", "medium", "high", "xhigh")
     )
@@ -213,6 +218,10 @@ def main(argv: list[str] | None = None) -> int:
                 or args.method
                 or args.model
                 or args.reasoning_effort
+                or args.pi_provider_id
+                or args.pi_api
+                or args.pi_api_key_env
+                or args.pi_api_base_env
             ):
                 raise ContractError(
                     "asset-pack setup does not accept benchmark, preset, method, "
@@ -232,6 +241,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             result = agent.setup(
                 targets,
+                pi_provider_id=args.pi_provider_id,
+                pi_api=args.pi_api,
+                pi_api_key_env=args.pi_api_key_env,
+                pi_api_base_env=args.pi_api_base_env,
                 profile=args.profile or (preset.profile if preset else None),
                 methods=tuple(
                     args.method

@@ -76,6 +76,10 @@ def build_command(arguments: list[str]) -> list[str]:
         str(cells_root),
     ]
     created: set[Path] = set()
+    if method == "goal-plus-pi":
+        proxy_runtime = _required_path("AIBENCH_PROXY_RUNTIME_DIR", directory=True)
+        command.extend(["--bind", str(proxy_runtime), str(proxy_runtime)])
+        command.extend(["--setenv", "XDG_RUNTIME_DIR", str(proxy_runtime)])
     if method.startswith("goal-plus-"):
         _mkdir_chain(command, created, cells_root, cell_root)
         command.extend(["--bind", str(cell_root), str(cell_root)])

@@ -44,7 +44,10 @@ def main(argv: list[str] | None = None) -> int:
     from frontier_eval.tasks.unified.evaluator.python import evaluate
     from frontier_eval.tasks.unified.spec import load_unified_task_spec
 
-    runtime: dict[str, str] = {"env_name": args.runtime_env}
+    runtime: dict[str, str] = {
+        "env_name": args.runtime_env,
+        "shell": str(Path(__file__).resolve().with_name("evaluator_shell.sh")),
+    }
     if args.runtime_python_env:
         runtime["python_path"] = f"uv-env:{args.runtime_python_env}"
     task_cfg = OmegaConf.create(

@@ -18,9 +18,19 @@ runtime's PyTorch CUDA probe before evaluating a seed. The legacy target
   `K`; missing evidence keeps the cell and campaign `partial`.
 - Plain Pi requires `K=1` and uses one outer Pi trajectory. Goal Plus + Pi
   maps `K` to internal subagents. Both Pi methods require the
-  profile model to be visible through the run-local OpenAI-compatible Pi
-  provider configured from `OPENAI_BASE_URL` and `OPENAI_API_KEY`; values are
-  inherited and never written to campaign manifests or reports.
+  profile model to be visible through the run-local Pi provider. Profile
+  `pi_provider` sets `id`, `api`, `api_base_env`, and `api_key_env`; defaults
+  remain `bench-openai`, `openai-responses`, `OPENAI_BASE_URL`, and
+  `OPENAI_API_KEY`. Doctor, Main, and worker use the same exact model.
+  Endpoint and credential values are inherited and never written to campaign
+  manifests or reports. The `energy-storage-goal-plus-pi-glm53flash-smoke`
+  profile uses Z.AI Flash with `ZAI_BASE_URL` and `ZAI_API_KEY`.
+- Goal Plus uses the common typed-command and public apply lifecycle, with
+  Git worktrees, autoresearch and no shared-dir. An external clean source
+  checkout uses `BENCH_GOAL_PLUS_SOURCE_DIR` plus
+  `BENCH_GOAL_PLUS_EXPECTED_REF`; plan records its full identity.
+- UnifiedTask uses the adapter's shell with host login profiles disabled to
+  preserve the evaluator cwd. The shell is part of the frozen evaluator hash.
 - Final source is `campaign-summary.json`; `finish` exports `report.md` and the
   campaign-named XLSX.
 - The `openevolve` method preserves the upstream Experiment 1 protocol: the

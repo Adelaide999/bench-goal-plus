@@ -20,6 +20,7 @@ from .config import (
     ROOT,
     UPSTREAM_ROOT,
     campaign_dir,
+    pi_provider_config,
     write_json,
 )
 from . import openevolve_runtime
@@ -44,6 +45,7 @@ def preserve_conflict(path: Path) -> Path | None:
 
 def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Path:
     search_scheduler = search_scheduler_from_json(profile.get("search_scheduler"))
+    pi_provider = pi_provider_config(profile)
     destination = campaign_dir(campaign_id)
     backup = preserve_conflict(destination)
     destination.mkdir(parents=True)
@@ -61,6 +63,7 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
         "seeds": profile["seeds"],
         "model": profile["model"],
         "reasoning_effort": profile["reasoning_effort"],
+        "pi_provider": pi_provider,
         **(
             {"search_scheduler": search_scheduler.as_dict()}
             if search_scheduler is not None
@@ -119,6 +122,9 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
                                 task_id=task_id,
                                 method=method,
                                 model=profile["model"],
+                                pi_provider_id=pi_provider["id"],
+                                pi_api=pi_provider["api"],
+                                pi_api_key_env=pi_provider["api_key_env"],
                                 reasoning_effort=profile["reasoning_effort"],
                                 wall_time_seconds=profile["wall_time_seconds"],
                                 concurrency=profile["concurrency"],
@@ -197,13 +203,21 @@ def execute_campaign(destination: Path) -> int:
                 if cell["method"] == "openevolve":
                     returncode = openevolve_runtime.execute_cell(Path(cell["run_dir"]))
                 else:
+                    pi_provider = pi_provider_config(campaign)
                     returncode = standalone.execute(
                         standalone.RunConfig(
                             run_dir=Path(cell["run_dir"]),
                             model=campaign["model"],
                             codex_bin="codex",
                             pi_bin="pi",
-                            api_base=os.environ.get("OPENAI_BASE_URL"),
+                            api_base=os.environ.get(
+                                pi_provider["api_base_env"]
+                                if cell["method"].endswith("-pi")
+                                else "OPENAI_BASE_URL"
+                            ),
+                            pi_provider_id=pi_provider["id"],
+                            pi_api=pi_provider["api"],
+                            pi_api_key_env=pi_provider["api_key_env"],
                         ).to_namespace()
                     )
                 manifest = json.loads(

@@ -44,6 +44,32 @@ def timestamp() -> str:
     return datetime.now().astimezone().strftime("%Y%m%d-%H%M")
 
 
+def validate_pi_provider(
+    *, runner_kind: str, methods: tuple[str, ...], model: str | None,
+    provider_id: str | None, api: str | None,
+    api_key_env: str | None, api_base_env: str | None,
+) -> None:
+    fields = {"--pi-provider-id": provider_id, "--pi-api": api,
+              "--pi-api-key-env": api_key_env, "--pi-api-base-env": api_base_env}
+    if not any(value is not None for value in fields.values()):
+        return
+    missing = [flag for flag, value in fields.items() if value is None]
+    if missing:
+        raise ContractError("explicit Pi provider selection requires " + ", ".join(missing))
+    if (runner_kind not in {"common-matrix", "openevolve-batch"}
+            or not methods or any(not method.endswith("-pi") for method in methods)):
+        raise ContractError("explicit Pi provider selection requires a common-matrix or OpenEvolve Pi method")
+    if not provider_id or "/" in provider_id:
+        raise ContractError("Pi provider id must be non-empty and cannot contain '/'")
+    if api not in {"openai-responses", "openai-completions", "anthropic-messages"}:
+        raise ContractError(f"unsupported Pi API: {api}")
+    if not model or "/" in model:
+        raise ContractError("explicit Pi provider selection requires a bare --model ID")
+    for flag, value in (("--pi-api-key-env", api_key_env), ("--pi-api-base-env", api_base_env)):
+        if not value or not value.replace("_", "A").isalnum():
+            raise ContractError(f"{flag} must name an environment variable")
+
+
 class BenchmarkAgent:
     def __init__(
         self,
@@ -134,20 +160,26 @@ class BenchmarkAgent:
         runner_definition = self.catalog.runners[next(iter(runners))]
         if runner_definition.kind == "native-profile" and len(targets) != 1:
             raise ContractError("native-profile campaigns accept exactly one benchmark")
-        if task_id is not None:
-            if runner_definition.kind != "common-matrix" or len(targets) != 1:
-                raise ContractError("--task-id requires exactly one common-matrix benchmark")
-            adapter_id = targets[0].adapter_id
-            if adapter_id is None:
-                raise ContractError(f"target {targets[0].target_id} has no task adapter")
-            loaded = load_adapter(adapter_id)
-            try:
-                loaded.configure_task(task_id)
-            except (KeyError, RuntimeError, ValueError) as error:
-                raise ContractError(str(error)) from error
-            finally:
-                loaded.configure_task(None)
         selected_profile = profile or (preset.profile if preset else None)
+        if task_id is not None:
+            if runner_definition.kind == "openevolve-batch":
+                from adapters.openevolve_examples.adapter import list_catalog_tasks
+
+                if task_id not in {item["task_id"] for item in list_catalog_tasks(selected_profile or "cpu_portable")}:
+                    raise ContractError(f"unknown task in OpenEvolve task set: {task_id}")
+            elif runner_definition.kind != "common-matrix" or len(targets) != 1:
+                raise ContractError("--task-id requires exactly one common-matrix benchmark")
+            else:
+                adapter_id = targets[0].adapter_id
+                if adapter_id is None:
+                    raise ContractError(f"target {targets[0].target_id} has no task adapter")
+                loaded = load_adapter(adapter_id)
+                try:
+                    loaded.configure_task(task_id)
+                except (KeyError, RuntimeError, ValueError) as error:
+                    raise ContractError(str(error)) from error
+                finally:
+                    loaded.configure_task(None)
         selected_methods = tuple(methods)
         selected_seeds = tuple(seeds) or (1,)
         selected_conditions = tuple(conditions)
@@ -328,44 +360,11 @@ class BenchmarkAgent:
                 f"runner {runner_definition.runner_id} does not support method(s): "
                 f"{rejected}; supported: {supported}"
             )
-        pi_provider = {
-            "--pi-provider-id": pi_provider_id,
-            "--pi-api": pi_api,
-            "--pi-api-key-env": pi_api_key_env,
-            "--pi-api-base-env": pi_api_base_env,
-        }
-        if any(value is not None for value in pi_provider.values()):
-            missing = [flag for flag, value in pi_provider.items() if value is None]
-            if missing:
-                raise ContractError(
-                    "explicit Pi provider selection requires " + ", ".join(missing)
-                )
-            if (
-                runner_definition.kind != "common-matrix"
-                or not selected_methods
-                or any(not method.endswith("-pi") for method in selected_methods)
-            ):
-                raise ContractError(
-                    "explicit Pi provider selection requires a common-matrix Pi method"
-                )
-            if not pi_provider_id or "/" in pi_provider_id:
-                raise ContractError("Pi provider id must be non-empty and cannot contain '/'")
-            if pi_api not in {
-                "openai-responses",
-                "openai-completions",
-                "anthropic-messages",
-            }:
-                raise ContractError(f"unsupported Pi API: {pi_api}")
-            if not model or "/" in model:
-                raise ContractError(
-                    "explicit Pi provider selection requires a bare --model ID"
-                )
-            for flag, value in (
-                ("--pi-api-key-env", pi_api_key_env),
-                ("--pi-api-base-env", pi_api_base_env),
-            ):
-                if not value or not value.replace("_", "A").isalnum():
-                    raise ContractError(f"{flag} must name an environment variable")
+        validate_pi_provider(
+            runner_kind=runner_definition.kind, methods=selected_methods, model=model,
+            provider_id=pi_provider_id, api=pi_api,
+            api_key_env=pi_api_key_env, api_base_env=pi_api_base_env,
+        )
         if live_search_concurrency is not None and live_search_concurrency > 1:
             unsupported_parallel_methods = [
                 method
@@ -450,6 +449,10 @@ class BenchmarkAgent:
         methods: tuple[str, ...] = (),
         model: str | None = None,
         reasoning_effort: str | None = None,
+        pi_provider_id: str | None = None,
+        pi_api: str | None = None,
+        pi_api_key_env: str | None = None,
+        pi_api_base_env: str | None = None,
         skip_bootstrap: bool,
         skip_provision: bool,
         dry_run: bool,
@@ -499,6 +502,11 @@ class BenchmarkAgent:
                     "setup method(s) are not supported by the selected runner(s): "
                     + ", ".join(sorted(unsupported))
                 )
+            validate_pi_provider(
+                runner_kind=definition.kind, methods=selected_methods, model=model,
+                provider_id=pi_provider_id, api=pi_api,
+                api_key_env=pi_api_key_env, api_base_env=pi_api_base_env,
+            )
             spec = CampaignSpec(
                 campaign_id="setup",
                 targets=tuple(members),
@@ -507,6 +515,8 @@ class BenchmarkAgent:
                 methods=selected_methods,
                 model=model,
                 reasoning_effort=reasoning_effort,
+                pi_provider_id=pi_provider_id, pi_api=pi_api,
+                pi_api_key_env=pi_api_key_env, pi_api_base_env=pi_api_base_env,
             )
             commands.extend(
                 runner.provision_commands(

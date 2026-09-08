@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "energy-storage-goal-plus-pi-glm53flash-smoke",
+  "benchmark_id": "frontier-engineering",
+  "suite": "v1-lite",
+  "accelerator_policy": "cpu-only",
+  "task_ids": ["EnergyStorage/BatteryFastChargingSPMe"],
+  "methods": ["goal-plus-pi"],
+  "model": "glm-5.3-flash",
+  "pi_provider": {
+    "id": "zai",
+    "api": "openai-completions",
+    "api_key_env": "ZAI_API_KEY",
+    "api_base_env": "ZAI_BASE_URL"
+  },
+  "reasoning_effort": "low",
+  "wall_time_seconds": 600,
+  "concurrency": 1,
+  "cell_concurrency": 1,
+  "seeds": [1],
+  "soft_closeout_seconds": 60,
+  "hard_kill_grace_seconds": 30,
+  "worker_runtime_seconds": 120,
+  "worker_min_runtime_seconds": null,
+  "doctor_seed_evaluation": true
+}

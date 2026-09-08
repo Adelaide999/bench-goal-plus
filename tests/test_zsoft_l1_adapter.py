@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,16 +20,21 @@ class AdapterContractTest(unittest.TestCase):
         self.assertIn(adapter.DIRECTION, {"minimize", "maximize"})
         self.assertTrue(adapter.PRIMARY_METRIC)
         self.assertTrue(adapter.ARTIFACT_NAME)
-        self.assertEqual(adapter.EVALUATION_MODE, "blind")
+        self.assertEqual(adapter.EVALUATION_MODE, "visible")
         self.assertEqual(adapter.PRIMARY_METRIC, "success")
-        self.assertEqual(adapter.GOAL_PLUS_PROCESS_METRIC, "format_valid")
+        self.assertEqual(adapter.GOAL_PLUS_PROCESS_METRIC, "success")
+        self.assertFalse(adapter.CONTROLLER_ONLY_OFFICIAL_EVALUATION)
+        self.assertGreaterEqual(
+            adapter.PROCESS_VERIFIER_TIMEOUT_SECONDS,
+            adapter.OFFICIAL_EVALUATOR_TIMEOUT_SECONDS + 120,
+        )
         self.assertEqual(
             adapter.UPSTREAM_SUBDIR,
             "benchmarks/vulnerability/zsoft-l1",
         )
         self.assertEqual(adapter.PI_WORKER_SANDBOX["engine"], "bubblewrap")
         self.assertEqual(
-            adapter.PI_WORKER_SANDBOX["evaluation_mode"], "blind"
+            adapter.PI_WORKER_SANDBOX["evaluation_mode"], "visible"
         )
         self.assertEqual(adapter.PI_WORKER_SANDBOX["workspace_access"], "read_only")
         self.assertEqual(
@@ -45,6 +51,16 @@ class AdapterContractTest(unittest.TestCase):
         with self.assertRaises(adapter.AdapterError):
             adapter.configure_task("no-such-task")
 
+    def test_process_timeout_follows_the_selected_official_task(self) -> None:
+        self.addCleanup(adapter.configure_task, None)
+        with mock.patch.object(adapter, "task_metadata", return_value={
+            "evaluator": {"timeout_seconds": 180},
+        }):
+            adapter.configure_task(None)
+        self.assertEqual(adapter.OFFICIAL_EVALUATOR_TIMEOUT_SECONDS, 180)
+        self.assertEqual(adapter.PROCESS_VERIFIER_TIMEOUT_SECONDS, 360)
+        self.assertEqual(adapter.VERIFIER_TIMEOUT_SECONDS, 360)
+
     def test_materialize_and_placeholder_is_publicly_well_formed(self) -> None:
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
@@ -55,19 +71,23 @@ class AdapterContractTest(unittest.TestCase):
         self.assertTrue((workspace / "TASK.md").is_file())
         self.assertTrue((workspace / "public_check.py").is_file())
         self.assertFalse((workspace / "evaluate.py").exists())
-        self.assertFalse((workspace / ".goal-plus-verifiers").exists())
+        self.assertTrue((workspace / ".goal-plus-verifiers/primary_metric.py").is_file())
         metadata = json.loads((workspace / "task.json").read_text())
         self.assertEqual(metadata["source_revision"], metadata["upstream_commit"])
         self.assertNotIn("upstream_root", metadata)
-        self.assertEqual(metadata["primary_metric"], "format_valid")
-        with mock.patch.object(adapter, "_run_cli") as judge:
+        self.assertEqual(metadata["primary_metric"], "success")
+        with mock.patch.object(adapter, "_run_cli", return_value=subprocess.CompletedProcess(
+            args=[], returncode=1,
+            stdout=json.dumps({"result": {"status": "completed", "success": False}}),
+            stderr="",
+        )) as judge:
             report = adapter.evaluate_workspace(
-                workspace, Path("/not-visible-to-public-check"), "public"
+                workspace, adapter.ZSOFT_ROOT, "public"
             )
-        judge.assert_not_called()
+        judge.assert_called_once()
         self.assertTrue(report["valid"])
-        self.assertEqual(report[adapter.GOAL_PLUS_PROCESS_METRIC], 1.0)
-        self.assertNotIn(adapter.PRIMARY_METRIC, report)
+        self.assertTrue(report["format_valid"])
+        self.assertEqual(report[adapter.GOAL_PLUS_PROCESS_METRIC], 0)
         self.assertNotIn("zsoft_result", report)
         self.assertEqual(report["budget"]["total_claimed"], 1)
 
@@ -80,7 +100,7 @@ class AdapterContractTest(unittest.TestCase):
 
     def test_git_commit_supports_shared_runtime_checkouts(self) -> None:
         self.assertRegex(
-            adapter.git_commit(adapter.ZSOFT_ROOT.parent / "muyuan"),
+            adapter.git_commit(ROOT),
             r"^[0-9a-f]{40}$",
         )
         self.assertRegex(adapter.git_commit(adapter.ZSOFT_ROOT), r"^[0-9a-f]{40}$")

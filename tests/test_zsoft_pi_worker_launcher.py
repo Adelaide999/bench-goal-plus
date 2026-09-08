@@ -6,6 +6,10 @@ import shutil
 import subprocess
 import sys
 import unittest
+import tempfile
+import time
+import uuid
+from unittest import mock
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +44,159 @@ def _context(workspace: Path) -> LaunchContext:
     )
 
 
+class CurrentGoalPlusContractTest(unittest.TestCase):
+    def test_visible_context_projects_only_bound_immutable_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            context = _context(base / "candidate")
+            proxy = WorkerToolProxy(
+                root=base / ".gp", context=context,
+                socket_dir=base / "proxy", evaluation_mode="visible",
+            )
+            result = {
+                "agent_session_id": "agent_1", "run_id": "run_1",
+                "candidate_id": "c001", "execution_generation": 2,
+                "candidate_task": {"workspace": str(context.workspace)},
+                "private_metadata": "must not be projected",
+            }
+            request = {"tool": "search_get_agent_context", "args": {
+                "agent_session_id": "agent_1",
+            }}
+            destination = proxy.socket_dir / "runtime/runs/run_1/candidates/c001/candidate.json"
+            with mock.patch(
+                "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
+                return_value=result,
+            ):
+                self.assertTrue(proxy.dispatch(request)["ok"])
+                self.assertTrue(proxy.dispatch(request)["ok"])
+            self.assertEqual(json.loads(destination.read_text()), {"execution_generation": 2})
+            for mismatch in (
+                {"agent_session_id": "foreign"}, {"run_id": "foreign"},
+                {"candidate_id": "foreign"}, {"execution_generation": 3},
+                {"execution_generation": True},
+                {"candidate_task": {"workspace": "/foreign"}},
+            ):
+                with self.subTest(mismatch=mismatch), mock.patch(
+                    "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
+                    return_value={**result, **mismatch},
+                ):
+                    self.assertFalse(proxy.dispatch(request)["ok"])
+                self.assertEqual(json.loads(destination.read_text()), {"execution_generation": 2})
+
+    def test_host_callback_transfers_only_a_bound_single_use_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            proxy = WorkerToolProxy(
+                root=base / ".gp", context=_context(base / "candidate"),
+                socket_dir=base / "proxy", evaluation_mode="blind",
+            )
+            token = str(uuid.uuid4())
+            source = proxy.socket_dir / "runtime/host-entrypoint/pi" / f"{token}.json"
+            source.parent.mkdir(parents=True)
+            source.write_text(json.dumps({"token": token, "issued_at_ms": time.time() * 1000}))
+            request = {
+                "host_entrypoint": True, "host_capability": token,
+                "tool": "goal_plus_host_kick_internal_agents",
+                "args": {"run_id": "run_1", "owner_pid": 123},
+            }
+            with mock.patch(
+                "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
+                return_value={"ok": True},
+            ) as host:
+                self.assertEqual(proxy.dispatch(request), {"ok": True, "result": {
+                    "ok": True, "run_id": "run_1",
+                }})
+                self.assertFalse(proxy.dispatch(request)["ok"])
+                self.assertEqual(host.call_count, 1)
+                self.assertEqual(host.call_args.args[2], {"run_id": "run_1"})
+                self.assertEqual(host.call_args.kwargs["host_capability"], token)
+            self.assertFalse(source.exists())
+            self.assertFalse((proxy.root / "host-entrypoint/pi" / f"{token}.json").exists())
+            for invalid in (
+                {"tool": "goal_plus_host_start"},
+                {"args": {"run_id": "foreign"}},
+                {"args": {"run_id": "run_1", "goal_plus_id": "foreign"}},
+            ):
+                with self.subTest(invalid=invalid), self.assertRaises(PermissionError):
+                    proxy.dispatch({**request, **invalid})
+
+    def test_sandbox_uses_the_bound_worker_identity(self) -> None:
+        from experiments.benchmark_compare.pi_worker_launcher import _sandbox_environment
+
+        environment = _sandbox_environment(
+            {"GOAL_PLUS_AGENT_SESSION_ID": "foreign", "GOAL_PLUS_PI_ROLE": "main"},
+            policy=_policy(), pi_runtime=Path("/usr/bin/pi"),
+            socket_path=Path("/proxy/tool.sock"), agent_session_id="agent_1",
+            runtime_root=Path("/proxy/runtime"),
+            private_git_admin=None,
+        )
+        self.assertEqual(environment["GOAL_PLUS_AGENT_SESSION_ID"], "agent_1")
+        self.assertEqual(environment["GOAL_PLUS_PI_ROLE"], "worker")
+        self.assertEqual(environment["GOAL_PLUS_ROOT"], "/proxy/runtime")
+
+    def test_current_public_models_are_reduced_to_opaque_receipts(self) -> None:
+        from goal_plus.models import IterationRecord, ScoreReport
+
+        workspace = Path("/candidate")
+        proxy = WorkerToolProxy(
+            root=Path("/runtime"), context=_context(workspace),
+            socket_dir=Path("/proxy"), evaluation_mode="blind",
+        )
+        report = ScoreReport(
+            run_id="run_1", candidate_id="c001", validity_passed=True,
+            process_passed=True, aggregate_score=1.0, verifier_results=[],
+            attempt_id="attempt_1", attempt_iteration=1,
+        ).model_dump(mode="json")
+        iteration = IterationRecord(
+            iteration=1, agent_session_id="agent_1", score=1.0,
+            process_passed=True, git_head="a" * 40, disposition="keep",
+            created_at="2026-09-08T00:00:00Z",
+        ).model_dump(mode="json")
+        with mock.patch(
+            "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
+            side_effect=[report, [iteration]],
+        ) as host:
+            result = proxy.dispatch({"tool": "search_run_verifier", "args": {
+                "run_id": "run_1", "candidate_id": "c001",
+                "agent_session_id": "agent_1", "hypothesis": "public check",
+            }})
+            self.assertEqual(result, {"ok": True, "result": {
+                "run_id": "run_1", "candidate_id": "c001", "recorded": True,
+            }})
+            result = proxy.dispatch({"tool": "search_list_iterations", "args": {
+                "agent_session_id": "agent_1",
+            }})
+        self.assertEqual(result, {"ok": True, "result": [
+            {"iteration": 1, "recorded": True},
+        ]})
+        self.assertEqual(host.call_args.args[2], {"agent_session_id": "agent_1"})
+        self.assertEqual(host.call_args.args[3]["GOAL_PLUS_PI_ROLE"], "worker")
+
+    def test_current_global_evidence_does_not_expose_artifact_handles(self) -> None:
+        proxy = WorkerToolProxy(
+            root=Path("/runtime"), context=_context(Path("/candidate")),
+            socket_dir=Path("/proxy"), evaluation_mode="blind",
+        )
+        entry = {
+            "candidate_id": "c001", "iteration": 1, "commit": "a" * 40,
+            "artifact_ref": {"id": "private-artifact-handle"},
+            "reference_available": True, "artifact_availability": "available",
+            "annotation_result_available": False, "score": 1.0,
+            "disposition": "keep", "view": None, "view_created_at": None,
+            "shared_tools": [],
+        }
+        with mock.patch(
+            "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
+            return_value=[entry],
+        ):
+            result = proxy.dispatch({"tool": "search_get_global_evidence", "args": {
+                "agent_session_id": "agent_1",
+            }})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"][0]["score"], 1.0)
+        self.assertNotIn("private-artifact-handle", json.dumps(result))
+
+
 def _policy(
     *paths: str,
     writable: tuple[str, ...] = (),
@@ -64,7 +221,7 @@ def _worker_command(
     session_id: str = "session_1",
 ) -> list[str]:
     return [
-        sys.executable,
+        shutil.which("python3", path="/usr/bin:/bin") or sys.executable,
         "-c",
         script,
         "--session-dir",
@@ -256,6 +413,13 @@ def test_bench_pi_shim_derives_a_trusted_worker_context(tmp_path: Path) -> None:
         "GOAL_PLUS_PI_ROLE": "worker",
         "GOAL_PLUS_ROOT": str(root),
         REAL_PI_BIN_ENV: str(Path(sys.executable).resolve()),
+        SANDBOX_POLICY_ENV: json.dumps({
+            "engine": "bubblewrap",
+            "workspace_access": "read_only",
+            "read_only_workspace_paths": [],
+            "writable_workspace_paths": [],
+            "evaluation_mode": "blind",
+        }),
     }
     command = [
         "--model",
@@ -274,7 +438,7 @@ def test_bench_pi_shim_derives_a_trusted_worker_context(tmp_path: Path) -> None:
     assert wrapped[:1] == [str(Path(sys.executable).resolve())]
     assert wrapped[1 : 1 + len(command)] == command
     assert wrapped[-2] == "--append-system-prompt"
-    assert "official metric are unavailable" in wrapped[-1]
+    assert "official metric" in wrapped[-1]
     assert "GOAL_PLUS_PI_WORKER_LAUNCHER" not in environment
 
 
@@ -417,16 +581,23 @@ def test_host_tool_proxy_enforces_worker_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[Path, str, dict[str, Any]]] = []
+    context_response = {
+        "agent_session_id": "agent_1", "run_id": "run_1", "candidate_id": "c001",
+        "execution_generation": 0, "candidate_task": {"workspace": str(tmp_path)},
+    }
 
-    def fake_call(root: Path, tool: str, args: dict[str, Any]) -> dict[str, Any]:
+    def fake_call(root: Path, tool: str, args: dict[str, Any], environment: dict[str, str]) -> dict[str, Any]:
+        assert environment["GOAL_PLUS_PI_ROLE"] == "worker"
+        assert environment["GOAL_PLUS_AGENT_SESSION_ID"] == "agent_1"
         calls.append((root, tool, args))
-        return {"workspace": "/candidate"}
+        return context_response
 
-    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", fake_call)
+    monkeypatch.setattr("experiments.benchmark_compare.pi_worker_launcher._run_host_tool", fake_call)
     proxy = WorkerToolProxy(
         root=tmp_path / ".gp",
         context=_context(tmp_path),
         socket_dir=tmp_path / "proxy",
+        evaluation_mode="visible",
     )
 
     response = proxy.dispatch(
@@ -435,7 +606,7 @@ def test_host_tool_proxy_enforces_worker_identity(
             "args": {"agent_session_id": "agent_1"},
         }
     )
-    assert response == {"ok": True, "result": {"workspace": "/candidate"}}
+    assert response == {"ok": True, "result": context_response}
     assert calls[0][1] == "search_get_agent_context"
 
     with pytest.raises(PermissionError, match="bound agent_session_id"):
@@ -445,11 +616,11 @@ def test_host_tool_proxy_enforces_worker_identity(
                 "args": {"agent_session_id": "agent_other"},
             }
         )
-    with pytest.raises(PermissionError, match="different candidate_id"):
+    with pytest.raises(PermissionError, match="accepts only the bound agent_session_id"):
         proxy.dispatch(
             {
                 "tool": "search_list_iterations",
-                "args": {"run_id": "run_1", "candidate_id": "c002"},
+                "args": {"agent_session_id": "agent_1", "candidate_id": "c002"},
             }
         )
     with pytest.raises(PermissionError, match="does not allow"):
@@ -474,19 +645,20 @@ def test_blind_tool_proxy_exposes_only_frozen_context_and_receipt_contracts(
         "agent_session_id": "agent_1",
         "run_id": "run_1",
         "candidate_id": "c001",
-        "workspace": str(tmp_path),
-        "evaluation_mode": "blind",
+        "execution_generation": 0,
+        "inner_agent": "autoresearch",
+        "result_ledger_source": "gp",
+        "workspace_ledger_projection": None,
         "metric_name": "format_valid",
         "metric_direction": "maximize",
         "candidate_task": {
-            "run_id": "run_1",
-            "candidate_id": "c001",
             "workspace": str(tmp_path),
             "hypothesis": "independent audit",
             "allowed_files": ["submission"],
             "denied_files": ["task.json"],
             "instructions": ["Commit the artifact."],
-            "expected_artifacts": ["submission"],
+            "acceptance": ["private acceptance"],
+            "process_environment": {"PRIVATE_FIXTURE": "private environment"},
         },
         "latest_result": {"score": 1.0, "process_passed": True},
         "recent_iterations": [{"summary": "private annotation"}],
@@ -495,7 +667,7 @@ def test_blind_tool_proxy_exposes_only_frozen_context_and_receipt_contracts(
         "resume": {"latest_handoff": {"summary": "private handoff"}},
     }
     monkeypatch.setattr(
-        "goal_plus.pi_tool.call_pi_tool", lambda *_args: context_result
+        "experiments.benchmark_compare.pi_worker_launcher._run_host_tool", lambda *_args: context_result
     )
     response = proxy.dispatch(context_request)
     assert response["ok"] is True
@@ -507,12 +679,9 @@ def test_blind_tool_proxy_exposes_only_frozen_context_and_receipt_contracts(
         "metric_name": "format_valid",
         "metric_direction": "maximize",
         "candidate_task": {
-            "run_id": "run_1",
-            "candidate_id": "c001",
             "workspace": str(tmp_path),
             "allowed_files": ["submission"],
             "denied_files": ["task.json"],
-            "expected_artifacts": ["submission"],
         },
     }
     serialized = json.dumps(response)
@@ -549,30 +718,31 @@ def test_blind_tool_proxy_exposes_only_frozen_context_and_receipt_contracts(
             _root: Path,
             _tool: str,
             _args: dict[str, Any],
+            _environment: dict[str, str],
             *,
             response_key: str = key,
             response_value: str = sentinel,
         ) -> dict[str, Any]:
             return {**context_result, response_key: response_value}
 
-        monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", forbidden_result)
+        monkeypatch.setattr("experiments.benchmark_compare.pi_worker_launcher._run_host_tool", forbidden_result)
         response = proxy.dispatch(context_request)
         assert response == {
             "ok": False,
-            "error": "blind worker tool response is unavailable",
+            "error": "worker tool response is unavailable",
         }
         assert sentinel not in json.dumps(response)
 
     def raises_raw_error(
-        _root: Path, _tool: str, _args: dict[str, Any]
+        _root: Path, _tool: str, _args: dict[str, Any], _environment: dict[str, str]
     ) -> dict[str, Any]:
         raise RuntimeError("secret-host-exception")
 
-    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", raises_raw_error)
+    monkeypatch.setattr("experiments.benchmark_compare.pi_worker_launcher._run_host_tool", raises_raw_error)
     response = proxy.dispatch(context_request)
     assert response == {
         "ok": False,
-        "error": "blind worker tool response is unavailable",
+        "error": "worker tool response is unavailable",
     }
     assert "secret-host-exception" not in json.dumps(response)
 
@@ -598,7 +768,7 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
         },
     }
     monkeypatch.setattr(
-        "goal_plus.pi_tool.call_pi_tool",
+        "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
         lambda *_args: {
             "run_id": "run_1",
             "candidate_id": "c001",
@@ -623,7 +793,7 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
     assert "passed" not in json.dumps(verified)
     assert "score" not in json.dumps(verified)
     monkeypatch.setattr(
-        "goal_plus.pi_tool.call_pi_tool",
+        "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
         lambda *_args: {
             "run_id": "run_1",
             "candidate_id": "c001",
@@ -635,12 +805,12 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
     )
     assert proxy.dispatch(verifier_request) == {
         "ok": False,
-        "error": "blind worker tool response is unavailable",
+        "error": "worker tool response is unavailable",
     }
 
     legacy_private_marker = "legacy-private-score-and-summary"
     monkeypatch.setattr(
-        "goal_plus.pi_tool.call_pi_tool",
+        "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
         lambda *_args: {
             "run_id": "run_1",
             "candidate_id": "c001",
@@ -672,25 +842,23 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
         raise RuntimeError("private-verifier-exception")
 
     monkeypatch.setattr(
-        "goal_plus.pi_tool.call_pi_tool", raises_private_verifier_error
+        "experiments.benchmark_compare.pi_worker_launcher._run_host_tool", raises_private_verifier_error
     )
     verifier_error = proxy.dispatch(verifier_request)
     assert verifier_error == {
         "ok": False,
-        "error": "blind worker tool response is unavailable",
+        "error": "worker tool response is unavailable",
     }
     assert "private-verifier-exception" not in json.dumps(verifier_error)
 
     iteration_request = {
         "tool": "search_list_iterations",
         "args": {
-            "run_id": "run_1",
-            "candidate_id": "c001",
             "agent_session_id": "agent_1",
         },
     }
     monkeypatch.setattr(
-        "goal_plus.pi_tool.call_pi_tool",
+        "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
         lambda *_args: [
             {
                 "run_id": "run_1",
@@ -719,7 +887,7 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
     assert "summary" not in json.dumps(iterations)
 
     monkeypatch.setattr(
-        "goal_plus.pi_tool.call_pi_tool",
+        "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
         lambda *_args: [
             {
                 "run_id": "run_1",
@@ -733,12 +901,12 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
     )
     assert proxy.dispatch(iteration_request) == {
         "ok": False,
-        "error": "blind worker tool response is unavailable",
+        "error": "worker tool response is unavailable",
     }
 
     legacy_iteration_marker = "legacy-private-iteration"
     monkeypatch.setattr(
-        "goal_plus.pi_tool.call_pi_tool",
+        "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
         lambda *_args: [
             {
                 "iteration": 2,
@@ -761,8 +929,6 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
     wrong_session_request = {
         "tool": "search_list_iterations",
         "args": {
-            "run_id": "run_1",
-            "candidate_id": "c001",
             "agent_session_id": "agent_other",
         },
     }
@@ -780,14 +946,15 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
         called = True
         return {}
 
-    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", must_not_call)
+    monkeypatch.setattr("experiments.benchmark_compare.pi_worker_launcher._run_host_tool", must_not_call)
     assert proxy.dispatch(evidence_request) == {
         "ok": False,
-        "error": "blind worker tool response is unavailable",
+        "error": "worker tool response is unavailable",
     }
-    assert called is False
+    assert called is True
+    called = False
 
-    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", must_not_call)
+    monkeypatch.setattr("experiments.benchmark_compare.pi_worker_launcher._run_host_tool", must_not_call)
     blocked = proxy.dispatch(
         {
             "tool": "search_get_evidence_detail",
@@ -800,15 +967,17 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
     )
     assert blocked == {
         "ok": False,
-        "error": "blind worker tool response is unavailable",
+        "error": "worker tool response is unavailable",
     }
     assert called is False
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Bubblewrap is Linux-only")
+@pytest.mark.parametrize("evaluation_mode", ["blind", "visible"])
 def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    evaluation_mode: str,
 ) -> None:
     if not shutil.which("bwrap"):
         pytest.skip("bwrap is unavailable")
@@ -834,24 +1003,22 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
     (pi_home / "auth.json").write_text("{}\n", encoding="utf-8")
     (pi_home / "models-store.json").write_text("{}\n", encoding="utf-8")
 
-    def fake_call(_root: Path, tool: str, args: dict[str, Any]) -> dict[str, Any]:
+    def fake_call(_root: Path, tool: str, args: dict[str, Any], _environment: dict[str, str]) -> dict[str, Any]:
         assert tool == "search_get_agent_context"
         assert args == {"agent_session_id": "agent_1"}
         return {
             "agent_session_id": "agent_1",
             "run_id": "run_1",
             "candidate_id": "c001",
-            "workspace": str(workspace),
+            "execution_generation": 0,
             "metric_name": "format_valid",
             "metric_direction": "maximize",
             "candidate_task": {
-                "run_id": "run_1",
-                "candidate_id": "c001",
                 "workspace": str(workspace),
             },
         }
 
-    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", fake_call)
+    monkeypatch.setattr("experiments.benchmark_compare.pi_worker_launcher._run_host_tool", fake_call)
     script = "\n".join(
         (
             "import json, os, pathlib, subprocess, sys",
@@ -859,7 +1026,7 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             f"assert not pathlib.Path({str(runtime_secret)!r}).exists()",
             "assert os.environ['TEST_ALLOWED'] == 'yes'",
             "assert 'TEST_HIDDEN' not in os.environ",
-            "assert 'GOAL_PLUS_ROOT' not in os.environ",
+            "assert pathlib.Path(os.environ['GOAL_PLUS_ROOT']).is_relative_to(pathlib.Path(os.environ['BENCH_GOAL_PLUS_PI_TOOL_SOCKET']).parent)",
             "assert 'GOAL_PLUS_SOURCE_PATH' not in os.environ",
             f"assert pathlib.Path(os.environ[{TOOL_SOCKET_ENV!r}]).exists()",
             "pi_home = pathlib.Path(os.environ['PI_CODING_AGENT_DIR'])",
@@ -898,6 +1065,14 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             "], capture_output=True, text=True)",
             "assert allowed.returncode == 0, allowed.stderr",
             "assert json.loads(allowed.stdout)['candidate_id'] == 'c001'",
+            "generation = pathlib.Path(os.environ['GOAL_PLUS_ROOT']) / 'runs/run_1/candidates/c001/candidate.json'",
+            f"if {evaluation_mode!r} == 'visible':",
+            " assert json.loads(generation.read_text()) == {'execution_generation': 0}",
+            " try:",
+            "  generation.write_text('{}')",
+            "  raise AssertionError('generation projection was writable')",
+            " except OSError:",
+            "  pass",
             "denied = subprocess.run([",
             " 'goal-plus-pi-tool', '--root', '.gp', '--args-json',",
             " json.dumps({'run_id': 'run_1'}), 'search_select'",
@@ -919,7 +1094,7 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             "source",
             writable=("submission",),
             pass_env=("TEST_ALLOWED",),
-            evaluation_mode="blind",
+            evaluation_mode=evaluation_mode,
         ),
         command=_worker_command(
             script,

@@ -203,11 +203,12 @@ def collect_run(
         value
         for evaluation in seeds
         if isinstance(evaluation, dict)
+        if isinstance(evaluation.get("primary_metric"), dict)
+        and evaluation["primary_metric"].get("name") == metric_name
+        and evaluation["primary_metric"].get("direction") == direction
         for value in [
             numeric(
-                (evaluation.get("primary_metric") or {}).get("value")
-                if isinstance(evaluation.get("primary_metric"), dict)
-                else None
+                evaluation["primary_metric"].get("value")
             )
         ]
         if value is not None

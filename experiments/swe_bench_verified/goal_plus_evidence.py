@@ -584,6 +584,7 @@ def collect_goal_plus_state(
     expected_supplemental_evaluation_enabled: bool = False,
     expected_evidence_annotator_enabled: bool = False,
     expected_worker_host: str = "pi-rpc",
+    expected_worker_model: str | None = None,
     expected_search_scheduler: GoalPlusSearchScheduler | None = None,
 ) -> dict[str, Any]:
     goal_records = []
@@ -783,6 +784,10 @@ def collect_goal_plus_state(
                 "initial_candidate_ids": initial_candidate_ids,
                 "agent_session_count": len(sessions),
                 "bound_session_count": len(bound_sessions),
+                "bound_worker_models": [
+                    (session.get("selected_model") or {}).get("model")
+                    for session in bound_sessions
+                ],
                 "bound_candidate_ids": sorted(bound_counts),
                 "bound_session_counts_by_candidate": dict(sorted(bound_counts.items())),
                 "bound_session_verifier_runs": [
@@ -1260,11 +1265,20 @@ def collect_goal_plus_state(
                 )
             ),
         ),
+        "worker_model": _check(
+            expected_worker_model,
+            selected_run.get("bound_worker_models") if selected_run else None,
+            expected_worker_model is None or bool(
+                selected_run
+                and selected_run.get("bound_worker_models")
+                and all(model == expected_worker_model for model in selected_run["bound_worker_models"])
+            ),
+        ),
         "closeout_reserve": _check(
             expected_closeout_reserve_seconds,
             (
                 selected_run.get("strategy_config", {}).get(
-                    "closeout_reserve_seconds"
+                    "reserve_closeout_seconds"
                 )
                 if selected_run
                 else None
@@ -1272,7 +1286,7 @@ def collect_goal_plus_state(
             bool(
                 selected_run
                 and selected_run.get("strategy_config", {}).get(
-                    "closeout_reserve_seconds"
+                    "reserve_closeout_seconds"
                 )
                 == expected_closeout_reserve_seconds
             ),

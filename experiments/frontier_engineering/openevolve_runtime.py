@@ -108,6 +108,7 @@ def build_command(
         "frontier_eval",
         "task=unified",
         f"task.benchmark={task_id}",
+        f"task.runtime.shell={Path(__file__).resolve().with_name('evaluator_shell.sh')}",
         "algorithm=openevolve",
         f"algorithm.iterations={contract['iterations']}",
         "algorithm.checkpoint_interval=25",

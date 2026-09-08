@@ -16,7 +16,7 @@ from bench_goal_plus.upstreams import registered_upstream_source_path
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_DIR = Path(__file__).resolve().parent / "profiles"
 RUNS_ROOT = ROOT / "runs" / "swe-bench-verified"
-SWEBENCH_ROOT = ROOT / "third_party" / "swebench"
+SWEBENCH_ROOT = registered_upstream_source_path("swebench", repository_root=ROOT)
 GOAL_PLUS_ROOT = registered_upstream_source_path(
     "goal_plus",
     repository_root=ROOT,
@@ -120,6 +120,14 @@ def load_profile(profile_id: str) -> tuple[Path, dict[str, Any]]:
 
 
 def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
+    architecture = profile.get("architecture", "x86_64")
+    if architecture not in {"x86_64", "arm64"}:
+        raise SweBenchContractError("unsupported SWE-bench architecture")
+    if architecture == "arm64" and (
+        any(method not in {"plain-pi", "goal-plus-pi"} for method in profile.get("methods", []))
+        or isinstance((profile.get("goal_plus") or {}).get("evidence_annotator"), dict)
+    ):
+        raise SweBenchContractError("ARM64 currently requires Pi without the Codex annotator runtime")
     if profile.get("schema_version") != 1:
         raise SweBenchContractError(f"{profile_id}: schema_version must be 1")
     if profile.get("id") != profile_id:

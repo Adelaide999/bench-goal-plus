@@ -12,8 +12,8 @@ from bench_goal_plus.search_scheduler import (
     search_scheduler_from_namespace,
 )
 
-from .config import SUPPORTED_METHODS, campaign_dir, load_profile, resolve_profile
-from .environment import doctor, provision
+from .config import SUPPORTED_METHODS, campaign_dir, load_profile, pi_provider_config, resolve_profile
+from .environment import doctor, provision, runtime_source
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -23,11 +23,17 @@ def build_parser() -> argparse.ArgumentParser:
     provision_parser = children.add_parser("provision")
     provision_parser.add_argument("--profile", required=True)
 
+    source_parser = children.add_parser("runtime-source")
+    source_parser.add_argument("--profile", required=True)
+    source_parser.add_argument("--method", action="append", choices=sorted(SUPPORTED_METHODS))
+    add_internal_search_scheduler_argument(source_parser)
+
     doctor_parser = children.add_parser("doctor")
     doctor_parser.add_argument("--profile", required=True)
     doctor_parser.add_argument("--output", type=Path)
     doctor_parser.add_argument("--method", action="append", choices=sorted(SUPPORTED_METHODS))
     doctor_parser.add_argument("--model")
+    doctor_parser.add_argument("--reasoning-effort")
     doctor_parser.add_argument("--local-assets-only", action="store_true")
     doctor_parser.add_argument("--allow-missing-local-assets", action="store_true")
 
@@ -64,6 +70,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     configure_temp_environment()
     args = build_parser().parse_args(argv)
+    if args.command == "runtime-source":
+        _, profile = load_profile(args.profile)
+        resolved = resolve_profile(profile, methods=args.method)
+        print(json.dumps({
+            "schema_version": 1,
+            "runtime_sources": {"goal_plus": runtime_source()},
+            "runtime_configuration": {"pi_provider": pi_provider_config(resolved)},
+        }))
+        return 0
     if args.command in {"provision", "doctor", "prepare"}:
         profile_path, profile = load_profile(args.profile)
         if args.command == "provision":
@@ -74,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             methods=args.method,
             seeds=(args.seeds if args.command == "prepare" else None),
             model=args.model,
-            reasoning_effort=(args.reasoning_effort if args.command == "prepare" else None),
+            reasoning_effort=args.reasoning_effort,
             wall_time_seconds=(args.wall_time_seconds if args.command == "prepare" else None),
             concurrency=(args.concurrency if args.command == "prepare" else None),
             cell_concurrency=(args.cell_concurrency if args.command == "prepare" else None),
@@ -87,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
                 allow_missing_local_assets=args.allow_missing_local_assets,
             )
         if args.retain_containers:
-            parser.error("frontier-engineering does not own retainable containers")
+            raise ValueError("frontier-engineering does not own retainable containers")
         search_scheduler = search_scheduler_from_namespace(args)
         if search_scheduler is not None:
             search_scheduler.validate_max_candidates(resolved["concurrency"])

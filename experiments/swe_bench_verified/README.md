@@ -29,7 +29,9 @@ file containing the issue statement and public repository identity; gold patches
 lists are excluded.
 
 The Agent works in a fresh container created from the exact task image. Its only output is a binary,
-full-index Git diff. By default the controller confirms removal of that container before invoking the
+full-index Git diff. Goal Plus exports exclude the runner-managed `.gp`, `.codex`,
+and `.goal-plus-verifiers` paths even when they were committed for freezing.
+By default the controller confirms removal of that container before invoking the
 official harness in a separate evaluation container. With unified `--retain-containers` debug mode,
 it instead confirms the Agent container is stopped, records its name/ID, and leaves it available for
 inspection. An evaluator attempt is persisted before the harness starts, so the same campaign cannot
@@ -128,6 +130,62 @@ container as well, add `--retain-containers` to both `plan` and `launch`; the re
 status, and final report record the retained Agent container. The official harness still cleans its
 separate evaluation container and preserves its logs. `finish` does not clean up the retained Agent
 container.
+
+## ARM64 Pi smoke
+
+The `sympy-16886-goal-plus-pi-arm64-smoke` profile selects the official
+`swebench/sweb.eval.arm64.sympy_1776_sympy-16886:latest` image for the same frozen
+instance and dataset. It uses `zai/glm-5.3-flash`, low reasoning, and
+`T=900,K=1,C=1,R=1`, without Annotation or a shared directory. ARM currently
+supports Pi methods without the Codex-backed annotator; it does not imply Codex
+or split-wide ARM support.
+The [recorded ARM acceptance](../../evidence/runs/2026-09-08-swe-arm-pi-glm53flash.md)
+completed the Goal Plus lifecycle with one exact Flash worker and official
+`resolved=true`; the record also preserves the two preceding partial attempts.
+
+This dataset uses the official SWE-bench v4 evaluator contract. The current
+managed upstream main has moved to v5, which requires different dataset fields.
+Select a clean official v4.1.0 checkout with `BENCH_SWEBENCH_SOURCE_DIR` and
+`BENCH_SWEBENCH_EXPECTED_REF=v4.1.0`; setup validates the ref and installs that
+checkout. Keep both variables set through plan and launch. The manifest records
+the full revision and launch rejects source drift. This leaves managed main
+unchanged. A Goal Plus development checkout can similarly be selected with
+`BENCH_GOAL_PLUS_SOURCE_DIR` and `BENCH_GOAL_PLUS_EXPECTED_REF`.
+
+The ARM image's Python 3.9 remains the task interpreter. The runner mounts the
+bench environment's portable native Python distribution read-only and creates a
+separate writable Goal Plus venv, installs the runtime lock, then runs the
+source `install.sh --pi`. `GOAL_PLUS_PYTHON` routes Pi tools and controller
+closeout to that interpreter. A system Python installation that depends on
+unmounted host libraries is not a substitute for this portable distribution;
+doctor validates the actual container installation. Native Z.AI model metadata
+is projected from the exact host Pi catalog entry, without credentials.
+Both doctor and the real trajectory use this projection. Completion checks the
+bound worker's persisted selected model against the profile, so substituting
+`glm-5.3` for `glm-5.3-flash` cannot pass as the requested configuration.
+Pi startup explicitly activates the image's `testbed` Conda environment:
+its isolated HOME does not read the image's `/root/.bashrc`. This makes existing
+task dependencies available to Main and inherited worker processes without
+installing packages into the task environment.
+
+Run profiled `check` and `setup --skip-provision` first. Use the following
+selection for both `plan` and `launch` (the profile is not a registry preset):
+
+```bash
+python3 scripts/bench.py plan \
+  --benchmark swe-bench-verified \
+  --profile sympy-16886-goal-plus-pi-arm64-smoke \
+  --method goal-plus-pi --model zai/glm-5.3-flash --reasoning-effort low \
+  --wall-time-seconds 900 --live-search-concurrency 1 --cell-concurrency 1 \
+  --campaign-id <new-id>
+```
+
+For launch, replace `plan` with `launch` and add
+`--skip-bootstrap --skip-provision --foreground`. Archive with public `status`
+and `finish`. The internal ARM evaluator adapter passes `arch=arm64` to official
+`make_test_spec` and calls official `run_instance` once, because the v4 CLI
+otherwise constructs an x86 spec. It requires the exact local image, disables
+rebuild and image removal, and retains the official per-instance report path.
 
 ## Mirrors
 

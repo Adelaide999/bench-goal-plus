@@ -92,6 +92,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             )
             manifest = {
                 "method": "plain-pi",
+                "task": {"controller_only_official_evaluation": False},
                 "reasoning_effort": "medium",
                 "workspaces": [str(workspace)],
                 "budget": {
@@ -236,6 +237,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                 )
                 manifest = {
                     "workspace": str(workspace),
+                    "task": {"controller_only_official_evaluation": False},
                     "reasoning_effort": "medium",
                     "environment": {"runtime_bin": str(root / "bin")},
                     "budget": {
@@ -251,7 +253,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                     api_base="http://proxy.example/v1",
                     codex_bin="codex",
                 )
-                seed = {"budget": {"total_claimed": 1}}
+                seed = {"valid": True, "budget": {"total_claimed": 1}}
                 final = {"valid": True, "budget": {"total_claimed": 1}}
                 annotator_usage = {
                     "input_tokens": 9,

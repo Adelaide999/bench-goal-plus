@@ -39,6 +39,7 @@ from experiments.frontier_engineering.config import (  # noqa: E402
 
 CONTROLLER_PATH = Path(__file__).resolve()
 BRIDGE_PATH = Path(__file__).resolve().with_name("evaluator_bridge.py")
+SHELL_PATH = Path(__file__).resolve().with_name("evaluator_shell.sh")
 UPSTREAM_KEY = "frontier_engineering"
 BENCHMARK_NAME = "Frontier-Engineering v1-lite"
 PRIMARY_METRIC = "combined_score"
@@ -160,7 +161,7 @@ def materialize_workspace(upstream_root: Path, workspace: Path) -> dict[str, Any
     ]
     official_evaluator = upstream_root / "frontier_eval/tasks/unified/evaluator/python.py"
     official_spec = upstream_root / "frontier_eval/tasks/unified/spec.py"
-    for path in (seed, official_evaluator, official_spec, BRIDGE_PATH, *metadata_paths):
+    for path in (seed, official_evaluator, official_spec, BRIDGE_PATH, SHELL_PATH, *metadata_paths):
         if not path.is_file():
             raise FileNotFoundError(path)
     if seed.name != task.artifact_name:
@@ -192,7 +193,7 @@ def materialize_workspace(upstream_root: Path, workspace: Path) -> dict[str, Any
         encoding="utf-8",
     )
     evaluator_hash = combined_sha256(
-        [official_evaluator, official_spec, BRIDGE_PATH, *metadata_paths]
+        [official_evaluator, official_spec, BRIDGE_PATH, SHELL_PATH, *metadata_paths]
     )
     metadata = {
         "schema_version": 1,
@@ -249,6 +250,7 @@ def evaluate_workspace(workspace: Path, upstream_root: Path, mode: str) -> dict[
             upstream_root / "frontier_eval/tasks/unified/evaluator/python.py",
             upstream_root / "frontier_eval/tasks/unified/spec.py",
             BRIDGE_PATH,
+            SHELL_PATH,
             *[
                 task_dir / "frontier_eval" / name
                 for name in (

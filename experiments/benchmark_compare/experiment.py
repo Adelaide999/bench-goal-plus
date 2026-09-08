@@ -27,6 +27,8 @@ sys.path.insert(0, str(ROOT))
 from bench_artifacts import read_json as load_json  # noqa: E402
 from bench_artifacts import utc_now, write_json, write_json_atomic  # noqa: E402
 from bench_goal_plus.upstreams import (  # noqa: E402
+    external_goal_plus_source,
+    require_prepared_goal_plus_source,
     upstream_checkout_path,
     upstream_source_path,
 )
@@ -625,6 +627,8 @@ def prepare(args: argparse.Namespace) -> int:
         source_kind = "local_example"
 
     for name, path in managed_checkouts:
+        if name == "goal_plus" and external_goal_plus_source():
+            continue
         if not (path / ".git").exists():
             raise FileNotFoundError(
                 f"managed {name} checkout is missing: {path}; run repro_env.py bootstrap"
@@ -746,7 +750,7 @@ def prepare(args: argparse.Namespace) -> int:
                 workspace_backend="git_worktree",
                 promotion_mode=(
                     "artifact_only"
-                    if CONTROLLER_ONLY_OFFICIAL_EVALUATION
+                    if EVALUATION_MODE == "blind"
                     else "apply"
                 ),
             ),
@@ -926,6 +930,7 @@ def prepare(args: argparse.Namespace) -> int:
             "goal_plus_root": str(goal_plus_root),
             "goal_plus_branch": checkout_branch(goal_plus_root),
             "goal_plus_commit": git_commit(goal_plus_root),
+            "goal_plus_source": external_goal_plus_source(),
             "goal_plus_tracking_branch": upstreams["goal_plus"]["tracking_branch"],
             "runtime_bin": str(runtime_bin(args.venv.expanduser().absolute())),
             **(
@@ -1223,10 +1228,13 @@ def _publicly_compliant_iteration(iteration: Any) -> bool:
         and type(iteration.get("iteration")) is int
         and iteration["iteration"] >= 1
         and isinstance(iteration.get("git_head"), str)
-        and iteration.get("git_artifact_clean") is True
+        and (
+            iteration.get("artifact_clean")
+            if iteration.get("artifact_clean") is not None
+            else iteration.get("git_artifact_clean")
+        ) is True
         and not iteration.get("touched_denied_files", False)
         and not iteration.get("changed_outside_allowed", False)
-        and iteration.get("disposition") not in {"discard", "failure"}
         and type(score) in {int, float}
         and math.isfinite(float(score))
     )
@@ -1972,7 +1980,9 @@ def execute_plain(
     return control
 
 
-def _controller_only_closeout_incomplete_reason(closeout: Any) -> str | None:
+def _controller_only_closeout_incomplete_reason(
+    closeout: Any, *, deterministic_public_gate: bool = True
+) -> str | None:
     if not isinstance(closeout, dict) or closeout.get("completed") is not True:
         error = closeout.get("error") if isinstance(closeout, dict) else None
         return (
@@ -1992,7 +2002,7 @@ def _controller_only_closeout_incomplete_reason(closeout: Any) -> str | None:
             not isinstance(selection, dict)
             or not isinstance(selection.get("selected_candidate_id"), str)
             or not selection["selected_candidate_id"]
-            or selection.get("selection_rule") != PUBLIC_GATE_SELECTION_RULE
+            or (deterministic_public_gate and selection.get("selection_rule") != PUBLIC_GATE_SELECTION_RULE)
         ):
             return (
                 "controller-only Goal Plus closeout lacks deterministic selection evidence"
@@ -2077,7 +2087,7 @@ def execute_goal_plus(
             "prepared Goal Plus config does not match the task posthoc-selection contract"
         )
     is_pi = manifest.get("method", "goal-plus-codex") == "goal-plus-pi"
-    if is_pi and controller_only:
+    if is_pi and controller_only and EVALUATION_MODE == "blind":
         environment[CONTROLLER_ONLY_CLOSEOUT_ENV] = "1"
     else:
         environment.pop(CONTROLLER_ONLY_CLOSEOUT_ENV, None)
@@ -2169,6 +2179,7 @@ def execute_goal_plus(
         ),
         controller_only_official_evaluation=controller_only,
         search_scheduler=search_scheduler,
+        evaluation_mode=EVALUATION_MODE,
         early_stop_contract=early_stop,
     )
     (run_dir / "prompt.md").write_text(prompt)
@@ -2263,7 +2274,7 @@ def execute_goal_plus(
         ):
             closeout = finalize_goal_plus_search(
                 workspace,
-                deterministic_public_gate=controller_only,
+                deterministic_public_gate=controller_only and EVALUATION_MODE == "blind",
                 verify_unsettled_candidates=not control.get(
                     "early_stop_triggered", False
                 ),
@@ -2276,7 +2287,9 @@ def execute_goal_plus(
         }
     control["goal_plus_controller_closeout"] = closeout
     closeout_reason = (
-        _controller_only_closeout_incomplete_reason(closeout)
+        _controller_only_closeout_incomplete_reason(
+            closeout, deterministic_public_gate=EVALUATION_MODE == "blind"
+        )
         if controller_only
         else None
     )
@@ -2547,6 +2560,7 @@ def execute(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.expanduser().absolute()
     manifest_path = run_dir / "experiment.json"
     manifest = load_json(manifest_path)
+    require_prepared_goal_plus_source((manifest.get("environment") or {}).get("goal_plus_source"))
     configure_adapter(
         manifest.get("benchmark_adapter", "heurigym"),
         task_id=manifest.get("benchmark_task_selector"),
@@ -2709,7 +2723,7 @@ def repair_closeout(args: argparse.Namespace) -> int:
             verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
         ):
             closeout = finalize_goal_plus_search(
-                workspace, deterministic_public_gate=controller_only
+                workspace, deterministic_public_gate=controller_only and EVALUATION_MODE == "blind"
             )
     except Exception as exc:
         if not controller_only:
@@ -2721,7 +2735,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
         }
     control["goal_plus_controller_closeout_repair"] = closeout
     controller_only_closeout_reason = (
-        _controller_only_closeout_incomplete_reason(closeout)
+        _controller_only_closeout_incomplete_reason(
+            closeout, deterministic_public_gate=EVALUATION_MODE == "blind"
+        )
         if controller_only
         else None
     )

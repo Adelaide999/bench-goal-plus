@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -19,6 +20,45 @@ SPEC.loader.exec_module(repro_env)
 
 
 class ReproEnvironmentTest(unittest.TestCase):
+    def test_prepared_external_source_requires_same_identity_and_runtime(self) -> None:
+        from bench_goal_plus.upstreams import require_prepared_goal_plus_source
+        from types import SimpleNamespace
+
+        identity = {"source_dir": "/fixture/plugin", "commit": "prepared"}
+        runtime = SimpleNamespace(__file__="/fixture/plugin/src/goal_plus/__init__.py")
+        with patch("bench_goal_plus.upstreams.external_goal_plus_source", return_value=identity), \
+                patch.dict("sys.modules", {"goal_plus": runtime}):
+            require_prepared_goal_plus_source(identity)
+            with self.assertRaisesRegex(ValueError, "prepared campaign"):
+                require_prepared_goal_plus_source({**identity, "commit": "changed"})
+            runtime.__file__ = "/fixture/other/src/goal_plus/__init__.py"
+            with self.assertRaisesRegex(ValueError, "installed Goal Plus runtime"):
+                require_prepared_goal_plus_source(identity)
+
+    def test_external_goal_plus_requires_exact_clean_source(self) -> None:
+        from bench_goal_plus.upstreams import external_goal_plus_source
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / "src/goal_plus").mkdir(parents=True)
+            (source / "install.sh").write_text("#!/bin/sh\n")
+            subprocess.run(["git", "init", "-b", "fixture", str(source)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(source), "add", "install.sh"], check=True)
+            subprocess.run(["git", "-C", str(source), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                            "commit", "-m", "fixture"], check=True, capture_output=True)
+            with patch.dict(os.environ, {"BENCH_GOAL_PLUS_SOURCE_DIR": str(source),
+                                        "BENCH_GOAL_PLUS_EXPECTED_REF": "fixture"}):
+                identity = external_goal_plus_source()
+                self.assertEqual(identity["branch"], "fixture")
+                self.assertEqual(len(identity["commit"]), 40)
+                (source / "install.sh").write_text("changed\n")
+                with self.assertRaisesRegex(ValueError, "local changes"):
+                    external_goal_plus_source()
+            with patch.dict(os.environ, {"BENCH_GOAL_PLUS_SOURCE_DIR": str(source),
+                                        "BENCH_GOAL_PLUS_EXPECTED_REF": ""}):
+                with self.assertRaisesRegex(ValueError, "requires"):
+                    external_goal_plus_source()
+
     @staticmethod
     def update_payload(*, current: bool) -> dict:
         root_check = {

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "goal-plus-pi-glm53flash-smoke",
+  "benchmark_id": "aibench-coding",
+  "case_set": "_clean2026",
+  "expected_case_set_fingerprint": "9149d02169845dc5",
+  "task_ids": ["rev-09f7740f614d3ea9"],
+  "validity_policy": "valid-only",
+  "methods": ["goal-plus-pi"],
+  "model": "zai/glm-5.3-flash",
+  "reasoning_effort": "low",
+  "agent_provider": {
+    "id": "zai",
+    "name": "ZAI coding",
+    "auth_mode": "openai-compatible",
+    "base_url_env": "ZAI_BASE_URL",
+    "api_key_env": "ZAI_API_KEY",
+    "wire_api": "completions"
+  },
+  "wall_time_seconds": 900,
+  "concurrency": 1,
+  "cell_concurrency": 1,
+  "soft_closeout_seconds": 120,
+  "hard_kill_grace_seconds": 30,
+  "worker_runtime_seconds": 120,
+  "verifier_timeout_seconds": 120,
+  "seeds": [1]
+}

@@ -27,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--method", action="append", choices=sorted(SUPPORTED_METHODS)
     )
     doctor_parser.add_argument("--model")
+    doctor_parser.add_argument("--reasoning-effort")
     doctor_parser.add_argument("--local-assets-only", action="store_true")
     doctor_parser.add_argument("--allow-missing-local-assets", action="store_true")
 
@@ -64,9 +65,7 @@ def main(argv: list[str] | None = None) -> int:
             profile,
             methods=args.method,
             model=args.model,
-            reasoning_effort=(
-                args.reasoning_effort if args.command == "prepare" else None
-            ),
+            reasoning_effort=args.reasoning_effort,
             wall_time_seconds=(
                 args.wall_time_seconds if args.command == "prepare" else None
             ),

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -16,47 +15,6 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"expected a JSON object: {path}")
     return payload
-
-
-def _apply_promotion_patch(source: Path, patch: Path) -> str:
-    if not patch.is_file():
-        raise FileNotFoundError(patch)
-    if not patch.read_text(encoding="utf-8").strip():
-        return "empty_patch"
-    check = subprocess.run(
-        ["git", "-C", str(source), "apply", "--check", str(patch)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if check.returncode == 0:
-        subprocess.run(
-            ["git", "-C", str(source), "apply", str(patch)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return "applied"
-    reverse = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(source),
-            "apply",
-            "--reverse",
-            "--check",
-            str(patch),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if reverse.returncode == 0:
-        return "already_applied"
-    raise RuntimeError(
-        "promotion patch does not apply cleanly: "
-        + (check.stderr.strip() or reverse.stderr.strip() or "unknown git error")
-    )
 
 
 def _close_pi_pools(root: Path, timeout_seconds: int) -> list[dict[str, Any]]:
@@ -149,7 +107,8 @@ def closeout(root: Path, source: Path, *, pool_timeout_seconds: int) -> dict[str
     try:
         result["pi_pools"] = _close_pi_pools(root, pool_timeout_seconds)
         goal_runtime = FileGoalPlusRuntime(root)
-        tools = SearchTools(FileSearchRuntime(root))
+        search_runtime = FileSearchRuntime(root)
+        tools = SearchTools(search_runtime)
         goals_by_run: dict[str, list[str]] = {}
         for goal_path in sorted((root / "goal-plus").glob("gp_*/goal.json")):
             goal = goal_runtime.status(goal_path.parent.name)
@@ -212,7 +171,14 @@ def closeout(root: Path, source: Path, *, pool_timeout_seconds: int) -> dict[str
                 raise RuntimeError(
                     f"Search run {run_id} promotion artifact escaped its run: {patch}"
                 )
-            patch_status = _apply_promotion_patch(source, patch)
+            publication = search_runtime.promotion_record(run_id)
+            if publication.state == "applied":
+                patch_status = "already_applied"
+            else:
+                applied = tools.search_apply_promotion(run_id)
+                if applied["state"] != "applied":
+                    raise RuntimeError("Goal Plus publication has not been applied")
+                patch_status = "applied"
 
             for goal_plus_id in goal_ids:
                 goal = goal_runtime.status(goal_plus_id)

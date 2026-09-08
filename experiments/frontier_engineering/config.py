@@ -80,6 +80,9 @@ V1_LITE_TASKS: dict[str, TaskContract] = {
             "EnergyStorage/BatteryFastChargingSPMe",
             "init.py",
             "frontier-eval-driver",
+            # The official seed takes <1s; leave headroom without reserving
+            # five minutes at every Goal Plus verifier admission.
+            evaluator_timeout_seconds=30,
         ),
         TaskContract(
             "Robotics/RobotArmCycleTimeOptimization",
@@ -222,6 +225,7 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
             )
     if not isinstance(profile.get("model"), str) or not profile["model"]:
         raise FrontierEngineeringContractError(f"{profile_id}: model is required")
+    pi_provider_config(profile)
     if profile.get("reasoning_effort") not in REASONING_EFFORTS:
         raise FrontierEngineeringContractError(f"{profile_id}: unsupported reasoning_effort")
     for field in (
@@ -290,6 +294,29 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         raise FrontierEngineeringContractError(
             f"{profile_id}: doctor_seed_evaluation must be boolean"
         )
+
+
+def pi_provider_config(profile: dict[str, Any]) -> dict[str, str]:
+    defaults = {
+        "id": "bench-openai",
+        "api": "openai-responses",
+        "api_key_env": "OPENAI_API_KEY",
+        "api_base_env": "OPENAI_BASE_URL",
+    }
+    supplied = profile.get("pi_provider", {})
+    if not isinstance(supplied, dict) or set(supplied) - defaults.keys():
+        raise FrontierEngineeringContractError("invalid pi_provider fields")
+    provider = {**defaults, **supplied}
+    if any(not isinstance(value, str) or not value for value in provider.values()):
+        raise FrontierEngineeringContractError("pi_provider values must be nonempty strings")
+    if "/" in provider["id"] or provider["api"] not in {
+        "openai-responses", "openai-completions", "anthropic-messages"
+    }:
+        raise FrontierEngineeringContractError("invalid Pi provider id or API")
+    for field in ("api_key_env", "api_base_env"):
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", provider[field]) is None:
+            raise FrontierEngineeringContractError(f"invalid pi_provider {field}")
+    return provider
 
 
 def resolve_profile(

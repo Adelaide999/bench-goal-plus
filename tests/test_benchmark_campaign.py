@@ -339,8 +339,17 @@ class BenchmarkCampaignTest(unittest.TestCase):
                 path.write_text(json.dumps(manifest) + "\n")
                 return 0
 
+            def run_cell_inprocess(command: list[str], **kwargs: object) -> mock.Mock:
+                child_args = campaign.build_parser().parse_args(command[2:])
+                with mock.patch.dict(campaign.os.environ, kwargs["env"], clear=True):
+                    returncode = campaign.run_cell(child_args)
+                return mock.Mock(poll=mock.Mock(return_value=returncode))
+
             with (
                 mock.patch.object(standalone, "execute", side_effect=finish) as execute,
+                mock.patch.object(
+                    campaign.subprocess, "Popen", side_effect=run_cell_inprocess
+                ) as popen,
                 mock.patch.dict(
                     campaign.os.environ,
                     {"OPENAI_BASE_URL": "https://provider.example/v1"},
@@ -353,6 +362,8 @@ class BenchmarkCampaignTest(unittest.TestCase):
             ):
                 self.assertEqual(campaign.run_campaign(args), 0)
             self.assertEqual(execute.call_count, 1)
+            popen.assert_called_once()
+            self.assertNotIn("provider.example", " ".join(popen.call_args.args[0]))
             self.assertEqual(
                 execute.call_args.args[0].api_base,
                 "https://provider.example/v1",

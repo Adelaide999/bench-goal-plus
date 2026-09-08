@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import unittest
 from pathlib import Path
@@ -53,7 +54,26 @@ class RuntimePathTest(unittest.TestCase):
                     self.assertNotIn("Path('/tmp", text)
                     if path.name != "bench_runtime_paths.py":
                         self.assertNotIn("tempfile.TemporaryDirectory", text)
-                        self.assertNotIn("tempfile.mkdtemp", text)
+                        if path.suffix == ".py":
+                            for node in ast.walk(ast.parse(text)):
+                                if (
+                                    isinstance(node, ast.Call)
+                                    and isinstance(node.func, ast.Attribute)
+                                    and isinstance(node.func.value, ast.Name)
+                                    and node.func.value.id == "tempfile"
+                                    and node.func.attr == "mkdtemp"
+                                ):
+                                    directory = next(
+                                        (kw.value for kw in node.keywords if kw.arg == "dir"),
+                                        None,
+                                    )
+                                    self.assertIsNotNone(directory)
+                                    self.assertFalse(
+                                        isinstance(directory, ast.Constant)
+                                        and directory.value is None
+                                    )
+                        else:
+                            self.assertNotIn("tempfile.mkdtemp", text)
 
 
 if __name__ == "__main__":

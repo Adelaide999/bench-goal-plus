@@ -88,6 +88,12 @@
         "goal-plus-pi"
       ],
       "method_contracts": {
+        "goal-plus-pi": {
+          "runtime_source_command": "runtime-source"
+        },
+        "goal-plus-codex": {
+          "runtime_source_command": "runtime-source"
+        },
         "openevolve": {
           "bootstrap_targets": ["frontier_engineering"]
         }

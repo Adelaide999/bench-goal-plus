@@ -18,6 +18,75 @@ from experiments.openevolve_compare import experiment  # noqa: E402
 
 
 class OpenEvolveComparisonTest(unittest.TestCase):
+    def test_missing_zai_model_rejects_without_writing_isolated_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(root)}):
+                with self.assertRaisesRegex(ValueError, "absent from the host Pi catalog"):
+                    experiment.write_pi_models_config(
+                        root / "isolated", api_base="https://example.invalid",
+                        model="glm-5.3-flash", provider_id="zai",
+                        api="openai-completions", api_key_env="ZAI_API_KEY",
+                    )
+            self.assertFalse((root / "isolated/models.json").exists())
+
+    def test_zai_model_keeps_native_catalog_metadata_without_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            native = {"id": "glm-5.3-flash", "api": "openai-completions", "name": "GLM Flash",
+                      "contextWindow": 1000000, "maxTokens": 131072, "reasoning": True,
+                      "thinkingLevelMap": {"low": "low"}, "compat": {"thinkingFormat": "zai"},
+                      "headers": {"Authorization": "fixture-not-a-key"}}
+            (root / "models-store.json").write_text(json.dumps({"zai": {"models": [native]}}))
+            with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": str(root)}):
+                experiment.write_pi_models_config(root / "isolated", api_base="https://example.invalid",
+                    model="glm-5.3-flash", reasoning_effort="low", provider_id="zai",
+                    api="openai-completions", api_key_env="ZAI_API_KEY")
+            provider = json.loads((root / "isolated/models.json").read_text())["providers"]["zai"]
+            self.assertEqual(provider["apiKey"], "$ZAI_API_KEY")
+            model = provider["models"][0]
+            self.assertEqual(model["id"], "glm-5.3-flash")
+            self.assertEqual(model["contextWindow"], 1000000)
+            self.assertEqual(model["compat"], {"thinkingFormat": "zai"})
+            self.assertNotIn("headers", model)
+
+    def test_single_task_batch_preserves_pi_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            args = experiment.build_parser().parse_args([
+                "prepare-batch", "--run-root", str(Path(directory) / "campaign"),
+                "--methods", "goal-plus-pi", "--task-id", "one",
+                "--pi-provider-id", "zai", "--pi-api", "openai-completions",
+                "--pi-api-key-env", "ZAI_API_KEY", "--pi-api-base-env", "ZAI_BASE_URL",
+            ])
+            with (
+                mock.patch.object(experiment, "list_catalog_tasks", return_value=[{"task_id": "one"}, {"task_id": "two"}]),
+                mock.patch.object(experiment, "prepare", return_value=0) as prepare,
+            ):
+                self.assertEqual(experiment.prepare_batch(args), 0)
+            self.assertEqual(prepare.call_count, 1)
+            selected = prepare.call_args.args[0]
+            self.assertEqual(selected.task_id, "one")
+            self.assertEqual(selected.pi_provider_id, "zai")
+            self.assertEqual(selected.pi_api, "openai-completions")
+            self.assertEqual(selected.pi_api_key_env, "ZAI_API_KEY")
+
+    def test_goal_prompt_uses_current_search_tools(self) -> None:
+        from goal_plus.domain.goal import GoalPlusWorkEventKind
+        from typing import get_args
+        from goal_plus.goal_plus import FileGoalPlusRuntime
+
+        self.assertNotIn("search_routed", get_args(GoalPlusWorkEventKind))
+        self.assertFalse(hasattr(FileGoalPlusRuntime, "upsert_work_items"))
+        for host in ("codex", "pi-rpc"):
+            prompt = experiment.render_goal(
+                task_text="Improve the score", artifact_name="solution.py",
+                metric_name="score", metric_direction="maximize", wall_seconds=300,
+                closeout_seconds=60, concurrency=2, worker_host=host, worker_model="test-model",
+            )
+            self.assertNotIn("goal_plus_upsert_work_items", prompt)
+            self.assertNotIn("search_routed", prompt)
+            self.assertNotIn("strategy.worker_host", prompt)
+
     def test_canonical_methods_and_experiment_defaults(self) -> None:
         self.assertEqual(
             experiment.METHODS,
@@ -266,6 +335,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertNotIn("goal_plus_id=", prompt)
         self.assertIn("search_start_batch", prompt)
         self.assertIn("pi_search_pool_open", prompt)
+        self.assertIn("`candidate_ids`", prompt)
+        self.assertIn("`final_verify=true`", prompt)
         self.assertIn("pi_search_pool_wait_any", prompt)
         self.assertNotIn("actual `spawn_agent` call", prompt)
 
@@ -290,10 +361,11 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 "workspace_backend=git_worktree promotion_mode=artifact_only "
             )
         )
-        self.assertIn("`shared_dir.enabled=false`", prompt)
-        self.assertNotIn("`shared_dir.enabled=true`", prompt)
-        self.assertIn('`strategy.config.global_evidence_mode="independent"`', prompt)
-        self.assertIn("never receives the official evaluator or official metric", prompt)
+        self.assertIn("`shared_dir.enabled=true`", prompt)
+        self.assertIn('`strategy.config.global_evidence_mode="manual"`', prompt)
+        self.assertIn("only the public verifier", prompt)
+        self.assertIn("role `validity_gate`", prompt)
+        self.assertIn("feedback policy `final_only`", prompt)
 
     def test_pi_goal_prompt_names_pool_supervisor_minimum_lease(self) -> None:
         prompt = experiment.render_goal(
@@ -312,7 +384,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
 
         self.assertIn("pool supervisor", prompt)
         self.assertIn("same native session", prompt)
-        self.assertIn("strategy.config.closeout_reserve_seconds=60", prompt)
+        self.assertIn("strategy.config.reserve_closeout_seconds=60", prompt)
         self.assertNotIn("SubagentStop", prompt)
 
     def test_plain_and_goal_plus_prompts_share_exact_common_body(self) -> None:
@@ -783,6 +855,14 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             goal_runtime.status.return_value = goal
             tools = mock.Mock()
             tools.search_report.return_value = {"report_path": "report.md"}
+            search_runtime = mock.Mock()
+            search_runtime.promotion_record.return_value.promotion_mode = "apply"
+            tools.search_apply_promotion.return_value = {"state": "applied"}
+
+            def require_applied_publication(*args, **kwargs):
+                tools.search_apply_promotion.assert_called_once_with("run_test")
+
+            goal_runtime.record_search_result.side_effect = require_applied_publication
 
             def finish_promotion_then_fail(_run_id: str) -> None:
                 run_data["state"] = "promoted"
@@ -798,7 +878,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                     "_goal_plus_runtime_types",
                     return_value=(
                         mock.Mock(return_value=goal_runtime),
-                        mock.Mock(),
+                        mock.Mock(return_value=search_runtime),
                         mock.Mock(return_value=tools),
                     ),
                 ),
@@ -813,8 +893,42 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             self.assertTrue(
                 result["runs"][0]["selection"]["reused_existing_promotion"]
             )
-            apply_patch.assert_called_once_with(workspace, patch_path)
+            apply_patch.assert_not_called()
+            tools.search_apply_promotion.assert_called_once_with("run_test")
             tools.search_promote.assert_not_called()
+            goal_runtime.upsert_work_items.assert_not_called()
+            goal_runtime.record_work_event.assert_not_called()
+
+            goal_runtime.record_search_result.reset_mock()
+            tools.search_apply_promotion.return_value = {"state": "awaiting_main_integration"}
+            with mock.patch.object(
+                experiment, "_goal_plus_runtime_types",
+                return_value=(mock.Mock(return_value=goal_runtime),
+                              mock.Mock(return_value=search_runtime),
+                              mock.Mock(return_value=tools)),
+            ):
+                refused = experiment.finalize_goal_plus_search(workspace)
+            self.assertFalse(refused["completed"])
+            self.assertIn("publication has not been applied", refused["error"])
+            goal_runtime.record_search_result.assert_not_called()
+
+            search_runtime.promotion_record.return_value.state = "applied"
+            goal.status = "complete"
+            goal.linked_search.selected_candidate_id = "c001"
+            tools.search_apply_promotion.reset_mock()
+            goal_runtime.set_status.reset_mock()
+            with mock.patch.object(
+                experiment, "_goal_plus_runtime_types",
+                return_value=(mock.Mock(return_value=goal_runtime),
+                              mock.Mock(return_value=search_runtime),
+                              mock.Mock(return_value=tools)),
+            ):
+                replay = experiment.finalize_goal_plus_search(workspace)
+            self.assertTrue(replay["completed"], replay)
+            self.assertEqual(replay["runs"][0]["source_patch_status"], "already_applied")
+            tools.search_apply_promotion.assert_not_called()
+            goal_runtime.record_search_result.assert_not_called()
+            goal_runtime.set_status.assert_not_called()
 
     def test_controller_closeout_reuses_selection_completed_before_closeout(
         self,

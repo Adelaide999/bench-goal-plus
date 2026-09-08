@@ -334,6 +334,25 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         )
         self.assertGreater(provision_index, 0)
 
+    def test_setup_validates_the_same_explicit_pi_provider_as_launch(self) -> None:
+        args = build_parser().parse_args([
+            "setup", "--benchmark", "zsoft-detect", "--method", "goal-plus-pi",
+            "--model", "glm-5.3-flash", "--pi-provider-id", "zai",
+            "--pi-api", "openai-completions", "--pi-api-key-env", "ZAI_API_KEY",
+            "--pi-api-base-env", "ZAI_BASE_URL",
+        ])
+        options = dict(
+            profile=None, methods=tuple(args.method), model=args.model,
+            pi_provider_id=args.pi_provider_id, pi_api=args.pi_api,
+            pi_api_key_env=args.pi_api_key_env, pi_api_base_env=args.pi_api_base_env,
+            skip_bootstrap=True, skip_provision=True, dry_run=True,
+        )
+        target = self.catalog.targets["zsoft-detect"]
+        self.agent.setup((target,), **options)
+        with self.assertRaisesRegex(ContractError, "requires.*--pi-api-key-env"):
+            self.agent.setup((target,), **{**options, "pi_api_key_env": None})
+
+
     def test_setup_routes_selected_method_and_model_to_native_doctor(self) -> None:
         args = build_parser().parse_args(
             [
@@ -721,6 +740,22 @@ class BenchmarkAgentContractTest(unittest.TestCase):
             self.agent.resolve_spec(
                 preset_id="edgebench-codex-2h", model="different-model"
             )
+
+    def test_openevolve_single_task_and_pi_provider_reach_native_prepare(self) -> None:
+        options = dict(
+            target_ids=("openevolve-cpu-portable",), methods=("goal-plus-pi",),
+            model="glm-5.3-flash", reasoning_effort="low", wall_time_seconds=60,
+            live_search_concurrency=2, pi_provider_id="zai", pi_api="openai-completions",
+            pi_api_key_env="ZAI_API_KEY", pi_api_base_env="ZAI_BASE_URL",
+        )
+        spec = self.agent.resolve_spec(task_id="function_minimization", **options)
+        commands, campaign = create_runner(spec.runner).prepare_commands(spec)
+        command = commands[0]
+        self.assertEqual(command[command.index("--task-id") + 1], "function_minimization")
+        self.assertEqual(command[command.index("--pi-provider-id") + 1], "zai")
+        self.assertEqual(command[command.index("--pi-api-key-env") + 1], "ZAI_API_KEY")
+        with self.assertRaisesRegex(ContractError, "unknown task"):
+            self.agent.resolve_spec(task_id="not-a-task", **options)
 
     def test_openevolve_batch_preserves_native_controller_and_resume(self) -> None:
         spec = self.agent.resolve_spec(

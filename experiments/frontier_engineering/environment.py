@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from bench_runtime_paths import configure_temp_environment
-from bench_goal_plus.upstreams import registered_upstream_branch
+from bench_goal_plus.upstreams import external_goal_plus_source, registered_upstream_branch
 
 from .config import (
     GOAL_PLUS_ROOT,
     ROOT,
     UPSTREAM_ROOT,
     V1_LITE_TASKS,
+    pi_provider_config,
     profile_nvidia_cuda_tasks,
     write_json,
 )
@@ -208,25 +209,35 @@ def command_output(
 
 def _pi_agent_checks(profile: dict[str, Any]) -> list[dict[str, Any]]:
     from experiments.openevolve_compare.experiment import (
-        PI_PROVIDER_ID,
         write_pi_models_config,
     )
 
+    provider = pi_provider_config(profile)
     path = shutil.which("pi")
     version_ok, version = command_output([path, "--version"]) if path else (False, "")
-    base_present = bool(os.environ.get("OPENAI_BASE_URL"))
-    key_present = bool(os.environ.get("OPENAI_API_KEY"))
-    qualified_model = f"{PI_PROVIDER_ID}/{profile['model']}"
+    base_present = bool(os.environ.get(provider["api_base_env"]))
+    key_present = bool(os.environ.get(provider["api_key_env"]))
+    qualified_model = f"{provider['id']}/{profile['model']}"
     model_visible = False
     model_error = None
     if path and version_ok and base_present and key_present:
         pi_home = ROOT / ".tmp/frontier-engineering/pi-doctor" / profile["id"]
-        write_pi_models_config(
-            pi_home,
-            api_base=str(os.environ["OPENAI_BASE_URL"]),
-            model=str(profile["model"]),
-            reasoning_effort=str(profile["reasoning_effort"]),
-        )
+        try:
+            write_pi_models_config(
+                pi_home,
+                api_base=str(os.environ[provider["api_base_env"]]),
+                model=str(profile["model"]),
+                reasoning_effort=str(profile["reasoning_effort"]),
+                provider_id=provider["id"],
+                api=provider["api"],
+                api_key_env=provider["api_key_env"],
+            )
+        except ValueError:
+            return [
+                {"kind": "agent-provider", "provider": provider["id"],
+                 "model": qualified_model, "passed": False,
+                 "error": "exact model metadata unavailable or invalid"}
+            ]
         probe_environment = configure_temp_environment(os.environ.copy())
         probe_environment["PI_CODING_AGENT_DIR"] = str(pi_home)
         visible_ok, output = command_output(
@@ -234,7 +245,7 @@ def _pi_agent_checks(profile: dict[str, Any]) -> list[dict[str, Any]]:
             environment=probe_environment,
         )
         model_visible = visible_ok and any(
-            columns[:2] == [PI_PROVIDER_ID, str(profile["model"])]
+            columns[:2] == [provider["id"], str(profile["model"])]
             for line in output.splitlines()
             for columns in [line.split()]
             if len(columns) >= 2
@@ -252,11 +263,12 @@ def _pi_agent_checks(profile: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "kind": "agent-provider",
             "name": "pi-openai-compatible",
-            "provider": PI_PROVIDER_ID,
+            "provider": provider["id"],
+            "api": provider["api"],
             "model": qualified_model,
-            "api_base_env": "OPENAI_BASE_URL",
+            "api_base_env": provider["api_base_env"],
             "api_base_present": base_present,
-            "api_key_env": "OPENAI_API_KEY",
+            "api_key_env": provider["api_key_env"],
             "api_key_present": key_present,
             "model_visible": model_visible,
             "error": model_error,
@@ -271,6 +283,19 @@ def _pi_agent_checks(profile: dict[str, Any]) -> list[dict[str, Any]]:
 def git_value(root: Path, *args: str) -> str | None:
     ok, output = command_output(["git", "-C", str(root), *args])
     return output if ok and output else None
+
+
+def runtime_source() -> dict[str, str]:
+    external = external_goal_plus_source()
+    if external is not None:
+        return external
+    expected = registered_upstream_branch("goal_plus", repository_root=ROOT)
+    branch = git_value(GOAL_PLUS_ROOT, "branch", "--show-current")
+    commit = git_value(GOAL_PLUS_ROOT, "rev-parse", "HEAD")
+    if branch != expected or not commit or git_value(GOAL_PLUS_ROOT, "status", "--porcelain"):
+        raise ValueError("Goal Plus source must be clean and on its registered branch")
+    return {"source_kind": "managed", "source_dir": str(GOAL_PLUS_ROOT),
+            "expected_ref": expected, "branch": branch, "commit": commit}
 
 
 def local_inventory(profile: dict[str, Any]) -> dict[str, Any]:
@@ -521,7 +546,10 @@ def _seed_probe(task_id: str) -> dict[str, Any]:
     error = completed.stderr.strip() or None
     if completed.returncode == 0:
         try:
-            metrics = (json.loads(completed.stdout).get("metrics") or {})
+            result = json.loads(completed.stdout)
+            metrics = result.get("metrics") or {}
+            artifacts = result.get("artifacts") or {}
+            error = artifacts.get("benchmark_stderr") or artifacts.get("error_message") or error
         except json.JSONDecodeError as exception:
             error = f"invalid evaluator JSON: {exception}"
     valid = bool(
@@ -574,13 +602,18 @@ def doctor(
         checks.append(_openevolve_config_check(profile))
     managed_checkouts = [("frontier_engineering", UPSTREAM_ROOT, "main")]
     if any(method.startswith("goal-plus-") for method in profile["methods"]):
-        managed_checkouts.append(
-            (
-                "goal_plus",
-                GOAL_PLUS_ROOT,
-                registered_upstream_branch("goal_plus", repository_root=ROOT),
+        external = external_goal_plus_source()
+        if external is not None:
+            checks.append({"kind": "runtime-source", "name": "goal_plus",
+                           **external, "passed": True})
+        else:
+            managed_checkouts.append(
+                (
+                    "goal_plus",
+                    GOAL_PLUS_ROOT,
+                    registered_upstream_branch("goal_plus", repository_root=ROOT),
+                )
             )
-        )
     for name, root, expected_branch in managed_checkouts:
         branch = git_value(root, "symbolic-ref", "--short", "HEAD")
         dirty = git_value(root, "status", "--porcelain")

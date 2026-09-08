@@ -91,9 +91,9 @@ def _validate_provider(profile_id: str, provider: Any) -> None:
         )
     if not isinstance(provider["id"], str) or not provider["id"]:
         raise AIBenchContractError(f"{profile_id}: agent_provider.id is required")
-    if provider["wire_api"] != "responses":
+    if provider["wire_api"] not in {"responses", "completions"}:
         raise AIBenchContractError(
-            f"{profile_id}: agent_provider.wire_api must be responses"
+            f"{profile_id}: agent_provider.wire_api must be responses or completions"
         )
     for field in ("base_url_env", "api_key_env"):
         if ENV_NAME.fullmatch(str(provider[field])) is None:
@@ -147,6 +147,8 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 f"{profile_id}: Pi model must use PROVIDER/MODEL"
             )
     _validate_provider(profile_id, profile.get("agent_provider"))
+    if any("codex" in method for method in methods) and profile["agent_provider"]["wire_api"] != "responses":
+        raise AIBenchContractError(f"{profile_id}: Codex methods require Responses")
     if (
         any("codex" in method for method in methods)
         and profile["agent_provider"]["api_key_env"] != "OPENAI_API_KEY"

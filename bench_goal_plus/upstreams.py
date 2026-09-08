@@ -3,8 +3,53 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
+
+
+def external_goal_plus_source() -> dict[str, str] | None:
+    return _external_source("GOAL_PLUS", ("install.sh", "src/goal_plus"))
+
+
+def external_swebench_source() -> dict[str, str] | None:
+    return _external_source("SWEBENCH", ("pyproject.toml", "swebench/harness"))
+
+
+def _external_source(name: str, required: tuple[str, ...]) -> dict[str, str] | None:
+    source = os.environ.get(f"BENCH_{name}_SOURCE_DIR")
+    expected = os.environ.get(f"BENCH_{name}_EXPECTED_REF")
+    if not source and not expected:
+        return None
+    if not source or not expected:
+        raise ValueError(f"external {name} requires BENCH_{name}_SOURCE_DIR and BENCH_{name}_EXPECTED_REF")
+    path = Path(source).expanduser().resolve(strict=True)
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", "-C", str(path), *args], text=True).strip()
+
+    head = git("rev-parse", "HEAD")
+    if head != git("rev-parse", "--verify", "--end-of-options", f"{expected}^{{commit}}"):
+        raise ValueError(f"external {name} HEAD differs from expected ref")
+    if git("status", "--porcelain"):
+        raise ValueError(f"external {name} checkout has local changes")
+    if not all((path / item).exists() for item in required):
+        raise ValueError(f"external {name} source is missing required assets")
+    return {"source_kind": "external", "source_dir": str(path), "expected_ref": expected,
+            "branch": git("branch", "--show-current"), "commit": head}
+
+
+def require_prepared_goal_plus_source(identity: Mapping[str, Any] | None) -> None:
+    if identity is None:
+        return
+    if external_goal_plus_source() != identity:
+        raise ValueError("external Goal Plus source differs from the prepared campaign")
+    import goal_plus
+
+    installed = Path(goal_plus.__file__).resolve().parents[2]
+    if installed != Path(identity["source_dir"]).resolve():
+        raise ValueError("installed Goal Plus runtime differs from the prepared source")
 
 
 def _relative_path(value: Any, *, field: str, upstream_key: str) -> Path:
@@ -44,6 +89,11 @@ def upstream_source_path(
     upstream_key: str,
 ) -> Path:
     """Return the consumable source root within a managed upstream checkout."""
+
+    if upstream_key == "goal_plus" and (external := external_goal_plus_source()):
+        return Path(external["source_dir"])
+    if upstream_key == "swebench" and (external := external_swebench_source()):
+        return Path(external["source_dir"])
 
     checkout = upstream_checkout_path(
         checkout_root,

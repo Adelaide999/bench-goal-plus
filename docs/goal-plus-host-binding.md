@@ -32,3 +32,19 @@ Old Goal Plus frozen records require their original plugin version for runtime
 recovery. Current Bench evidence cannot certify their missing native identity;
 original campaign artifacts are preserved. Start a new campaign for the new
 contract rather than editing historical `.gp` records.
+
+Common/OpenEvolve development runs may explicitly select a clean external plugin
+checkout with `BENCH_GOAL_PLUS_SOURCE_DIR` and `BENCH_GOAL_PLUS_EXPECTED_REF`.
+Both are required; HEAD must resolve to the expected ref. Setup verifies this
+source without updating it, and plan/cell evidence records its actual branch and
+commit. The managed tracking branch is unchanged. Keep the same source selection
+through setup, plan, launch, and any resume.
+
+Search prompts use `strategy.config.reserve_closeout_seconds` so candidate
+continuation and verifier admission reserve the same finalization window.
+
+Controller closeout for `promotion_mode=apply` calls `search_apply_promotion`
+before recording the Search result. Applying a Git patch alone does not settle
+Goal Plus publication state. An unresolved publication keeps closeout incomplete.
+If Main already completed publication, closeout reuses its persisted `applied`
+state without requesting another mutation on the completed Goal.

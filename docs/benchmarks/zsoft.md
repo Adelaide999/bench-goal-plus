@@ -49,6 +49,32 @@ are recorded in the experiment manifest.
 Declared read-only workspace entries must be real directories; symlinked source
 or public bundles fail closed before worker startup.
 
+The proxy follows the current Goal Plus session contract: worker calls run with
+the bound `GOAL_PLUS_AGENT_SESSION_ID`, iteration listing accepts that session ID
+alone, and candidate workspace identity is read from `candidate_task.workspace`.
+Artifact handles and settlement metadata from the current context, verifier,
+iteration, and Global Evidence schemas are accepted but removed from blind
+worker responses. Unknown response fields still fail closed. Detect posthoc
+evaluation includes clean, publicly compliant `discard` iterations; an online
+format-score tie does not make the submitted artifact ineligible for official F1.
+
+The current Pi extension also sends native internal-agent kick callbacks after
+candidate context and verifier calls. Each sandbox uses a private runtime root
+for those one-time capability files. The proxy accepts only the bound Search's
+kick callback and transfers its capability to the host CLI; Goal creation,
+cross-run callbacks, and replay remain rejected. The real `.gp` tree is never
+mounted into the worker. A private, short `XDG_RUNTIME_DIR` is required for the
+Unix socket, independently of the repository-local temporary directory policy.
+For visible-feedback workers, the same private runtime also contains a read-only
+candidate generation projection. It is populated only from the host response
+matching the launch session, run, candidate and workspace, and contains only
+`execution_generation`. A different generation within one sandbox launch is
+rejected. This supports the native Pi workspace guard without mounting private
+candidate records; the real host remains authoritative for every Search call.
+
+Both batch scripts pass the same explicit DeepSeek provider, Chat Completions
+API, and credential environment-variable names to `setup` and `launch`.
+
 ### Native SWE-agent path
 
 `zsoft-detect-swe-agent` is a separate executable target backed by runner

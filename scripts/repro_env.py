@@ -28,6 +28,8 @@ from bench_runtime_paths import (  # noqa: E402
     ensure_temp_root,
 )
 from bench_goal_plus.upstreams import (  # noqa: E402
+    external_goal_plus_source,
+    external_swebench_source,
     upstream_checkout_path,
     upstream_source_path,
 )
@@ -973,6 +975,12 @@ def collect_doctor(
 
     for name, entry in chosen.items():
         branch = entry["tracking_branch"]
+        if name == "goal_plus" and (external := external_goal_plus_source()):
+            checks.append({"name": "checkout:goal_plus", "passed": True, **external})
+            continue
+        if name == "swebench" and (external := external_swebench_source()):
+            checks.append({"name": "checkout:swebench", "passed": True, **external})
+            continue
         state = git_state(paths[name], branch)
         source_exists = sources[name].is_dir()
         remote_is_ancestor = git_is_ancestor(
@@ -1112,6 +1120,10 @@ def bootstrap_environment(args: argparse.Namespace) -> dict[str, Any]:
         manifest, args.only, include_always=include_always
     )
     for name, entry in chosen.items():
+        if name == "goal_plus" and external_goal_plus_source():
+            continue
+        if name == "swebench" and external_swebench_source():
+            continue
         ensure_checkout(
             upstream_checkout_path(checkout_root, entry, upstream_key=name),
             entry,

@@ -29,6 +29,17 @@ The Pi credential value is never serialized. Docker receives only the selected e
 name. The complete dataset row is host-side evaluator input; the Agent receives only the public
 issue allowlist.
 
+For a native ARM64 host, the profile `sympy-16886-goal-plus-pi-arm64-smoke`
+uses the official ARM image of this same case, Pi `zai/glm-5.3-flash` low,
+and `T=900,K=1,C=1,R=1`. Select it with `--benchmark` and `--profile`, plus
+explicit model, reasoning, and budget arguments; it is not a frozen registry
+preset. Follow the [ARM setup requirements](../../../../../experiments/swe_bench_verified/README.md#arm64-pi-smoke):
+a validated external official SWE-bench v4.1.0 checkout and a portable native
+Python for Goal Plus. The task interpreter remains unchanged; Goal Plus uses
+`install.sh --pi` in its own venv. The internal ARM adapter calls the same
+official single-instance evaluator with an explicit architecture. No ARM Codex
+or full-split readiness is implied.
+
 The Luna profile materializes a campaign-local Pi `models.json` containing only the endpoint and
 `$OPENAI_API_KEY` environment reference. A Linux loopback endpoint uses the same repository-owned
 socket bridge as Plain Codex; doctor must pass host Responses, task-container Responses, and Pi's
@@ -109,6 +120,7 @@ one terminal Goal Plus record and linked promoted Search run, a frozen spec with
 `budget.max_parallel=K`, the method's bound `codex` or `pi-rpc` worker topology, the frozen
 worker/closeout budgets, exactly `K` candidates, one bound worker session per candidate,
 worker-origin verifier evidence for every candidate,
+the profile's exact model in every bound worker session,
 any profile-frozen minimum worker budget plus its satisfied runtime lease,
 the registered visible-test wrapper with the benchmark-owned frozen hash, a passing promotion
 `visible_test_score=1.0`, and no active Pi pool job. When the profile enables the

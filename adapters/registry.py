@@ -202,7 +202,7 @@ def _validate_module(definition: AdapterDefinition, module: ModuleType) -> None:
         raise AdapterContractError(
             f"adapter {definition.adapter_id} protected Pi worker flag must be boolean"
         )
-    if controller_only_official_evaluation != (evaluation_mode == "blind"):
+    if evaluation_mode == "blind" and not controller_only_official_evaluation:
         raise AdapterContractError(
             f"adapter {definition.adapter_id} evaluation mode conflicts with its "
             "controller-only official evaluation flag"

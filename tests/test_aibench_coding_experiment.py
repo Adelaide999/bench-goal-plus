@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from bench_goal_plus.catalog import Catalog
@@ -24,6 +28,78 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AIBenchCodingContractTest(unittest.TestCase):
+    def test_pi_flash_profile_preserves_provider_and_controller_source(self) -> None:
+        _path, profile = load_profile("goal-plus-pi-glm53flash-smoke")
+        self.assertEqual(split_model(profile), ("zai", "glm-5.3-flash"))
+        self.assertEqual(profile["agent_provider"]["wire_api"], "completions")
+        with self.assertRaisesRegex(AIBenchContractError, "Responses"):
+            resolve_profile(profile, methods=["goal-plus-codex"])
+        with mock.patch.dict(os.environ, {
+            "BENCH_GOAL_PLUS_SOURCE_DIR": "/trusted/goal-plus",
+            "BENCH_GOAL_PLUS_EXPECTED_REF": "current",
+            "PI_CODING_AGENT_DIR": "/trusted/pi",
+            "UNRELATED_SECRET": "not-for-agent",
+        }):
+            environment = runtime._agent_environment(Path("/cell"), profile, "goal-plus-pi")
+        self.assertEqual(environment["BENCH_GOAL_PLUS_SOURCE_DIR"], "/trusted/goal-plus")
+        self.assertEqual(environment["BENCH_GOAL_PLUS_EXPECTED_REF"], "current")
+        self.assertEqual(environment["PI_CODING_AGENT_DIR"], "/trusted/pi")
+        self.assertNotIn("UNRELATED_SECRET", environment)
+
+    def test_visible_process_feedback_keeps_hidden_grading_in_controller(self) -> None:
+        from experiments.openevolve_compare.experiment import render_goal
+        from adapters.registry import load_adapter_module
+
+        loaded = load_adapter_module(runtime.ADAPTER_ID, runtime.ADAPTER_MODULE)
+        self.assertTrue(loaded.module.CONTROLLER_ONLY_OFFICIAL_EVALUATION)
+
+        prompt = render_goal(
+            task_text="Repair submission using public tests", artifact_name="submission",
+            artifact_is_directory=True, metric_name=task_adapter.GOAL_PLUS_PROCESS_METRIC,
+            metric_direction="maximize", wall_seconds=900, closeout_seconds=120,
+            concurrency=1, worker_host="pi-rpc", worker_model="zai/glm-5.3-flash",
+            controller_only_official_evaluation=True, evaluation_mode=task_adapter.EVALUATION_MODE,
+        )
+        self.assertIn("promotion_mode=apply", prompt)
+        self.assertIn("`ranking_signal`", prompt)
+        self.assertIn("visible_test_score", prompt)
+        self.assertNotIn("format_valid", prompt)
+        self.assertEqual(task_adapter.PI_WORKER_SANDBOX["evaluation_mode"], "visible")
+
+    def test_visible_selection_closeout_does_not_require_blind_selection_rule(self) -> None:
+        closeout = {"completed": True, "runs": [{
+            "selection": {"selected_candidate_id": "c001"},
+            "promotion": {"artifact_path": "/artifact"},
+            "final_state": "promoted", "goal_statuses": {"gp_0001": "complete"},
+        }]}
+        reason = benchmark_compare._controller_only_closeout_incomplete_reason
+        self.assertIsNone(reason(closeout, deterministic_public_gate=False))
+        self.assertIsNotNone(reason(closeout, deterministic_public_gate=True))
+        closeout["runs"][0]["goal_statuses"]["gp_0001"] = "active"
+        self.assertIsNotNone(reason(closeout, deterministic_public_gate=False))
+
+    def test_hidden_grading_only_blocks_native_closeout_for_blind_search(self) -> None:
+        manifest = {
+            "workspace": str(self.root), "budget": {}, "method": "goal-plus-pi",
+            "task": {"controller_only_official_evaluation": True},
+        }
+        for mode in ("visible", "blind"):
+            with (
+                self.subTest(mode=mode),
+                mock.patch.object(benchmark_compare, "EVALUATION_MODE", mode),
+                mock.patch.object(benchmark_compare, "CONTROLLER_ONLY_OFFICIAL_EVALUATION", True),
+                mock.patch.object(benchmark_compare, "GOAL_PLUS_EARLY_STOP_CONTRACT", None),
+                mock.patch.object(benchmark_compare, "GOAL_PLUS_POSTHOC_SELECTION_CONTRACT", None),
+                mock.patch.object(benchmark_compare, "evaluate_with_controller_runtime",
+                                  return_value={"valid": False, "budget": {"total_claimed": 0}}),
+            ):
+                environment = {benchmark_compare.CONTROLLER_ONLY_CLOSEOUT_ENV: "1"}
+                result = benchmark_compare.execute_goal_plus(
+                    manifest, self.root, SimpleNamespace(), environment
+                )
+            self.assertTrue(result["preflight_failed"])
+            self.assertEqual(benchmark_compare.CONTROLLER_ONLY_CLOSEOUT_ENV in environment, mode == "blind")
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(
             prefix="aibench-coding-test-", dir=ensure_temp_root("tests")
@@ -52,7 +128,7 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertTrue(target.local_asset_inventory)
         self.assertEqual(target.docker.requirement, "not_required")
 
-    def test_registry_promotes_only_the_evidenced_goal_plus_codex_method(self) -> None:
+    def test_registry_promotes_only_evidenced_goal_plus_methods(self) -> None:
         registry = json.loads(
             (ROOT / "benchmarks" / "registry.json").read_text(encoding="utf-8")
         )
@@ -65,7 +141,8 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertEqual(item["stages"]["goal_plus_codex"], "pass")
         self.assertEqual(item["stages"]["plain_codex"], "partial")
         self.assertEqual(item["stages"]["plain_pi"], "partial")
-        self.assertEqual(item["stages"]["goal_plus_pi"], "partial")
+        self.assertEqual(item["stages"]["goal_plus_pi"], "pass")
+        self.assertTrue(all((ROOT / path).is_file() for path in item["stage_evidence"]["goal_plus_pi"]))
         self.assertEqual(item["stages"]["campaign_ready"], "partial")
         self.assertEqual(summary["method"]["id"], "goal-plus-codex")
         self.assertEqual(summary["status"], "completed")
@@ -315,6 +392,34 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertIn(("--tmpfs", str(cell.parent)), pairs)
         self.assertIn(("--bind", str(workspace)), pairs)
         self.assertEqual(command[-3:], [str(binary), "exec", "--json"])
+
+    @unittest.skipUnless(shutil.which("bwrap"), "requires Bubblewrap")
+    def test_goal_plus_pi_outer_sandbox_can_create_worker_socket(self) -> None:
+        cell = self.root / "cells/one"
+        workspace = cell / "workspace"
+        workspace.mkdir(parents=True)
+        hidden = self.root / "hidden"
+        hidden.mkdir()
+        (hidden / "gold.txt").write_text("not public")
+        with tempfile.TemporaryDirectory(prefix="ab-", dir=ensure_temp_root()) as scratch:
+            environment = {
+                "AIBENCH_AGENT_ROLE": "pi", "AIBENCH_METHOD": "goal-plus-pi",
+                "AIBENCH_REAL_PI_BIN": sys.executable,
+                "AIBENCH_HIDDEN_CHECKOUT": str(hidden), "AIBENCH_CELL_ROOT": str(cell),
+                "AIBENCH_PROXY_RUNTIME_DIR": scratch,
+            }
+            script = (
+                "import os,socket,sys; from pathlib import Path; "
+                f"sys.path.insert(0,{str(ROOT)!r}); "
+                "from experiments.benchmark_compare.pi_worker_launcher import _worker_proxy_base; "
+                "p=_worker_proxy_base(os.environ)/'bgp-pi-0000000000000000'; p.mkdir(); "
+                "s=socket.socket(socket.AF_UNIX); s.bind(str(p/'tool.sock')); "
+                f"assert not (Path({str(hidden)!r})/'gold.txt').exists()"
+            )
+            with mock.patch.dict(os.environ, environment), mock.patch.object(Path, "cwd", return_value=workspace):
+                command = sandbox.build_command(["-c", script])
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def _write_cell(
         self,

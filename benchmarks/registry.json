@@ -637,12 +637,13 @@
         "plain_codex": "partial",
         "goal_plus_codex": "pass",
         "plain_pi": "partial",
-        "goal_plus_pi": "partial",
+        "goal_plus_pi": "pass",
         "matched_baseline": "todo",
         "campaign_ready": "partial"
       },
       "evidence": [
-        "evidence/runs/2026-09-03-aibench-coding-goal-plus-codex/summary.json"
+        "evidence/runs/2026-09-03-aibench-coding-goal-plus-codex/summary.json",
+        "evidence/runs/2026-09-08-aibench-pi-current-goal-plus.md"
       ],
       "stage_evidence": {
         "source_forked": [
@@ -656,11 +657,14 @@
         ],
         "goal_plus_codex": [
           "evidence/runs/2026-09-03-aibench-coding-goal-plus-codex/summary.json"
+        ],
+        "goal_plus_pi": [
+          "evidence/runs/2026-09-08-aibench-pi-current-goal-plus.md"
         ]
       },
-      "next_action": "Run the same exact-revision Linux+bwrap task with Plain Codex, Plain Pi, and Goal Plus + Pi, then archive a matched four-method campaign before promoting campaign_ready.",
+      "next_action": "Run matched Plain Codex and Plain Pi baselines before promoting campaign_ready; the Pi Goal Plus smoke now has current-runtime evidence.",
       "blockers": [
-        "Only Goal Plus + Codex K=1 has real-model Linux+bwrap evidence; the other three registered methods and the native baseline remain separately unproven.",
+        "Goal Plus + Codex and Goal Plus + Pi K=1 have separate real-model Linux+bwrap evidence; matched Plain baselines and the native baseline remain unproven.",
         "The _clean2026 revision contains 45 cases but only 38 pass the upstream validity gate; the initial profile uses valid-only selection.",
         "For K>1, only the selected result receives hidden grading, so pass@K and pass^K remain unavailable even though task-level K topology is checked."
       ]
@@ -720,17 +724,27 @@
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
-        "official_verifier": "partial",
+        "official_verifier": "pass",
         "native_baseline": "n/a",
         "plain_codex": "todo",
         "goal_plus_codex": "todo",
         "plain_pi": "todo",
-        "goal_plus_pi": "todo",
+        "goal_plus_pi": "pass",
         "matched_baseline": "todo",
         "campaign_ready": "partial"
       },
-      "evidence": [],
-      "next_action": "Archive one official sample-asan-crash Goal Plus campaign, then expand coverage across pinned formal tasks with matched budgets.",
+      "evidence": [
+        "evidence/runs/2026-09-08-zsoft-pi-current-goal-plus.md"
+      ],
+      "stage_evidence": {
+        "official_verifier": [
+          "evidence/runs/2026-09-08-zsoft-pi-current-goal-plus.md"
+        ],
+        "goal_plus_pi": [
+          "evidence/runs/2026-09-08-zsoft-pi-current-goal-plus.md"
+        ]
+      },
+      "next_action": "Expand beyond the accepted sample-asan-crash Pi Goal Plus workflow to pinned formal tasks and matched baselines.",
       "blockers": [
         "Docker and Docker Compose are required for every official evaluation.",
         "Tasks whose source archives are not cached require network access during benchmark preparation."
@@ -757,17 +771,24 @@
       "stages": {
         "source_forked": "pass",
         "environment": "pass",
-        "official_verifier": "partial",
+        "official_verifier": "pass",
         "native_baseline": "partial",
         "plain_codex": "todo",
         "goal_plus_codex": "todo",
         "plain_pi": "todo",
-        "goal_plus_pi": "todo",
+        "goal_plus_pi": "partial",
         "matched_baseline": "todo",
         "campaign_ready": "partial"
       },
-      "evidence": [],
-      "next_action": "Run the zsoft-detect-civetweb-swe-agent-smoke preset on a Linux+bwrap host, archive exact provider usage plus official F1 evidence, then run matched Goal Plus comparisons across the five pinned projects.",
+      "evidence": [
+        "evidence/runs/2026-09-08-zsoft-pi-current-goal-plus.md"
+      ],
+      "stage_evidence": {
+        "official_verifier": [
+          "evidence/runs/2026-09-08-zsoft-pi-current-goal-plus.md"
+        ]
+      },
+      "next_action": "Resolve the retained Pi minimum-lease evidence gap before claiming completed Goal Plus lifecycle coverage, then run matched comparisons and native SWE-agent acceptance.",
       "blockers": [
         "The native SWE-agent acceptance path still lacks a real-model Linux+bwrap campaign; macOS OrbStack is not the upstream native host.",
         "The upstream SWE-agent launcher does not expose an explicit reasoning-effort control, so its results are not yet eligible for reasoning-matched method comparisons.",

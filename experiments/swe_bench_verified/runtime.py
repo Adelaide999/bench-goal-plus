@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from bench_goal_plus.codex_provider import codex_responses_provider_args
+from bench_goal_plus.upstreams import external_goal_plus_source, external_swebench_source
 from bench_goal_plus.goal_plus_command import (
     goal_plus_command_config,
     goal_plus_entrypoint,
@@ -126,7 +127,7 @@ def _validate_instance_image(instance: dict[str, Any], profile: dict[str, Any]) 
         raise SweBenchContractError(
             "dataset base_commit does not match the pinned profile"
         )
-    spec = make_test_spec(instance, namespace="swebench")
+    spec = make_test_spec(instance, namespace="swebench", arch=profile.get("architecture", "x86_64"))
     if spec.instance_image_key != task["image"]:
         raise SweBenchContractError(
             "official harness image key does not match the local inventory tag: "
@@ -266,7 +267,9 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
             ),
             "swebench_commit": swebench_commit,
             "swebench_checkout": str(SWEBENCH_ROOT),
+            "swebench_source": external_swebench_source(),
             "goal_plus_commit": goal_plus_commit,
+            "goal_plus_source": external_goal_plus_source(),
             "goal_plus_checkout": (
                 str(GOAL_PLUS_ROOT) if goal_plus_commit is not None else None
             ),
@@ -729,6 +732,8 @@ def _create_agent_container(
             "goal_plus_controller",
             "goal_plus_pip_cache",
         )
+        if runtime.get("goal_plus_python_root"):
+            command.extend(["--mount", f"type=bind,src={runtime['goal_plus_python_root']},dst=/opt/goal-plus-python,readonly"])
         if method == "goal-plus-pi" and runtime.get(
             "goal_plus_evidence_annotator"
         ) is not None:
@@ -947,7 +952,7 @@ def _initialize_agent_container(
             timeout=120,
         )
     if method in {"goal-plus-codex", "goal-plus-pi"}:
-        environment = goal_plus_runtime_environment()
+        environment = goal_plus_runtime_environment(runtime)
         install_command = ["docker", "exec"]
         for name, value in environment.items():
             install_command.extend(["-e", f"{name}={value}"])
@@ -971,7 +976,7 @@ def _initialize_agent_container(
                 "sh",
                 "-lc",
                 install_script
-                + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
+                + " && \"$GOAL_PLUS_PYTHON\" -c \"import fastmcp, goal_plus, plotly, pydantic\""
                 + f" && {version_probe}",
             ]
         )
@@ -1072,6 +1077,9 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
     else:
         worker_instruction = (
             "Continue the same bound Pi worker session; do not create replacement lanes."
+            " After search_start_batch, pass its candidate IDs to pi_search_pool_open "
+            f"with max_parallel={profile['concurrency']} and final_verify=true; "
+            "the pool creates and binds worker sessions."
         )
     minimum_budget_instruction = ""
     if "worker_min_runtime_seconds" in goal_plus:
@@ -1106,7 +1114,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "after this Goal Plus session.\n\n"
         "Freeze exactly one SearchSpec discovered from the public issue and repository. "
         "Honor every leading typed command field. Use source_path=/testbed, "
-        "metric_name=visible_test_score, direction=maximize. "
+        "metric_name=visible_test_score, metric_direction=maximize. "
         + render_search_scheduler_instructions(
             search_scheduler_from_json(profile.get("search_scheduler"))
         )
@@ -1114,7 +1122,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         f"{goal_plus['worker_runtime_seconds']}. "
         f"{minimum_budget_instruction}"
         "Set "
-        "strategy.config.closeout_reserve_seconds="
+        "strategy.config.reserve_closeout_seconds="
         f"{goal_plus['closeout_reserve_seconds']} and strategy.config.seed="
         f"{profile.get('seed', 1)}. {candidate_instruction}"
         "Set strategy.evidence_annotator.timeout_seconds="
@@ -1170,7 +1178,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "Include that wrapper path in verifier_artifacts. "
         "Keep .gp and .goal-plus-verifiers outside the editable artifact surface. "
         "After worker completion, close the pool, select and promote verifier-backed "
-        "Evidence, apply the promotion patch to /testbed, record the Search result, "
+        "Evidence, call search_apply_promotion to apply it to /testbed, record the Search result, "
         "and finish the Goal Plus record.\n\n"
         f"Public issue:\n{task['problem_statement']}\n"
     )
@@ -1283,7 +1291,7 @@ def _agent_command(
     if profile["methods"][0] == "goal-plus-codex":
         custom_provider = profile.get("agent_provider") is not None
         goal_plus_environment = {
-            **goal_plus_runtime_environment(),
+            **goal_plus_runtime_environment(runtime),
             **_goal_plus_supplemental_evaluation_environment(profile),
             **_goal_plus_evidence_annotator_environment(profile, runtime),
             "HOME": "/opt/codex-home",
@@ -1394,9 +1402,16 @@ def _agent_command(
             "-",
         ]
     credential_env = str(runtime["credential_env"])
+    # Isolated Pi HOME does not load the task image's /root/.bashrc activation.
+    pi_shell = [
+        "bash", "-c",
+        'source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed && '
+        'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH && exec "$@"',
+        "swe-bench-pi",
+    ]
     if profile["methods"][0] == "goal-plus-pi":
         goal_plus_environment = {
-            **goal_plus_runtime_environment(),
+            **goal_plus_runtime_environment(runtime),
             **_goal_plus_supplemental_evaluation_environment(profile),
             **_goal_plus_evidence_annotator_environment(profile, runtime),
             "HOME": "/opt/pi-home",
@@ -1425,10 +1440,7 @@ def _agent_command(
                 "-e",
                 credential_env,
                 container_id,
-                "sh",
-                "-lc",
-                'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH; exec "$@"',
-                "swe-bench-goal-plus",
+                *pi_shell,
                 "/opt/node/bin/node",
                 "/opt/pi/dist/cli.js",
                 "--mode",
@@ -1477,6 +1489,7 @@ def _agent_command(
         credential_env,
         *bridge_environment,
         container_id,
+        *pi_shell,
         "/opt/node/bin/node",
         "/opt/pi/dist/cli.js",
         "--mode",
@@ -1555,7 +1568,7 @@ def _goal_plus_closeout(
         int(annotator["timeout_seconds"]) if isinstance(annotator, dict) else 0
     )
     environment = {
-        **goal_plus_runtime_environment(),
+        **goal_plus_runtime_environment(runtime),
         **_goal_plus_supplemental_evaluation_environment(profile),
         **_goal_plus_evidence_annotator_environment(profile, runtime),
         "HOME": "/opt/pi-home" if is_pi else "/opt/codex-home",
@@ -1569,6 +1582,7 @@ def _goal_plus_closeout(
     if is_pi:
         environment["PI_CODING_AGENT_DIR"] = "/opt/pi-home/.pi/agent"
         environment["GOAL_PLUS_PI_MODEL"] = profile["model"]
+        environment["PATH"] = "/opt/miniconda3/envs/testbed/bin:" + environment["PATH"]
     command = ["docker", "exec"]
     for name, value in environment.items():
         command.extend(["-e", f"{name}={value}"])
@@ -1588,7 +1602,7 @@ def _goal_plus_closeout(
     command.extend(
         [
             container_id,
-            "python",
+            environment["GOAL_PLUS_PYTHON"],
             "/opt/swebench-goal-plus-controller.py",
             "--root",
             "/testbed/.gp",
@@ -1669,6 +1683,7 @@ def _export_goal_plus_state(
     state = collect_goal_plus_state(
         destination,
         expected_k=profile["concurrency"],
+        expected_worker_model=profile["model"],
         expected_worker_runtime_seconds=profile["goal_plus"][
             "worker_runtime_seconds"
         ],
@@ -1856,10 +1871,8 @@ def _run_agent(
                         "Pi OpenAI-compatible Responses probe failed through the runtime route"
                     )
             else:
-                runtime = (
-                    resolve_goal_plus_runtime(profile)
-                    if method == "goal-plus-pi"
-                    else resolve_pi_runtime(profile)
+                runtime = resources.enter_context(
+                    routed_pi_runtime(profile, campaign, goal_plus=method == "goal-plus-pi")
                 )
                 host_probe = None
         if network.get("enforced") and runtime.get("bridge") is None:
@@ -1957,6 +1970,7 @@ def _run_agent(
                 "package_root": str(runtime["package_root"]),
                 "provider": runtime["provider"],
                 "credential_env": runtime["credential_env"],
+                "models_file": str(runtime["models_file"]) if runtime.get("models_file") else None,
             }
             if runtime.get("custom_provider"):
                 runtime_public.update(
@@ -2152,6 +2166,11 @@ def _run_agent(
                 "--binary",
                 "--full-index",
                 profile["tasks"][0]["base_commit"],
+                *(
+                    ["--", ".", ":(top,exclude).gp", ":(top,exclude).codex",
+                     ":(top,exclude).goal-plus-verifiers"]
+                    if method in {"goal-plus-codex", "goal-plus-pi"} else []
+                ),
             ]
         )
         status = _docker_checked(
@@ -2304,6 +2323,14 @@ def _official_evaluation(
         "--report_dir",
         str(evaluator_dir),
     ]
+    if profile.get("architecture") == "arm64":
+        command = [
+            command[0], str(ROOT / "experiments/swe_bench_verified/official_instance.py"),
+            "--instances", str(evaluator_dir / "instances.json"),
+            "--predictions", str(predictions_path), "--image", profile["tasks"][0]["image"],
+            "--architecture", "arm64", "--run-id", run_id,
+            "--timeout", str(profile["evaluator_timeout_seconds"]),
+        ]
     evaluation = {
         "state": "running",
         "calls": 1,
@@ -2386,6 +2413,10 @@ def _official_evaluation(
 
 def execute_campaign(campaign: Path) -> int:
     manifest = _manifest(campaign)
+    for name, current in (("goal_plus", external_goal_plus_source), ("swebench", external_swebench_source)):
+        prepared = (manifest.get("source") or {}).get(f"{name}_source")
+        if prepared is not None and current() != prepared:
+            raise SweBenchContractError(f"{name} source differs from the prepared campaign")
     if manifest["state"] != "prepared":
         raise SweBenchContractError(
             f"campaign must be prepared, got {manifest['state']!r}"

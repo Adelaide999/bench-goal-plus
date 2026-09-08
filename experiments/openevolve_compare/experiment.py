@@ -46,7 +46,11 @@ from bench_goal_plus.search_scheduler import (  # noqa: E402
     search_scheduler_from_namespace,
     summarize_worker_concurrency,
 )
-from bench_goal_plus.upstreams import upstream_source_path  # noqa: E402
+from bench_goal_plus.upstreams import (  # noqa: E402
+    external_goal_plus_source,
+    require_prepared_goal_plus_source,
+    upstream_source_path,
+)
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
     describe_task,
@@ -301,10 +305,6 @@ def render_goal(
         )
     if evaluation_mode not in {"visible", "blind"}:
         raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
-    if controller_only_official_evaluation and evaluation_mode != "blind":
-        raise ValueError(
-            "controller-only official evaluation requires blind worker feedback"
-        )
     if evaluation_mode == "blind":
         controller_only_official_evaluation = True
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
@@ -339,7 +339,7 @@ def render_goal(
         annotator_model=worker_model,
         workspace_backend="git_worktree",
         promotion_mode=(
-            "artifact_only" if controller_only_official_evaluation else "apply"
+            "artifact_only" if evaluation_mode == "blind" else "apply"
         ),
     )
     coordination_text = ""
@@ -366,13 +366,15 @@ def render_goal(
     )
     pool_close_target = (
         "returning control for host closeout"
-        if controller_only_official_evaluation
+        if evaluation_mode == "blind"
         else "selection"
     )
     initial_launch_contract = (
         "- After the one initial `search_plan_next` call, call `search_start_batch` "
-        "once, then open exactly one `pi_search_pool_open` for the returned launch "
-        "payloads. Treat the pool's persisted jobs and native session ids as the "
+        "once to materialize the candidates. Pass all returned candidate IDs as "
+        "`candidate_ids` to one `pi_search_pool_open`, with "
+        f"`max_parallel={concurrency}` and `final_verify=true`; the pool creates and binds "
+        "the worker sessions. Treat the pool's persisted jobs and native session ids as the "
         "only evidence that workers started; use `pi_search_pool_wait_any`, continue "
         f"ready candidates while useful, and close the pool before {pool_close_target}.\n"
         if worker_host == "pi-rpc"
@@ -389,7 +391,7 @@ def render_goal(
         render_controller_only_task_prompt(
             task_text, wall_seconds, closeout_seconds
         )
-        if controller_only_official_evaluation
+        if evaluation_mode == "blind"
         else render_common_task_prompt(task_text, wall_seconds, closeout_seconds)
     )
     edit_surface_limit = (
@@ -401,8 +403,7 @@ def render_goal(
     worker_verification_text = (
         "- Each candidate worker must submit its own final process verifier result. After a "
         "worker returns with that durable result, do not run a duplicate parent-side process "
-        "verification for the same candidate; wait for all workers, then select and let the "
-        "promotion verifier perform the final gate.\n"
+        "verification for the same candidate; wait for all workers before closeout.\n"
     )
     early_stop_text = ""
     if early_stop_contract is not None:
@@ -418,7 +419,7 @@ def render_goal(
             f"process iteration records `{target_metric}={target_score:g}`. Treat that stop "
             "as expected; selection, promotion, and final verification still run afterward.\n"
         )
-    if controller_only_official_evaluation:
+    if evaluation_mode == "blind":
         return (
             f"{goal_plus_command}\n\n"
             f"{common_prompt.rstrip()}\n\n"
@@ -428,12 +429,9 @@ def render_goal(
             "official evaluator and official metric outside every worker trajectory; Goal "
             "Plus receives only the public verifier and its safe shared Evidence.\n\n"
             "- Honor every leading typed command field in the SearchSpec.\n"
+            "- Set `strategy.inner_agent=\"autoresearch\"`.\n"
             + render_search_scheduler_instructions(search_scheduler)
-            + "- After triage and before freezing the SearchSpec, call "
-            "`goal_plus_upsert_work_items` with one required `route=\"search\"` item "
-            "for this benchmark Search. After linking the run, record "
-            "`search_routed` for that item and leave its result acceptance to the host "
-            "controller closeout.\n"
+            + "- Use the Goal's linked Search lifecycle for this optimization.\n"
             + "- Set `strategy.config.global_evidence_mode=\"manual\"` so every worker can "
             "read settled public-verifier Evidence from the other candidates as reference.\n"
             + (
@@ -479,7 +477,7 @@ def render_goal(
             "- Workspace: use `source_path=\".\"`; backend and promotion mode come "
             "from the typed command config.\n"
             "- Constraints: no network; preserve all controller-owned public task files.\n"
-            f"- `strategy.config.closeout_reserve_seconds={closeout_seconds}` so host "
+            f"- `strategy.config.reserve_closeout_seconds={closeout_seconds}` so host "
             "supervisors stop worker continuation before final completion work.\n"
             f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
             f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
@@ -502,12 +500,9 @@ def render_goal(
         "the configuration below. Goal Plus owns intake, triage, SearchSpec freezing, candidate "
         "workspaces, selection, promotion, and final reporting.\n\n"
         "- Honor every leading typed command field in the SearchSpec.\n"
+        "- Set `strategy.inner_agent=\"autoresearch\"`.\n"
         + render_search_scheduler_instructions(search_scheduler)
-        + "- After triage and before freezing the SearchSpec, call "
-        "`goal_plus_upsert_work_items` with one required `route=\"search\"` item "
-        "for this benchmark Search. After linking the run, record "
-        "`search_routed` for that item and leave its result acceptance to the host "
-        "controller closeout.\n"
+        + "- Use the Goal's linked Search lifecycle for this optimization.\n"
         + (
             "- Set top-level `shared_dir.enabled=true`.\n"
             if shared_dir_enabled
@@ -544,7 +539,7 @@ def render_goal(
         "the typed command config.\n"
         "- Constraints: no network; preserve the artifact's controller-checked fixed regions.\n"
         f"{early_stop_text}"
-        f"- `strategy.config.closeout_reserve_seconds={closeout_seconds}` so host "
+        f"- `strategy.config.reserve_closeout_seconds={closeout_seconds}` so host "
         "supervisors stop worker continuation before final completion work.\n"
         f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
         f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
@@ -552,6 +547,11 @@ def render_goal(
         f"- Promotion rule: select the valid verifier-backed candidate with the best "
         f"`{metric_name}`, promote it, complete the full goal audit, and write the "
         "final Goal Plus report.\n"
+        + (
+            "- The controller runs official hidden grading after Search closeout; "
+            "only public verifier evidence participates in Search selection.\n"
+            if controller_only_official_evaluation else ""
+        )
     )
 
 
@@ -709,6 +709,11 @@ def write_pi_models_config(
             }
         }
     }
+    if provider_id == "zai" and api == "openai-completions":
+        # Preserve Pi's native Z.AI thinking and tool-stream protocol metadata.
+        from bench_goal_plus.pi_models import native_catalog_model
+
+        payload["providers"][provider_id]["models"] = [native_catalog_model(provider_id, model, api)]
     models_path = target / "models.json"
     models_path.write_text(json.dumps(payload, indent=2) + "\n")
     models_path.chmod(0o600)
@@ -785,6 +790,8 @@ def prepare(args: argparse.Namespace) -> int:
     if is_sky:
         managed_checkouts.append(("skydiscover", skydiscover_root))
     for name, path in managed_checkouts:
+        if name == "goal_plus" and external_goal_plus_source():
+            continue
         expected_branch = upstreams[name]["tracking_branch"]
         actual_branch = git_branch(path)
         if actual_branch != expected_branch:
@@ -865,7 +872,7 @@ def prepare(args: argparse.Namespace) -> int:
             copy_goal_plus_pi_assets(goal_plus_root, workspace)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
             worker_host = "pi-rpc"
-            worker_model = f"{PI_PROVIDER_ID}/{args.model}"
+            worker_model = f"{getattr(args, 'pi_provider_id', PI_PROVIDER_ID)}/{args.model}"
         task_text = (workspace / "TASK.md").read_text()
         goal = render_goal(
             task_text=task_text,
@@ -915,6 +922,12 @@ def prepare(args: argparse.Namespace) -> int:
                 else {}
             ),
             "worker_host": worker_host,
+            "pi_provider": {
+                "id": getattr(args, "pi_provider_id", PI_PROVIDER_ID),
+                "api": getattr(args, "pi_api", "openai-responses"),
+                "api_key_env": getattr(args, "pi_api_key_env", PI_API_KEY_ENV),
+                "api_base_env": getattr(args, "pi_api_base_env", "OPENAI_BASE_URL"),
+            } if method == "goal-plus-pi" else None,
             "worker_model": worker_model,
             "base_model": args.model,
             "reasoning_effort": args.reasoning_effort,
@@ -1006,6 +1019,7 @@ def prepare(args: argparse.Namespace) -> int:
             "openevolve_branch": git_branch(openevolve_root),
             "openevolve_commit": git_commit(openevolve_root),
             "goal_plus_root": str(goal_plus_root),
+            "goal_plus_source": external_goal_plus_source(),
             "goal_plus_tracking_branch": upstreams["goal_plus"][
                 "tracking_branch"
             ],
@@ -1079,6 +1093,10 @@ def prepare_batch(args: argparse.Namespace) -> int:
     ):
         raise ValueError("Search Scheduler requires only Goal Plus batch methods")
     tasks = list_catalog_tasks(args.task_set)
+    if getattr(args, "task_id", None) is not None:
+        tasks = [task for task in tasks if task["task_id"] == args.task_id]
+        if not tasks:
+            raise ValueError(f"unknown task in OpenEvolve task set: {args.task_id}")
     run_root.mkdir(parents=True, exist_ok=False)
     entries: list[dict[str, Any]] = []
 
@@ -1101,6 +1119,10 @@ def prepare_batch(args: argparse.Namespace) -> int:
                 environment_manifest=args.environment_manifest,
                 checkout_root=args.checkout_root,
                 venv=args.venv,
+                pi_provider_id=getattr(args, "pi_provider_id", PI_PROVIDER_ID),
+                pi_api=getattr(args, "pi_api", "openai-responses"),
+                pi_api_key_env=getattr(args, "pi_api_key_env", PI_API_KEY_ENV),
+                pi_api_base_env=getattr(args, "pi_api_base_env", "OPENAI_BASE_URL"),
                 search_scheduler_config_json=getattr(
                     args, "search_scheduler_config_json", None
                 ),
@@ -1205,6 +1227,10 @@ def run_batch(args: argparse.Namespace) -> int:
                         pi_bin=args.pi_bin,
                         model=model,
                         api_base=args.api_base,
+                        pi_provider_id=getattr(args, "pi_provider_id", PI_PROVIDER_ID),
+                        pi_api=getattr(args, "pi_api", "openai-responses"),
+                        pi_api_key_env=getattr(args, "pi_api_key_env", PI_API_KEY_ENV),
+                        pi_api_base_env=getattr(args, "pi_api_base_env", "OPENAI_BASE_URL"),
                     )
                 )
                 result["status"] = (
@@ -2099,254 +2125,6 @@ def _goal_plus_runtime_types() -> tuple[type[Any], type[Any], type[Any]]:
     return FileGoalPlusRuntime, FileSearchRuntime, SearchTools
 
 
-def _ensure_controller_search_work_item(
-    goal_runtime: Any, goal_plus_id: str, run_id: str
-) -> str:
-    """Return the auditable work item that controller closeout will resolve."""
-    goal = goal_runtime.status(goal_plus_id)
-    current_items = [
-        item
-        for item in goal.work_items
-        if item.goal_revision == goal.goal_revision
-    ]
-    linked_items = [
-        item
-        for item in current_items
-        if item.route == "search" and item.search_run_id == run_id
-    ]
-    if len(linked_items) > 1:
-        raise RuntimeError(
-            f"Goal Plus {goal_plus_id} has multiple work items for Search run {run_id}"
-        )
-    if linked_items:
-        linked_item = linked_items[0]
-        if linked_item.status in {"planned", "blocked", "failed"}:
-            goal_runtime.record_work_event(
-                goal_plus_id,
-                linked_item.work_item_id,
-                "search_routed",
-                "Controller closeout resumed the linked fixed-budget Search run.",
-                search_run_id=run_id,
-                evidence=[{"type": "search_run", "run_id": run_id}],
-            )
-        return linked_item.work_item_id
-
-    unbound_search_items = [
-        item
-        for item in current_items
-        if item.route == "search"
-        and item.status in {"planned", "blocked", "failed"}
-        and item.search_run_id is None
-    ]
-    if len(unbound_search_items) > 1:
-        raise RuntimeError(
-            f"Goal Plus {goal_plus_id} has ambiguous unbound Search work items"
-        )
-    if unbound_search_items:
-        work_item_id = unbound_search_items[0].work_item_id
-    else:
-        # A goal-plus agent can drive the fixed-budget Search run through an
-        # ordinary "main" work item whose scope names the run, then complete the
-        # goal on its own before controller closeout runs. In that terminal state
-        # the goal is no longer active, so the controller cannot upsert a search
-        # item or record a search_routed event (both require status=="active").
-        # Reuse that accepted main work item as the auditable item instead.
-        scope_matched = [
-            item
-            for item in current_items
-            if item.status == "accepted"
-            and run_id in item.scope
-        ]
-        if len(scope_matched) > 1:
-            raise RuntimeError(
-                f"Goal Plus {goal_plus_id} has multiple accepted work items "
-                f"scoping Search run {run_id}"
-            )
-        if len(scope_matched) == 1:
-            return scope_matched[0].work_item_id
-        # The host may interrupt the agent before it drafts any work item plan,
-        # leaving an active goal with an empty current-revision work list (the
-        # common early-stop-on-live-pass shape). The controller is authoritative
-        # for the drained Search run, so a dedicated auditable item is created
-        # now. The goal is active in this shape, so upsert is legal here.
-        work_item_id = "benchmark_search"
-        goal_runtime.upsert_work_items(
-            goal_plus_id,
-            [
-                {
-                    "work_item_id": work_item_id,
-                    "title": "Run benchmark Search",
-                    "objective": (
-                        "Run the fixed-budget candidate search and let controller closeout "
-                        "apply the frozen selection and promotion contract."
-                    ),
-                    "route": "search",
-                    "depends_on": [],
-                    "scope": [run_id],
-                    "acceptance": [
-                        "The linked Search run is selected and promoted",
-                        "The controller promotion verifier passes",
-                        "The Goal Plus Search result is recorded",
-                    ],
-                    "required": True,
-                }
-            ],
-        )
-
-    goal_runtime.record_work_event(
-        goal_plus_id,
-        work_item_id,
-        "search_routed",
-        "Controller closeout adopted the linked fixed-budget Search run.",
-        search_run_id=run_id,
-        evidence=[{"type": "search_run", "run_id": run_id}],
-    )
-    return work_item_id
-
-
-def _accept_controller_search_work_item(
-    goal_runtime: Any,
-    goal_plus_id: str,
-    work_item_id: str,
-    *,
-    run_id: str,
-    candidate_id: str,
-    selected_score: Any,
-) -> None:
-    evidence = [
-        {
-            "type": "controller_closeout",
-            "run_id": run_id,
-            "selected_candidate_id": candidate_id,
-            "selected_score": selected_score,
-        }
-    ]
-    goal = goal_runtime.status(goal_plus_id)
-    item = next(
-        item
-        for item in goal.work_items
-        if item.goal_revision == goal.goal_revision
-        and item.work_item_id == work_item_id
-    )
-    if item.status == "active":
-        goal_runtime.record_work_event(
-            goal_plus_id,
-            work_item_id,
-            "result",
-            "Controller selected and promoted the verifier-backed Search result.",
-            search_run_id=run_id,
-            evidence=evidence,
-        )
-        goal = goal_runtime.status(goal_plus_id)
-        item = next(
-            item
-            for item in goal.work_items
-            if item.goal_revision == goal.goal_revision
-            and item.work_item_id == work_item_id
-        )
-    if item.status == "result_ready":
-        goal_runtime.record_work_event(
-            goal_plus_id,
-            work_item_id,
-            "accepted",
-            "Controller verified the Search selection, promotion, and recorded result.",
-            search_run_id=run_id,
-            evidence=evidence,
-        )
-    elif item.status != "accepted":
-        raise RuntimeError(
-            f"Goal Plus work item {work_item_id} cannot be accepted from {item.status}"
-        )
-
-
-def _accept_controller_closeout_items(
-    goal_runtime: Any,
-    goal_plus_id: str,
-    *,
-    run_id: str,
-    selected_candidate_id: str,
-    selected_score: Any,
-) -> None:
-    """Resolve leftover orchestration items before the goal completes.
-
-    A goal-plus agent may draft a terminal "closeout" (or similar) main-route
-    work item that it never executes -- it depends on the Search run that the
-    controller owns.  The controller is authoritative for that item after the
-    frozen budget ends, so it drives the placeholder to accepted, which lets the
-    evaluation gate produce a real PASS / NOT_PASS instead of refusing to
-    complete.  Subagent route items are left untouched: they represent live
-    concurrent work that must not be swallowed.
-    """
-    goal = goal_runtime.status(goal_plus_id)
-    current_items = [
-        item
-        for item in goal.work_items
-        if item.goal_revision == goal.goal_revision
-    ]
-    unresolved = [
-        item
-        for item in current_items
-        if item.route != "search"
-        and item.route != "subagent"
-        and item.status != "accepted"
-        and not (not item.required and item.status in {"cancelled", "superseded"})
-    ]
-    for item in unresolved:
-        work_item_id = item.work_item_id
-        evidence = [
-            {
-                "type": "controller_closeout",
-                "run_id": run_id,
-                "selected_candidate_id": selected_candidate_id,
-                "selected_score": selected_score,
-            }
-        ]
-        if item.status in {"planned", "blocked", "failed"}:
-            goal_runtime.record_work_event(
-                goal_plus_id,
-                work_item_id,
-                "dispatch",
-                "Controller closeout adopted the orchestration placeholder.",
-                search_run_id=run_id,
-                evidence=evidence,
-            )
-            goal = goal_runtime.status(goal_plus_id)
-            item = next(
-                item
-                for item in goal.work_items
-                if item.goal_revision == goal.goal_revision
-                and item.work_item_id == work_item_id
-            )
-        if item.status == "active":
-            goal_runtime.record_work_event(
-                goal_plus_id,
-                work_item_id,
-                "result",
-                "Controller closeout resolved the orchestration placeholder.",
-                search_run_id=run_id,
-                evidence=evidence,
-            )
-            goal = goal_runtime.status(goal_plus_id)
-            item = next(
-                item
-                for item in goal.work_items
-                if item.goal_revision == goal.goal_revision
-                and item.work_item_id == work_item_id
-            )
-        if item.status == "result_ready":
-            goal_runtime.record_work_event(
-                goal_plus_id,
-                work_item_id,
-                "accepted",
-                "Controller closeout accepted the orchestration placeholder.",
-                search_run_id=run_id,
-                evidence=evidence,
-            )
-        elif item.status != "accepted":
-            raise RuntimeError(
-                f"Goal Plus work item {work_item_id} cannot be accepted "
-                f"from {item.status}"
-            )
 
 
 def _expected_public_gate_selection(run_path: Path) -> dict[str, Any]:
@@ -2445,6 +2223,8 @@ def finalize_goal_plus_search(
         goals_by_run: dict[str, list[str]] = {}
         for goal_path in goal_paths:
             goal = goal_runtime.status(goal_path.parent.name)
+            if goal.status not in {"active", "complete"}:
+                raise RuntimeError(f"Goal {goal.goal_plus_id} requires host resume: {goal.status}")
             if goal.linked_search is not None and goal.linked_search.run_id:
                 goals_by_run.setdefault(goal.linked_search.run_id, []).append(
                     goal.goal_plus_id
@@ -2521,9 +2301,19 @@ def finalize_goal_plus_search(
                             raise
                         run_data, candidate_id, selection = selected
                         promotion = tools.search_promote(run_id, candidate_id)
-            patch_status = apply_promotion_patch(
-                Path(run_data["source_path"]), Path(promotion["artifact_path"])
-            )
+            publication = search_runtime.promotion_record(run_id)
+            if publication.promotion_mode == "apply":
+                if publication.state == "applied":
+                    patch_status = "already_applied"
+                else:
+                    applied = tools.search_apply_promotion(run_id)
+                    if applied["state"] != "applied":
+                        raise RuntimeError("Goal Plus publication has not been applied")
+                    patch_status = "applied"
+            else:
+                patch_status = apply_promotion_patch(
+                    Path(run_data["source_path"]), Path(promotion["artifact_path"])
+                )
             for goal_plus_id in goal_ids:
                 goal = goal_runtime.status(goal_plus_id)
                 linked = goal.linked_search
@@ -2537,54 +2327,8 @@ def finalize_goal_plus_search(
                     )
                 goal = goal_runtime.status(goal_plus_id)
                 if goal.status != "complete":
-                    # Reactivate a terminal-but-incomplete goal so the closeout
-                    # can resolve its outstanding Search work item. An agent that
-                    # promotes a Search run but then sets the goal "blocked"
-                    # (e.g. it gives up during final_audit) leaves the drained
-                    # run's route=search work item unaccepted. Work events --
-                    # which are the ONLY way to accept a work item -- require an
-                    # active goal record, and set_status("complete") in turn
-                    # requires every work item "accepted". So on a blocked goal
-                    # the item can neither be accepted (needs active) nor skipped
-                    # (unresolved), and closeout dead-locks into INFRA_ERROR. The
-                    # controller is authoritative for the drained Search run, so
-                    # it reactivates the goal (blocked -> active is an unguarded,
-                    # side-effect-free transition) to drive that item to accepted.
                     if goal.status != "active":
-                        goal_runtime.set_status(
-                            goal_plus_id,
-                            status="active",
-                            reason=(
-                                "controller closeout reactivating terminal goal to "
-                                "resolve the drained fixed-budget Search work item"
-                            ),
-                        )
-                    # Drive the controller-owned Search work item to "accepted".
-                    # The "stop search on live pass" early-stop path leaves the
-                    # route=search work item "active" (result acceptance is
-                    # deliberately deferred to this closeout), and
-                    # _accept_controller_closeout_items skips route=search items,
-                    # so without this the item stays unresolved and set_status
-                    # ("complete") raises "unresolved work items: ...=active",
-                    # misclassifying a verified live pass as INFRA_ERROR.
-                    search_work_item_id = _ensure_controller_search_work_item(
-                        goal_runtime, goal_plus_id, run_id
-                    )
-                    _accept_controller_search_work_item(
-                        goal_runtime,
-                        goal_plus_id,
-                        search_work_item_id,
-                        run_id=run_id,
-                        candidate_id=candidate_id,
-                        selected_score=selection.get("selected_score"),
-                    )
-                    _accept_controller_closeout_items(
-                        goal_runtime,
-                        goal_plus_id,
-                        run_id=run_id,
-                        selected_candidate_id=candidate_id,
-                        selected_score=selection.get("selected_score"),
-                    )
+                        raise RuntimeError(f"Goal {goal_plus_id} requires host resume: {goal.status}")
                     goal_runtime.set_status(
                         goal_plus_id,
                         status="complete",
@@ -2874,10 +2618,17 @@ def execute(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.expanduser().absolute()
     manifest_path = run_dir / "experiment.json"
     manifest = load_json(manifest_path)
+    require_prepared_goal_plus_source((manifest.get("environment") or {}).get("goal_plus_source"))
     if manifest["status"] != "prepared":
         raise RuntimeError(f"run is not prepared: status={manifest['status']}")
 
     method = canonical_method(manifest["method"])
+    pi_provider = (manifest.get("goal_plus_config") or {}).get("pi_provider") or {
+        "id": PI_PROVIDER_ID, "api": "openai-responses",
+        "api_key_env": PI_API_KEY_ENV, "api_base_env": "OPENAI_BASE_URL",
+    }
+    if method == "goal-plus-pi":
+        args.api_base = args.api_base or os.environ.get(pi_provider["api_base_env"])
     reasoning_effort = manifest.get(
         "reasoning_effort", DEFAULT_REASONING_EFFORT
     )
@@ -2926,9 +2677,10 @@ def execute(args: argparse.Namespace) -> int:
             api_base=args.api_base,
         )
 
-    if args.api_base and not environment.get("OPENAI_API_KEY"):
+    key_env = pi_provider["api_key_env"] if method == "goal-plus-pi" else "OPENAI_API_KEY"
+    if args.api_base and not environment.get(key_env):
         raise RuntimeError(
-            "OPENAI_API_KEY is required when --api-base selects the unified provider"
+            f"{key_env} is required for the selected API provider"
         )
 
     if method in {"plain-codex", "goal-plus-codex"}:
@@ -3278,7 +3030,7 @@ def execute(args: argparse.Namespace) -> int:
             stdout_path = run_dir / "events.jsonl"
             recorded_command = None
         else:
-            qualified_model = f"{PI_PROVIDER_ID}/{args.model}"
+            qualified_model = f"{pi_provider['id']}/{args.model}"
             prompt = render_goal(
                 task_text=(workspace / "TASK.md").read_text(),
                 artifact_name=manifest["task"]["artifact_name"],
@@ -3298,6 +3050,9 @@ def execute(args: argparse.Namespace) -> int:
                 api_base=args.api_base,
                 model=args.model,
                 reasoning_effort=reasoning_effort,
+                provider_id=pi_provider["id"],
+                api=pi_provider["api"],
+                api_key_env=pi_provider["api_key_env"],
             )
             environment["PI_CODING_AGENT_DIR"] = str(pi_home)
             environment["GOAL_PLUS_PI_MODEL"] = qualified_model
@@ -3306,7 +3061,7 @@ def execute(args: argparse.Namespace) -> int:
                 "--mode",
                 "json",
                 "--provider",
-                PI_PROVIDER_ID,
+                pi_provider["id"],
                 "--model",
                 qualified_model,
                 "--thinking",
@@ -3565,6 +3320,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     prepare_batch_parser = subparsers.add_parser("prepare-batch")
     prepare_batch_parser.add_argument("--task-set", default="cpu_portable")
+    prepare_batch_parser.add_argument("--task-id")
     prepare_batch_parser.add_argument(
         "--methods",
         nargs="+",
@@ -3616,6 +3372,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_batch_parser.add_argument("--model")
     run_batch_parser.add_argument("--api-base")
     run_batch_parser.add_argument("--fail-fast", action="store_true")
+    for provider_parser in (prepare_parser, prepare_batch_parser, run_parser, run_batch_parser):
+        provider_parser.add_argument("--pi-provider-id", default=PI_PROVIDER_ID)
+        provider_parser.add_argument("--pi-api", choices=PI_APIS, default="openai-responses")
+        provider_parser.add_argument("--pi-api-key-env", default=PI_API_KEY_ENV)
+        provider_parser.add_argument("--pi-api-base-env", default="OPENAI_BASE_URL")
 
     smoke_parser = subparsers.add_parser("seed-smoke")
     smoke_parser.add_argument("--run-dir", type=Path, required=True)

@@ -15,6 +15,20 @@ candidate-workspace evaluator bridge.
 
 Defaults are `T=300s`, `K=2`, model `gpt-5.6-luna`, and reasoning `high`. OpenEvolve, Pi, and SkyDiscover require an explicit OpenAI-compatible `--api-base` and inherit `OPENAI_API_KEY`; the key is never serialized. Codex paths can omit `--api-base` and use the machine's native Codex login, or use the same explicit endpoint as the other paths.
 
+For a single Goal Plus + Pi wiring task, the unified `scripts/bench.py` entrypoint
+accepts `--benchmark openevolve-cpu-portable`, `--task-id function_minimization`,
+and `--method goal-plus-pi`. Explicit Pi providers use `--pi-provider-id`, `--pi-api`,
+`--pi-api-key-env`, and `--pi-api-base-env`, just as the common runner does.
+Preparation records these names and the qualified worker model. Z.AI uses Pi's
+native protocol metadata; the exact host model catalog entry is required and projected
+into the isolated model configuration without copying authentication data.
+
+The Search prompt uses the current linked-Search lifecycle. `search_start_batch`
+materializes candidates; Pi starts them by passing their IDs to
+`pi_search_pool_open(candidate_ids=..., final_verify=true)`. Search is not an
+ordinary dispatch work item. Controller closeout does not create or accept
+placeholder work items, or reactivate a paused or aborted Goal.
+
 `T` is a total cap, not a minimum duration or success criterion. The default prompt asks all paths to reserve the final 60 seconds for making the best verified artifact ready; a method may finish earlier when it has satisfied the objective.
 
 ## What is outside and inside T

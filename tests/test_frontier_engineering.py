@@ -12,6 +12,7 @@ from bench_goal_plus.catalog import Catalog
 from bench_goal_plus.errors import ContractError
 from bench_goal_plus.runners.factory import create_runner
 from experiments.frontier_engineering import config
+from experiments.frontier_engineering import cli
 from experiments.frontier_engineering import environment
 from experiments.frontier_engineering import openevolve_runtime
 from experiments.frontier_engineering import reporting
@@ -102,6 +103,19 @@ def make_upstream(root: Path, task_id: str, initial: str) -> Path:
 
 
 class FrontierEngineeringTest(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        upstream_patch = mock.patch.object(openevolve_runtime, "UPSTREAM_ROOT", Path(directory.name))
+        upstream_patch.start()
+        self.addCleanup(upstream_patch.stop)
+        for name in ("PAPER_BATCH_CONFIG", "ALGORITHM_CONFIG", "LLM_CONFIG"):
+            path = Path(directory.name) / f"{name}.yaml"
+            path.write_text("fixture: true\n")
+            patch = mock.patch.object(openevolve_runtime, name, path)
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def tearDown(self) -> None:
         task_adapter.configure_task("ComputerSystems/MallocLab")
 
@@ -132,7 +146,7 @@ class FrontierEngineeringTest(unittest.TestCase):
             config.V1_LITE_TASKS[
                 "EnergyStorage/BatteryFastChargingSPMe"
             ].evaluator_timeout_seconds,
-            300,
+            30,
         )
         self.assertEqual(
             config.V1_LITE_TASKS[
@@ -350,7 +364,7 @@ class FrontierEngineeringTest(unittest.TestCase):
                             "metrics": {
                                 "valid": 1.0,
                                 "combined_score": 12.5,
-                                "timeout_budget_s": 300.0,
+                                "timeout_budget_s": 30.0,
                             }
                         }
                     ),
@@ -370,11 +384,11 @@ class FrontierEngineeringTest(unittest.TestCase):
         probe_environment = observed["environment"]
         self.assertIsInstance(probe_environment, dict)
         self.assertEqual(
-            probe_environment["FRONTIER_EVAL_EVALUATOR_TIMEOUT_S"], "300"
+            probe_environment["FRONTIER_EVAL_EVALUATOR_TIMEOUT_S"], "30"
         )
-        self.assertEqual(observed["timeout"], 300)
+        self.assertEqual(observed["timeout"], 30)
         self.assertTrue(result["passed"])
-        self.assertEqual(result["metrics"]["timeout_budget_s"], 300.0)
+        self.assertEqual(result["metrics"]["timeout_budget_s"], 30.0)
 
     def test_accelerator_doctor_probes_only_explicit_gpu_profile(self) -> None:
         _, cpu_profile = config.load_profile("v1-lite-cpu-codex-1h")
@@ -572,6 +586,104 @@ class FrontierEngineeringTest(unittest.TestCase):
         self.assertNotIn("secret-value", serialized)
         self.assertNotIn("https://provider.example/v1", serialized)
         write_models.assert_called_once()
+
+    def test_flash_provider_is_preserved_through_prepare_and_execution(self) -> None:
+        profile_path, profile = config.load_profile("energy-storage-goal-plus-pi-glm53flash-smoke")
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch.object(config, "RUNS_ROOT", Path(temporary)),
+            mock.patch.object(runtime.standalone, "prepare", return_value=0) as prepare,
+            mock.patch.dict(environment.os.environ, {"ZAI_BASE_URL": "https://provider.example/v4"}),
+        ):
+            destination = runtime.prepare("flash", profile, profile_path)
+            args = prepare.call_args.args[0]
+            self.assertEqual((args.model, args.pi_provider_id, args.pi_api, args.pi_api_key_env),
+                             ("glm-5.3-flash", "zai", "openai-completions", "ZAI_API_KEY"))
+
+            def execute(args):
+                self.assertEqual((args.model, args.pi_provider_id, args.pi_api, args.pi_api_key_env),
+                                 ("glm-5.3-flash", "zai", "openai-completions", "ZAI_API_KEY"))
+                self.assertEqual(args.api_base, "https://provider.example/v4")
+                config.write_json(args.run_dir / "experiment.json", {"status": "finished"})
+                config.write_json(args.run_dir / "final-eval.json", {"valid": True})
+                return 0
+
+            with mock.patch.object(runtime.standalone, "execute", side_effect=execute):
+                self.assertEqual(runtime.execute_campaign(destination), 0)
+            campaign = json.loads((destination / "campaign.json").read_text())
+            self.assertEqual(campaign["pi_provider"], profile["pi_provider"])
+            self.assertNotIn("https://provider.example", json.dumps(campaign))
+
+    def test_flash_doctor_uses_exact_provider_and_rejects_unknown_model(self) -> None:
+        _, profile = config.load_profile("energy-storage-goal-plus-pi-glm53flash-smoke")
+        with (
+            mock.patch.dict(environment.os.environ, {"ZAI_BASE_URL": "https://provider.example/v4", "ZAI_API_KEY": "secret"}),
+            mock.patch.object(environment.shutil, "which", return_value="/bin/pi"),
+            mock.patch.object(environment, "command_output", side_effect=[(True, "0.83.0"), (True, "zai glm-5.3-flash 200K")]),
+            mock.patch("experiments.openevolve_compare.experiment.write_pi_models_config") as write_models,
+        ):
+            self.assertTrue(all(check["passed"] for check in environment._pi_agent_checks(profile)))
+            self.assertEqual(write_models.call_args.kwargs["provider_id"], "zai")
+            self.assertEqual(write_models.call_args.kwargs["api_key_env"], "ZAI_API_KEY")
+            write_models.side_effect = ValueError("missing exact model")
+            with mock.patch.object(environment, "command_output", return_value=(True, "0.83.0")):
+                self.assertFalse(all(check["passed"] for check in environment._pi_agent_checks(profile)))
+
+    def test_doctor_accepts_runner_reasoning_override(self) -> None:
+        with mock.patch.object(cli, "doctor", return_value=0) as doctor:
+            self.assertEqual(cli.main(["doctor", "--profile", "energy-storage-pi-smoke",
+                                       "--reasoning-effort", "low"]), 0)
+        self.assertEqual(doctor.call_args.args[0]["reasoning_effort"], "low")
+
+    def test_native_plan_records_exact_source_and_profile_provider(self) -> None:
+        identity = {"source_kind": "external", "source_dir": "/external/goal-plus",
+                    "expected_ref": "feature", "branch": "feature", "commit": "a" * 40}
+        with mock.patch.object(cli, "runtime_source", return_value=identity), mock.patch("builtins.print") as output:
+            self.assertEqual(cli.main([
+                "runtime-source", "--profile", "energy-storage-goal-plus-pi-glm53flash-smoke",
+                "--method", "goal-plus-pi",
+            ]), 0)
+        payload = json.loads(output.call_args.args[0])
+        self.assertEqual(payload["runtime_sources"]["goal_plus"], identity)
+        self.assertEqual(payload["runtime_configuration"]["pi_provider"]["id"], "zai")
+        spec = BenchmarkAgent().resolve_spec(
+            target_ids=["frontier-engineering"],
+            profile="energy-storage-goal-plus-pi-glm53flash-smoke",
+            methods=["goal-plus-pi"],
+        )
+        with mock.patch("bench_goal_plus.runners.native_profile.subprocess.run",
+                        return_value=subprocess.CompletedProcess([], 0, json.dumps(payload), "")):
+            self.assertEqual(create_runner(spec.runner).runtime_metadata(spec)["runtime_sources"],
+                             payload["runtime_sources"])
+
+    def test_evaluator_shell_preserves_cwd_and_disables_login_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            completed = subprocess.run(
+                [str(task_adapter.SHELL_PATH), "-lc",
+                 '[[ $0 == bash ]] && shopt -q login_shell && pwd'],
+                cwd=temporary, text=True, capture_output=True, check=True,
+            )
+            self.assertEqual(Path(completed.stdout.strip()), Path(temporary))
+            self.assertEqual(completed.stderr, "")
+
+    def test_goal_plus_doctor_accepts_validated_external_source(self) -> None:
+        _, profile = config.load_profile("energy-storage-goal-plus-pi-smoke")
+        identity = {"source_kind": "external", "source_dir": "/external/goal-plus",
+                    "expected_ref": "feature", "branch": "feature", "commit": "abc"}
+        with (
+            mock.patch.object(environment, "external_goal_plus_source", return_value=identity),
+            mock.patch.object(environment, "local_inventory", return_value={"passed": True}),
+            mock.patch.object(environment.shutil, "which", return_value="/bin/tool"),
+            mock.patch.object(environment, "_pi_agent_checks", return_value=[{"passed": True}]),
+            mock.patch.object(environment, "_runtime_probe", return_value={"passed": True}),
+            mock.patch.object(environment, "_seed_probe", return_value={"passed": True}),
+            mock.patch.object(environment, "git_value", side_effect=["main", None, "upstream-commit"]),
+            mock.patch("builtins.print") as output,
+        ):
+            self.assertEqual(environment.doctor(profile), 0)
+        payload = json.loads(output.call_args.args[0])
+        source = next(item for item in payload["checks"] if item.get("kind") == "runtime-source")
+        self.assertEqual(source["expected_ref"], "feature")
 
     def test_plain_codex_stage_is_backed_by_archived_native_evidence(self) -> None:
         registry = json.loads((ROOT / "benchmarks/registry.json").read_text())
