@@ -1163,6 +1163,7 @@ class BubblewrapWorker:
         if executable is None:
             raise FileNotFoundError(f"Pi executable not found: {self.command[0]}")
         executable_path = Path(executable).absolute()
+        executable_entrypoint = _executable_entrypoint(executable_path)
         pi_runtime = _executable_runtime_root(executable_path)
         extension = _command_path_argument(self.command, "-e")
         extension_bundle = extension.parent
@@ -1343,7 +1344,7 @@ class BubblewrapWorker:
                 "--chdir",
                 str(self.context.workspace),
                 "--",
-                str(executable_path),
+                str(executable_entrypoint),
                 *command[1:],
             ]
         )
@@ -1460,6 +1461,11 @@ def _executable_runtime_root(executable: Path) -> Path:
     ):
         return executable.parent.parent.parent.resolve()
     return executable.resolve()
+
+
+def _executable_entrypoint(executable: Path) -> Path:
+    """Return the mounted target instead of a sandbox-invisible symlink alias."""
+    return executable.resolve(strict=True)
 
 
 def _is_system_path(path: Path) -> bool:

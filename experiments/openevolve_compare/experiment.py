@@ -424,11 +424,8 @@ def render_goal(
             "Plus receives only the public verifier and its safe shared Evidence.\n\n"
             "- Honor every leading typed command field in the SearchSpec.\n"
             + render_search_scheduler_instructions(search_scheduler)
-            + "- After triage and before freezing the SearchSpec, call "
-            "`goal_plus_upsert_work_items` with one required `route=\"search\"` item "
-            "for this benchmark Search. After linking the run, record "
-            "`search_routed` for that item and leave its result acceptance to the host "
-            "controller closeout.\n"
+            + "- Represent Search only through the linked Search run and "
+            "`goal_plus_record_search_result`; do not create a Goal Plus WorkItem for it.\n"
             f"- Set `strategy.worker_host=\"{worker_host}\"`.\n"
             + "- Set `strategy.config.global_evidence_mode=\"manual\"` so every worker can "
             "read settled public-verifier Evidence from the other candidates as reference.\n"
@@ -500,11 +497,8 @@ def render_goal(
         "- Honor every leading typed command field in the SearchSpec and omit "
         "deprecated `budget.max_candidates`.\n"
         + render_search_scheduler_instructions(search_scheduler)
-        + "- After triage and before freezing the SearchSpec, call "
-        "`goal_plus_upsert_work_items` with one required `route=\"search\"` item "
-        "for this benchmark Search. After linking the run, record "
-        "`search_routed` for that item and leave its result acceptance to the host "
-        "controller closeout.\n"
+        + "- Represent Search only through the linked Search run and "
+        "`goal_plus_record_search_result`; do not create a Goal Plus WorkItem for it.\n"
         + f"- Set `strategy.worker_host=\"{worker_host}\"` and "
         "`strategy.orchestration_mode=\"parallel_loops\"`.\n"
         + (
@@ -2104,256 +2098,6 @@ def _goal_plus_runtime_types() -> tuple[type[Any], type[Any], type[Any]]:
     return FileGoalPlusRuntime, FileSearchRuntime, SearchTools
 
 
-def _ensure_controller_search_work_item(
-    goal_runtime: Any, goal_plus_id: str, run_id: str
-) -> str:
-    """Return the auditable work item that controller closeout will resolve."""
-    goal = goal_runtime.status(goal_plus_id)
-    current_items = [
-        item
-        for item in goal.work_items
-        if item.goal_revision == goal.goal_revision
-    ]
-    linked_items = [
-        item
-        for item in current_items
-        if item.route == "search" and item.search_run_id == run_id
-    ]
-    if len(linked_items) > 1:
-        raise RuntimeError(
-            f"Goal Plus {goal_plus_id} has multiple work items for Search run {run_id}"
-        )
-    if linked_items:
-        linked_item = linked_items[0]
-        if linked_item.status in {"planned", "blocked", "failed"}:
-            goal_runtime.record_work_event(
-                goal_plus_id,
-                linked_item.work_item_id,
-                "search_routed",
-                "Controller closeout resumed the linked fixed-budget Search run.",
-                search_run_id=run_id,
-                evidence=[{"type": "search_run", "run_id": run_id}],
-            )
-        return linked_item.work_item_id
-
-    unbound_search_items = [
-        item
-        for item in current_items
-        if item.route == "search"
-        and item.status in {"planned", "blocked", "failed"}
-        and item.search_run_id is None
-    ]
-    if len(unbound_search_items) > 1:
-        raise RuntimeError(
-            f"Goal Plus {goal_plus_id} has ambiguous unbound Search work items"
-        )
-    if unbound_search_items:
-        work_item_id = unbound_search_items[0].work_item_id
-    else:
-        # A goal-plus agent can drive the fixed-budget Search run through an
-        # ordinary "main" work item whose scope names the run, then complete the
-        # goal on its own before controller closeout runs. In that terminal state
-        # the goal is no longer active, so the controller cannot upsert a search
-        # item or record a search_routed event (both require status=="active").
-        # Reuse that accepted main work item as the auditable item instead.
-        scope_matched = [
-            item
-            for item in current_items
-            if item.status == "accepted"
-            and run_id in item.scope
-        ]
-        if len(scope_matched) > 1:
-            raise RuntimeError(
-                f"Goal Plus {goal_plus_id} has multiple accepted work items "
-                f"scoping Search run {run_id}"
-            )
-        if len(scope_matched) == 1:
-            return scope_matched[0].work_item_id
-        # The host may interrupt the agent before it drafts any work item plan,
-        # leaving an active goal with an empty current-revision work list (the
-        # common early-stop-on-live-pass shape). The controller is authoritative
-        # for the drained Search run, so a dedicated auditable item is created
-        # now. The goal is active in this shape, so upsert is legal here.
-        work_item_id = "benchmark_search"
-        goal_runtime.upsert_work_items(
-            goal_plus_id,
-            [
-                {
-                    "work_item_id": work_item_id,
-                    "title": "Run benchmark Search",
-                    "objective": (
-                        "Run the fixed-budget candidate search and let controller closeout "
-                        "apply the frozen selection and promotion contract."
-                    ),
-                    "route": "search",
-                    "depends_on": [],
-                    "scope": [run_id],
-                    "acceptance": [
-                        "The linked Search run is selected and promoted",
-                        "The controller promotion verifier passes",
-                        "The Goal Plus Search result is recorded",
-                    ],
-                    "required": True,
-                }
-            ],
-        )
-
-    goal_runtime.record_work_event(
-        goal_plus_id,
-        work_item_id,
-        "search_routed",
-        "Controller closeout adopted the linked fixed-budget Search run.",
-        search_run_id=run_id,
-        evidence=[{"type": "search_run", "run_id": run_id}],
-    )
-    return work_item_id
-
-
-def _accept_controller_search_work_item(
-    goal_runtime: Any,
-    goal_plus_id: str,
-    work_item_id: str,
-    *,
-    run_id: str,
-    candidate_id: str,
-    selected_score: Any,
-) -> None:
-    evidence = [
-        {
-            "type": "controller_closeout",
-            "run_id": run_id,
-            "selected_candidate_id": candidate_id,
-            "selected_score": selected_score,
-        }
-    ]
-    goal = goal_runtime.status(goal_plus_id)
-    item = next(
-        item
-        for item in goal.work_items
-        if item.goal_revision == goal.goal_revision
-        and item.work_item_id == work_item_id
-    )
-    if item.status == "active":
-        goal_runtime.record_work_event(
-            goal_plus_id,
-            work_item_id,
-            "result",
-            "Controller selected and promoted the verifier-backed Search result.",
-            search_run_id=run_id,
-            evidence=evidence,
-        )
-        goal = goal_runtime.status(goal_plus_id)
-        item = next(
-            item
-            for item in goal.work_items
-            if item.goal_revision == goal.goal_revision
-            and item.work_item_id == work_item_id
-        )
-    if item.status == "result_ready":
-        goal_runtime.record_work_event(
-            goal_plus_id,
-            work_item_id,
-            "accepted",
-            "Controller verified the Search selection, promotion, and recorded result.",
-            search_run_id=run_id,
-            evidence=evidence,
-        )
-    elif item.status != "accepted":
-        raise RuntimeError(
-            f"Goal Plus work item {work_item_id} cannot be accepted from {item.status}"
-        )
-
-
-def _accept_controller_closeout_items(
-    goal_runtime: Any,
-    goal_plus_id: str,
-    *,
-    run_id: str,
-    selected_candidate_id: str,
-    selected_score: Any,
-) -> None:
-    """Resolve leftover orchestration items before the goal completes.
-
-    A goal-plus agent may draft a terminal "closeout" (or similar) main-route
-    work item that it never executes -- it depends on the Search run that the
-    controller owns.  The controller is authoritative for that item after the
-    frozen budget ends, so it drives the placeholder to accepted, which lets the
-    evaluation gate produce a real PASS / NOT_PASS instead of refusing to
-    complete.  Subagent route items are left untouched: they represent live
-    concurrent work that must not be swallowed.
-    """
-    goal = goal_runtime.status(goal_plus_id)
-    current_items = [
-        item
-        for item in goal.work_items
-        if item.goal_revision == goal.goal_revision
-    ]
-    unresolved = [
-        item
-        for item in current_items
-        if item.route != "search"
-        and item.route != "subagent"
-        and item.status != "accepted"
-        and not (not item.required and item.status in {"cancelled", "superseded"})
-    ]
-    for item in unresolved:
-        work_item_id = item.work_item_id
-        evidence = [
-            {
-                "type": "controller_closeout",
-                "run_id": run_id,
-                "selected_candidate_id": selected_candidate_id,
-                "selected_score": selected_score,
-            }
-        ]
-        if item.status in {"planned", "blocked", "failed"}:
-            goal_runtime.record_work_event(
-                goal_plus_id,
-                work_item_id,
-                "dispatch",
-                "Controller closeout adopted the orchestration placeholder.",
-                search_run_id=run_id,
-                evidence=evidence,
-            )
-            goal = goal_runtime.status(goal_plus_id)
-            item = next(
-                item
-                for item in goal.work_items
-                if item.goal_revision == goal.goal_revision
-                and item.work_item_id == work_item_id
-            )
-        if item.status == "active":
-            goal_runtime.record_work_event(
-                goal_plus_id,
-                work_item_id,
-                "result",
-                "Controller closeout resolved the orchestration placeholder.",
-                search_run_id=run_id,
-                evidence=evidence,
-            )
-            goal = goal_runtime.status(goal_plus_id)
-            item = next(
-                item
-                for item in goal.work_items
-                if item.goal_revision == goal.goal_revision
-                and item.work_item_id == work_item_id
-            )
-        if item.status == "result_ready":
-            goal_runtime.record_work_event(
-                goal_plus_id,
-                work_item_id,
-                "accepted",
-                "Controller closeout accepted the orchestration placeholder.",
-                search_run_id=run_id,
-                evidence=evidence,
-            )
-        elif item.status != "accepted":
-            raise RuntimeError(
-                f"Goal Plus work item {work_item_id} cannot be accepted "
-                f"from {item.status}"
-            )
-
-
 def _public_gate_compliant_iterations(candidate: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         iteration
@@ -2589,54 +2333,15 @@ def finalize_goal_plus_search(
                     )
                 goal = goal_runtime.status(goal_plus_id)
                 if goal.status != "complete":
-                    # Reactivate a terminal-but-incomplete goal so the closeout
-                    # can resolve its outstanding Search work item. An agent that
-                    # promotes a Search run but then sets the goal "blocked"
-                    # (e.g. it gives up during final_audit) leaves the drained
-                    # run's route=search work item unaccepted. Work events --
-                    # which are the ONLY way to accept a work item -- require an
-                    # active goal record, and set_status("complete") in turn
-                    # requires every work item "accepted". So on a blocked goal
-                    # the item can neither be accepted (needs active) nor skipped
-                    # (unresolved), and closeout dead-locks into INFRA_ERROR. The
-                    # controller is authoritative for the drained Search run, so
-                    # it reactivates the goal (blocked -> active is an unguarded,
-                    # side-effect-free transition) to drive that item to accepted.
                     if goal.status != "active":
                         goal_runtime.set_status(
                             goal_plus_id,
                             status="active",
                             reason=(
                                 "controller closeout reactivating terminal goal to "
-                                "resolve the drained fixed-budget Search work item"
+                                "record the drained fixed-budget Search result"
                             ),
                         )
-                    # Drive the controller-owned Search work item to "accepted".
-                    # The "stop search on live pass" early-stop path leaves the
-                    # route=search work item "active" (result acceptance is
-                    # deliberately deferred to this closeout), and
-                    # _accept_controller_closeout_items skips route=search items,
-                    # so without this the item stays unresolved and set_status
-                    # ("complete") raises "unresolved work items: ...=active",
-                    # misclassifying a verified live pass as INFRA_ERROR.
-                    search_work_item_id = _ensure_controller_search_work_item(
-                        goal_runtime, goal_plus_id, run_id
-                    )
-                    _accept_controller_search_work_item(
-                        goal_runtime,
-                        goal_plus_id,
-                        search_work_item_id,
-                        run_id=run_id,
-                        candidate_id=candidate_id,
-                        selected_score=selection.get("selected_score"),
-                    )
-                    _accept_controller_closeout_items(
-                        goal_runtime,
-                        goal_plus_id,
-                        run_id=run_id,
-                        selected_candidate_id=candidate_id,
-                        selected_score=selection.get("selected_score"),
-                    )
                     goal_runtime.set_status(
                         goal_plus_id,
                         status="complete",

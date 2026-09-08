@@ -140,6 +140,10 @@ class AIBenchCodingContractTest(unittest.TestCase):
             pi_worker_launcher._executable_runtime_root(executable),
             runtime_root.resolve(),
         )
+        self.assertEqual(
+            pi_worker_launcher._executable_entrypoint(executable),
+            target.resolve(strict=True),
+        )
 
     def _zai_profile(self, methods: list[str]) -> dict[str, object]:
         _path, profile = load_profile("smoke")
