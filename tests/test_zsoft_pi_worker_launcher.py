@@ -822,6 +822,18 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
     (source / "input.c").write_text("/* public source */\n", encoding="utf-8")
     runtime_secret = root / "runs" / "all-candidates.json"
     runtime_secret.write_text('{"secret": true}\n', encoding="utf-8")
+    candidate_state = root / "runs" / "run_1" / "candidates" / "c001"
+    candidate_state.mkdir(parents=True)
+    candidate_record = candidate_state / "candidate.json"
+    candidate_record.write_text(
+        '{"candidate_id": "c001", "execution_generation": 1}\n',
+        encoding="utf-8",
+    )
+    peer_record = (
+        root / "runs" / "run_1" / "candidates" / "c002" / "candidate.json"
+    )
+    peer_record.parent.mkdir()
+    peer_record.write_text('{"secret": true}\n', encoding="utf-8")
     ground_truth = tmp_path / "cases" / "ground-truth.json"
     ground_truth.parent.mkdir()
     ground_truth.write_text('{"answer": true}\n', encoding="utf-8")
@@ -834,7 +846,12 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
     (pi_home / "auth.json").write_text("{}\n", encoding="utf-8")
     (pi_home / "models-store.json").write_text("{}\n", encoding="utf-8")
 
-    def fake_call(_root: Path, tool: str, args: dict[str, Any]) -> dict[str, Any]:
+    def fake_call(
+        _root: Path,
+        tool: str,
+        args: dict[str, Any],
+        _environment: dict[str, str],
+    ) -> dict[str, Any]:
         assert tool == "search_get_agent_context"
         assert args == {"agent_session_id": "agent_1"}
         return {
@@ -851,12 +868,22 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             },
         }
 
-    monkeypatch.setattr("goal_plus.pi_tool.call_pi_tool", fake_call)
+    monkeypatch.setattr(
+        "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
+        fake_call,
+    )
     script = "\n".join(
         (
             "import json, os, pathlib, subprocess, sys",
             f"assert not pathlib.Path({str(ground_truth)!r}).exists()",
             f"assert not pathlib.Path({str(runtime_secret)!r}).exists()",
+            f"assert json.loads(pathlib.Path({str(candidate_record)!r}).read_text())['execution_generation'] == 1",
+            f"assert not pathlib.Path({str(peer_record)!r}).exists()",
+            "try:",
+            f" pathlib.Path({str(candidate_record)!r}).write_text('{{}}')",
+            " raise AssertionError('candidate fencing state was writable')",
+            "except OSError:",
+            " pass",
             "assert os.environ['TEST_ALLOWED'] == 'yes'",
             "assert 'TEST_HIDDEN' not in os.environ",
             "assert 'GOAL_PLUS_ROOT' not in os.environ",
@@ -913,6 +940,12 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
         "TEST_ALLOWED": "yes",
         "TEST_HIDDEN": "no",
     }
+    worker_command = _worker_command(
+        script,
+        session_root=session_root,
+        extension=extension,
+    )
+    worker_command[0] = "/usr/bin/python3"
     worker = BubblewrapWorker(
         context=_context(workspace),
         policy=_policy(
@@ -921,11 +954,7 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             pass_env=("TEST_ALLOWED",),
             evaluation_mode="blind",
         ),
-        command=_worker_command(
-            script,
-            session_root=session_root,
-            extension=extension,
-        ),
+        command=worker_command,
         environment=environment,
     )
     private_runtime = worker.proxy.socket_dir

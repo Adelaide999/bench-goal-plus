@@ -1233,6 +1233,24 @@ class BubblewrapWorker:
         if not _is_system_path(pi_runtime):
             _add_bind(args, pi_runtime, pi_runtime, readonly=True, created=created)
         _add_tmpfs(args, self.root, created)
+        candidate_state = (
+            self.root
+            / "runs"
+            / self.context.run_id
+            / "candidates"
+            / self.context.candidate_id
+        )
+        candidate_record = candidate_state / "candidate.json"
+        if candidate_record.is_file():
+            if candidate_state.is_symlink() or candidate_record.is_symlink():
+                raise RuntimeError("Pi worker candidate state must not be a symlink")
+            _add_bind(
+                args,
+                candidate_state,
+                candidate_state,
+                readonly=True,
+                created=created,
+            )
         protected_paths = _validated_workspace_paths(
             self.context.workspace,
             self.policy.read_only_workspace_paths,
