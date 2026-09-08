@@ -351,6 +351,31 @@ class AIBenchCodingContractTest(unittest.TestCase):
             task_adapter.PI_WORKER_SANDBOX["evaluation_mode"], "visible"
         )
 
+    def test_visible_closeout_does_not_require_blind_selection_rule(self) -> None:
+        closeout = {
+            "completed": True,
+            "runs": [
+                {
+                    "selection": {"selected_candidate_id": "c001"},
+                    "promotion": {"artifact_path": "promotion/c001.patch"},
+                    "final_state": "promoted",
+                    "goal_statuses": {"gp_0001": "complete"},
+                }
+            ],
+        }
+
+        self.assertIsNone(
+            benchmark_compare._controller_only_closeout_incomplete_reason(
+                closeout, require_deterministic_selection=False
+            )
+        )
+        self.assertIn(
+            "deterministic selection evidence",
+            benchmark_compare._controller_only_closeout_incomplete_reason(
+                closeout, require_deterministic_selection=True
+            ),
+        )
+
     def test_goal_plus_pi_worker_uses_unwrapped_binary_inside_worker_sandbox(
         self,
     ) -> None:

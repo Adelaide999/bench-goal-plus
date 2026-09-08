@@ -1974,7 +1974,9 @@ def execute_plain(
     return control
 
 
-def _controller_only_closeout_incomplete_reason(closeout: Any) -> str | None:
+def _controller_only_closeout_incomplete_reason(
+    closeout: Any, *, require_deterministic_selection: bool = True
+) -> str | None:
     if not isinstance(closeout, dict) or closeout.get("completed") is not True:
         error = closeout.get("error") if isinstance(closeout, dict) else None
         return (
@@ -1994,11 +1996,13 @@ def _controller_only_closeout_incomplete_reason(closeout: Any) -> str | None:
             not isinstance(selection, dict)
             or not isinstance(selection.get("selected_candidate_id"), str)
             or not selection["selected_candidate_id"]
-            or selection.get("selection_rule") != PUBLIC_GATE_SELECTION_RULE
         ):
-            return (
-                "controller-only Goal Plus closeout lacks deterministic selection evidence"
-            )
+            return "controller-only Goal Plus closeout lacks selection evidence"
+        if (
+            require_deterministic_selection
+            and selection.get("selection_rule") != PUBLIC_GATE_SELECTION_RULE
+        ):
+            return "controller-only Goal Plus closeout lacks deterministic selection evidence"
         if (
             not isinstance(promotion, dict)
             or not isinstance(promotion.get("artifact_path"), str)
@@ -2284,7 +2288,10 @@ def execute_goal_plus(
         }
     control["goal_plus_controller_closeout"] = closeout
     closeout_reason = (
-        _controller_only_closeout_incomplete_reason(closeout)
+        _controller_only_closeout_incomplete_reason(
+            closeout,
+            require_deterministic_selection=EVALUATION_MODE == "blind",
+        )
         if controller_only
         else None
     )
@@ -2733,7 +2740,10 @@ def repair_closeout(args: argparse.Namespace) -> int:
         }
     control["goal_plus_controller_closeout_repair"] = closeout
     controller_only_closeout_reason = (
-        _controller_only_closeout_incomplete_reason(closeout)
+        _controller_only_closeout_incomplete_reason(
+            closeout,
+            require_deterministic_selection=EVALUATION_MODE == "blind",
+        )
         if controller_only
         else None
     )
