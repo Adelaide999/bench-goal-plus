@@ -7,7 +7,7 @@ is implied by the image checks below.
 
 | Role | Local image | Image ID prefix |
 | --- | --- | --- |
-| Work | `edgebench-arm64-local.work.vliw_kernel_optimization:9fa380a0ebef` | `6f9d4e3750e1` |
+| Work | `edgebench-arm64-local.work.vliw_kernel_optimization:9fa380a0ebef` | `af44629a81dc` |
 | Judge | `edgebench-arm64-local.judge.vliw_kernel_optimization:5cdef0021634` | `252d0f154267` |
 
 The dataset revision is `47846a4c3669ad447e0ea984833b0d352460c5f9`.
@@ -59,6 +59,17 @@ The 2026-09-07 build ran on a Linux aarch64 Docker host:
 The [verification record](../../evidence/environment/2026-09-07-vliw-arm64.json)
 contains image identities and check results. Local build logs, test output, and
 the full file-hash manifest are retained under `.tmp/vliw-arm64-build/`.
+
+The Work image was rebuilt on 2026-09-08 to fix task-root ownership. `WORKDIR`
+had created the destination as root; `COPY --chown` assigned ownership to its
+contents without changing that existing directory. Work now explicitly owns
+the task root as `agent:agent`. A build step running as `agent` must create a
+temporary file and directory there. The rebuilt image also passed an independent
+write probe and the unchanged 4/4 public baseline at 147734 cycles. Judge is
+unchanged. The original Work image remains available as
+`edgebench-arm64-local.work.vliw_kernel_optimization:9fa380a0ebef_bak_root-owner_20260908`;
+the dated verification record above describes that original image. Rebuild and
+comparison evidence is retained under `.tmp/vliw-image-comparison-20260908/`.
 
 For a quick repeat of the public test:
 

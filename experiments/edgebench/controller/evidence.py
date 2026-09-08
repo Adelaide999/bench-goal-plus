@@ -388,6 +388,7 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                             if isinstance(payload, dict):
                                 pi_worker_intervals.append(
                                     {
+                                        "run_id": payload.get("run_id"),
                                         "candidate_id": payload.get("candidate_id"),
                                         "started_at": payload.get("started_at"),
                                         "ended_at": payload.get("finished_at"),
@@ -444,6 +445,7 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         if lease:
             worker_intervals.append(
                 {
+                    "run_id": session.get("run_id"),
                     "candidate_id": session.get("candidate_id"),
                     "started_at": lease.get("started_at"),
                     "ended_at": lease.get("released_at")
@@ -457,8 +459,50 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         for interval in worker_intervals
         if interval.get("candidate_id") in initial_candidate_ids
     )
+    run_evidence = []
+    for run_id in sorted(search_runs):
+        run = run_records.get(run_id) or {}
+        frozen = frozen_specs.get(str(run.get("frozen_spec_id"))) or {}
+        spec = frozen.get("spec") or {}
+        run_candidates = {candidate for owner, candidate in candidates if owner == run_id}
+        initial = {candidate for owner, candidate in initial_candidates if owner == run_id}
+        run_sessions = [item for item in worker_sessions if item.get("run_id") == run_id]
+        handles = [item for item in bound_worker_handles if item.get("run_id") == run_id]
+        intervals = [item for item in worker_intervals if item.get("run_id") == run_id]
+        selected = run.get("selected_candidate_id")
+        run_evidence.append({
+            "run_id": run_id,
+            "state": run.get("state"),
+            "invalidated_at": run.get("invalidated_at"),
+            "max_parallel": (spec.get("budget") or {}).get("max_parallel"),
+            "candidates": len(run_candidates),
+            "candidate_ids": sorted(run_candidates),
+            "initial_candidates": len(initial),
+            "initial_candidate_ids": sorted(initial),
+            "agent_sessions": len(run_sessions),
+            "bound_worker_handles": handles,
+            "initial_agent_sessions": sum(item.get("candidate_id") in initial and item.get("execution_generation", 0) == 0 for item in run_sessions),
+            "initial_bound_worker_handles": sum(item.get("candidate_id") in initial and item.get("execution_generation", 0) == 0 for item in handles),
+            "actual_worker_launches": len(handles),
+            "recovery_agent_sessions": sum(item.get("execution_generation", 0) > 0 for item in run_sessions),
+            "confirmed_initial_worker_launches": sum(item.get("execution_generation", 0) == 0 and item.get("launch_confirmed", False) for item in run_sessions),
+            "worker_verifier_runs": sum(item.get("verifier_runs", 0) for item in run_sessions),
+            "verifier_candidate_ids": sorted({item["candidate_id"] for item in run_sessions if item.get("verifier_runs", 0) > 0}),
+            "selected_candidate_ids": [selected] if selected else [],
+            "promoted_candidate_ids": [selected] if selected and run.get("state") == "promoted" else [],
+            "search_run_contracts": [item for item in search_run_contracts if item["run_id"] == run_id],
+            "worker_concurrency": summarize_worker_concurrency(intervals),
+            "initial_worker_concurrency": summarize_worker_concurrency(item for item in intervals if item.get("candidate_id") in initial),
+        })
     return {
         "search_runs": len(search_runs),
+        "run_evidence": run_evidence,
+        "completion_run_ids": sorted(contract_run_ids),
+        "worker_identity_concurrency": summarize_worker_concurrency(
+            {**item, "candidate_id": f"{item['run_id']}/{item['candidate_id']}"}
+            for item in worker_intervals
+            if item.get("run_id") and item.get("candidate_id")
+        ),
         "candidates": len(candidates),
         "candidate_ids": sorted({candidate_id for _, candidate_id in candidates}),
         "initial_candidates": len(initial_candidates),
@@ -852,6 +896,8 @@ def goal_plus_completion_evidence(
                 }
             },
         }
+    if any(int((item.get("goal_plus") or {}).get("search_runs") or 0) > 1 for item in observations):
+        return successor_completion_evidence(cell, observations, valid_trajectories=valid_trajectories)
     expected_workers = int(cell["inner_search_concurrency"])
     scheduler_contract = (cell.get("goal_plus_config") or {}).get(
         "search_scheduler"
@@ -906,6 +952,7 @@ def goal_plus_completion_evidence(
         spawned_worker_threads = max(
             spawned_worker_threads,
             int(events.get("spawned_agent_thread_count") or 0),
+            int(archived.get("actual_worker_launches") or 0),
         )
         bound_worker_handles = max(
             bound_worker_handles,
@@ -1147,6 +1194,62 @@ def goal_plus_completion_evidence(
         "cumulative_agent_session_count": agent_sessions,
         "recovery_agent_session_count": recovery_agent_sessions,
         "recovery_parallelism_passed": recovery_parallelism_passed,
+    }
+
+
+def successor_completion_evidence(
+    cell: dict[str, Any], observations: list[dict[str, Any]], *, valid_trajectories: int,
+) -> dict[str, Any]:
+    """Verify the current Search separately from invalidated predecessor runs."""
+    expected_workers = int(cell["inner_search_concurrency"])
+    results = []
+    histories = []
+    cumulative_candidates = cumulative_sessions = 0
+    for observation in observations:
+        archived = observation.get("goal_plus") or {}
+        runs = archived.get("run_evidence") or []
+        current_ids = set(archived.get("completion_run_ids") or [])
+        current = [run for run in runs if run.get("run_id") in current_ids]
+        concurrency = archived.get("worker_identity_concurrency") or {}
+        expected_identities = {
+            f"{run['run_id']}/{handle['candidate_id']}"
+            for run in runs for handle in run.get("bound_worker_handles") or []
+        }
+        history_passed = bool(
+            len(runs) == archived.get("search_runs")
+            and len({run.get("run_id") for run in runs}) == len(runs)
+            and len(current_ids) == len(current) == 1
+            and all(run.get("max_parallel") == expected_workers for run in runs)
+            and all(
+                run.get("state") == "aborted" and run.get("invalidated_at")
+                and run.get("initial_bound_worker_handles", 0) <= expected_workers
+                for run in runs if run.get("run_id") not in current_ids
+            )
+            and concurrency.get("invalid_interval_count") == 0
+            and isinstance(concurrency.get("max_live_workers"), int)
+            and concurrency["max_live_workers"] <= expected_workers
+            and expected_identities
+            and set(concurrency.get("candidate_ids") or []) == expected_identities
+        )
+        histories.append({"passed": history_passed, "completion_run_ids": sorted(current_ids), "concurrency": concurrency})
+        for run in current:
+            result = goal_plus_completion_evidence(cell, [{"goal_plus": run}], valid_trajectories=valid_trajectories)
+            result["passed"] = result["passed"] and run.get("initial_bound_worker_handles") == expected_workers
+            results.append(result)
+        cumulative_candidates = max(cumulative_candidates, int(archived.get("candidates") or 0))
+        cumulative_sessions = max(cumulative_sessions, int(archived.get("agent_sessions") or 0))
+    passed = bool(results and all(item["passed"] for item in results) and all(item["passed"] for item in histories))
+    return {
+        "required": True, "passed": passed,
+        "checks": {"current_search": {"expected": expected_workers, "actual": results},
+                   "successor_history": {"expected": "invalidated predecessors and trajectory live workers <= K", "actual": histories}},
+        "reason": None if passed else "Goal Plus current Search evidence or successor worker isolation is incomplete",
+        "search_scheduler_enabled": isinstance((cell.get("goal_plus_config") or {}).get("search_scheduler"), dict),
+        "actual_subagent_count": max((item["actual_subagent_count"] for item in results), default=0),
+        "cumulative_candidate_count": cumulative_candidates,
+        "cumulative_agent_session_count": cumulative_sessions,
+        "recovery_agent_session_count": sum(item.get("recovery_agent_session_count", 0) for item in results),
+        "recovery_parallelism_passed": all(item.get("recovery_parallelism_passed", False) for item in results),
     }
 
 

@@ -305,6 +305,11 @@ hard-kill 或清理容器/目录。
 pause/clear、中断、needs_user、原因不明或身份变化均禁止自动恢复。恢复保留原 Main/Search、
 累计用量和 deadline，T 截止后的 segment 仅收尾。此路径不等于重新启动已停止 campaign。
 
+冻结合同有误而创建 successor Search 时，验收按当前 Goal 链接的 Search 核对 K、verifier
+和 promotion；已 invalidated/aborted 的旧 Search 单独保留，累计 worker 可以超过 K。
+同时必须有全部 run/candidate 的完整执行区间证明实际峰值不超过 K，缺少归属、退出或
+当前 Search 的验证证据仍为 partial。
+
 外层 campaign/cell 的恢复边界仍然是：
 
 - controller 仍活着：只用 `status` 重新观察；

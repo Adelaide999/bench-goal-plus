@@ -117,6 +117,12 @@ EdgeBench 的同 trajectory 受控 recovery 单独统计 generation 0 的初始�
 恢复后必须额外证明所有 generation 的真实峰值并行数不超过 `K`；缺少完整执行区间或
 实际 launch 证据仍为 `partial`。这不授予其他 runner 自动恢复或重解释 `K` 的能力。
 
+同一 EdgeBench trajectory 因冻结合同有误而 invalidate 并创建 successor Search 时，按当前
+Goal 链接的 run 单独验收 K、worker verifier 和 promotion，累计 candidate/session 数另列。
+旧 run 必须已 invalidated 且为 aborted；所有 run 的冻结 K 必须一致，并以 run/candidate
+组合身份的完整执行区间证明整条 trajectory 的实际峰值不超过 K。不得把不同 run 中同名的
+candidate 合并来补齐缺失的当前 run 证据。
+
 ## 目录职责
 
 | 路径 | 负责内容 | 必须包含 | 不得包含 |

@@ -15,7 +15,10 @@ LABEL org.bench-goal-plus.platform="linux/arm64" \
     org.bench-goal-plus.source-image="seededge/edgebench.work.vliw_kernel_optimization@sha256:f4e9334beef8b304fd942b44ad3ec6a01c7369c305d5afc8b394075d0aff3b58" \
     org.bench-goal-plus.dataset-revision="47846a4c3669ad447e0ea984833b0d352460c5f9"
 COPY --chown=agent:agent work/ /home/workspace/sebench_performance_takehome/
+# WORKDIR created the destination itself as root before COPY.
+RUN chown agent:agent /home/workspace/sebench_performance_takehome
 USER agent
+RUN python -c 'import tempfile; f = tempfile.TemporaryFile(dir="."); f.close(); d = tempfile.TemporaryDirectory(dir="."); d.cleanup()'
 
 FROM base AS judge
 LABEL org.bench-goal-plus.platform="linux/arm64" \

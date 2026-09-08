@@ -4045,6 +4045,63 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             1,
         )
 
+    def test_successor_search_keeps_per_run_k_and_requires_complete_execution_evidence(self) -> None:
+        task_run = self.temp / "successor-task-run"
+        task_run.mkdir()
+        documents = {
+            ".goal-plus/goal-plus/gp-1/goal.json": {"linked_search": {"run_id": "run-2"}},
+            ".goal-plus/specs/spec-1/frozen_spec.json": {"spec": {"budget": {"max_parallel": 2}, "strategy": {"orchestration_mode": "parallel_loops"}}},
+        }
+        for number in (1, 2):
+            run_id = f"run-{number}"
+            documents[f".goal-plus/runs/{run_id}/run.json"] = {
+                "run_id": run_id, "frozen_spec_id": "spec-1",
+                "state": "aborted" if number == 1 else "promoted",
+                "invalidated_at": "2026-01-01T00:03:00Z" if number == 1 else None,
+                "selected_candidate_id": None if number == 1 else "c001",
+            }
+            for candidate in ("c001", "c002"):
+                session = f"{run_id}-{candidate}"
+                documents[f".goal-plus/runs/{run_id}/candidates/{candidate}/candidate.json"] = {"task": {"allocation_depth": 0}}
+                documents[f".goal-plus/agent_sessions/{session}.json"] = {
+                    "agent_session_id": session, "run_id": run_id, "candidate_id": candidate,
+                    "host": "pi-rpc", "host_handle": {"host": "pi-rpc", "external_id": session},
+                    "counters": {"verifier_runs": 1 if number == 2 else 0},
+                }
+                documents[f".goal-plus/host-pools/pi/{session}/job.json"] = {
+                    "run_id": run_id, "candidate_id": candidate,
+                    "started_at": f"2026-01-01T00:0{number * 2}:00Z",
+                    "finished_at": f"2026-01-01T00:0{number * 2 + 1}:00Z",
+                }
+        cell = {"method": "goal-plus-pi-provider", "outer_replicas": 1, "inner_search_concurrency": 2}
+        for fault in (None, "overlap", "missing_interval", "unbound", "active_predecessor", "missing_verifier"):
+            with self.subTest(fault=fault):
+                inputs = json.loads(json.dumps(documents))
+                job = ".goal-plus/host-pools/pi/run-2-c002/job.json"
+                session = ".goal-plus/agent_sessions/run-2-c002.json"
+                if fault == "overlap":
+                    inputs[job]["started_at"] = "2026-01-01T00:02:00Z"
+                elif fault == "missing_interval":
+                    del inputs[job]
+                elif fault == "unbound":
+                    inputs[session].pop("host_handle")
+                elif fault == "active_predecessor":
+                    inputs[".goal-plus/runs/run-1/run.json"]["state"] = "running"
+                elif fault == "missing_verifier":
+                    inputs[session]["counters"]["verifier_runs"] = 0
+                with tarfile.open(task_run / "goal-plus-state.tar", "w") as archive:
+                    for name, document in inputs.items():
+                        data = json.dumps(document).encode()
+                        member = tarfile.TarInfo(name)
+                        member.size = len(data)
+                        archive.addfile(member, io.BytesIO(data))
+                stats = EDGE.goal_plus_stats(task_run)
+                evidence = EDGE.goal_plus_completion_evidence(cell, [{"goal_plus": stats}], valid_trajectories=1)
+                self.assertEqual(evidence["passed"], fault is None)
+                self.assertEqual(evidence["cumulative_agent_session_count"], 4)
+                self.assertEqual(evidence["cumulative_candidate_count"], 4)
+                self.assertEqual(evidence["actual_subagent_count"], 2)
+
     def test_command_keeps_plain_replicas_distinct_from_goal_plus_workers(self) -> None:
         destination = self.temp / "campaign"
         plain = {
