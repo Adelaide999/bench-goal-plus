@@ -1354,6 +1354,7 @@ class BubblewrapWorker:
             self.environment,
             policy=self.policy,
             pi_runtime=pi_runtime,
+            runtime_root=self.root,
             socket_path=self.proxy.socket_path,
             private_git_admin=self.private_git_admin,
         )
@@ -1873,6 +1874,7 @@ def _sandbox_environment(
     *,
     policy: SandboxPolicy,
     pi_runtime: Path,
+    runtime_root: Path,
     socket_path: Path,
     private_git_admin: PrivateGitAdmin | None,
 ) -> dict[str, str]:
@@ -1895,6 +1897,7 @@ def _sandbox_environment(
                 "/bin",
             )
         ),
+        "GOAL_PLUS_ROOT": str(runtime_root),
         TOOL_SOCKET_ENV: str(socket_path),
     }
     if private_git_admin is not None:
