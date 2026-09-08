@@ -248,6 +248,30 @@ def test_runtime_root_is_bound_to_run_candidate_and_workspace(tmp_path: Path) ->
         )
 
 
+def test_main_tool_shim_reserves_host_closeout() -> None:
+    shim = (
+        Path(__file__).resolve().parents[1]
+        / "experiments/benchmark_compare/main-bin/goal-plus-pi-tool"
+    )
+    environment = {**os.environ, "BENCH_GOAL_PLUS_CONTROLLER_ONLY_CLOSEOUT": "1"}
+    for tool in (
+        "goal_plus_record_search_result",
+        "goal_plus_set_status",
+        "search_promote",
+        "search_report",
+        "search_select",
+    ):
+        completed = subprocess.run(
+            [sys.executable, str(shim), "--root", ".gp", "--args-json", "{}", tool],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 1
+        assert json.loads(completed.stderr)["tool"] == tool
+
+
 def test_bench_pi_shim_derives_a_trusted_worker_context(tmp_path: Path) -> None:
     root, workspace = _candidate_paths(tmp_path)
     workspace.mkdir()
