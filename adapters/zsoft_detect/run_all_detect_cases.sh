@@ -47,6 +47,10 @@ readonly EXPECTED_CASES="${DETECT_EXPECTED_CASES:-5}"
 
 MODE="all"
 REQUESTED_CASE_ID=""
+WALL_TIME_SECONDS=1800
+LIVE_SEARCH_CONCURRENCY=4
+CELL_CONCURRENCY=1
+REPEAT_COUNT=1
 MAX_INFRA_ATTEMPTS="${DETECT_MAX_INFRA_ATTEMPTS:-2}"
 STATUS_INTERVAL_SECONDS="${DETECT_STATUS_INTERVAL_SECONDS:-60}"
 FETCH_MISSING_SOURCES="${DETECT_FETCH_MISSING_SOURCES:-1}"
@@ -61,11 +65,19 @@ usage() {
   ./run_all_detect_cases.sh
   ./run_all_detect_cases.sh --one
   ./run_all_detect_cases.sh --case-id PROJECT_OR_TASK_ID
+  ./run_all_detect_cases.sh --case-id civetweb-detect -T 3600 -K 2 -C 1 -R 3
+  ./run_all_detect_cases.sh --list-cases
 
 选项:
   --one                         优先选择已有源码缓存的 detect 项目做真实验证
   --case-id ID                  只运行指定项目；支持 civetweb 或 civetweb-detect
-  --max-infra-attempts NUMBER   基础设施失败时的最大尝试次数，默认 2
+  --list-cases                  列出当前 ZSoft checkout 中全部可用 CASE_ID 后退出
+  -T, --wall-time-seconds       T: 每个 search 的墙钟预算，默认 1800，当前最小 1260
+  -K, --live-search-concurrency
+                                K: 每个 task cell 内部 subagent 数，默认 4
+  -C, --cell-concurrency        C: 同时运行的 task cell 数，默认 1（当前仅支持 1）
+  -R, --repeats                 R: 每个 case 的独立串行 campaign 数，使用 seed 1..R，默认 1
+  -A, --max-infra-attempts      基础设施失败时的最大尝试次数，默认 2
   -h, --help                    显示帮助
 
 可选环境变量:
@@ -76,7 +88,7 @@ usage() {
   DETECT_STATUS_INTERVAL_SECONDS 实验运行心跳间隔，默认 60 秒
 
 实验合同:
-  配置固定为 model=deepseek-v4-flash、reasoning=high、T=1800、K=4、C=1、R=1。
+  默认配置为 model=deepseek-v4-flash、reasoning=high、T=1800、K=4、C=1、R=1。
   detect 搜索过程中只使用公开格式校验；不查看 F1，也不提前终止。
   所有 agent 退出且收尾完成后，控制器对合规提交评分；final-eval 记录最高 F1。
   F1 同分时选择 candidate ID 最小者，同一 candidate 选择较晚 iteration。
@@ -97,21 +109,47 @@ while (($# > 0)); do
     case "$1" in
         --one)
             [[ "$MODE" == "all" && -z "$REQUESTED_CASE_ID" ]] \
-                || die "--one 不能和 --case-id 重复使用"
+                || die "--one 不能重复，也不能和 --case-id 或 --list-cases 同时使用"
             MODE="one"
             shift
             ;;
         --case-id)
             (($# >= 2)) || die "--case-id 缺少参数"
             [[ "$MODE" == "all" && -z "$REQUESTED_CASE_ID" ]] \
-                || die "--case-id 不能重复，也不能和 --one 同时使用"
+                || die "--case-id 不能重复，也不能和 --one 或 --list-cases 同时使用"
             MODE="case"
             REQUESTED_CASE_ID="$2"
             shift 2
             ;;
-        --max-infra-attempts)
-            (($# >= 2)) || die "--max-infra-attempts 缺少参数"
+        --list-cases)
+            [[ "$MODE" == "all" && -z "$REQUESTED_CASE_ID" ]] \
+                || die "--list-cases 不能重复，也不能和 --one 或 --case-id 同时使用"
+            MODE="list"
+            shift
+            ;;
+        -A|--max-infra-attempts)
+            (($# >= 2)) || die "$1 缺少参数"
             MAX_INFRA_ATTEMPTS="$2"
+            shift 2
+            ;;
+        -T|--wall-time-seconds)
+            (($# >= 2)) || die "$1 缺少参数"
+            WALL_TIME_SECONDS="$2"
+            shift 2
+            ;;
+        -K|--live-search-concurrency)
+            (($# >= 2)) || die "$1 缺少参数"
+            LIVE_SEARCH_CONCURRENCY="$2"
+            shift 2
+            ;;
+        -C|--cell-concurrency)
+            (($# >= 2)) || die "$1 缺少参数"
+            CELL_CONCURRENCY="$2"
+            shift 2
+            ;;
+        -R|--repeats)
+            (($# >= 2)) || die "$1 缺少参数"
+            REPEAT_COUNT="$2"
             shift 2
             ;;
         -h|--help)
@@ -126,6 +164,18 @@ done
 
 [[ "$EXPECTED_CASES" =~ ^[1-9][0-9]*$ ]] \
     || die "DETECT_EXPECTED_CASES 必须是正整数"
+[[ "$WALL_TIME_SECONDS" =~ ^[1-9][0-9]*$ ]] \
+    || die "T (--wall-time-seconds) 必须是正整数"
+((WALL_TIME_SECONDS >= 1260)) \
+    || die "T (--wall-time-seconds) 必须至少为 1260 秒（1200 秒 worker 预算 + 60 秒 closeout）"
+[[ "$LIVE_SEARCH_CONCURRENCY" =~ ^[1-9][0-9]*$ ]] \
+    || die "K (--live-search-concurrency) 必须是正整数"
+[[ "$CELL_CONCURRENCY" =~ ^[1-9][0-9]*$ ]] \
+    || die "C (--cell-concurrency) 必须是正整数"
+((CELL_CONCURRENCY == 1)) \
+    || die "当前 zsoft-detect common-matrix runner 尚未支持 C>1；--cell-concurrency 必须为 1"
+[[ "$REPEAT_COUNT" =~ ^[1-9][0-9]*$ ]] \
+    || die "R (--repeats) 必须是正整数"
 [[ "$MAX_INFRA_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] \
     || die "最大基础设施尝试次数必须是正整数"
 [[ "$STATUS_INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]] \
@@ -137,22 +187,15 @@ done
 
 cd "$WORK_DIR" || die "无法进入工作目录: $WORK_DIR"
 
-for required in awk curl date find flock git jq mktemp mv realpath rm sleep sort stat tar tee; do
+for required in find sort; do
     require_command "$required"
 done
-[[ -x "$PYTHON" ]] || die "Python 环境不存在: $PYTHON"
 [[ -d "$PROJECTS_DIR" ]] || die "detect projects 目录不存在: $PROJECTS_DIR"
-
-mkdir -p "$WORK_DIR/.tmp"
-exec 9>"$WORK_DIR/.tmp/run-detect-cases.lock"
-flock -n 9 || die "已有另一个 detect 批量或验证脚本正在运行"
 
 mapfile -t ALL_PROJECT_IDS < <(
     find "$PROJECTS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' |
         LC_ALL=C sort
 )
-((${#ALL_PROJECT_IDS[@]} == EXPECTED_CASES)) \
-    || die "detect 项目数量为 ${#ALL_PROJECT_IDS[@]}，预期为 $EXPECTED_CASES"
 
 declare -A PROJECT_COMMITS=()
 declare -a ALL_CASE_IDS=()
@@ -171,6 +214,25 @@ for project_id in "${ALL_PROJECT_IDS[@]}"; do
     PROJECT_COMMITS["$project_id"]="${version_commits[0]}"
     ALL_CASE_IDS+=("${project_id}-detect")
 done
+
+if [[ "$MODE" == "list" ]]; then
+    printf '可用 Detect CASE_ID（%d 个；也可省略 -detect 后缀）:\n' \
+        "${#ALL_CASE_IDS[@]}"
+    printf '  %s\n' "${ALL_CASE_IDS[@]}"
+    exit 0
+fi
+
+((${#ALL_PROJECT_IDS[@]} == EXPECTED_CASES)) \
+    || die "detect 项目数量为 ${#ALL_PROJECT_IDS[@]}，预期为 $EXPECTED_CASES"
+
+for required in awk curl date flock git jq mktemp mv realpath rm sleep stat tar tee; do
+    require_command "$required"
+done
+[[ -x "$PYTHON" ]] || die "Python 环境不存在: $PYTHON"
+
+mkdir -p "$WORK_DIR/.tmp"
+exec 9>"$WORK_DIR/.tmp/run-detect-cases.lock"
+flock -n 9 || die "已有另一个 detect 批量或验证脚本正在运行"
 
 if [[ -n "${DETECT_SOURCE_CACHE_ROOT:-}" ]]; then
     [[ "$DETECT_SOURCE_CACHE_ROOT" == /* && "$DETECT_SOURCE_CACHE_ROOT" != "/" ]] \
@@ -275,6 +337,8 @@ case "$MODE" in
         ;;
 esac
 
+readonly TOTAL_TASK_CELLS=$((${#CASE_IDS[@]} * REPEAT_COUNT))
+
 if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
     [[ -t 0 ]] || die "非交互运行前必须先 export DEEPSEEK_API_KEY"
     read -rsp '请输入 DEEPSEEK_API_KEY: ' DEEPSEEK_API_KEY
@@ -327,19 +391,24 @@ case_status() {
 {
     printf 'ZSoft Detect 运行汇总\n'
     printf '开始时间: %s\n' "$(date --iso-8601=seconds)"
-    printf '配置: model=deepseek-v4-flash reasoning=high T=1800 K=4 C=1 R=1\n'
+    printf '配置: model=deepseek-v4-flash reasoning=high T=%d K=%d C=%d R=%d\n' \
+        "$WALL_TIME_SECONDS" "$LIVE_SEARCH_CONCURRENCY" \
+        "$CELL_CONCURRENCY" "$REPEAT_COUNT"
     printf '评分策略: 搜索期间仅 format_valid；收尾后隐藏评分并记录最高 F1\n'
     printf '源码缓存: %s\n' "$SOURCE_CACHE_ROOT"
     printf '源码缓存模式: %s\n' "$SOURCE_CACHE_STORAGE_MODE"
     printf '计划 case 数: %d\n' "${#CASE_IDS[@]}"
-    printf 'case_id\tstatus\tf1\tattempts\tcampaign_id\treason\tcase_log\n'
+    printf '计划 task cell 数: %d\n' "$TOTAL_TASK_CELLS"
+    printf 'case_id\tseed\tstatus\tf1\tattempts\tcampaign_id\treason\tcase_log\n'
 } >"$SUMMARY_FILE"
 
 status_message "INIT work_dir=$WORK_DIR"
 status_message "INIT log_dir=$LOG_DIR progress_file=$PROGRESS_FILE"
 status_message "INIT source_cache=$SOURCE_CACHE_ROOT storage_mode=$SOURCE_CACHE_STORAGE_MODE"
-status_message "CONFIG model=deepseek-v4-flash reasoning=high T=1800 K=4 C=1 R=1 scoring=controller_posthoc_best_f1"
-status_message "QUEUE cases=${#CASE_IDS[@]} execution=serial"
+status_message \
+    "CONFIG model=deepseek-v4-flash reasoning=high T=$WALL_TIME_SECONDS K=$LIVE_SEARCH_CONCURRENCY C=$CELL_CONCURRENCY R=$REPEAT_COUNT scoring=controller_posthoc_best_f1"
+status_message \
+    "QUEUE cases=${#CASE_IDS[@]} task_cells=$TOTAL_TASK_CELLS execution=serial"
 
 PREFLIGHT_LOG="$LOG_DIR/preflight.log"
 preflight_started="$(date +%s)"
@@ -444,22 +513,23 @@ PY
 build_bench_args() {
     local case_id="$1"
     local campaign_id="$2"
+    local seed="$3"
     BENCH_ARGS=(
         --benchmark zsoft-detect
         --task-id "$case_id"
         --campaign-id "$campaign_id"
         --campaign-dir "$WORK_DIR/$CAMPAIGN_BASE/$campaign_id"
         --method goal-plus-pi
-        --seed 1
+        --seed "$seed"
         --model deepseek-v4-flash
         --reasoning-effort high
         --pi-provider-id deepseek
         --pi-api openai-completions
         --pi-api-key-env DEEPSEEK_API_KEY
         --pi-api-base-env DEEPSEEK_BASE_URL
-        --wall-time-seconds 1800
-        --live-search-concurrency 4
-        --cell-concurrency 1
+        --wall-time-seconds "$WALL_TIME_SECONDS"
+        --live-search-concurrency "$LIVE_SEARCH_CONCURRENCY"
+        --cell-concurrency "$CELL_CONCURRENCY"
         --worker-runtime-seconds 1200
         --worker-min-runtime-seconds 600
         --skip-bootstrap
@@ -470,9 +540,10 @@ build_bench_args() {
 
 start_launch_heartbeat() {
     local case_id="$1"
-    local campaign_dir="$2"
-    local log_file="$3"
-    local started_epoch="$4"
+    local seed="$2"
+    local campaign_dir="$3"
+    local log_file="$4"
+    local started_epoch="$5"
 
     (
         local campaign_state="not_created"
@@ -517,7 +588,7 @@ start_launch_heartbeat() {
                     ;;
             esac
             case_status "$log_file" \
-                "EXPERIMENT_HEARTBEAT case=$case_id elapsed_seconds=$(($(date +%s) - started_epoch)) campaign_state=$campaign_state cell_state=$cell_state experiment_status=$experiment_status final_eval=$final_eval_status"
+                "EXPERIMENT_HEARTBEAT case=$case_id seed=$seed elapsed_seconds=$(($(date +%s) - started_epoch)) campaign_state=$campaign_state cell_state=$cell_state experiment_status=$experiment_status final_eval=$final_eval_status"
         done
     ) &
     ACTIVE_HEARTBEAT_PID=$!
@@ -538,14 +609,55 @@ ATTEMPT_CAMPAIGN_ID=""
 ATTEMPT_REASON="not_started"
 ATTEMPT_LOG_FILE=""
 
+campaign_contract_valid() {
+    local case_id="$1"
+    local seed="$2"
+    local campaign="$3"
+
+    jq -e \
+        --arg case_id "$case_id" \
+        --argjson seed "$seed" \
+        --argjson wall_time "$WALL_TIME_SECONDS" \
+        --argjson live_concurrency "$LIVE_SEARCH_CONCURRENCY" \
+        --argjson cell_concurrency "$CELL_CONCURRENCY" '
+        .task_id == $case_id and
+        .methods == ["goal-plus-pi"] and
+        .seeds == [$seed] and
+        .model == "deepseek-v4-flash" and
+        .reasoning_effort == "high" and
+        .budget.wall_time_seconds == $wall_time and
+        .budget.live_search_concurrency == $live_concurrency and
+        .budget.requested_live_concurrency == $live_concurrency and
+        .budget.cell_concurrency == $cell_concurrency and
+        .budget.attempts == 1 and
+        .budget.worker_runtime_seconds == 1200 and
+        .budget.worker_min_runtime_seconds == 600 and
+        (.cells | type) == "array" and
+        (.cells | length) == 1 and
+        .cells[0].benchmark_id == "zsoft-detect" and
+        .cells[0].method == "goal-plus-pi" and
+        .cells[0].seed == $seed and
+        .cells[0].effective_concurrency == $live_concurrency
+    ' "$campaign" >/dev/null 2>&1
+}
+
 run_case_attempt() {
     local case_id="$1"
-    local attempt="$2"
-    local case_number="$3"
+    local seed="$2"
+    local attempt="$3"
+    local task_cell_number="$4"
     local project="${case_id%-detect}"
-    local campaign_id="detect-${project}-${RUN_STAMP}-a${attempt}"
+    local campaign_id=""
+    if ((REPEAT_COUNT == 1)); then
+        campaign_id="detect-${project}-${RUN_STAMP}-a${attempt}"
+    else
+        campaign_id="detect-${project}-seed-${seed}-${RUN_STAMP}-a${attempt}"
+    fi
     local campaign_dir="$WORK_DIR/$CAMPAIGN_BASE/$campaign_id"
     local case_log_dir="$LOG_DIR/cases/$case_id"
+    if ((REPEAT_COUNT > 1)); then
+        case_log_dir="$case_log_dir/seed-$seed"
+    fi
     local log_file="$case_log_dir/attempt-${attempt}.log"
     local launch_rc=0
     local campaign_state=""
@@ -565,7 +677,7 @@ run_case_attempt() {
     mkdir -p "$case_log_dir"
     : >"$log_file"
     case_status "$log_file" \
-        "CASE_ATTEMPT_START case=$case_id position=$case_number/${#CASE_IDS[@]} attempt=$attempt/$MAX_INFRA_ATTEMPTS campaign_id=$campaign_id"
+        "CASE_ATTEMPT_START case=$case_id seed=$seed position=$task_cell_number/$TOTAL_TASK_CELLS attempt=$attempt/$MAX_INFRA_ATTEMPTS campaign_id=$campaign_id"
 
     stage_started="$(date +%s)"
     case_status "$log_file" "SOURCE_CHECK_START case=$case_id"
@@ -579,7 +691,7 @@ run_case_attempt() {
     case_status "$log_file" \
         "SOURCE_CHECK_OK case=$case_id elapsed_seconds=$(($(date +%s) - stage_started))"
 
-    build_bench_args "$case_id" "$campaign_id"
+    build_bench_args "$case_id" "$campaign_id" "$seed"
     stage_started="$(date +%s)"
     case_status "$log_file" "PLAN_START case=$case_id campaign_id=$campaign_id"
     "$PYTHON" scripts/bench.py plan "${BENCH_ARGS[@]}" >>"$log_file" 2>&1
@@ -595,7 +707,8 @@ run_case_attempt() {
     stage_started="$(date +%s)"
     case_status "$log_file" \
         "EXPERIMENT_LAUNCH_START case=$case_id campaign_id=$campaign_id campaign_dir=$campaign_dir fresh_campaign=true"
-    start_launch_heartbeat "$case_id" "$campaign_dir" "$log_file" "$stage_started"
+    start_launch_heartbeat \
+        "$case_id" "$seed" "$campaign_dir" "$log_file" "$stage_started"
     "$PYTHON" scripts/bench.py launch "${BENCH_ARGS[@]}" >>"$log_file" 2>&1
     launch_rc=$?
     stop_launch_heartbeat
@@ -614,6 +727,13 @@ run_case_attempt() {
             "RESULT_VALIDATION_FAILED case=$case_id reason=$ATTEMPT_REASON"
         return 0
     }
+    if ! campaign_contract_valid \
+        "$case_id" "$seed" "$campaign_dir/campaign.json"; then
+        ATTEMPT_REASON="campaign_contract_invalid"
+        case_status "$log_file" \
+            "RESULT_VALIDATION_FAILED case=$case_id seed=$seed reason=$ATTEMPT_REASON"
+        return 0
+    fi
     cell_state="$(jq -r '
         if (.cells | type) == "array" and (.cells | length) == 1
         then .cells[0].state // empty
@@ -687,17 +807,21 @@ run_case_attempt() {
     fi
 
     case_status "$log_file" "RESULT_VALIDATION_START case=$case_id"
-    jq -e --arg case_id "$case_id" '
+    jq -e \
+        --arg case_id "$case_id" \
+        --argjson seed "$seed" \
+        --argjson wall_time "$WALL_TIME_SECONDS" \
+        --argjson live_concurrency "$LIVE_SEARCH_CONCURRENCY" '
         .status == "finished" and
         .benchmark_adapter == "zsoft-detect" and
         .benchmark_task_selector == $case_id and
         .task_id == $case_id and
         .method == "goal-plus-pi" and
-        .seed == 1 and
+        .seed == $seed and
         .model == "deepseek-v4-flash" and
         .reasoning_effort == "high" and
-        .budget.wall_time_seconds == 1800 and
-        .budget.concurrency == 4 and
+        .budget.wall_time_seconds == $wall_time and
+        .budget.concurrency == $live_concurrency and
         .budget.worker_runtime_seconds == 1200 and
         .budget.worker_min_runtime_seconds == 600 and
         .task.primary_metric == "f1" and
@@ -714,7 +838,7 @@ run_case_attempt() {
             "timing": "after_agent_exit_and_controller_closeout",
             "visible_to_workers": false
         } and
-        .goal_plus_config.command_config.max_parallel == 4 and
+        .goal_plus_config.command_config.max_parallel == $live_concurrency and
         .goal_plus_config.metric_name == "format_valid" and
         .goal_plus_config.controller_only_official_evaluation == true and
         ((.goal_plus_config.early_stop // null) == null) and
@@ -822,7 +946,7 @@ run_case_attempt() {
     ATTEMPT_RESULT="COMPLETED"
     ATTEMPT_REASON="valid_f1"
     case_status "$log_file" \
-        "RESULT_VALIDATION_OK case=$case_id result=COMPLETED f1=$ATTEMPT_F1"
+        "RESULT_VALIDATION_OK case=$case_id seed=$seed result=COMPLETED f1=$ATTEMPT_F1"
 }
 
 COMPLETED_COUNT=0
@@ -831,54 +955,56 @@ declare -a INFRA_CASES=()
 
 for case_index in "${!CASE_IDS[@]}"; do
     case_id="${CASE_IDS[$case_index]}"
-    case_number=$((case_index + 1))
-    case_result="INFRA_ERROR"
-    case_f1=""
-    attempts_used=0
-    final_campaign_id=""
-    final_reason="not_started"
-    final_log_file=""
+    for ((seed = 1; seed <= REPEAT_COUNT; seed++)); do
+        task_cell_number=$((case_index * REPEAT_COUNT + seed))
+        case_result="INFRA_ERROR"
+        case_f1=""
+        attempts_used=0
+        final_campaign_id=""
+        final_reason="not_started"
+        final_log_file=""
 
-    for ((attempt = 1; attempt <= MAX_INFRA_ATTEMPTS; attempt++)); do
-        attempts_used="$attempt"
-        run_case_attempt "$case_id" "$attempt" "$case_number"
-        case_result="$ATTEMPT_RESULT"
-        case_f1="$ATTEMPT_F1"
-        final_campaign_id="$ATTEMPT_CAMPAIGN_ID"
-        final_reason="$ATTEMPT_REASON"
-        final_log_file="$ATTEMPT_LOG_FILE"
-        [[ "$case_result" == "COMPLETED" ]] && break
-        if ((attempt < MAX_INFRA_ATTEMPTS)); then
+        for ((attempt = 1; attempt <= MAX_INFRA_ATTEMPTS; attempt++)); do
+            attempts_used="$attempt"
+            run_case_attempt "$case_id" "$seed" "$attempt" "$task_cell_number"
+            case_result="$ATTEMPT_RESULT"
+            case_f1="$ATTEMPT_F1"
+            final_campaign_id="$ATTEMPT_CAMPAIGN_ID"
+            final_reason="$ATTEMPT_REASON"
+            final_log_file="$ATTEMPT_LOG_FILE"
+            [[ "$case_result" == "COMPLETED" ]] && break
+            if ((attempt < MAX_INFRA_ATTEMPTS)); then
+                status_message \
+                    "CASE_RETRY case=$case_id seed=$seed position=$task_cell_number/$TOTAL_TASK_CELLS attempt=$attempt reason=$final_reason"
+            fi
+        done
+
+        if [[ "$case_result" == "COMPLETED" ]]; then
+            COMPLETED_COUNT=$((COMPLETED_COUNT + 1))
             status_message \
-                "CASE_RETRY case=$case_id position=$case_number/${#CASE_IDS[@]} attempt=$attempt reason=$final_reason"
+                "CASE_COMPLETE case=$case_id seed=$seed position=$task_cell_number/$TOTAL_TASK_CELLS result=COMPLETED f1=$case_f1 attempts=$attempts_used"
+        else
+            INFRA_COUNT=$((INFRA_COUNT + 1))
+            INFRA_CASES+=("$case_id:seed-$seed")
+            status_message \
+                "CASE_COMPLETE case=$case_id seed=$seed position=$task_cell_number/$TOTAL_TASK_CELLS result=INFRA_ERROR attempts=$attempts_used reason=$final_reason"
+        fi
+
+        printf '%s\t%d\t%s\t%s\t%d\t%s\t%s\t%s\n' \
+            "$case_id" "$seed" "$case_result" "${case_f1:-n/a}" \
+            "$attempts_used" "$final_campaign_id" "$final_reason" \
+            "$final_log_file" >>"$SUMMARY_FILE"
+
+        unset BENCH_GOAL_PLUS_ZSOFT_DETECT_SOURCE_CACHE
+        if ((task_cell_number < TOTAL_TASK_CELLS)); then
+            sleep 2
         fi
     done
-
-    if [[ "$case_result" == "COMPLETED" ]]; then
-        COMPLETED_COUNT=$((COMPLETED_COUNT + 1))
-        status_message \
-            "CASE_COMPLETE case=$case_id position=$case_number/${#CASE_IDS[@]} result=COMPLETED f1=$case_f1 attempts=$attempts_used"
-    else
-        INFRA_COUNT=$((INFRA_COUNT + 1))
-        INFRA_CASES+=("$case_id")
-        status_message \
-            "CASE_COMPLETE case=$case_id position=$case_number/${#CASE_IDS[@]} result=INFRA_ERROR attempts=$attempts_used reason=$final_reason"
-    fi
-
-    printf '%s\t%s\t%s\t%d\t%s\t%s\t%s\n' \
-        "$case_id" "$case_result" "${case_f1:-n/a}" "$attempts_used" \
-        "$final_campaign_id" "$final_reason" "$final_log_file" \
-        >>"$SUMMARY_FILE"
-
-    unset BENCH_GOAL_PLUS_ZSOFT_DETECT_SOURCE_CACHE
-    if ((case_number < ${#CASE_IDS[@]})); then
-        sleep 2
-    fi
 done
 
 if ((COMPLETED_COUNT > 0)); then
     MEAN_F1="$(awk -F '\t' '
-        $2 == "COMPLETED" { total += $3; count++ }
+        $3 == "COMPLETED" { total += $4; count++ }
         END { if (count > 0) printf "%.6f", total / count; else print "n/a" }
     ' "$SUMMARY_FILE")"
 else
@@ -887,23 +1013,23 @@ fi
 
 {
     printf '\n结束时间: %s\n' "$(date --iso-8601=seconds)"
-    printf '计划: %d\n' "${#CASE_IDS[@]}"
+    printf '计划 task cell: %d\n' "$TOTAL_TASK_CELLS"
     printf '有效完成: %d\n' "$COMPLETED_COUNT"
     printf 'INFRA_ERROR: %d\n' "$INFRA_COUNT"
     printf '有效结果平均 F1: %s\n' "$MEAN_F1"
     if ((INFRA_COUNT > 0)); then
         printf '全量平均 F1: unavailable（仍有基础设施失败需要重跑）\n'
-        printf '待重跑 case: %s\n' "${INFRA_CASES[*]}"
+        printf '待重跑 case/seed: %s\n' "${INFRA_CASES[*]}"
     else
         printf '全量平均 F1: %s\n' "$MEAN_F1"
     fi
 } >>"$SUMMARY_FILE"
 
 status_message \
-    "RUN_COMPLETE planned=${#CASE_IDS[@]} completed=$COMPLETED_COUNT infra_error=$INFRA_COUNT mean_f1=$MEAN_F1 summary=$SUMMARY_FILE"
+    "RUN_COMPLETE planned=$TOTAL_TASK_CELLS completed=$COMPLETED_COUNT infra_error=$INFRA_COUNT mean_f1=$MEAN_F1 summary=$SUMMARY_FILE"
 
 printf '\n运行结束：有效完成 %d/%d，INFRA_ERROR=%d。\n' \
-    "$COMPLETED_COUNT" "${#CASE_IDS[@]}" "$INFRA_COUNT"
+    "$COMPLETED_COUNT" "$TOTAL_TASK_CELLS" "$INFRA_COUNT"
 printf '有效结果平均 F1: %s\n' "$MEAN_F1"
 printf '汇总文件: %s\n' "$SUMMARY_FILE"
 
