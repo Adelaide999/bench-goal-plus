@@ -6,6 +6,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import urllib.error
@@ -60,6 +61,7 @@ PI_API_KEYS = {
     "openai": ("OPENAI_API_KEY",),
     "anthropic": ("ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"),
 }
+PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent"
 
 PI_RESPONSES_PROVIDER_COMPAT = {
     "deepseek-responses": {
@@ -334,13 +336,30 @@ def routed_codex_runtime(
             closer()
 
 
+def _resolve_pi_package(pi_cli: Path | None) -> tuple[Path | None, str | None]:
+    if pi_cli is None:
+        return None, None
+    for candidate in pi_cli.parents:
+        manifest_path = candidate / "package.json"
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if manifest.get("name") == PI_PACKAGE_NAME:
+            container_cli = Path("/opt/pi") / pi_cli.relative_to(candidate)
+            return candidate, str(container_cli)
+    return None, None
+
+
 def resolve_pi_runtime(profile: dict[str, Any]) -> dict[str, Any]:
     node_command = shutil.which("node")
     pi_command = shutil.which("pi")
     node_binary = Path(node_command).resolve() if node_command else None
     pi_cli = Path(pi_command).resolve() if pi_command else None
     node_root = node_binary.parent.parent if node_binary else None
-    package_root = pi_cli.parent.parent if pi_cli else None
+    package_root, container_pi_cli = _resolve_pi_package(pi_cli)
     model = str(profile["model"])
     provider, _, model_id = model.partition("/")
     provider_contract = profile.get("agent_provider")
@@ -360,6 +379,7 @@ def resolve_pi_runtime(profile: dict[str, Any]) -> dict[str, Any]:
         "node_binary": node_binary,
         "package_root": package_root,
         "pi_cli": pi_cli,
+        "container_pi_cli": container_pi_cli,
         "provider": provider,
         "model_id": model_id,
         "credential_env": key_source,
@@ -489,7 +509,7 @@ def routed_pi_runtime(
             closer()
 
 
-def goal_plus_install_script(*, include_pi: bool = True) -> str:
+def goal_plus_install_script(*, pi_cli: str | None) -> str:
     installer = (
         "import os, sys; "
         "cache = os.stat('/opt/pip-cache'); "
@@ -511,11 +531,11 @@ def goal_plus_install_script(*, include_pi: bool = True) -> str:
         "> /opt/goal-plus-bin/goal-plus",
         "chmod 0555 /opt/goal-plus-bin/goal-plus",
     ]
-    if include_pi:
+    if pi_cli is not None:
         commands.extend(
             [
                 "mkdir -p /opt/pi-home/.pi/agent",
-                "ln -sf /opt/pi/dist/cli.js /opt/goal-plus-bin/pi",
+                f"ln -sf {shlex.quote(pi_cli)} /opt/goal-plus-bin/pi",
             ]
         )
     return " && ".join(commands)
@@ -831,7 +851,7 @@ def _pi_container_probe(
                 "-lc",
                 "mkdir -p /opt/pi-home/.pi/agent && "
                 "cp /opt/provider/models.json /opt/pi-home/.pi/agent/models.json && "
-                "exec /opt/node/bin/node /opt/pi/dist/cli.js "
+                f"exec /opt/node/bin/node {shlex.quote(str(runtime['container_pi_cli']))} "
                 "--offline --list-models \"$@\"",
                 "swe-bench-pi-probe",
                 provider,
@@ -842,7 +862,7 @@ def _pi_container_probe(
             [
                 image,
                 "/opt/node/bin/node",
-                "/opt/pi/dist/cli.js",
+                str(runtime["container_pi_cli"]),
                 "--offline",
                 "--list-models",
                 provider,
@@ -919,7 +939,7 @@ def _goal_plus_container_probe(
                 if annotator_enabled
                 else ""
             )
-            + goal_plus_install_script()
+            + goal_plus_install_script(pi_cli=str(runtime["container_pi_cli"]))
             + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
             + " && pi --version"
             + (
@@ -981,7 +1001,7 @@ def _goal_plus_codex_container_probe(
             "-lc",
             "mkdir -p /opt/codex && "
             "tar -xzf /opt/runtime/codex.tgz -C /opt/codex && "
-            + goal_plus_install_script(include_pi=False)
+            + goal_plus_install_script(pi_cli=None)
             + " && ln -sf "
             "/opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex "
             "/opt/goal-plus-bin/codex"
@@ -1415,7 +1435,7 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
         paths_present = all(
             isinstance(runtime.get(name), Path) and runtime[name].exists()
             for name in ("node_root", "package_root", "pi_cli")
-        )
+        ) and isinstance(runtime.get("container_pi_cli"), str)
         checks.extend(
             [
                 _check(
