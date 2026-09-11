@@ -697,7 +697,10 @@ def _create_agent_container(
             raise SweBenchContractError(
                 f"Pi credential for provider {runtime['provider']} is missing"
             )
-        if not all(runtime.get(name) for name in ("node_root", "package_root")):
+        if not all(
+            runtime.get(name)
+            for name in ("node_root", "package_root", "container_pi_cli")
+        ):
             raise SweBenchContractError("Pi Node.js or package runtime is missing")
         command.extend(
             [
@@ -954,7 +957,11 @@ def _initialize_agent_container(
         if os.environ.get("PIP_INDEX_URL"):
             install_command.extend(["-e", "PIP_INDEX_URL"])
         install_script = goal_plus_install_script(
-            include_pi=method == "goal-plus-pi"
+            pi_cli=(
+                str(runtime["container_pi_cli"])
+                if method == "goal-plus-pi"
+                else None
+            )
         )
         if runtime.get("goal_plus_evidence_annotator") is not None:
             install_script += (
@@ -1432,7 +1439,7 @@ def _agent_command(
                 'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH; exec "$@"',
                 "swe-bench-goal-plus",
                 "/opt/node/bin/node",
-                "/opt/pi/dist/cli.js",
+                str(runtime["container_pi_cli"]),
                 "--mode",
                 "json",
                 "--print",
@@ -1480,7 +1487,7 @@ def _agent_command(
         *bridge_environment,
         container_id,
         "/opt/node/bin/node",
-        "/opt/pi/dist/cli.js",
+        str(runtime["container_pi_cli"]),
         "--mode",
         "json",
         "--print",

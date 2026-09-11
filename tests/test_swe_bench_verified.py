@@ -158,23 +158,45 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(json.loads(passing.stdout)["visible_test_score"], 1.0)
 
     def test_goal_plus_installer_uses_the_bind_cache_owner(self) -> None:
-        script = environment.goal_plus_install_script()
+        script = environment.goal_plus_install_script(
+            pi_cli="/opt/pi/dist/bundle/cli.js"
+        )
 
         self.assertIn("os.stat('/opt/pip-cache')", script)
         self.assertIn("os.setgid(cache.st_gid)", script)
         self.assertIn("os.setuid(cache.st_uid)", script)
         self.assertIn("'/opt/goal-plus-runtime-requirements.lock'", script)
         self.assertIn("PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH", script)
+        self.assertIn(
+            "ln -sf /opt/pi/dist/bundle/cli.js /opt/goal-plus-bin/pi", script
+        )
         self.assertNotIn("PATH", environment.goal_plus_runtime_environment())
         self.assertEqual(
             environment.goal_plus_runtime_environment()["HOME"],
             "/opt/agent-tmp",
         )
 
-        codex_script = environment.goal_plus_install_script(include_pi=False)
+        codex_script = environment.goal_plus_install_script(pi_cli=None)
         self.assertIn("goal_plus.server", codex_script)
         self.assertNotIn("/opt/pi/dist", codex_script)
         self.assertNotIn("/opt/goal-plus-bin/pi", codex_script)
+
+    def test_pi_package_resolution_is_independent_of_cli_layout(self) -> None:
+        with self.temporary_directory() as temporary:
+            package_root = Path(temporary) / "pi-coding-agent"
+            package_root.mkdir()
+            (package_root / "package.json").write_text(
+                json.dumps({"name": environment.PI_PACKAGE_NAME}), encoding="utf-8"
+            )
+            for relative_cli in ("dist/cli.js", "dist/bundle/cli.js"):
+                pi_cli = package_root / relative_cli
+                pi_cli.parent.mkdir(parents=True, exist_ok=True)
+                pi_cli.touch()
+
+                resolved_root, container_cli = environment._resolve_pi_package(pi_cli)
+
+                self.assertEqual(resolved_root, package_root)
+                self.assertEqual(container_cli, f"/opt/pi/{relative_cli}")
 
     def test_goal_plus_codex_project_assets_follow_latest_muyuan_layout(self) -> None:
         script = runtime.goal_plus_codex_project_asset_script()
@@ -1328,6 +1350,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "container-id",
                 profile,
                 {
+                    "container_pi_cli": "/opt/pi/dist/bundle/cli.js",
                     "goal_plus_visible_verifier": (
                         environment.GOAL_PLUS_VISIBLE_VERIFIER
                     )
@@ -1514,6 +1537,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "model_id": "glm-5.2",
             "node_root": Path("/opt/node-host"),
             "package_root": Path("/opt/pi-host"),
+            "container_pi_cli": "/opt/pi/dist/bundle/cli.js",
         }
         with mock.patch.dict(os.environ, {"ZAI_API_KEY": secret}, clear=False):
             command = runtime._agent_command("container-id", profile, runtime_info)
@@ -1521,6 +1545,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn("ZAI_API_KEY", command)
         self.assertFalse(any(secret in argument for argument in command))
         self.assertNotIn(f"ZAI_API_KEY={secret}", command)
+        self.assertIn("/opt/pi/dist/bundle/cli.js", command)
 
         completed = subprocess.CompletedProcess([], 0, "glm-5.2", "")
         with mock.patch.object(environment, "run_capture", return_value=completed) as capture:
@@ -1528,6 +1553,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         probe = capture.call_args.args[0]
         self.assertIn("ZAI_API_KEY", probe)
         self.assertFalse(any(secret in argument for argument in probe))
+        self.assertIn("/opt/pi/dist/bundle/cli.js", probe)
 
     def test_custom_pi_container_probe_mounts_generated_provider_config(self) -> None:
         secret = "not-for-command-lines"
@@ -1541,6 +1567,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "model_id": "gpt-5.6-luna",
                 "node_root": Path("/opt/node-host"),
                 "package_root": Path("/opt/pi-host"),
+                "container_pi_cli": "/opt/pi/dist/bundle/cli.js",
                 "models_file": models_file,
                 "bridge_host": "192.0.2.10",
             }
@@ -1586,6 +1613,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "model_id": "glm-5.2",
                 "node_root": Path("/host/node"),
                 "package_root": Path("/host/pi"),
+                "container_pi_cli": "/opt/pi/dist/bundle/cli.js",
                 "goal_plus_root": goal_plus_root,
                 "goal_plus_dependency_lock": dependency_lock,
                 "goal_plus_visible_verifier": verifier,
@@ -1687,6 +1715,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 command,
             )
             self.assertIn("ZAI_API_KEY", command)
+            self.assertIn("/opt/pi/dist/bundle/cli.js", command)
             self.assertFalse(any(secret in argument for argument in command))
 
     def test_goal_plus_luna_container_mounts_codex_view_agent_runtime(self) -> None:
@@ -1717,6 +1746,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "model_id": "gpt-5.6-luna",
                 "node_root": Path("/host/node"),
                 "package_root": Path("/host/pi"),
+                "container_pi_cli": "/opt/pi/dist/bundle/cli.js",
                 "runtime_api_base_url": "http://192.0.2.10:45678/v1",
                 "outer_deadline_at": "2026-08-03T12:00:00+00:00",
                 "goal_plus_evidence_annotator": profile["goal_plus"][
