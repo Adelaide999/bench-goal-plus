@@ -962,7 +962,10 @@ def _run_host_tool(
         check=False,
     )
     if completed.returncode != 0:
-        raise RuntimeError("host tool call failed")
+        detail = completed.stderr.strip()
+        if len(detail) > 500:
+            detail = detail[:500] + "..."
+        raise RuntimeError(detail or "host tool call failed")
     return json.loads(completed.stdout)
 
 
@@ -1053,8 +1056,10 @@ class WorkerToolProxy:
                 args,
                 self.host_environment,
             )
-        except Exception:  # workers must not receive raw host exceptions
-            return dict(_BLIND_RESPONSE_REJECTED)
+        except Exception:
+            if self.evaluation_mode == "blind":
+                return dict(_BLIND_RESPONSE_REJECTED)
+            raise
         if self.evaluation_mode == "blind":
             result = _blind_tool_response(str(tool), result, self.context)
             if result is _INVALID_BLIND_RESPONSE:

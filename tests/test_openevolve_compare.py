@@ -375,6 +375,9 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("This fixed-budget benchmark uses host-owned closeout", prompt)
         self.assertIn("do not call `search_select`", prompt)
         self.assertIn("`goal_plus_set_status`", prompt)
+        self.assertIn("`shared_dir.enabled=false`", prompt)
+        self.assertIn("do not call shared-tool APIs", prompt)
+        self.assertIn("or send `toolization_decision`", prompt)
 
     def test_pi_goal_prompt_names_pool_supervisor_minimum_lease(self) -> None:
         prompt = experiment.render_goal(

@@ -507,7 +507,8 @@ def render_goal(
         + (
             "- Set top-level `shared_dir.enabled=true`.\n"
             if shared_dir_enabled
-            else ""
+            else "- Keep top-level `shared_dir.enabled=false`; do not call shared-tool "
+            "APIs or send `toolization_decision` in verifier submissions.\n"
         )
         + f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
         "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "

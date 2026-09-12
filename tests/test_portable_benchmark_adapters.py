@@ -727,7 +727,11 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
     def test_controller_closeout_uses_pinned_runtime_and_restores_environment(self) -> None:
         with patch.dict(
             os.environ,
-            {"PATH": "/outer/bin", "GOAL_PLUS_VERIFIER_TMPDIR": "outer-runtime"},
+            {
+                "PATH": "/outer/bin",
+                "GOAL_PLUS_VERIFIER_TMPDIR": "outer-runtime",
+                "GOAL_PLUS_OUTER_DEADLINE_AT": "outer-deadline",
+            },
             clear=False,
         ):
             runtime_bin = ROOT / ".tmp/tests/pinned-bin"
@@ -735,6 +739,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             with experiment.controller_subprocess_environment(
                 runtime_bin_dir=runtime_bin,
                 verifier_tmpdir=verifier_runtime,
+                outer_deadline_at="controller-closeout",
             ):
                 self.assertEqual(
                     os.environ["PATH"],
@@ -744,8 +749,15 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                     os.environ["GOAL_PLUS_VERIFIER_TMPDIR"],
                     str(verifier_runtime),
                 )
+                self.assertEqual(
+                    os.environ["GOAL_PLUS_OUTER_DEADLINE_AT"],
+                    "controller-closeout",
+                )
             self.assertEqual(os.environ["PATH"], "/outer/bin")
             self.assertEqual(os.environ["GOAL_PLUS_VERIFIER_TMPDIR"], "outer-runtime")
+            self.assertEqual(
+                os.environ["GOAL_PLUS_OUTER_DEADLINE_AT"], "outer-deadline"
+            )
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import stat
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -351,6 +352,171 @@ class AIBenchCodingContractTest(unittest.TestCase):
                 closeout, require_deterministic_selection=True
             ),
         )
+
+    def test_failed_closeout_keeps_official_score_but_remains_incomplete(self) -> None:
+        self.addCleanup(benchmark_compare.configure_adapter, "heurigym")
+        benchmark_compare.configure_adapter(
+            "aibench-coding-native",
+            module_name="experiments.aibench_coding.task_adapter",
+        )
+        run_dir = self.root / "goal-plus-closeout-failure"
+        workspace = run_dir / "workspace"
+        (workspace / "submission").mkdir(parents=True)
+        (workspace / "submission" / "solution.py").write_text(
+            "RESULT = 1\n", encoding="utf-8"
+        )
+        (workspace / "TASK.md").write_text("fix it\n", encoding="utf-8")
+        (workspace / "GOAL.md").write_text("prompt", encoding="utf-8")
+        manifest = {
+            "method": "goal-plus-codex",
+            "workspace": str(workspace),
+            "reasoning_effort": "medium",
+            "environment": {"runtime_bin": str(self.root / "bin")},
+            "task": {
+                "controller_only_official_evaluation": True,
+                "goal_plus_early_stop": None,
+                "goal_plus_posthoc_selection": None,
+            },
+            "goal_plus_config": {
+                "early_stop": None,
+                "posthoc_selection": None,
+                "shared_dir_enabled": False,
+            },
+            "budget": {
+                "wall_time_seconds": 300,
+                "soft_closeout_seconds": 60,
+                "hard_kill_grace_seconds": 5,
+                "concurrency": 1,
+                "worker_runtime_seconds": 200,
+                "worker_min_runtime_seconds": None,
+            },
+        }
+        args = SimpleNamespace(
+            model="gpt-test",
+            api_base=None,
+            codex_bin="codex-test",
+        )
+        seed = {"valid": True, "budget": {"total_claimed": 1}}
+        final = {
+            "valid": True,
+            "mode": "final",
+            "primary_metric": {"name": "task_success", "value": True},
+            "budget": {"total_claimed": 1},
+        }
+
+        def failed_closeout(*_args: object, **_kwargs: object) -> dict[str, object]:
+            deadline = datetime.fromisoformat(
+                os.environ["GOAL_PLUS_OUTER_DEADLINE_AT"]
+            )
+            self.assertLessEqual(deadline, datetime.now(timezone.utc))
+            return {"completed": False, "runs": [], "error": "recovery pending"}
+
+        with (
+            mock.patch.object(
+                benchmark_compare,
+                "evaluate_with_controller_runtime",
+                side_effect=[seed, final],
+            ) as evaluate,
+            mock.patch.object(benchmark_compare, "configure_isolated_codex_home"),
+            mock.patch.object(
+                benchmark_compare, "configure_evidence_annotator_environment"
+            ),
+            mock.patch.object(benchmark_compare, "render_goal", return_value="prompt"),
+            mock.patch.object(
+                benchmark_compare, "codex_command", return_value=["codex-test"]
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "run_controlled",
+                return_value={
+                    "returncode": 0,
+                    "deadline_reached": False,
+                    "hard_killed": False,
+                    "controller_interrupted": False,
+                },
+            ),
+            mock.patch.object(
+                benchmark_compare, "finalize_goal_plus_search", failed_closeout
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "parse_codex_events",
+                return_value={"top_level_usage": {}},
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "collect_goal_plus_state",
+                return_value={"runs": [], "goals": []},
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "collect_evidence_annotator_usage",
+                return_value={},
+            ),
+            mock.patch.object(
+                benchmark_compare, "goal_plus_incomplete_reason", return_value=None
+            ),
+        ):
+            control = benchmark_compare.execute_goal_plus(
+                manifest, run_dir, args, {}
+            )
+
+        self.assertEqual(evaluate.call_count, 2)
+        self.assertTrue((run_dir / "final-eval.json").is_file())
+        self.assertTrue((run_dir / "submission" / "solution.py").is_file())
+        self.assertEqual(control["evaluator_calls"]["controller_final_claimed"], 1)
+        self.assertNotIn("official_evaluation_withheld", control)
+        self.assertIn("recovery pending", control["result_incomplete_reason"])
+
+    def test_visible_pi_worker_proxy_surfaces_host_rejection(self) -> None:
+        context = pi_worker_launcher.LaunchContext(
+            run_id="run_1",
+            candidate_id="c001",
+            agent_session_id="agent_1",
+            workspace=self.root,
+        )
+        proxy = pi_worker_launcher.WorkerToolProxy(
+            root=self.root / ".gp",
+            context=context,
+            socket_dir=self.root / "proxy",
+            evaluation_mode="visible",
+        )
+        request = {
+            "tool": "search_run_verifier",
+            "args": {
+                "run_id": "run_1",
+                "candidate_id": "c001",
+                "agent_session_id": "agent_1",
+            },
+        }
+        with (
+            mock.patch.object(
+                pi_worker_launcher,
+                "_run_host_tool",
+                side_effect=RuntimeError(
+                    "toolization_decision requires shared_dir.enabled=true"
+                ),
+            ),
+            self.assertRaisesRegex(RuntimeError, "shared_dir.enabled=true"),
+        ):
+            proxy.dispatch(request)
+
+    def test_pi_host_tool_preserves_a_short_rejection_detail(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["goal-plus-pi-tool"],
+            1,
+            stdout="",
+            stderr="toolization_decision requires shared_dir.enabled=true\n",
+        )
+        with (
+            mock.patch.object(
+                pi_worker_launcher.subprocess, "run", return_value=completed
+            ),
+            self.assertRaisesRegex(RuntimeError, "shared_dir.enabled=true"),
+        ):
+            pi_worker_launcher._run_host_tool(
+                self.root / ".gp", "search_run_verifier", {}, {}
+            )
 
     def test_plain_visible_k2_selects_the_best_public_score(self) -> None:
         self.addCleanup(benchmark_compare.configure_adapter, "heurigym")
