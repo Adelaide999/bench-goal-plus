@@ -163,8 +163,16 @@ def canonical_method(method: str) -> str:
     return METHOD_ALIASES.get(method, method)
 
 
+def _goal_plus_host_assets(goal_plus_root: Path, host: str) -> Path:
+    for relative in (Path("assets") / host, Path(f".{host}")):
+        source = goal_plus_root / relative
+        if source.is_dir():
+            return source
+    raise FileNotFoundError(goal_plus_root / "assets" / host)
+
+
 def copy_goal_plus_assets(goal_plus_root: Path, workspace: Path) -> None:
-    source = goal_plus_root / ".codex"
+    source = _goal_plus_host_assets(goal_plus_root, "codex")
     required = (source / "skills", source / "config.example.toml")
     for path in required:
         if not path.exists():
@@ -190,7 +198,7 @@ def copy_goal_plus_assets(goal_plus_root: Path, workspace: Path) -> None:
 
 
 def copy_goal_plus_pi_assets(goal_plus_root: Path, workspace: Path) -> None:
-    source = goal_plus_root / ".pi"
+    source = _goal_plus_host_assets(goal_plus_root, "pi")
     required = (
         source / "extensions" / "goal-plus.ts",
         source / "skills" / "goal-plus" / "SKILL.md",
