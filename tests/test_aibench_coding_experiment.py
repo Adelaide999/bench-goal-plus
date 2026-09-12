@@ -141,6 +141,10 @@ class AIBenchCodingContractTest(unittest.TestCase):
             pi_worker_launcher._executable_entrypoint(executable),
             target.resolve(strict=True),
         )
+        self.assertEqual(
+            pi_worker_launcher._executable_runtime_root(target),
+            runtime_root.resolve(),
+        )
 
     def _anthropic_pi_profile(self, methods: list[str]) -> dict[str, object]:
         _path, profile = load_profile("smoke")
@@ -286,6 +290,30 @@ class AIBenchCodingContractTest(unittest.TestCase):
             "vendor",
         )
         self.assertEqual(result["state"], "completed")
+
+    def test_latest_pi_assets_use_the_isolated_development_runtime(self) -> None:
+        goal_plus_root = self.root / "goal-plus"
+        pi_assets = goal_plus_root / "assets/pi"
+        pi_assets.mkdir(parents=True)
+        workspace = self.root / "workspace"
+        environment: dict[str, str] = {}
+        manifest = {
+            "environment": {
+                "goal_plus_root": str(goal_plus_root),
+                "runtime_bin": str(self.root / "runtime/bin"),
+            }
+        }
+
+        extension, skill = benchmark_compare._goal_plus_pi_runtime_assets(
+            manifest, workspace, environment
+        )
+
+        self.assertEqual(extension, pi_assets / "extensions/goal-plus.ts")
+        self.assertEqual(skill, pi_assets / "skills/goal-plus/SKILL.md")
+        self.assertEqual(environment["GOAL_PLUS_PI_DEV_ROOT"], str(goal_plus_root))
+        self.assertEqual(
+            environment["GOAL_PLUS_PYTHON"], str(self.root / "runtime/bin/python")
+        )
 
     def test_cli_accepts_native_runner_override_contract(self) -> None:
         args = build_parser().parse_args(

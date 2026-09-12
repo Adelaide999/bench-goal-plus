@@ -37,6 +37,8 @@ _RESERVED_ENV_NAMES = {
     "HOME",
     "PATH",
     "TMPDIR",
+    "GOAL_PLUS_PI_DEV_ROOT",
+    "GOAL_PLUS_PYTHON",
     LEGACY_GOAL_PLUS_WORKER_LAUNCHER_ENV,
     SANDBOX_POLICY_ENV,
     TOOL_SOCKET_ENV,
@@ -1169,9 +1171,18 @@ class BubblewrapWorker:
             raise FileNotFoundError(f"Pi executable not found: {self.command[0]}")
         executable_path = Path(executable).absolute()
         executable_entrypoint = _executable_entrypoint(executable_path)
-        pi_runtime = _executable_runtime_root(executable_path)
+        pi_runtime_roots = tuple(
+            dict.fromkeys(
+                (
+                    _executable_runtime_root(executable_path),
+                    _executable_runtime_root(executable_entrypoint),
+                )
+            )
+        )
+        pi_runtime = pi_runtime_roots[0]
         extension = _command_path_argument(self.command, "-e")
         extension_bundle = extension.parent
+        goal_plus_dev_runtime = _goal_plus_dev_runtime(self.environment, extension)
         session_root = _command_path_argument(self.command, "--session-dir")
         session_id = _command_argument(self.command, "--session-id")
         if not extension.is_file():
@@ -1235,8 +1246,9 @@ class BubblewrapWorker:
         )
         created = {"/proc", "/dev", "/tmp", "/run", "/home", "/home/pi"}
         _mount_system(args)
-        if not _is_system_path(pi_runtime):
-            _add_bind(args, pi_runtime, pi_runtime, readonly=True, created=created)
+        for runtime in pi_runtime_roots:
+            if not _is_system_path(runtime):
+                _add_bind(args, runtime, runtime, readonly=True, created=created)
         _add_tmpfs(args, self.root, created)
         candidate_state = (
             self.root
@@ -1313,13 +1325,28 @@ class BubblewrapWorker:
             readonly=False,
             created=created,
         )
+        extension_mount = (
+            goal_plus_dev_runtime[0]
+            if goal_plus_dev_runtime is not None
+            else extension_bundle
+        )
         _add_bind(
             args,
-            extension_bundle,
-            extension_bundle,
+            extension_mount,
+            extension_mount,
             readonly=True,
             created=created,
         )
+        if goal_plus_dev_runtime is not None:
+            for runtime in goal_plus_dev_runtime[1]:
+                if not _is_system_path(runtime):
+                    _add_bind(
+                        args,
+                        runtime,
+                        runtime,
+                        readonly=True,
+                        created=created,
+                    )
         _add_bind(
             args,
             _TOOL_PROXY_BIN.parent,
@@ -1484,12 +1511,54 @@ def _executable_runtime_root(executable: Path) -> Path:
         and executable.parent.parent.name == "node_modules"
     ):
         return executable.parent.parent.parent.resolve()
-    return executable.resolve()
+    resolved = executable.resolve()
+    for parent in resolved.parents:
+        if parent.name == "node_modules":
+            return parent.parent
+    if resolved.parent.name == "bin":
+        return resolved.parent.parent
+    return resolved
 
 
 def _executable_entrypoint(executable: Path) -> Path:
     """Return the mounted target instead of a sandbox-invisible symlink alias."""
     return executable.resolve(strict=True)
+
+
+def _goal_plus_dev_runtime(
+    environment: Mapping[str, str], extension: Path
+) -> tuple[Path, tuple[Path, ...]] | None:
+    root_text = environment.get("GOAL_PLUS_PI_DEV_ROOT")
+    python_text = environment.get("GOAL_PLUS_PYTHON")
+    if root_text is None and python_text is None:
+        return None
+    if not root_text or not python_text:
+        raise RuntimeError(
+            "GOAL_PLUS_PI_DEV_ROOT and GOAL_PLUS_PYTHON must be configured together"
+        )
+    root = Path(root_text)
+    python = Path(python_text)
+    if not root.is_absolute() or not python.is_absolute():
+        raise ValueError("Goal Plus Pi development runtime paths must be absolute")
+    root = root.resolve(strict=True)
+    python = python.absolute()
+    resolved_python = python.resolve(strict=True)
+    if not python.is_file() or not os.access(python, os.X_OK):
+        raise PermissionError(f"Goal Plus Python is not executable: {python}")
+    expected_extension = root / "assets/pi/extensions/goal-plus.ts"
+    if extension != expected_extension.resolve(strict=True):
+        raise ValueError(
+            "Goal Plus Pi development extension does not match GOAL_PLUS_PI_DEV_ROOT"
+        )
+    runtime_roots = tuple(
+        dict.fromkeys(
+            (
+                _executable_runtime_root(python),
+                _executable_runtime_root(resolved_python),
+            )
+        )
+    )
+    return root, runtime_roots
 
 
 def _is_system_path(path: Path) -> bool:
@@ -1915,8 +1984,10 @@ def _sandbox_environment(
         )
     inherited_names = {
         "PI_CODING_AGENT_DIR",
+        "GOAL_PLUS_PI_DEV_ROOT",
         "GOAL_PLUS_PI_ROLE",
         "GOAL_PLUS_PI_MODEL",
+        "GOAL_PLUS_PYTHON",
         "GOAL_PLUS_PI_WORKER_CONTINUE_UNTIL_MS",
         *policy.pass_env,
     }

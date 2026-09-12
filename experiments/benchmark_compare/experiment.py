@@ -77,6 +77,7 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     copy_goal_plus_assets,
     copy_goal_plus_pi_assets,
     finalize_goal_plus_search,
+    goal_plus_host_assets,
     goal_plus_incomplete_reason,
     parse_codex_events,
     parse_pi_events,
@@ -2074,6 +2075,23 @@ def _posthoc_prerequisite_incomplete_reason(
     return _pi_pool_cleanup_incomplete_reason(pi_pool_cleanup)
 
 
+def _goal_plus_pi_runtime_assets(
+    manifest: dict[str, Any], workspace: Path, environment: dict[str, str]
+) -> tuple[Path, Path]:
+    goal_plus_root = Path(manifest["environment"]["goal_plus_root"])
+    source = goal_plus_host_assets(goal_plus_root, "pi")
+    if source == goal_plus_root / "assets" / "pi":
+        runtime_bin = Path(manifest["environment"]["runtime_bin"])
+        runtime_python = runtime_bin / ("python.exe" if os.name == "nt" else "python")
+        environment["GOAL_PLUS_PI_DEV_ROOT"] = str(goal_plus_root)
+        environment["GOAL_PLUS_PYTHON"] = str(runtime_python)
+        return source / "extensions/goal-plus.ts", source / "skills/goal-plus/SKILL.md"
+    return (
+        workspace / ".pi/extensions/goal-plus.ts",
+        workspace / ".pi/skills/goal-plus/SKILL.md",
+    )
+
+
 def execute_goal_plus(
     manifest: dict[str, Any],
     run_dir: Path,
@@ -2198,6 +2216,9 @@ def execute_goal_plus(
     reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)
     if is_pi:
         qualified_model = f"{pi_provider_id}/{args.model}"
+        pi_extension, pi_skill = _goal_plus_pi_runtime_assets(
+            manifest, workspace, environment
+        )
         pi_home = run_dir / "pi-home"
         write_pi_models_config(
             pi_home,
@@ -2230,9 +2251,9 @@ def execute_goal_plus(
             "--no-prompt-templates",
             "--no-context-files",
             "--extension",
-            str(workspace / ".pi/extensions/goal-plus.ts"),
+            str(pi_extension),
             "--skill",
-            str(workspace / ".pi/skills/goal-plus/SKILL.md"),
+            str(pi_skill),
             prompt,
         ]
         stdin_text = None
