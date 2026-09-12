@@ -8,11 +8,11 @@ import hashlib
 import json
 import math
 import os
+import secrets
 import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -662,7 +662,7 @@ def prepare(args: argparse.Namespace) -> int:
             controller_only_official_evaluation=(
                 CONTROLLER_ONLY_OFFICIAL_EVALUATION
             ),
-            search_scheduler=search_scheduler,
+            evaluation_mode=EVALUATION_MODE,
         )
         prompt_contract = {
             "mode": f"{args.method.replace('-', '_')}_common_prompt",
@@ -711,6 +711,7 @@ def prepare(args: argparse.Namespace) -> int:
                 CONTROLLER_ONLY_OFFICIAL_EVALUATION
             ),
             evaluation_mode=EVALUATION_MODE,
+            search_scheduler=search_scheduler,
             early_stop_contract=GOAL_PLUS_EARLY_STOP_CONTRACT,
         )
         (workspace / "GOAL.md").write_text(goal_prompt)
@@ -725,6 +726,7 @@ def prepare(args: argparse.Namespace) -> int:
             controller_only_official_evaluation=(
                 CONTROLLER_ONLY_OFFICIAL_EVALUATION
             ),
+            evaluation_mode=EVALUATION_MODE,
         )
         prompt_contract = {
             "mode": "natural_goal_plus_entry",
@@ -1392,9 +1394,13 @@ def finalize_posthoc_official_selection(
 
     analysis_parent = run_dir / "controller-runtime/posthoc-selection"
     analysis_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    attempt_root = Path(
-        tempfile.mkdtemp(prefix="attempt-", dir=str(analysis_parent))
-    )
+    while True:
+        attempt_root = analysis_parent / f"attempt-{secrets.token_hex(8)}"
+        try:
+            attempt_root.mkdir(mode=0o700)
+            break
+        except FileExistsError:
+            continue
     score_record_path = run_dir / "posthoc-candidate-scores.json"
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -1714,6 +1720,7 @@ def codex_command(
     goal_plus: bool,
     ephemeral: bool,
     max_concurrent_threads_per_session: int = 5,
+    controller_only_closeout: bool = False,
 ) -> list[str]:
     command = [
         codex_bin,
@@ -1755,7 +1762,10 @@ def codex_command(
                 "agents.max_concurrent_threads_per_session="
                 f"{max_concurrent_threads_per_session}",
                 "--dangerously-bypass-hook-trust",
-                *codex_goal_plus_mcp_args(GOAL_PLUS_MCP_ENV_VARS),
+                *codex_goal_plus_mcp_args(
+                    GOAL_PLUS_MCP_ENV_VARS,
+                    controller_only_closeout=controller_only_closeout,
+                ),
             ]
         )
     command.extend(["--model", model, "-"])
@@ -1808,6 +1818,7 @@ def execute_plain(
             budget["wall_time_seconds"],
             budget["soft_closeout_seconds"],
             controller_only_official_evaluation=controller_only,
+            evaluation_mode=EVALUATION_MODE,
         )
         (lane_dir / "prompt.md").write_text(prompt)
         lane_environment = environment.copy()
@@ -1915,7 +1926,7 @@ def execute_plain(
     selection_pool = valid_lane_results or lane_results
     selected = (
         min(selection_pool, key=lambda item: item["lane"])
-        if controller_only
+        if controller_only and EVALUATION_MODE == "blind"
         else min(
             selection_pool,
             key=lambda item: score_order_key(item["evaluation"]),
@@ -1972,7 +1983,9 @@ def execute_plain(
     return control
 
 
-def _controller_only_closeout_incomplete_reason(closeout: Any) -> str | None:
+def _controller_only_closeout_incomplete_reason(
+    closeout: Any, *, require_deterministic_selection: bool = True
+) -> str | None:
     if not isinstance(closeout, dict) or closeout.get("completed") is not True:
         error = closeout.get("error") if isinstance(closeout, dict) else None
         return (
@@ -1992,11 +2005,13 @@ def _controller_only_closeout_incomplete_reason(closeout: Any) -> str | None:
             not isinstance(selection, dict)
             or not isinstance(selection.get("selected_candidate_id"), str)
             or not selection["selected_candidate_id"]
-            or selection.get("selection_rule") != PUBLIC_GATE_SELECTION_RULE
         ):
-            return (
-                "controller-only Goal Plus closeout lacks deterministic selection evidence"
-            )
+            return "controller-only Goal Plus closeout lacks selection evidence"
+        if (
+            require_deterministic_selection
+            and selection.get("selection_rule") != PUBLIC_GATE_SELECTION_RULE
+        ):
+            return "controller-only Goal Plus closeout lacks deterministic selection evidence"
         if (
             not isinstance(promotion, dict)
             or not isinstance(promotion.get("artifact_path"), str)
@@ -2077,7 +2092,7 @@ def execute_goal_plus(
             "prepared Goal Plus config does not match the task posthoc-selection contract"
         )
     is_pi = manifest.get("method", "goal-plus-codex") == "goal-plus-pi"
-    if is_pi and controller_only:
+    if controller_only:
         environment[CONTROLLER_ONLY_CLOSEOUT_ENV] = "1"
     else:
         environment.pop(CONTROLLER_ONLY_CLOSEOUT_ENV, None)
@@ -2168,9 +2183,12 @@ def execute_goal_plus(
             (manifest.get("goal_plus_config") or {}).get("shared_dir_enabled")
         ),
         controller_only_official_evaluation=controller_only,
+        evaluation_mode=EVALUATION_MODE,
         search_scheduler=search_scheduler,
         early_stop_contract=early_stop,
     )
+    if prompt != (workspace / "GOAL.md").read_text():
+        raise RuntimeError("runtime Goal Plus prompt differs from prepared GOAL.md")
     (run_dir / "prompt.md").write_text(prompt)
     reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)
     if is_pi:
@@ -2226,6 +2244,7 @@ def execute_goal_plus(
             goal_plus=True,
             ephemeral=False,
             max_concurrent_threads_per_session=budget["concurrency"] + 1,
+            controller_only_closeout=controller_only,
         )
         stdin_text = prompt
         recorded_command = command_for_manifest(command, args.api_base)
@@ -2263,10 +2282,13 @@ def execute_goal_plus(
         ):
             closeout = finalize_goal_plus_search(
                 workspace,
-                deterministic_public_gate=controller_only,
+                deterministic_public_gate=(
+                    controller_only and EVALUATION_MODE == "blind"
+                ),
                 verify_unsettled_candidates=not control.get(
                     "early_stop_triggered", False
                 ),
+                require_unsettled_at_entry=controller_only,
             )
     except Exception as exc:
         closeout = {
@@ -2276,7 +2298,10 @@ def execute_goal_plus(
         }
     control["goal_plus_controller_closeout"] = closeout
     closeout_reason = (
-        _controller_only_closeout_incomplete_reason(closeout)
+        _controller_only_closeout_incomplete_reason(
+            closeout,
+            require_deterministic_selection=EVALUATION_MODE == "blind",
+        )
         if controller_only
         else None
     )
@@ -2709,7 +2734,11 @@ def repair_closeout(args: argparse.Namespace) -> int:
             verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
         ):
             closeout = finalize_goal_plus_search(
-                workspace, deterministic_public_gate=controller_only
+                workspace,
+                deterministic_public_gate=(
+                    controller_only and EVALUATION_MODE == "blind"
+                ),
+                require_unsettled_at_entry=controller_only,
             )
     except Exception as exc:
         if not controller_only:
@@ -2721,7 +2750,10 @@ def repair_closeout(args: argparse.Namespace) -> int:
         }
     control["goal_plus_controller_closeout_repair"] = closeout
     controller_only_closeout_reason = (
-        _controller_only_closeout_incomplete_reason(closeout)
+        _controller_only_closeout_incomplete_reason(
+            closeout,
+            require_deterministic_selection=EVALUATION_MODE == "blind",
+        )
         if controller_only
         else None
     )

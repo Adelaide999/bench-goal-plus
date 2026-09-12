@@ -46,9 +46,11 @@ GOAL_PLUS_PROCESS_METRIC = "visible_test_score"
 DIRECTION = "maximize"
 CODEX_SANDBOX = "workspace-write"
 CONTROLLER_ONLY_OFFICIAL_EVALUATION = True
+EVALUATION_MODE = "visible"
 OFFICIAL_BENCHMARK_COMPARABLE = True
 PI_WORKER_SANDBOX = {
     "engine": "bubblewrap",
+    "evaluation_mode": "visible",
     "workspace_access": "read_only",
     "read_only_workspace_paths": [],
     "writable_workspace_paths": [ARTIFACT_NAME],

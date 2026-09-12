@@ -1102,6 +1102,25 @@ class WorkerToolProxy:
             pass
 
 
+def _bwrap_supports_option(
+    executable: str,
+    option: str,
+    environment: Mapping[str, str],
+) -> bool:
+    completed = subprocess.run(
+        [executable, "--help"],
+        env=dict(environment),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"failed to inspect Bubblewrap options: {completed.stderr.strip()}"
+        )
+    return option in f"{completed.stdout}\n{completed.stderr}".split()
+
+
 class BubblewrapWorker:
     def __init__(
         self,
@@ -1144,6 +1163,7 @@ class BubblewrapWorker:
         if executable is None:
             raise FileNotFoundError(f"Pi executable not found: {self.command[0]}")
         executable_path = Path(executable).absolute()
+        executable_entrypoint = _executable_entrypoint(executable_path)
         pi_runtime = _executable_runtime_root(executable_path)
         extension = _command_path_argument(self.command, "-e")
         extension_bundle = extension.parent
@@ -1185,29 +1205,52 @@ class BubblewrapWorker:
             "--unshare-all",
             "--share-net",
             "--unshare-user",
-            "--disable-userns",
-            "--cap-drop",
-            "ALL",
-            "--hostname",
-            "zsoft-goal-plus-worker",
-            "--proc",
-            "/proc",
-            "--dev",
-            "/dev",
-            "--tmpfs",
-            "/tmp",
-            "--dir",
-            "/run",
-            "--dir",
-            "/home",
-            "--dir",
-            "/home/pi",
         ]
+        if _bwrap_supports_option(bwrap, "--disable-userns", self.environment):
+            args.append("--disable-userns")
+        args.extend(
+            [
+                "--cap-drop",
+                "ALL",
+                "--hostname",
+                "zsoft-goal-plus-worker",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+                "--dir",
+                "/run",
+                "--dir",
+                "/home",
+                "--dir",
+                "/home/pi",
+            ]
+        )
         created = {"/proc", "/dev", "/tmp", "/run", "/home", "/home/pi"}
         _mount_system(args)
         if not _is_system_path(pi_runtime):
             _add_bind(args, pi_runtime, pi_runtime, readonly=True, created=created)
         _add_tmpfs(args, self.root, created)
+        candidate_state = (
+            self.root
+            / "runs"
+            / self.context.run_id
+            / "candidates"
+            / self.context.candidate_id
+        )
+        candidate_record = candidate_state / "candidate.json"
+        if candidate_record.is_file():
+            if candidate_state.is_symlink() or candidate_record.is_symlink():
+                raise RuntimeError("Pi worker candidate state must not be a symlink")
+            _add_bind(
+                args,
+                candidate_state,
+                candidate_state,
+                readonly=True,
+                created=created,
+            )
         protected_paths = _validated_workspace_paths(
             self.context.workspace,
             self.policy.read_only_workspace_paths,
@@ -1311,6 +1354,7 @@ class BubblewrapWorker:
             self.environment,
             policy=self.policy,
             pi_runtime=pi_runtime,
+            runtime_root=self.root,
             socket_path=self.proxy.socket_path,
             private_git_admin=self.private_git_admin,
         )
@@ -1319,7 +1363,7 @@ class BubblewrapWorker:
                 "--chdir",
                 str(self.context.workspace),
                 "--",
-                str(executable_path),
+                str(executable_entrypoint),
                 *command[1:],
             ]
         )
@@ -1430,7 +1474,17 @@ def _safe_name(value: str) -> str:
 def _executable_runtime_root(executable: Path) -> Path:
     if executable.parent.name == "bin":
         return executable.parent.parent.resolve()
+    if (
+        executable.parent.name == ".bin"
+        and executable.parent.parent.name == "node_modules"
+    ):
+        return executable.parent.parent.parent.resolve()
     return executable.resolve()
+
+
+def _executable_entrypoint(executable: Path) -> Path:
+    """Return the mounted target instead of a sandbox-invisible symlink alias."""
+    return executable.resolve(strict=True)
 
 
 def _is_system_path(path: Path) -> bool:
@@ -1820,6 +1874,7 @@ def _sandbox_environment(
     *,
     policy: SandboxPolicy,
     pi_runtime: Path,
+    runtime_root: Path,
     socket_path: Path,
     private_git_admin: PrivateGitAdmin | None,
 ) -> dict[str, str]:
@@ -1842,6 +1897,7 @@ def _sandbox_environment(
                 "/bin",
             )
         ),
+        "GOAL_PLUS_ROOT": str(runtime_root),
         TOOL_SOCKET_ENV: str(socket_path),
     }
     if private_git_admin is not None:

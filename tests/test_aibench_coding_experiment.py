@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
+from adapters.registry import load_adapter_module
 from bench_goal_plus.catalog import Catalog
 from bench_runtime_paths import ensure_temp_root
 from experiments.aibench_coding import bridge, reporting, runtime, sandbox, task_adapter
@@ -14,10 +18,12 @@ from experiments.aibench_coding.cli import build_parser
 from experiments.aibench_coding.config import (
     AIBenchContractError,
     load_profile,
+    pi_api,
     resolve_profile,
     split_model,
 )
 from experiments.benchmark_compare import experiment as benchmark_compare
+from experiments.benchmark_compare import pi_worker_launcher
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +38,126 @@ class AIBenchCodingContractTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def _sandbox_command(
+        self, role: str, method: str, arguments: list[str]
+    ) -> tuple[list[str], Path, Path, Path, Path]:
+        cell = self.root / "campaign" / "cells" / "cell-1"
+        workspace = (
+            cell / "workspace"
+            if method.startswith("goal-plus-")
+            else cell / "workspaces" / "lane-00"
+        )
+        hidden = self.root / "aibench-checkout"
+        binary = self.root / role
+        workspace.mkdir(parents=True)
+        hidden.mkdir()
+        binary.write_text("", encoding="utf-8")
+        environment = {
+            "AIBENCH_AGENT_ROLE": role,
+            "AIBENCH_METHOD": method,
+            f"AIBENCH_REAL_{role.upper()}_BIN": str(binary),
+            "AIBENCH_HIDDEN_CHECKOUT": str(hidden),
+            "AIBENCH_CELL_ROOT": str(cell),
+        }
+        previous = Path.cwd()
+        try:
+            os.chdir(workspace)
+            with (
+                mock.patch.dict(os.environ, environment, clear=False),
+                mock.patch.object(
+                    sandbox.shutil, "which", return_value="/usr/bin/bwrap"
+                ),
+            ):
+                command = sandbox.build_command(arguments)
+        finally:
+            os.chdir(previous)
+        return command, cell, workspace, hidden, binary
+
+    def test_bwrap_option_detection_supports_old_and_new_versions(self) -> None:
+        for help_output, expected in (
+            ("--unshare-user --disable-userns --cap-drop", True),
+            ("--unshare-user --cap-drop", False),
+        ):
+            with self.subTest(help_output=help_output), mock.patch.object(
+                pi_worker_launcher.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    ["/usr/bin/bwrap", "--help"],
+                    0,
+                    stdout=help_output,
+                    stderr="",
+                ),
+            ):
+                self.assertEqual(
+                    pi_worker_launcher._bwrap_supports_option(
+                        "/usr/bin/bwrap", "--disable-userns", {}
+                    ),
+                    expected,
+                )
+
+    def test_bwrap_option_detection_fails_closed(self) -> None:
+        with mock.patch.object(
+            pi_worker_launcher.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                ["/usr/bin/bwrap", "--help"],
+                1,
+                stdout="",
+                stderr="broken",
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "failed to inspect Bubblewrap options"
+            ):
+                pi_worker_launcher._bwrap_supports_option(
+                    "/usr/bin/bwrap", "--disable-userns", {}
+                )
+
+    def test_pi_runtime_root_preserves_npm_bin_symlink(self) -> None:
+        runtime_root = self.root / "pi-runtime"
+        executable = runtime_root / "node_modules" / ".bin" / "pi"
+        target = (
+            runtime_root
+            / "node_modules"
+            / "@earendil-works"
+            / "pi-coding-agent"
+            / "dist"
+            / "cli.js"
+        )
+        target.parent.mkdir(parents=True)
+        executable.parent.mkdir(parents=True)
+        target.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+        executable.symlink_to(
+            Path("..") / "@earendil-works" / "pi-coding-agent" / "dist" / "cli.js"
+        )
+
+        self.assertEqual(
+            pi_worker_launcher._executable_runtime_root(executable),
+            runtime_root.resolve(),
+        )
+        self.assertEqual(
+            pi_worker_launcher._executable_entrypoint(executable),
+            target.resolve(strict=True),
+        )
+
+    def _anthropic_pi_profile(self, methods: list[str]) -> dict[str, object]:
+        _path, profile = load_profile("smoke")
+        profile["methods"] = methods
+        profile["model"] = (
+            "vendor/example-model"
+            if any("pi" in method for method in methods)
+            else "example-model"
+        )
+        profile["agent_provider"] = {
+            "id": "vendor",
+            "name": "Example Anthropic-compatible API",
+            "auth_mode": "anthropic-compatible",
+            "base_url_env": "VENDOR_BASE_URL",
+            "api_key_env": "VENDOR_API_KEY",
+            "wire_api": "anthropic-messages",
+        }
+        return profile
 
     def test_catalog_exposes_four_methods_and_native_capabilities(self) -> None:
         catalog = Catalog()
@@ -96,6 +222,70 @@ class AIBenchCodingContractTest(unittest.TestCase):
         with self.assertRaisesRegex(AIBenchContractError, "openai-compatible"):
             resolve_profile(oauth)
 
+    def test_pi_accepts_anthropic_messages_provider(self) -> None:
+        profile = self._anthropic_pi_profile(["goal-plus-pi"])
+
+        resolved = resolve_profile(profile)
+
+        self.assertEqual(split_model(resolved), ("vendor", "example-model"))
+        self.assertEqual(pi_api(resolved), "anthropic-messages")
+
+    def test_codex_rejects_anthropic_messages_provider(self) -> None:
+        profile = self._anthropic_pi_profile(["goal-plus-codex"])
+
+        with self.assertRaisesRegex(
+            AIBenchContractError, "Codex methods require openai-compatible responses"
+        ):
+            resolve_profile(profile)
+
+    def test_runtime_passes_anthropic_messages_to_pi(self) -> None:
+        profile = self._anthropic_pi_profile(["goal-plus-pi"])
+        run_dir = self.root / "cell"
+        run_dir.mkdir()
+        captured_command: list[str] = []
+
+        def fake_run(command: list[str], **kwargs: object) -> object:
+            del kwargs
+            captured_command.extend(command)
+            (run_dir / "experiment.json").write_text(
+                json.dumps({"status": "finished"}), encoding="utf-8"
+            )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "VENDOR_BASE_URL": "https://example.invalid",
+                    "VENDOR_API_KEY": "key",
+                },
+                clear=False,
+            ),
+            mock.patch.object(
+                runtime,
+                "_sandbox_binaries",
+                return_value=(Path("/codex"), Path("/pi")),
+            ),
+            mock.patch.object(runtime.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(
+                runtime.shutil, "which", side_effect=lambda name: f"/bin/{name}"
+            ),
+        ):
+            result = runtime._run_cell(
+                profile,
+                {"run_dir": str(run_dir), "method": "goal-plus-pi"},
+            )
+
+        self.assertEqual(
+            captured_command[captured_command.index("--pi-api") + 1],
+            "anthropic-messages",
+        )
+        self.assertEqual(
+            captured_command[captured_command.index("--pi-provider-id") + 1],
+            "vendor",
+        )
+        self.assertEqual(result["state"], "completed")
+
     def test_cli_accepts_native_runner_override_contract(self) -> None:
         args = build_parser().parse_args(
             [
@@ -114,6 +304,13 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertEqual(args.reasoning_effort, "high")
 
     def test_all_four_methods_use_controller_only_hidden_evaluation(self) -> None:
+        self.assertEqual(task_adapter.EVALUATION_MODE, "visible")
+        loaded = load_adapter_module(
+            "aibench-coding-native", "experiments.aibench_coding.task_adapter"
+        )
+        self.assertTrue(
+            loaded.manifest_contract()["controller_only_official_evaluation"]
+        )
         self.assertTrue(
             {
                 "plain-codex",
@@ -125,6 +322,116 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertEqual(
             task_adapter.PI_WORKER_SANDBOX["writable_workspace_paths"],
             ["submission"],
+        )
+        self.assertEqual(
+            task_adapter.PI_WORKER_SANDBOX["evaluation_mode"], "visible"
+        )
+
+    def test_visible_closeout_does_not_require_blind_selection_rule(self) -> None:
+        closeout = {
+            "completed": True,
+            "runs": [
+                {
+                    "selection": {"selected_candidate_id": "c001"},
+                    "promotion": {"artifact_path": "promotion/c001.patch"},
+                    "final_state": "promoted",
+                    "goal_statuses": {"gp_0001": "complete"},
+                }
+            ],
+        }
+
+        self.assertIsNone(
+            benchmark_compare._controller_only_closeout_incomplete_reason(
+                closeout, require_deterministic_selection=False
+            )
+        )
+        self.assertIn(
+            "deterministic selection evidence",
+            benchmark_compare._controller_only_closeout_incomplete_reason(
+                closeout, require_deterministic_selection=True
+            ),
+        )
+
+    def test_plain_visible_k2_selects_the_best_public_score(self) -> None:
+        self.addCleanup(benchmark_compare.configure_adapter, "heurigym")
+        benchmark_compare.configure_adapter(
+            "aibench-coding-native",
+            module_name="experiments.aibench_coding.task_adapter",
+        )
+        run_dir = self.root / "plain-k2"
+        workspaces = []
+        for lane in range(2):
+            workspace = run_dir / "workspaces" / f"lane-{lane:02d}"
+            (workspace / "submission").mkdir(parents=True)
+            (workspace / "TASK.md").write_text("fix the task\n", encoding="utf-8")
+            (workspace / "submission" / "solution.py").write_text(
+                f"LANE = {lane}\n", encoding="utf-8"
+            )
+            workspaces.append(workspace)
+
+        def evaluation(score: float) -> dict[str, object]:
+            return {
+                "valid": True,
+                "primary_metric": {"value": score},
+                "budget": {"total_claimed": 1},
+            }
+
+        manifest = {
+            "method": "plain-codex",
+            "reasoning_effort": "medium",
+            "workspaces": [str(path) for path in workspaces],
+            "task": {"controller_only_official_evaluation": True},
+            "budget": {
+                "wall_time_seconds": 300,
+                "soft_closeout_seconds": 60,
+                "hard_kill_grace_seconds": 30,
+                "concurrency": 2,
+            },
+        }
+        args = SimpleNamespace(
+            model="gpt-test",
+            pi_bin="pi-test",
+            codex_bin="codex-test",
+            api_base=None,
+        )
+        controlled = {
+            "lanes": [
+                {"name": f"lane-{lane:02d}", "returncode": 0, "hard_killed": False}
+                for lane in range(2)
+            ]
+        }
+        with (
+            mock.patch.object(
+                benchmark_compare,
+                "evaluate",
+                side_effect=[
+                    evaluation(0.0),
+                    evaluation(0.0),
+                    evaluation(0.25),
+                    evaluation(0.75),
+                    evaluation(0.80),
+                ],
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "evaluator_budget",
+                return_value={"total_claimed": 1},
+            ),
+            mock.patch.object(
+                benchmark_compare, "run_controlled_many", return_value=controlled
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "parse_codex_events",
+                return_value={"coverage": "codex"},
+            ),
+        ):
+            result = benchmark_compare.execute_plain(manifest, run_dir, args, {})
+
+        self.assertEqual(result["selected_lane"], "lane-01")
+        self.assertEqual(
+            (run_dir / "submission" / "solution.py").read_text(encoding="utf-8"),
+            "LANE = 1\n",
         )
 
     def test_goal_plus_pi_worker_uses_unwrapped_binary_inside_worker_sandbox(
@@ -283,19 +590,30 @@ class AIBenchCodingContractTest(unittest.TestCase):
             bridge._submission_root(submission)
 
     def test_bubblewrap_masks_hidden_checkout_and_other_cells(self) -> None:
-        campaign = self.root / "campaign"
-        cell = campaign / "cells" / "cell-1"
-        workspace = cell / "workspaces" / "lane-00"
-        hidden = self.root / "aibench-checkout"
-        binary = self.root / "codex"
+        command, cell, workspace, hidden, binary = self._sandbox_command(
+            "codex", "plain-codex", ["exec", "--json"]
+        )
+        pairs = list(zip(command, command[1:]))
+        self.assertIn(("--tmpfs", str(hidden)), pairs)
+        self.assertIn(("--tmpfs", str(cell.parent)), pairs)
+        self.assertIn(("--bind", str(workspace)), pairs)
+        self.assertEqual(command[-3:], [str(binary), "exec", "--json"])
+
+    def test_bubblewrap_masks_symlinked_hidden_checkout_target(self) -> None:
+        cell = self.root / "campaign" / "cells" / "cell-1"
+        workspace = cell / "workspace"
+        hidden = self.root / "hidden-real"
+        hidden_link = self.root / "hidden-link"
+        binary = self.root / "pi"
         workspace.mkdir(parents=True)
         hidden.mkdir()
+        hidden_link.symlink_to(hidden, target_is_directory=True)
         binary.write_text("", encoding="utf-8")
         environment = {
-            "AIBENCH_AGENT_ROLE": "codex",
-            "AIBENCH_METHOD": "plain-codex",
-            "AIBENCH_REAL_CODEX_BIN": str(binary),
-            "AIBENCH_HIDDEN_CHECKOUT": str(hidden),
+            "AIBENCH_AGENT_ROLE": "pi",
+            "AIBENCH_METHOD": "goal-plus-pi",
+            "AIBENCH_REAL_PI_BIN": str(binary),
+            "AIBENCH_HIDDEN_CHECKOUT": str(hidden_link),
             "AIBENCH_CELL_ROOT": str(cell),
         }
         previous = Path.cwd()
@@ -303,18 +621,31 @@ class AIBenchCodingContractTest(unittest.TestCase):
             os.chdir(workspace)
             with (
                 mock.patch.dict(os.environ, environment, clear=False),
-                mock.patch.object(
-                    sandbox.shutil, "which", return_value="/usr/bin/bwrap"
-                ),
+                mock.patch.object(sandbox.shutil, "which", return_value="/usr/bin/bwrap"),
             ):
-                command = sandbox.build_command(["exec", "--json"])
+                command = sandbox.build_command([])
         finally:
             os.chdir(previous)
-        pairs = list(zip(command, command[1:]))
-        self.assertIn(("--tmpfs", str(hidden)), pairs)
-        self.assertIn(("--tmpfs", str(cell.parent)), pairs)
-        self.assertIn(("--bind", str(workspace)), pairs)
-        self.assertEqual(command[-3:], [str(binary), "exec", "--json"])
+
+        tmpfs_targets = [
+            command[index + 1]
+            for index, value in enumerate(command[:-1])
+            if value == "--tmpfs"
+        ]
+        self.assertIn(str(hidden.resolve()), tmpfs_targets)
+        self.assertNotIn(str(hidden_link.absolute()), tmpfs_targets)
+
+    def test_goal_plus_pi_binds_private_short_xdg_runtime(self) -> None:
+        command, cell, *_ = self._sandbox_command(
+            "pi", "goal-plus-pi", ["--mode", "rpc"]
+        )
+
+        source = cell / "controller-runtime" / "agent-home" / "xdg-runtime"
+        destination = str(sandbox.XDG_RUNTIME_DESTINATION)
+        triples = [command[index : index + 3] for index in range(len(command) - 2)]
+        self.assertIn(["--bind", str(source), destination], triples)
+        self.assertIn(["--setenv", "XDG_RUNTIME_DIR", destination], triples)
+        self.assertEqual(stat.S_IMODE(source.stat().st_mode), 0o700)
 
     def _write_cell(
         self,

@@ -30,6 +30,7 @@ from .config import (
     UPSTREAM_CHECKOUT,
     UPSTREAM_ROOT,
     campaign_dir,
+    pi_api,
     preserve_conflict,
     split_model,
     write_json,
@@ -370,9 +371,9 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
         profile["expected_case_set_fingerprint"],
         profile["validity_policy"],
     )
+    provider_id, model_id = split_model(profile)
     for task_id in profile["task_ids"]:
         for method in profile["methods"]:
-            provider_id, model_id = split_model(profile)
             for seed in profile["seeds"]:
                 cell_id = sanitize_id(f"{task_id}-{method}-seed-{seed}")
                 run_dir = destination / "cells" / cell_id
@@ -396,7 +397,7 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
                             method=method,
                             model=model_id,
                             pi_provider_id=provider_id,
-                            pi_api="openai-responses",
+                            pi_api=pi_api(profile),
                             pi_api_key_env=profile["agent_provider"]["api_key_env"],
                             wall_time_seconds=profile["wall_time_seconds"],
                             concurrency=profile["concurrency"],
@@ -431,15 +432,11 @@ def prepare(campaign_id: str, profile: dict[str, Any], profile_path: Path) -> Pa
 
 
 def _sandbox_binaries(run_dir: Path) -> tuple[Path, Path]:
-    destination = run_dir / "controller-runtime" / "agent-sandbox"
-    destination.mkdir(parents=True, exist_ok=True)
-    wrappers = []
-    for role in ("codex", "pi"):
-        path = destination / f"{role}-sandbox"
-        shutil.copy2(SANDBOX_SOURCE, path)
-        path.chmod(0o755)
-        wrappers.append(path)
-    return wrappers[0], wrappers[1]
+    wrapper = run_dir / "controller-runtime" / "agent-sandbox"
+    wrapper.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SANDBOX_SOURCE, wrapper)
+    wrapper.chmod(0o755)
+    return wrapper, wrapper
 
 
 def _agent_environment(
@@ -471,21 +468,22 @@ def _agent_environment(
     }
     environment = {name: os.environ[name] for name in allowed if name in os.environ}
     environment = dict(configure_temp_environment(environment))
-    real_codex = shutil.which("codex")
-    real_pi = shutil.which("pi")
+    role = "pi" if method in PI_METHODS else "codex"
+    real_binary = shutil.which(role)
+    if real_binary is None:
+        raise RuntimeError(f"{role} executable is unavailable")
     environment.update(
         {
-            "AIBENCH_AGENT_ROLE": "pi" if method in PI_METHODS else "codex",
+            "AIBENCH_AGENT_ROLE": role,
             "AIBENCH_METHOD": method,
             "AIBENCH_HIDDEN_CHECKOUT": str(UPSTREAM_CHECKOUT),
             "AIBENCH_CELL_ROOT": str(run_dir),
-            "AIBENCH_REAL_CODEX_BIN": str(Path(real_codex or "")),
-            "AIBENCH_REAL_PI_BIN": str(Path(real_pi or "")),
+            f"AIBENCH_REAL_{role.upper()}_BIN": real_binary,
             "PYTHONDONTWRITEBYTECODE": "1",
         }
     )
-    if real_pi is not None:
-        environment[REAL_PI_BIN_ENV] = real_pi
+    if role == "pi":
+        environment[REAL_PI_BIN_ENV] = real_binary
     return environment
 
 
@@ -515,7 +513,7 @@ def _run_cell(
         "--pi-provider-id",
         provider_id,
         "--pi-api",
-        "openai-responses",
+        pi_api(profile),
         "--pi-api-key-env",
         provider["api_key_env"],
         "--api-base",
