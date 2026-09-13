@@ -133,6 +133,9 @@ python3 scripts/bench.py plan --benchmark edgebench \
 
 Use the same arguments with `launch` after reviewing the resolved source and
 budget. This is a local ARM64 integration scenario, not an official amd64 result.
+The [session-contract verification](../../evidence/runs/2026-09-13-edgebench-vliw-session-contract.md)
+records a completed 15-minute override, native closeout recovery, and a separate
+three-round Search run with its own completion limitation.
 
 On a Linux host without passwordless sudo, an explicitly selected
 `SFORGE_IPTABLES_HELPER_IMAGE` can execute the same host iptables operations
