@@ -494,7 +494,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                     {
                         "candidate_id": "c001",
                         "host": "codex",
-                        "host_handle": {
+                        "session_handle": {
                             "external_id": None,
                             "task_name": "/root/search_agent_test_001",
                         },
@@ -506,7 +506,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                     {
                         "candidate_id": "c001",
                         "host": "codex",
-                        "host_handle": {
+                        "session_handle": {
                             "external_id": None,
                             "task_name": "search_agent_test_001",
                         },
@@ -579,10 +579,10 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             (spec_dir / "frozen_spec.json").write_text(
                 json.dumps(
                     {
-                        "native_host": "pi",
+                        "agent_harness": "pi", "runtime_provider": "direct",
                         "spec": {
                             "metric_direction": "minimize",
-                            "workspace": {"backend": "git_worktree"},
+                            "workspace": {"provider": "git_worktree"},
                             "strategy": {
                                 "worker_budget": {
                                     "min_runtime_seconds": 150,
@@ -610,7 +610,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
 
             run = openevolve_experiment.collect_goal_plus_state(workspace)["runs"][0]
 
-            self.assertEqual(run["worker_host"], "pi-rpc")
+            self.assertEqual(run["agent_harness"], "pi")
             self.assertEqual(run["worker_budget"]["min_runtime_seconds"], 150)
             self.assertEqual(run["pi_pool_jobs"][0]["status"], "timed_out")
             self.assertFalse(run["pi_pool_jobs"][0]["lease"]["satisfied"])

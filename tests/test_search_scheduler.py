@@ -134,7 +134,7 @@ class SearchSchedulerContractTest(unittest.TestCase):
             "metric_name": "score", "metric_direction": "maximize",
             "edit_surface": {"allow": ["solution.py"]},
             "process_verifiers": [{"name": "score", "role": "ranking_signal", "command": ["python", "score.py"]}],
-            "budget": {"max_parallel": 2}, "workspace": {"backend": "git_worktree"},
+            "budget": {"max_parallel": 2}, "workspace": {"provider": "git_worktree"},
             "strategy": {"orchestration_mode": "adaptive_search", "search_scheduler": config.scheduler_spec},
         })
         self.assertEqual(parsed.strategy.search_scheduler.model_dump(), config.scheduler_spec)
@@ -240,7 +240,7 @@ class SearchSchedulerContractTest(unittest.TestCase):
 
         self.assertIn("budget.max_candidates=null", text)
         self.assertIn('strategy.orchestration_mode="adaptive_search"', text)
-        self.assertIn('workspace.backend="git_worktree"', text)
+        self.assertIn('workspace.provider="git_worktree"', text)
         self.assertNotIn('"host":', text)
         self.assertIn("independent live-worker limit", text)
         self.assertEqual(search_scheduler_from_json(config.to_json()), config)
@@ -362,6 +362,8 @@ class SearchSchedulerContractTest(unittest.TestCase):
             {
                 "goal_plus": {
                     "candidates": 4,
+                    "agent_harness": "pi", "execution_contract_valid": True,
+                    "confirmed_initial_worker_launches": 2,
                     "initial_candidates": 2,
                     "agent_sessions": 4,
                     "initial_agent_sessions": 2,
@@ -447,14 +449,7 @@ class SearchSchedulerContractTest(unittest.TestCase):
             run_dir = state_root / "runs" / "run_0001"
             spec_dir = state_root / "specs" / "spec_0001"
             goal_dir = state_root / "goal-plus" / "gp_0001"
-            job_dir = (
-                state_root
-                / "host-pools"
-                / "pi"
-                / "pool_0001"
-                / "jobs"
-                / "job_0001"
-            )
+            job_dir = run_dir / "agent_sessions"
             for directory in (run_dir, spec_dir, goal_dir, job_dir, task_run):
                 directory.mkdir(parents=True, exist_ok=True)
             (run_dir / "run.json").write_text(
@@ -508,13 +503,22 @@ class SearchSchedulerContractTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (job_dir / "job.json").write_text(
+            (job_dir / "agent_0001.json").write_text(
                 json.dumps(
                     {
                         "run_id": "run_0001",
                         "candidate_id": "c001",
-                        "started_at": "2026-09-03T00:00:00Z",
-                        "finished_at": "2026-09-03T00:01:00Z",
+                        "agent_session_id": "agent_0001",
+                        "agent_harness": "pi", "runtime_provider": "direct",
+                        "session_handle": {
+                            "agent_harness": "pi", "runtime_provider": "direct", "external_id": "native-1",
+                            "metadata": {"dispatches": [{
+                                "agent_harness": "pi", "runtime_provider": "direct",
+                                "native_session_id": "native-1", "invocation_id": "turn-1",
+                                "started_at": "2026-09-03T00:00:00Z",
+                                "ended_at": "2026-09-03T00:01:00Z",
+                            }]},
+                        },
                     }
                 ),
                 encoding="utf-8",

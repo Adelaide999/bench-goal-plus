@@ -77,15 +77,15 @@ class OpenEvolveComparisonTest(unittest.TestCase):
 
         self.assertNotIn("search_routed", get_args(GoalPlusWorkEventKind))
         self.assertFalse(hasattr(FileGoalPlusRuntime, "upsert_work_items"))
-        for host in ("codex", "pi-rpc"):
+        for host in ("codex", "pi"):
             prompt = experiment.render_goal(
                 task_text="Improve the score", artifact_name="solution.py",
                 metric_name="score", metric_direction="maximize", wall_seconds=300,
-                closeout_seconds=60, concurrency=2, worker_host=host, worker_model="test-model",
+                closeout_seconds=60, concurrency=2, agent_harness=host, worker_model="test-model",
             )
             self.assertNotIn("goal_plus_upsert_work_items", prompt)
             self.assertNotIn("search_routed", prompt)
-            self.assertNotIn("strategy.worker_host", prompt)
+            self.assertNotIn("strategy.agent_harness", prompt)
 
     def test_canonical_methods_and_experiment_defaults(self) -> None:
         self.assertEqual(
@@ -262,13 +262,13 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 "[mcp_servers.goal-plus]\n",
             )
 
-    def test_goal_plus_entrypoint_matches_worker_host(self) -> None:
+    def test_goal_plus_entrypoint_matches_agent_harness(self) -> None:
         self.assertEqual(
             experiment.goal_plus_entrypoint("codex"),
             "$goal-plus",
         )
         self.assertEqual(
-            experiment.goal_plus_entrypoint("pi-rpc"),
+            experiment.goal_plus_entrypoint("pi"),
             "/goal-plus",
         )
         with self.assertRaisesRegex(ValueError, "unsupported Goal Plus worker host"):
@@ -305,13 +305,13 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             wall_seconds=300,
             closeout_seconds=60,
             concurrency=2,
-            worker_host="pi-rpc",
+            agent_harness="pi",
             worker_model="bench-openai/gpt-5.6-luna",
         )
         self.assertTrue(
             prompt.startswith(
                 "/goal-plus mode=autonomous max_parallel=2 "
-                "workspace_backend=git_worktree promotion_mode=apply "
+                "workspace_provider=git_worktree promotion_mode=apply "
                 "strategy=agent_guided "
                 "workers=bench-openai/gpt-5.6-luna*2 "
                 "annotator=bench-openai/gpt-5.6-luna"
@@ -324,7 +324,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("240 seconds", prompt)
         self.assertIn("not hard-capped", prompt)
         self.assertIn("GOAL_PLUS_OUTER_DEADLINE_AT", prompt)
-        self.assertNotIn("strategy.worker_host", prompt)
+        self.assertNotIn("strategy.agent_harness", prompt)
         self.assertNotIn('strategy.name="agent_guided"', prompt)
         self.assertIn("aligned with `command_config.workers`", prompt)
         self.assertIn('strategy.worker_launch.reasoning_effort="high"', prompt)
@@ -349,7 +349,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             wall_seconds=300,
             closeout_seconds=60,
             concurrency=2,
-            worker_host="pi-rpc",
+            agent_harness="pi",
             worker_model="bench-openai/gpt-5.6-luna",
             shared_dir_enabled=True,
             evaluation_mode="blind",
@@ -358,7 +358,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertTrue(
             prompt.startswith(
                 "/goal-plus mode=autonomous max_parallel=2 "
-                "workspace_backend=git_worktree promotion_mode=artifact_only "
+                "workspace_provider=git_worktree promotion_mode=artifact_only "
             )
         )
         self.assertIn("`shared_dir.enabled=true`", prompt)
@@ -376,7 +376,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             wall_seconds=300,
             closeout_seconds=60,
             concurrency=2,
-            worker_host="pi-rpc",
+            agent_harness="pi",
             worker_model="bench-openai/gpt-5.6-luna",
             worker_runtime_seconds=200,
             worker_min_runtime_seconds=150,
@@ -398,13 +398,13 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             wall_seconds=300,
             closeout_seconds=60,
             concurrency=2,
-            worker_host="codex",
+            agent_harness="codex",
             worker_model="gpt-5.6-luna",
         )
         self.assertTrue(
             prompt.startswith(
                 "$goal-plus mode=autonomous max_parallel=2 "
-                "workspace_backend=git_worktree promotion_mode=apply "
+                "workspace_provider=git_worktree promotion_mode=apply "
                 "strategy=agent_guided workers=gpt-5.6-luna*2 "
                 "annotator=gpt-5.6-luna\n\n"
                 + common.rstrip()
@@ -505,25 +505,28 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         )
 
     def test_codex_event_parser_deduplicates_bound_worker_handles(self) -> None:
-        events = [
-            {
-                "type": "item.completed",
-                "item": {
-                    "type": "mcp_tool_call",
-                    "server": "goal-plus",
-                    "tool": "search_bind_agent_handle",
-                    "status": "completed",
-                    "arguments": {
-                        "agent_session_id": session_id,
-                        "handle": {
-                            "host": "codex",
-                            "task_name": "/root/shared-worker",
-                        },
+        events = []
+        for session_id in ("agent_001", "agent_002"):
+            for tool, arguments, result in (
+                ("goal_plus_session_open", {"agent_session_id": session_id}, {
+                    "session_id": session_id, "native_session_id": "native-worker",
+                    "agent_harness": "codex", "runtime_provider": "direct",
+                }),
+                ("goal_plus_session_wait", {"session_id": session_id, "call_id": "call-1"}, {
+                    "call_id": "call-1", "state": "completed", "result": {
+                        "agent_harness": "codex", "runtime_provider": "direct",
+                        "native_session_id": "native-worker", "invocation_id": "turn-1",
                     },
-                },
-            }
-            for session_id in ("agent_001", "agent_002")
-        ]
+                }),
+            ):
+                events.append({
+                    "type": "item.completed",
+                    "item": {
+                        "type": "mcp_tool_call", "server": "goal-plus",
+                        "tool": tool, "status": "completed", "arguments": arguments,
+                        "result": {"structured_content": result},
+                    },
+                })
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "events.jsonl"
             path.write_text("\n".join(json.dumps(item) for item in events))
@@ -547,7 +550,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 {
                     "run_id": "run_test",
                     "candidate_count": 2,
-                    "worker_host": "pi-rpc",
+                    "agent_harness": "pi",
                     "worker_budget": {
                         "min_runtime_seconds": 150,
                         "min_verifier_runs": 1,
@@ -720,7 +723,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             wall_seconds=300,
             closeout_seconds=60,
             concurrency=2,
-            worker_host="pi-rpc",
+            agent_harness="pi",
             worker_model="bench-openai/gpt-5.6-luna",
         )
         self.assertIn("allow only `candidate.py`", prompt)
@@ -742,7 +745,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             wall_seconds=1800,
             closeout_seconds=60,
             concurrency=4,
-            worker_host="codex",
+            agent_harness="codex",
             worker_model="gpt-5.6-sol",
         )
         self.assertIn("allow only `submission`", prompt)
@@ -759,7 +762,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             wall_seconds=300,
             closeout_seconds=60,
             concurrency=4,
-            worker_host="pi-rpc",
+            agent_harness="pi",
             worker_model="provider/model",
         )
 

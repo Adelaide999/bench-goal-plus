@@ -12,23 +12,26 @@ from bench_goal_plus.goal_plus_command import (
 class GoalPlusCommandTests(unittest.TestCase):
     def test_host_entrypoints_are_exact(self) -> None:
         self.assertEqual(goal_plus_entrypoint("codex"), "$goal-plus")
-        self.assertEqual(goal_plus_entrypoint("pi-rpc"), "/goal-plus")
+        self.assertEqual(goal_plus_entrypoint("pi"), "/goal-plus")
+        for legacy_identity in ("pi-rpc", "thinkthread", "direct"):
+            with self.subTest(identity=legacy_identity), self.assertRaises(ValueError):
+                goal_plus_entrypoint(legacy_identity)
 
     def test_render_uses_only_leading_typed_config(self) -> None:
         command = render_goal_plus_command(
-            "pi-rpc",
+            "pi",
             max_parallel=2,
             strategy="agent_guided",
             worker_model="bench-openai/gpt-5.6-luna",
             annotator_model="bench-openai/gpt-5.6-terra",
-            workspace_backend="git_worktree",
+            workspace_provider="git_worktree",
             promotion_mode="apply",
         )
 
         self.assertEqual(
             command,
             "/goal-plus mode=autonomous max_parallel=2 "
-            "workspace_backend=git_worktree promotion_mode=apply "
+            "workspace_provider=git_worktree promotion_mode=apply "
             "strategy=agent_guided workers=bench-openai/gpt-5.6-luna*2 "
             "annotator=bench-openai/gpt-5.6-terra",
         )
@@ -46,7 +49,7 @@ class GoalPlusCommandTests(unittest.TestCase):
             {
                 "mode": "autonomous",
                 "max_parallel": 1,
-                "workspace_backend": "git_worktree",
+                "workspace_provider": "git_worktree",
                 "promotion_mode": "artifact_only",
                 "strategy": "random",
                 "workers": "gpt-5.6-sol*1",
@@ -71,7 +74,7 @@ class GoalPlusCommandTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "safe model token"):
             render_goal_plus_command(
-                "pi-rpc",
+                "pi",
                 max_parallel=1,
                 strategy="random",
                 worker_model="$(unsafe)",

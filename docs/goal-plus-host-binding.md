@@ -6,12 +6,27 @@ does not accept `strategy.worker_host`, `worker_launch.agent_profile`,
 role-specific; this migration does not change their defaults.
 
 Bench selects the native entrypoint through its method (`goal-plus-codex`,
-`goal-plus-pi`, or EdgeBench's provider Pi variant). The runner-local
-`worker_host` identifier is still used for commands and normalized evidence; it
-is not emitted into SearchSpec. Current frozen records contain
-`native_host=codex|pi`, and local Git/Copy evidence maps these to the Codex or
-Pi RPC driver. Missing identity is not guessed from allocated sessions or old
-SearchSpec fields. ThinkThread is outside this Bench migration.
+`goal-plus-pi`, or EdgeBench's provider Pi variant). Commands and normalized
+evidence use `agent_harness=codex|pi`. Frozen records also require
+`runtime_provider=direct` and `spec.workspace.provider=git_worktree|copy`.
+The typed command uses `workspace_provider`, and sessions contain a matching
+`session_handle` with the native external identity. Missing identity is not
+guessed from transport labels, allocated sessions, or old SearchSpec fields.
+ThinkThread is outside these Bench execution paths.
+
+Both EdgeBench adapters install the selected source through `install.sh` and
+read its managed runtime receipt. Source assets live under `assets/codex` and
+`assets/pi`; old source-root skill trees are not installed. Codex project hooks
+come from the generated immutable release and use its isolated launcher.
+Pi loads the installer-registered package for both start and resume.
+
+Main prepares a candidate, calls `goal_plus_session_open`, then explicitly uses
+`goal_plus_session_wake/wait` for each invocation and closes the session after
+delivery. Opening alone is not proof of a model invocation. Archived
+`session_handle.metadata.dispatches` provide exact native invocation identities
+and execution intervals for concurrency evidence. Missing intervals remain
+unknown; process registration/release is not an execution interval. The live
+EdgeBench probe no longer checks Goal Plus worker PIDs or retired pool jobs.
 
 Scheduler CLI configuration now consists of `--search-scheduler-model`,
 `--search-scheduler-reasoning-effort`, `--search-scheduler-timeout-seconds`,
@@ -29,7 +44,7 @@ instructions when configured. Updating only this control-plane repository does
 not update that fork. Retain and review both diffs before publishing either.
 
 Old Goal Plus frozen records require their original plugin version for runtime
-recovery. Current Bench evidence cannot certify their missing native identity;
+recovery. Current Bench evidence cannot certify their missing execution identity;
 original campaign artifacts are preserved. Start a new campaign for the new
 contract rather than editing historical `.gp` records.
 

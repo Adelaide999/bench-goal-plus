@@ -123,33 +123,28 @@ SFORGE_AGENT_DEFAULT_API_BASE_URLS: dict[str, str] = {
 GOAL_PLUS_BASE_REQUIRED_ASSETS = (
     "pyproject.toml",
     "src/goal_plus/__init__.py",
+    "install.sh",
+    "scripts/install.py",
+    "assets/goal-plus-instructions.txt",
 )
 
 GOAL_PLUS_CODEX_REQUIRED_ASSETS = (
     "src/goal_plus/server.py",
     "src/goal_plus/tools.py",
     "src/goal_plus/goal_plus_stop_hook.py",
-    ".codex/config.example.toml",
-    ".codex/skills/goal-plus/SKILL.md",
-    ".codex/skills/goal-plus/agents/openai.yaml",
-    ".codex/skills/search/SKILL.md",
-    ".codex/agents/search_candidate_agent.toml",
-    ".codex/agents/goal_plus_final_checker.toml",
+    "assets/codex/mcp.json",
+    "assets/codex/plugin.json",
 )
 
 GOAL_PLUS_CODEX_HOOK_ASSETS = (
-    "hooks/hooks.json",
-    ".codex/hooks.example.json",
-    ".codex/hooks.json",
+    "assets/codex/hooks.json",
 )
 
 GOAL_PLUS_PI_REQUIRED_ASSETS = (
     "install.sh",
     "scripts/install.py",
-    "package.json",
-    ".pi/extensions/goal-plus.ts",
-    ".pi/prompts/goal-plus.md",
-    ".pi/skills/goal-plus/SKILL.md",
+    "assets/pi/package.json",
+    "assets/pi/extensions/goal-plus.ts",
 )
 
 GOAL_PLUS_REQUIRED_ASSETS = tuple(
@@ -199,8 +194,9 @@ def active_sforge_codex_runtime_contract() -> dict[str, Any]:
             for template in (CodexGoalPlusAgent.run_cmd, CodexGoalPlusAgent.resume_cmd)
         )
         plugin_install = "install_codex_plugin.py" in commands
-        hook_asset_install = all(
-            path in commands for path in GOAL_PLUS_CODEX_HOOK_ASSETS
+        hook_asset_install = (
+            "/opt/goal-plus/install.sh --codex" in commands
+            and "/hooks/hooks.json" in commands
         )
         project_hooks_enabled = bool(
             CodexGoalPlusAgent.stop_hook == "codex-native-goal-plus"
@@ -214,7 +210,7 @@ def active_sforge_codex_runtime_contract() -> dict[str, Any]:
             for marker in (
                 "mode=autonomous",
                 "max_parallel=__GOAL_PLUS_PARALLEL_NUM__",
-                "workspace_backend=git_worktree",
+                "workspace_provider=git_worktree",
                 "promotion_mode=artifact_only",
                 "strategy=agent_guided",
                 "__GOAL_PLUS_ROLE_COMMAND_CONFIG__",
@@ -284,7 +280,7 @@ def active_sforge_pi_runtime_contract() -> dict[str, Any]:
             for marker in (
                 "mode=autonomous",
                 "max_parallel=__GOAL_PLUS_PARALLEL_NUM__",
-                "workspace_backend=git_worktree",
+                "workspace_provider=git_worktree",
                 "promotion_mode=artifact_only",
                 "strategy=agent_guided",
                 "__GOAL_PLUS_ROLE_COMMAND_CONFIG__",

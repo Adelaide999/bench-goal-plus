@@ -208,7 +208,7 @@ def prepare(campaign_id: str, profile: dict[str, Any]) -> Path:
                 "entrypoint": goal_plus_entrypoint(
                     "codex"
                     if profile["methods"][0] == "goal-plus-codex"
-                    else "pi-rpc"
+                    else "pi"
                 ),
                 "command_config": swe_goal_plus_command_config(profile),
                 **(
@@ -1053,16 +1053,16 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         annotator["timeout_seconds"] if isinstance(annotator, dict) else 300
     )
     codex_host = profile["methods"][0] == "goal-plus-codex"
-    worker_host = "codex" if codex_host else "pi-rpc"
+    agent_harness = "codex" if codex_host else "pi"
     goal_plus_command = render_goal_plus_command(
-        worker_host,
+        agent_harness,
         max_parallel=profile["concurrency"],
         strategy="random",
         worker_model=profile["model"],
         annotator_model=(
             annotator["model"] if isinstance(annotator, dict) else None
         ),
-        workspace_backend="git_worktree",
+        workspace_provider="git_worktree",
         promotion_mode="apply",
     )
     if codex_host and profile["concurrency"] > 1:
@@ -1195,7 +1195,7 @@ def swe_goal_plus_command_config(profile: dict[str, Any]) -> dict[str, str | int
         annotator_model=(
             annotator["model"] if isinstance(annotator, dict) else None
         ),
-        workspace_backend="git_worktree",
+        workspace_provider="git_worktree",
         promotion_mode="apply",
     )
 
@@ -1705,8 +1705,8 @@ def _export_goal_plus_state(
         expected_evidence_annotator_enabled=isinstance(
             profile["goal_plus"]["evidence_annotator"], dict
         ),
-        expected_worker_host=(
-            "codex" if profile["methods"][0] == "goal-plus-codex" else "pi-rpc"
+        expected_agent_harness=(
+            "codex" if profile["methods"][0] == "goal-plus-codex" else "pi"
         ),
         expected_search_scheduler=search_scheduler_from_json(
             profile.get("search_scheduler")

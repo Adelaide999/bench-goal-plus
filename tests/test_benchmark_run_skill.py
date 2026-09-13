@@ -44,7 +44,7 @@ class BenchmarkAgentContractTest(unittest.TestCase):
         for fragment in (
             "$goal-plus mode=autonomous max_parallel=K",
             "/goal-plus mode=autonomous max_parallel=K",
-            "workspace_backend=git_worktree",
+            "workspace_provider=git_worktree",
             "promotion_mode=MODE",
             "strategy=STRATEGY",
             "workers=MODEL*K",

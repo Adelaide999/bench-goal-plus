@@ -329,7 +329,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             asset = self.test_paths.goal_plus_root / relative
             asset.parent.mkdir(parents=True, exist_ok=True)
             asset.write_text("fixture\n", encoding="utf-8")
-        plugin_hooks = self.test_paths.goal_plus_root / "hooks" / "hooks.json"
+        plugin_hooks = self.test_paths.goal_plus_root / "assets" / "codex" / "hooks.json"
         plugin_hooks.parent.mkdir(parents=True, exist_ok=True)
         plugin_hooks.write_text('{"hooks": {}}\n', encoding="utf-8")
         subprocess.run(
@@ -1441,7 +1441,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "command_config": {
                     "mode": "autonomous",
                     "max_parallel": 2,
-                    "workspace_backend": "git_worktree",
+                    "workspace_provider": "git_worktree",
                     "promotion_mode": "artifact_only",
                     "strategy": "agent_guided",
                     "workers": "gpt-test*2",
@@ -1577,7 +1577,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 "command_config": {
                     "mode": "autonomous",
                     "max_parallel": 1,
-                    "workspace_backend": "git_worktree",
+                    "workspace_provider": "git_worktree",
                     "promotion_mode": "artifact_only",
                     "strategy": "agent_guided",
                     "workers": "worker-provider/worker-model*1",
@@ -2891,15 +2891,15 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "SFORGE_GOAL_PLUS_EXPECTED_REF": "master",
         }
 
-        metadata = root / ".codex" / "skills" / "goal-plus" / "agents" / "openai.yaml"
+        metadata = root / "assets" / "codex" / "plugin.json"
         metadata.unlink()
-        self._commit_goal_plus_fixture("remove explicit-only skill metadata")
+        self._commit_goal_plus_fixture("remove plugin metadata")
         missing_metadata = EDGE_ENV.resolve_goal_plus_source(
             env, methods=["goal-plus-codex"]
         )
         self.assertFalse(missing_metadata["valid"])
         self.assertIn(
-            ".codex/skills/goal-plus/agents/openai.yaml",
+            "assets/codex/plugin.json",
             missing_metadata["missing_assets"],
         )
 
@@ -2910,7 +2910,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
             "SFORGE_GOAL_PLUS_EXPECTED_REF": "master",
         }
 
-        (root / "hooks" / "hooks.json").unlink()
+        (root / "assets" / "codex" / "hooks.json").unlink()
         self._commit_goal_plus_fixture("remove project hooks")
         missing_hooks = EDGE_ENV.resolve_goal_plus_source(
             env, methods=["goal-plus-codex"]
@@ -4064,7 +4064,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         task_run.mkdir()
         documents = {
             ".goal-plus/goal-plus/gp-1/goal.json": {"linked_search": {"run_id": "run-2"}},
-            ".goal-plus/specs/spec-1/frozen_spec.json": {"spec": {"budget": {"max_parallel": 2}, "strategy": {"orchestration_mode": "parallel_loops"}}},
+            ".goal-plus/specs/spec-1/frozen_spec.json": {"agent_harness": "pi", "runtime_provider": "direct", "spec": {"workspace": {"provider": "git_worktree"}, "budget": {"max_parallel": 2}, "strategy": {"orchestration_mode": "parallel_loops"}}},
         }
         for number in (1, 2):
             run_id = f"run-{number}"
@@ -4079,30 +4079,41 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                 documents[f".goal-plus/runs/{run_id}/candidates/{candidate}/candidate.json"] = {"task": {"allocation_depth": 0}}
                 documents[f".goal-plus/agent_sessions/{session}.json"] = {
                     "agent_session_id": session, "run_id": run_id, "candidate_id": candidate,
-                    "host": "pi-rpc", "host_handle": {"host": "pi-rpc", "external_id": session},
+                    "agent_harness": "pi", "runtime_provider": "direct",
+                    "session_handle": {
+                        "agent_harness": "pi", "runtime_provider": "direct", "external_id": session,
+                        "metadata": {"pi_metrics": {"usage_total": {"input": 10, "output": 3, "assistantMessages": 2}}, "dispatches": [{
+                            "agent_harness": "pi", "runtime_provider": "direct",
+                            "native_session_id": session, "invocation_id": "turn-1",
+                            "started_at": f"2026-01-01T00:0{number * 2}:00Z",
+                            "ended_at": f"2026-01-01T00:0{number * 2 + 1}:00Z",
+                        }]},
+                    },
                     "counters": {"verifier_runs": 1 if number == 2 else 0},
                 }
-                documents[f".goal-plus/host-pools/pi/{session}/job.json"] = {
-                    "run_id": run_id, "candidate_id": candidate,
-                    "started_at": f"2026-01-01T00:0{number * 2}:00Z",
-                    "finished_at": f"2026-01-01T00:0{number * 2 + 1}:00Z",
-                }
         cell = {"method": "goal-plus-pi-provider", "outer_replicas": 1, "inner_search_concurrency": 2}
-        for fault in (None, "overlap", "missing_interval", "unbound", "active_predecessor", "missing_verifier"):
+        for fault in (None, "overlap", "missing_interval", "unbound", "active_predecessor", "missing_verifier", "old_frozen", "foreign_harness"):
             with self.subTest(fault=fault):
                 inputs = json.loads(json.dumps(documents))
-                job = ".goal-plus/host-pools/pi/run-2-c002/job.json"
                 session = ".goal-plus/agent_sessions/run-2-c002.json"
+                dispatches = inputs[session]["session_handle"]["metadata"]["dispatches"]
                 if fault == "overlap":
-                    inputs[job]["started_at"] = "2026-01-01T00:02:00Z"
+                    dispatches[0]["started_at"] = "2026-01-01T00:02:00Z"
                 elif fault == "missing_interval":
-                    del inputs[job]
+                    dispatches.clear()
                 elif fault == "unbound":
-                    inputs[session].pop("host_handle")
+                    inputs[session].pop("session_handle")
                 elif fault == "active_predecessor":
                     inputs[".goal-plus/runs/run-1/run.json"]["state"] = "running"
                 elif fault == "missing_verifier":
                     inputs[session]["counters"]["verifier_runs"] = 0
+                elif fault == "old_frozen":
+                    frozen = inputs[".goal-plus/specs/spec-1/frozen_spec.json"]
+                    frozen["native_host"] = frozen.pop("agent_harness")
+                elif fault == "foreign_harness":
+                    inputs[session]["agent_harness"] = "codex"
+                    inputs[session]["session_handle"]["agent_harness"] = "codex"
+                    dispatches[0]["agent_harness"] = "codex"
                 with tarfile.open(task_run / "goal-plus-state.tar", "w") as archive:
                     for name, document in inputs.items():
                         data = json.dumps(document).encode()
@@ -4110,11 +4121,15 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                         member.size = len(data)
                         archive.addfile(member, io.BytesIO(data))
                 stats = EDGE.goal_plus_stats(task_run)
+                if fault is None:
+                    self.assertEqual(stats["worker_usage"]["input_tokens"], 40)
+                    self.assertEqual(stats["worker_usage"]["assistant_messages"], 8)
+                    self.assertEqual(stats["worker_usage"]["sessions"], 4)
                 evidence = EDGE.goal_plus_completion_evidence(cell, [{"goal_plus": stats}], valid_trajectories=1)
                 self.assertEqual(evidence["passed"], fault is None)
                 self.assertEqual(evidence["cumulative_agent_session_count"], 4)
                 self.assertEqual(evidence["cumulative_candidate_count"], 4)
-                self.assertEqual(evidence["actual_subagent_count"], 2)
+                self.assertEqual(evidence["actual_subagent_count"], 1 if fault == "unbound" else 2)
 
     def test_command_keeps_plain_replicas_distinct_from_goal_plus_workers(self) -> None:
         destination = self.temp / "campaign"
@@ -4173,6 +4188,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         complete = {
             "edgebench_score": 50.0,
             "goal_plus": {
+                "agent_harness": "codex", "execution_contract_valid": True,
                 "candidates": 2,
                 "agent_sessions": 2,
                 "worker_verifier_runs": 2,
@@ -4244,6 +4260,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
     def test_goal_plus_recovery_counts_generations_separately_from_live_k(self) -> None:
         cell = {"method": "goal-plus-pi", "outer_replicas": 1, "inner_search_concurrency": 2}
         archived = {
+            "agent_harness": "pi", "execution_contract_valid": True,
             "candidates": 2, "agent_sessions": 3, "recovery_agent_sessions": 1,
             "confirmed_initial_worker_launches": 2,
             "worker_verifier_runs": 3, "verifier_candidate_ids": ["c001", "c002"],
@@ -4267,6 +4284,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         complete = {
             "edgebench_score": 40.0,
             "goal_plus": {
+                "agent_harness": "pi", "execution_contract_valid": True,
+                "confirmed_initial_worker_launches": 2,
                 "candidates": 2,
                 "agent_sessions": 2,
                 "worker_verifier_runs": 3,
@@ -4305,8 +4324,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
 
         self.assertTrue(evidence["passed"])
-        self.assertFalse(too_many_sessions["passed"])
-        self.assertNotIn("actual_worker_launches", evidence["checks"])
+        self.assertTrue(too_many_sessions["passed"])
+        self.assertEqual(evidence["checks"]["actual_worker_launches"]["actual"], 2)
         self.assertEqual(
             too_many_sessions["checks"]["agent_sessions"],
             {"expected": 2, "actual": 3},

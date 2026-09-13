@@ -72,8 +72,8 @@ def _revalidate_goal_plus_cell(
             state_root,
             expected_k=int(profile["concurrency"]),
             expected_worker_model=profile["model"],
-            expected_worker_host=(
-                "codex" if cell["method"] == "goal-plus-codex" else "pi-rpc"
+            expected_agent_harness=(
+                "codex" if cell["method"] == "goal-plus-codex" else "pi"
             ),
             expected_worker_runtime_seconds=int(
                 goal_plus_profile["worker_runtime_seconds"]

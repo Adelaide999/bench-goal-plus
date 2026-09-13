@@ -6,18 +6,18 @@ import re
 from typing import Literal
 
 
-GoalPlusWorkerHost = Literal["codex", "pi-rpc"]
-GoalPlusWorkspaceBackend = Literal["git_worktree", "thinkthread"]
+GoalPlusAgentHarness = Literal["codex", "pi"]
+GoalPlusWorkspaceProvider = Literal["git_worktree", "thinkthread"]
 GoalPlusPromotionMode = Literal["apply", "artifact_only"]
 GOAL_PLUS_MODEL_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*\Z")
 
 
-def goal_plus_entrypoint(worker_host: GoalPlusWorkerHost) -> str:
-    if worker_host == "codex":
+def goal_plus_entrypoint(agent_harness: GoalPlusAgentHarness) -> str:
+    if agent_harness == "codex":
         return "$goal-plus"
-    if worker_host == "pi-rpc":
+    if agent_harness == "pi":
         return "/goal-plus"
-    raise ValueError(f"unsupported Goal Plus worker host: {worker_host}")
+    raise ValueError(f"unsupported Goal Plus worker host: {agent_harness}")
 
 
 def _config_token(name: str, value: str) -> str:
@@ -40,7 +40,7 @@ def goal_plus_command_config(
     strategy: str,
     worker_model: str | None,
     annotator_model: str | None = None,
-    workspace_backend: GoalPlusWorkspaceBackend = "git_worktree",
+    workspace_provider: GoalPlusWorkspaceProvider = "git_worktree",
     promotion_mode: GoalPlusPromotionMode = "apply",
     mode: Literal["autonomous", "probe"] = "autonomous",
 ) -> dict[str, str | int]:
@@ -51,7 +51,7 @@ def goal_plus_command_config(
     config: dict[str, str | int] = {
         "mode": mode,
         "max_parallel": max_parallel,
-        "workspace_backend": workspace_backend,
+        "workspace_provider": workspace_provider,
         "promotion_mode": promotion_mode,
         "strategy": _config_token("strategy", strategy),
     }
@@ -71,13 +71,13 @@ def goal_plus_command_config(
 
 
 def render_goal_plus_command(
-    worker_host: GoalPlusWorkerHost,
+    agent_harness: GoalPlusAgentHarness,
     *,
     max_parallel: int,
     strategy: str,
     worker_model: str | None,
     annotator_model: str | None = None,
-    workspace_backend: GoalPlusWorkspaceBackend = "git_worktree",
+    workspace_provider: GoalPlusWorkspaceProvider = "git_worktree",
     promotion_mode: GoalPlusPromotionMode = "apply",
     mode: Literal["autonomous", "probe"] = "autonomous",
 ) -> str:
@@ -88,10 +88,10 @@ def render_goal_plus_command(
         strategy=strategy,
         worker_model=worker_model,
         annotator_model=annotator_model,
-        workspace_backend=workspace_backend,
+        workspace_provider=workspace_provider,
         promotion_mode=promotion_mode,
         mode=mode,
     )
-    tokens = [goal_plus_entrypoint(worker_host)]
+    tokens = [goal_plus_entrypoint(agent_harness)]
     tokens.extend(f"{name}={value}" for name, value in config.items())
     return " ".join(tokens)

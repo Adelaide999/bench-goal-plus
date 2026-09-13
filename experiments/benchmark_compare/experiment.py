@@ -684,12 +684,12 @@ def prepare(args: argparse.Namespace) -> int:
         if args.method == "goal-plus-codex":
             copy_goal_plus_assets(goal_plus_root, workspace)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".codex-log/"])
-            worker_host = "codex"
+            agent_harness = "codex"
             worker_model = args.model
         else:
             copy_goal_plus_pi_assets(goal_plus_root, workspace)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
-            worker_host = "pi-rpc"
+            agent_harness = "pi"
             worker_model = f"{args.pi_provider_id}/{args.model}"
         task_text = (workspace / "TASK.md").read_text()
         goal_prompt = render_goal(
@@ -701,7 +701,7 @@ def prepare(args: argparse.Namespace) -> int:
             wall_seconds=args.wall_time_seconds,
             closeout_seconds=args.soft_closeout_seconds,
             concurrency=args.concurrency,
-            worker_host=worker_host,
+            agent_harness=agent_harness,
             worker_model=worker_model,
             reasoning_effort=args.reasoning_effort,
             worker_runtime_seconds=args.worker_runtime_seconds,
@@ -734,20 +734,20 @@ def prepare(args: argparse.Namespace) -> int:
             "mode": "natural_goal_plus_entry",
             "common_prompt_sha256": sha256_text(common_prompt),
             "transform": (
-                f"{goal_plus_entrypoint(worker_host)} typed config prefix plus aligned "
+                f"{goal_plus_entrypoint(agent_harness)} typed config prefix plus aligned "
                 "SearchSpec-only constraints"
             ),
             "goal_prompt_sha256": sha256_text(goal_prompt),
         }
         workspace_value = str(workspace)
         goal_plus_config = {
-            "entrypoint": goal_plus_entrypoint(worker_host),
+            "entrypoint": goal_plus_entrypoint(agent_harness),
             "command_config": goal_plus_command_config(
                 max_parallel=args.concurrency,
                 strategy="agent_guided",
                 worker_model=worker_model,
                 annotator_model=worker_model,
-                workspace_backend="git_worktree",
+                workspace_provider="git_worktree",
                 promotion_mode=(
                     "artifact_only"
                     if EVALUATION_MODE == "blind"
@@ -759,7 +759,8 @@ def prepare(args: argparse.Namespace) -> int:
                 if search_scheduler is not None
                 else {}
             ),
-            "worker_host": worker_host,
+            "agent_harness": agent_harness,
+            "runtime_provider": "direct",
             "worker_model": worker_model,
             "metric_name": GOAL_PLUS_PROCESS_METRIC,
             "metric_direction": DIRECTION,
@@ -773,7 +774,7 @@ def prepare(args: argparse.Namespace) -> int:
             "shared_dir_enabled": getattr(args, "shared_dir", False),
             "worker_sandbox": (
                 _pi_worker_sandbox_policy(args.pi_api_key_env)
-                if worker_host == "pi-rpc"
+                if agent_harness == "pi"
                 else None
             ),
             "state_at_t0": "absent; natural prompt creates all Goal Plus state inside T",
@@ -2163,7 +2164,7 @@ def execute_goal_plus(
         wall_seconds=budget["wall_time_seconds"],
         closeout_seconds=budget["soft_closeout_seconds"],
         concurrency=budget["concurrency"],
-        worker_host="pi-rpc" if is_pi else "codex",
+        agent_harness="pi" if is_pi else "codex",
         worker_model=f"{pi_provider_id}/{args.model}" if is_pi else args.model,
         reasoning_effort=manifest.get(
             "reasoning_effort", DEFAULT_REASONING_EFFORT

@@ -40,13 +40,12 @@ def _structured_result(item: dict[str, Any]) -> Any:
 def _distinct_bound_handle_count(
     handles: Iterable[dict[str, Any]],
 ) -> int:
-    identities: set[tuple[str, str]] = set()
+    identities: set[tuple[str, str, str]] = set()
     for handle in handles:
-        identity = handle.get("external_id") or handle.get("task_name")
+        identity = handle.get("external_id")
         if not isinstance(identity, str) or not identity:
             continue
-        host = handle.get("host")
-        identities.add((str(host or ""), identity))
+        identities.add((str(handle.get("agent_harness") or ""), str(handle.get("runtime_provider") or ""), identity))
     return len(identities)
 
 
@@ -64,6 +63,7 @@ def parse_codex_event_text(text: str) -> dict[str, Any]:
     agent_session_ids: set[str] = set()
     worker_sessions: dict[str, dict[str, Any]] = {}
     bound_worker_handles: dict[str, dict[str, Any]] = {}
+    native_sessions: dict[str, tuple[str, dict[str, Any]]] = {}
     verifier_ledger: list[dict[str, Any]] = []
     selected_candidate_ids: set[str] = set()
     promoted_candidate_ids: set[str] = set()
@@ -138,7 +138,7 @@ def parse_codex_event_text(text: str) -> dict[str, Any]:
                 agent_session_ids.add(session_id)
                 worker_sessions[session_id] = {
                     key: structured.get(key)
-                    for key in ("agent_session_id", "run_id", "candidate_id", "host")
+                    for key in ("agent_session_id", "run_id", "candidate_id", "agent_harness", "runtime_provider")
                     if structured.get(key) is not None
                 }
             for key, target in (
@@ -148,37 +148,36 @@ def parse_codex_event_text(text: str) -> dict[str, Any]:
                 value = structured.get(key)
                 if isinstance(value, str) and value:
                     target.add(value)
-        elif tool == "search_bind_agent_handle":
+        elif tool == "goal_plus_session_open" and isinstance(structured, dict):
             session_id = arguments.get("agent_session_id")
-            handle = arguments.get("handle")
-            if isinstance(session_id, str) and isinstance(handle, dict):
-                compact_handle = {
-                    key: handle.get(key)
-                    for key in ("host", "task_name", "external_id")
-                    if handle.get(key) is not None
-                }
-                if compact_handle:
+            control_id = structured.get("session_id")
+            if (
+                isinstance(session_id, str) and isinstance(control_id, str)
+                and structured.get("agent_harness") in {"codex", "pi"}
+                and structured.get("runtime_provider") == "direct"
+            ):
+                native_sessions[control_id] = (session_id, structured)
+                agent_session_ids.add(session_id)
+        elif tool == "goal_plus_session_wait" and isinstance(structured, dict):
+            binding = native_sessions.get(arguments.get("session_id"))
+            result = structured.get("result")
+            if binding and isinstance(result, dict):
+                session_id, opened = binding
+                external_id = result.get("native_session_id")
+                if (
+                    isinstance(external_id, str) and external_id
+                    and result.get("agent_harness") == opened["agent_harness"]
+                    and result.get("runtime_provider") == opened["runtime_provider"]
+                    and opened.get("native_session_id") in {None, external_id}
+                    and result.get("invocation_id")
+                    and structured.get("call_id") == arguments.get("call_id")
+                ):
                     bound_worker_handles[session_id] = {
                         "agent_session_id": session_id,
-                        **compact_handle,
+                        "agent_harness": result["agent_harness"],
+                        "runtime_provider": result["runtime_provider"],
+                        "external_id": external_id,
                     }
-                    agent_session_ids.add(session_id)
-            if isinstance(structured, dict):
-                structured_session_id = structured.get("agent_session_id")
-                structured_handle = structured.get("host_handle")
-                if isinstance(structured_session_id, str) and isinstance(
-                    structured_handle, dict
-                ):
-                    compact_handle = {
-                        key: structured_handle.get(key)
-                        for key in ("host", "task_name", "external_id")
-                        if structured_handle.get(key) is not None
-                    }
-                    if compact_handle:
-                        bound_worker_handles[structured_session_id] = {
-                            "agent_session_id": structured_session_id,
-                            **compact_handle,
-                        }
         elif tool == "search_run_verifier":
             payload = structured if isinstance(structured, dict) else arguments
             result_candidate = payload.get("candidate_id")

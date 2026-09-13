@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from bench_goal_plus.agent_events import parse_codex_event_file
+from bench_goal_plus.goal_plus_evidence import (
+    frozen_agent_harness,
+    session_agent_harness,
+    session_worker_intervals,
+)
 from bench_goal_plus.search_scheduler import summarize_worker_concurrency
 from bench_runtime_paths import configure_temp_environment
 
@@ -52,6 +57,11 @@ def add_pi_usage(total: dict[str, int | float], event: dict[str, Any]) -> bool:
         usage = message.get("usage") if isinstance(message, dict) else None
     if not isinstance(usage, dict):
         return False
+    add_pi_usage_values(total, usage)
+    return True
+
+
+def add_pi_usage_values(total: dict[str, int | float], usage: dict[str, Any]) -> None:
     values: dict[str, int] = {}
     for source, target in (
         ("input", "input_tokens"),
@@ -79,8 +89,9 @@ def add_pi_usage(total: dict[str, int | float], event: dict[str, Any]) -> bool:
     cost = usage.get("cost")
     if isinstance(cost, dict) and isinstance(cost.get("total"), (int, float)):
         total["cost_usd"] += float(cost["total"])
-    total["assistant_messages"] += 1
-    return True
+    total["assistant_messages"] += int(usage.get("assistantMessages", 1))
+    if isinstance(usage.get("costTotal"), (int, float)):
+        total["cost_usd"] += float(usage["costTotal"])
 
 
 def codex_usage(task_run: Path) -> dict[str, Any]:
@@ -183,10 +194,11 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
     annotation_states: dict[str, int] = defaultdict(int)
     worker_usage: dict[str, int | float] = defaultdict(int)
     worker_logs = 0
+    native_worker_usage: dict[str, int | float] = defaultdict(int)
+    native_worker_sessions = 0
     run_records: dict[str, dict[str, Any]] = {}
     frozen_specs: dict[str, dict[str, Any]] = {}
-    pi_worker_intervals: list[dict[str, Any]] = []
-    codex_leases: dict[str, dict[str, Any]] = {}
+    worker_intervals: list[dict[str, Any]] = []
     try:
         with tarfile.open(archive_path) as archive:
             for member in archive:
@@ -295,6 +307,9 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                             verifier_runs += session_verifier_runs
                             session_id = payload.get("agent_session_id")
                             candidate_id = payload.get("candidate_id")
+                            harness = session_agent_harness(payload)
+                            intervals = session_worker_intervals(payload)
+                            worker_intervals.extend(intervals)
                             worker_sessions.append(
                                 {
                                     key: value
@@ -302,22 +317,29 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                                         "agent_session_id": session_id,
                                         "run_id": payload.get("run_id"),
                                         "candidate_id": candidate_id,
-                                        "host": payload.get("host"),
+                                        "agent_harness": harness,
+                                        "runtime_provider": payload.get("runtime_provider"),
                                         "execution_generation": payload.get("execution_generation", 0),
-                                        "launch_confirmed": bool(session_verifier_runs or (payload.get("host_handle") or {}).get("metadata", {}).get("bound_at")),
+                                        "launch_confirmed": bool(harness and (intervals or session_verifier_runs)),
                                         "verifier_runs": session_verifier_runs,
                                         "updated_at": payload.get("updated_at"),
                                     }.items()
                                     if value is not None
                                 }
                             )
-                            handle = payload.get("host_handle")
-                            if isinstance(handle, dict) and session_id:
+                            handle = payload.get("session_handle")
+                            if harness == "pi" and isinstance(handle, dict):
+                                metrics = (handle.get("metadata") or {}).get("pi_metrics") or {}
+                                usage = metrics.get("usage_total")
+                                if isinstance(usage, dict) and usage:
+                                    add_pi_usage_values(native_worker_usage, usage)
+                                    native_worker_sessions += 1
+                            if harness and isinstance(handle, dict) and session_id and (intervals or session_verifier_runs):
                                 compact_handle = {
                                     key: handle.get(key)
                                     for key in (
-                                        "host",
-                                        "task_name",
+                                        "agent_harness",
+                                        "runtime_provider",
                                         "external_id",
                                     )
                                     if handle.get(key) is not None
@@ -333,7 +355,7 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                                         }
                                     )
                             if (
-                                session_verifier_runs > 0
+                                harness and session_verifier_runs > 0
                                 and isinstance(candidate_id, str)
                                 and candidate_id
                             ):
@@ -376,41 +398,6 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                         text = extracted.read().decode("utf-8", errors="replace")
                         for event in iter_json_lines(text):
                             add_pi_usage(worker_usage, event)
-                if "/host-pools/pi/" in member.name and member.name.endswith(
-                    "/job.json"
-                ):
-                    extracted = archive.extractfile(member)
-                    if extracted:
-                        try:
-                            payload = json.loads(
-                                extracted.read().decode("utf-8", errors="replace")
-                            )
-                            if isinstance(payload, dict):
-                                pi_worker_intervals.append(
-                                    {
-                                        "run_id": payload.get("run_id"),
-                                        "candidate_id": payload.get("candidate_id"),
-                                        "started_at": payload.get("started_at"),
-                                        "ended_at": payload.get("finished_at"),
-                                    }
-                                )
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                lease_match = re.search(
-                    r"/host-logs/codex-autoresearch-leases/([^/]+)\.json$",
-                    member.name,
-                )
-                if lease_match:
-                    extracted = archive.extractfile(member)
-                    if extracted:
-                        try:
-                            payload = json.loads(
-                                extracted.read().decode("utf-8", errors="replace")
-                            )
-                            if isinstance(payload, dict):
-                                codex_leases[lease_match.group(1)] = payload
-                        except (json.JSONDecodeError, TypeError):
-                            pass
     except tarfile.TarError:
         return {"archive": "invalid"}
     linked_run_ids = {
@@ -433,25 +420,14 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                 "run_id": run_id,
                 "frozen_spec_id": frozen_spec_id,
                 "frozen_spec_present": bool(frozen),
+                "agent_harness": frozen_agent_harness(frozen),
+                "runtime_provider": frozen.get("runtime_provider"),
                 "max_parallel": budget.get("max_parallel"),
                 "max_candidates": budget.get("max_candidates"),
                 "orchestration_mode": strategy.get("orchestration_mode"),
                 "search_scheduler": strategy.get("search_scheduler"),
             }
         )
-    worker_intervals = list(pi_worker_intervals)
-    for session in worker_sessions:
-        lease = codex_leases.get(str(session.get("agent_session_id")))
-        if lease:
-            worker_intervals.append(
-                {
-                    "run_id": session.get("run_id"),
-                    "candidate_id": session.get("candidate_id"),
-                    "started_at": lease.get("started_at"),
-                    "ended_at": lease.get("released_at")
-                    or session.get("updated_at"),
-                }
-            )
     initial_candidate_ids = {candidate_id for _, candidate_id in initial_candidates}
     worker_concurrency = summarize_worker_concurrency(worker_intervals)
     initial_worker_concurrency = summarize_worker_concurrency(
@@ -470,8 +446,17 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         handles = [item for item in bound_worker_handles if item.get("run_id") == run_id]
         intervals = [item for item in worker_intervals if item.get("run_id") == run_id]
         selected = run.get("selected_candidate_id")
+        harness = frozen_agent_harness(frozen)
         run_evidence.append({
             "run_id": run_id,
+            "agent_harness": harness,
+            "execution_contract_valid": bool(
+                harness and all(
+                    item.get("agent_harness") == harness
+                    and item.get("runtime_provider") == "direct"
+                    for item in run_sessions
+                )
+            ),
             "state": run.get("state"),
             "invalidated_at": run.get("invalidated_at"),
             "max_parallel": (spec.get("budget") or {}).get("max_parallel"),
@@ -494,8 +479,23 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
             "worker_concurrency": summarize_worker_concurrency(intervals),
             "initial_worker_concurrency": summarize_worker_concurrency(item for item in intervals if item.get("candidate_id") in initial),
         })
+    harnesses = {item["agent_harness"] for item in run_evidence}
+    if native_worker_sessions:
+        worker_usage = native_worker_usage
+        worker_logs = native_worker_sessions
     return {
         "search_runs": len(search_runs),
+        "agent_harness": next(iter(harnesses)) if len(harnesses) == 1 else None,
+        "execution_contract_valid": bool(
+            run_evidence and len(harnesses) == 1
+            and sessions == len(worker_sessions)
+            and sessions == sum(item["agent_sessions"] for item in run_evidence)
+            and all(item["execution_contract_valid"] for item in run_evidence)
+        ),
+        "actual_worker_launches": len({
+            (item["agent_harness"], item["runtime_provider"], item["external_id"])
+            for item in bound_worker_handles
+        }),
         "run_evidence": run_evidence,
         "completion_run_ids": sorted(contract_run_ids),
         "worker_identity_concurrency": summarize_worker_concurrency(
@@ -538,7 +538,10 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         "worker_usage": {
             **dict(sorted(worker_usage.items())),
             "sessions": worker_logs,
-            "coverage": "persisted Pi worker message usage",
+            "coverage": (
+                "persisted native Pi session usage" if native_worker_sessions
+                else "persisted Pi worker message usage"
+            ),
         },
         "evidence_annotator_usage": {
             **annotation_usage,
@@ -922,8 +925,14 @@ def goal_plus_completion_evidence(
     promoted: set[str] = set()
     actual_scheduler_contracts: list[dict[str, Any]] = []
     scheduler_worker_evidence: list[dict[str, Any]] = []
+    execution_contract_valid = bool(observations)
     for observation in observations:
         archived = observation.get("goal_plus") or {}
+        expected_harness = "codex" if cell["method"] == "goal-plus-codex" else "pi"
+        execution_contract_valid = (
+            execution_contract_valid and archived.get("execution_contract_valid") is True
+            and archived.get("agent_harness") == expected_harness
+        )
         events = observation.get("agent_events") or {}
         event_goal_plus = events.get("goal_plus") or {}
         candidates = max(
@@ -1132,6 +1141,7 @@ def goal_plus_completion_evidence(
     }
     required_evidence_present = all(
         (
+            execution_contract_valid,
             valid_trajectories >= 1,
             candidate_limit_passed,
             agent_sessions_passed,
@@ -1160,6 +1170,12 @@ def goal_plus_completion_evidence(
         if scheduler_enabled and cell["method"] != "goal-plus-codex"
         else int(actual_subagent_check["actual"])
     )
+    if cell["method"] != "goal-plus-codex":
+        actual_subagent_count = confirmed_initial_worker_launches
+        checks["actual_worker_launches"] = {
+            "expected": expected_workers, "actual": actual_subagent_count,
+        }
+    checks["execution_contract"] = {"expected": True, "actual": execution_contract_valid}
     actual_subagent_count_matches_k = actual_subagent_count == expected_workers
     recovery_parallelism_passed = not recovery_agent_sessions or bool(
         recovery_concurrency and all(
@@ -1216,7 +1232,8 @@ def successor_completion_evidence(
             for run in runs for handle in run.get("bound_worker_handles") or []
         }
         history_passed = bool(
-            len(runs) == archived.get("search_runs")
+            archived.get("execution_contract_valid") is True
+            and len(runs) == archived.get("search_runs")
             and len({run.get("run_id") for run in runs}) == len(runs)
             and len(current_ids) == len(current) == 1
             and all(run.get("max_parallel") == expected_workers for run in runs)

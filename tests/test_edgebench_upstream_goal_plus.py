@@ -54,6 +54,7 @@ class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
         ):
             with self.subTest(agent=agent_class.name):
                 command = agent_class(SForgeConfig()).format_run_cmd("prompt.md", model=model)
+                self.assertNotIn("strategy.agent_harness", command)
                 self.assertNotIn("strategy.worker_host", command)
                 self.assertNotIn("agent_profile", command)
                 self.assertNotIn("evidence_annotator.host", command)
@@ -92,7 +93,7 @@ class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
 
         self.assertIn(
             "/goal-plus mode=autonomous max_parallel=2 "
-            "workspace_backend=git_worktree promotion_mode=artifact_only "
+            "workspace_provider=git_worktree promotion_mode=artifact_only "
             "strategy=agent_guided workers=openai-codex/gpt-test*2 ",
             command,
         )

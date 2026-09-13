@@ -40,7 +40,7 @@ prepare 必须：
 - 不预建 Goal Plus `.gp`、goal、spec、run、candidate 或 session。
 
 Goal Plus cell 使用 typed host command，显式冻结 `max_parallel=K`、
-`workspace_backend=git_worktree`、`promotion_mode=apply`、
+`workspace_provider=git_worktree`、`promotion_mode=apply`、
 `strategy=agent_guided` 和
 `workers=MODEL*K`，并用 `annotator=MODEL` 固定已配置的 ViewAgent。目标正文只补充
 worker budget、verifier、edit surface、metric 和

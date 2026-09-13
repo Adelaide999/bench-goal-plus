@@ -313,11 +313,11 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertTrue(
             prompt.startswith(
                 "$goal-plus mode=autonomous max_parallel=1 "
-                "workspace_backend=git_worktree promotion_mode=apply "
+                "workspace_provider=git_worktree promotion_mode=apply "
                 "strategy=random workers=gpt-5.6-sol*1"
             )
         )
-        self.assertNotIn("strategy.worker_host", prompt)
+        self.assertNotIn("strategy.agent_harness", prompt)
         self.assertIn("strategy.config.seed=1", prompt)
         self.assertIn("GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED=0", command)
         self.assertIn("gpt-5.6-sol", command)
@@ -346,7 +346,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         verifier_runs: int = 1,
         supplemental_evaluation: bool = False,
         evidence_annotations: bool = False,
-        worker_host: str = "pi-rpc",
+        agent_harness: str = "pi",
         worker_model: str | None = None,
         worker_min_runtime_seconds: int | None = None,
         worker_min_verifier_runs: int | None = None,
@@ -379,7 +379,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             },
         )
         spec = {
-            "workspace": {"backend": "git_worktree"},
+            "workspace": {"provider": "git_worktree"},
             "budget": {"max_parallel": max_parallel},
             "strategy": {
                 "orchestration_mode": "parallel_loops",
@@ -446,7 +446,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         write_json(
             root / "specs/spec_test/frozen_spec.json",
             {
-                "native_host": "codex" if worker_host == "codex" else "pi",
+                "agent_harness": agent_harness,
+                "runtime_provider": "direct",
                 "spec": spec,
                 "verifier_hashes": {
                     ".goal-plus-verifiers/visible_test_verifier.py": (
@@ -550,7 +551,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                             "candidate_id": current_candidate_id,
                             "iteration": iteration["iteration"],
                             "state": "completed",
-                            "profile": {"host": "codex"},
+                            "profile": {"agent_harness": "codex", "runtime_provider": "direct"},
                             "task_context_source": "goal_plus_raw_goal",
                             "task_context_ref": "goal_plus:gp_test:revision:1",
                             "task_context_sha256": hashlib.sha256(
@@ -589,13 +590,16 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             write_json(
                 root / f"runs/{run_id}/agent_sessions/{agent_session_id}.json",
                 {
-                    "selected_model": {"model": worker_model or ("gpt-5.6-sol" if worker_host == "codex" else "zai/glm-5.2")},
+                    "selected_model": {"model": worker_model or ("gpt-5.6-sol" if agent_harness == "codex" else "zai/glm-5.2")},
                     "agent_session_id": agent_session_id,
                     "created_at": "2026-08-06T12:00:00Z",
                     "updated_at": "2026-08-06T12:10:00Z",
-                    "host": worker_host,
+                    "agent_harness": agent_harness,
+                    "runtime_provider": "direct",
                     "candidate_id": session_candidate_id,
-                    "host_handle": {
+                    "session_handle": {
+                        "agent_harness": agent_harness,
+                        "runtime_provider": "direct",
                         "external_id": f"agent_{index}",
                         "metadata": {
                             "pi_metrics": {
@@ -649,14 +653,14 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_codex_completion_accepts_codex_worker_sessions(self) -> None:
         with self.temporary_directory() as temporary:
             root = Path(temporary)
-            self.write_goal_plus_state(root, worker_host="codex")
+            self.write_goal_plus_state(root, agent_harness="codex")
             state = goal_plus_evidence.collect_goal_plus_state(
                 root,
                 expected_k=1,
                 expected_worker_runtime_seconds=1500,
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
 
         self.assertTrue(state["completion"]["passed"])
@@ -720,7 +724,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 verifier_runs=2,
                 supplemental_evaluation=True,
                 evidence_annotations=True,
-                worker_host="codex",
+                agent_harness="codex",
                 worker_min_runtime_seconds=600,
                 worker_min_verifier_runs=2,
                 candidate_count=2,
@@ -736,7 +740,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
                 expected_evidence_annotator_enabled=True,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
 
             self.assertTrue(state["completion"]["passed"])
@@ -774,7 +778,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
                 expected_evidence_annotator_enabled=True,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
             self.assertFalse(
                 serialized_state["completion"]["checks"]["live_worker_overlap"][
@@ -805,7 +809,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
                 expected_evidence_annotator_enabled=True,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
             self.assertTrue(
                 tampered_state["completion"]["checks"][
@@ -826,7 +830,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 verifier_runs=2,
                 supplemental_evaluation=True,
                 evidence_annotations=True,
-                worker_host="codex",
+                agent_harness="codex",
                 worker_min_runtime_seconds=600,
                 worker_min_verifier_runs=2,
                 candidate_count=2,
@@ -841,7 +845,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_min_verifier_runs=2,
                 expected_supplemental_evaluation_enabled=True,
                 expected_evidence_annotator_enabled=True,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
             self.assertFalse(missing_state["completion"]["passed"])
             self.assertIn(
@@ -856,7 +860,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             root = Path(temporary)
             self.write_goal_plus_state(
                 root,
-                worker_host="codex",
+                agent_harness="codex",
                 verifier_runs=2,
                 worker_min_runtime_seconds=600,
                 worker_min_verifier_runs=2,
@@ -869,7 +873,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_visible_verifier_timeout_seconds=300,
                 expected_worker_min_runtime_seconds=600,
                 expected_worker_min_verifier_runs=2,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
 
             self.assertTrue(state["completion"]["passed"])
@@ -912,7 +916,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_visible_verifier_timeout_seconds=300,
                 expected_worker_min_runtime_seconds=600,
                 expected_worker_min_verifier_runs=2,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
             observation = recovered["completion"]["checks"][
                 "worker_minimum_observed"
@@ -937,7 +941,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_visible_verifier_timeout_seconds=300,
                 expected_worker_min_runtime_seconds=600,
                 expected_worker_min_verifier_runs=2,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
             self.assertFalse(failed["completion"]["passed"])
             self.assertIn("worker_minimum_observed", failed["completion"]["reason"])
@@ -966,7 +970,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 supplemental_evaluation=True,
                 evidence_annotations=True,
                 worker_model=profile["model"],
-                worker_host="codex",
+                agent_harness="codex",
             )
             patch_file = campaign / "cells/goal-plus-codex/model.patch"
             patch_file.write_text("diff --git a/a b/a\n", encoding="utf-8")
@@ -1207,7 +1211,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertTrue(
             prompt.startswith(
                 "$goal-plus mode=autonomous max_parallel=2 "
-                "workspace_backend=git_worktree promotion_mode=apply "
+                "workspace_provider=git_worktree promotion_mode=apply "
                 "strategy=random workers=gpt-5.6-sol*2"
             )
         )
@@ -1671,7 +1675,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "command_config": {
                     "mode": "autonomous",
                     "max_parallel": 2,
-                    "workspace_backend": "git_worktree",
+                    "workspace_provider": "git_worktree",
                     "promotion_mode": "apply",
                     "strategy": "random",
                     "workers": "gpt-5.6-sol*2",
@@ -1813,7 +1817,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertTrue(
                 prompt.startswith(
                     "/goal-plus mode=autonomous max_parallel=1 "
-                    "workspace_backend=git_worktree promotion_mode=apply "
+                    "workspace_provider=git_worktree promotion_mode=apply "
                     "strategy=random workers=zai/glm-5.2*1"
                 )
             )
@@ -2107,7 +2111,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     ) -> None:
         with self.temporary_directory() as temporary:
             root = Path(temporary)
-            self.write_goal_plus_state(root, worker_host="codex")
+            self.write_goal_plus_state(root, agent_harness="codex")
             frozen_path = root / "specs/spec_test/frozen_spec.json"
             frozen = read_json(frozen_path)
             frozen["verifier_hashes"][
@@ -2121,7 +2125,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_runtime_seconds=1500,
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
             self.assertFalse(
                 state["completion"]["checks"]["visible_verifier_integrity"][
@@ -2149,7 +2153,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_runtime_seconds=1500,
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
             self.assertFalse(
                 state["completion"]["checks"]["visible_verifiers"]["passed"]
@@ -2180,7 +2184,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_worker_runtime_seconds=1500,
                 expected_closeout_reserve_seconds=300,
                 expected_visible_verifier_timeout_seconds=300,
-                expected_worker_host="codex",
+                expected_agent_harness="codex",
             )
             self.assertFalse(
                 state["completion"]["checks"]["promotion_visible_test"]["passed"]

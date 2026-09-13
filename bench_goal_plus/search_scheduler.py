@@ -289,7 +289,7 @@ def render_search_scheduler_instructions(
     limit = "null" if config.max_candidates is None else str(config.max_candidates)
     return (
         "- Set `strategy.orchestration_mode=\"adaptive_search\"`.\n"
-        "- Set `workspace.backend=\"git_worktree\"`.\n"
+        "- Set `workspace.provider=\"git_worktree\"`.\n"
         f"- Set `budget.max_candidates={limit}`; keep "
         "`budget.max_parallel` as the independent live-worker limit.\n"
         f"- Set `strategy.search_scheduler` exactly to `{scheduler}`.\n"

@@ -116,8 +116,8 @@ branch 和完整 SHA。只写版本号、目录名、tracking branch、短 SHA�
 <!-- markdownlint-disable MD013 -->
 
 ```text
-$goal-plus mode=autonomous max_parallel=K workspace_backend=git_worktree promotion_mode=MODE strategy=STRATEGY workers=MODEL*K annotator=MODEL <目标>
-/goal-plus mode=autonomous max_parallel=K workspace_backend=git_worktree promotion_mode=MODE strategy=STRATEGY workers=MODEL*K annotator=MODEL <目标>
+$goal-plus mode=autonomous max_parallel=K workspace_provider=git_worktree promotion_mode=MODE strategy=STRATEGY workers=MODEL*K annotator=MODEL <目标>
+/goal-plus mode=autonomous max_parallel=K workspace_provider=git_worktree promotion_mode=MODE strategy=STRATEGY workers=MODEL*K annotator=MODEL <目标>
 ```
 
 <!-- markdownlint-enable MD013 -->

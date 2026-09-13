@@ -37,7 +37,7 @@ from bench_goal_plus.goal_plus_command import (  # noqa: E402
     goal_plus_entrypoint,
     render_goal_plus_command,
 )
-from bench_goal_plus.goal_plus_evidence import frozen_worker_host  # noqa: E402
+from bench_goal_plus.goal_plus_evidence import frozen_agent_harness  # noqa: E402
 from bench_goal_plus.search_scheduler import (  # noqa: E402
     GoalPlusSearchScheduler,
     add_internal_search_scheduler_argument,
@@ -282,7 +282,7 @@ def render_goal(
     wall_seconds: int,
     closeout_seconds: int,
     concurrency: int,
-    worker_host: str,
+    agent_harness: str,
     worker_model: str,
     artifact_is_directory: bool = False,
     reasoning_effort: str = DEFAULT_REASONING_EFFORT,
@@ -332,12 +332,12 @@ def render_goal(
             f"{coordination_condition} requires an explicit search-space mode"
         )
     goal_plus_command = render_goal_plus_command(
-        worker_host,
+        agent_harness,
         max_parallel=concurrency,
         strategy="agent_guided",
         worker_model=worker_model,
         annotator_model=worker_model,
-        workspace_backend="git_worktree",
+        workspace_provider="git_worktree",
         promotion_mode=(
             "artifact_only" if evaluation_mode == "blind" else "apply"
         ),
@@ -361,7 +361,7 @@ def render_goal(
     minimum_lease_enforcement = (
         "the Pi pool supervisor automatically resumes the same native session "
         "until the cumulative minimum is satisfied"
-        if worker_host == "pi-rpc"
+        if agent_harness == "pi"
         else "SubagentStop blocks an early worker return"
     )
     pool_close_target = (
@@ -377,7 +377,7 @@ def render_goal(
         "the worker sessions. Treat the pool's persisted jobs and native session ids as the "
         "only evidence that workers started; use `pi_search_pool_wait_any`, continue "
         f"ready candidates while useful, and close the pool before {pool_close_target}.\n"
-        if worker_host == "pi-rpc"
+        if agent_harness == "pi"
         else "- A successful `search_start_agent_session` only allocates a durable "
         "Goal Plus session and returns a launch payload; it does not start a Codex "
         "worker. For every initial candidate, immediately map that payload to an "
@@ -866,12 +866,12 @@ def prepare(args: argparse.Namespace) -> int:
         if method == "goal-plus-codex":
             copy_goal_plus_assets(goal_plus_root, workspace)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".codex-log/"])
-            worker_host = "codex"
+            agent_harness = "codex"
             worker_model = args.model
         else:
             copy_goal_plus_pi_assets(goal_plus_root, workspace)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
-            worker_host = "pi-rpc"
+            agent_harness = "pi"
             worker_model = f"{getattr(args, 'pi_provider_id', PI_PROVIDER_ID)}/{args.model}"
         task_text = (workspace / "TASK.md").read_text()
         goal = render_goal(
@@ -882,7 +882,7 @@ def prepare(args: argparse.Namespace) -> int:
             wall_seconds=args.wall_time_seconds,
             closeout_seconds=args.soft_closeout_seconds,
             concurrency=args.concurrency,
-            worker_host=worker_host,
+            agent_harness=agent_harness,
             worker_model=worker_model,
             reasoning_effort=args.reasoning_effort,
             search_scheduler=search_scheduler,
@@ -901,19 +901,19 @@ def prepare(args: argparse.Namespace) -> int:
             "mode": "natural_goal_plus_entry",
             "common_prompt_sha256": sha256_text(common_prompt),
             "transform": (
-                f"{goal_plus_entrypoint(worker_host)} typed config prefix plus "
+                f"{goal_plus_entrypoint(agent_harness)} typed config prefix plus "
                 "Goal Plus SearchSpec-only configuration suffix"
             ),
             "goal_prompt_sha256": sha256_text(goal),
         }
         goal_plus_config = {
-            "entrypoint": goal_plus_entrypoint(worker_host),
+            "entrypoint": goal_plus_entrypoint(agent_harness),
             "command_config": goal_plus_command_config(
                 max_parallel=args.concurrency,
                 strategy="agent_guided",
                 worker_model=worker_model,
                 annotator_model=worker_model,
-                workspace_backend="git_worktree",
+                workspace_provider="git_worktree",
                 promotion_mode="apply",
             ),
             **(
@@ -921,7 +921,8 @@ def prepare(args: argparse.Namespace) -> int:
                 if search_scheduler is not None
                 else {}
             ),
-            "worker_host": worker_host,
+            "agent_harness": agent_harness,
+            "runtime_provider": "direct",
             "pi_provider": {
                 "id": getattr(args, "pi_provider_id", PI_PROVIDER_ID),
                 "api": getattr(args, "pi_api", "openai-responses"),
@@ -1530,7 +1531,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
         payload = load_json(path)
         run_dir = path.parent
         metric_direction = None
-        worker_host = None
+        agent_harness = None
         worker_budget = None
         search_scheduler_enabled = False
         search_scheduler_spec = None
@@ -1545,7 +1546,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 spec = frozen.get("spec") or {}
                 metric_direction = spec.get("metric_direction")
                 strategy = spec.get("strategy") or {}
-                worker_host = frozen_worker_host(frozen)
+                agent_harness = frozen_agent_harness(frozen)
                 worker_budget = strategy.get("worker_budget")
                 search_scheduler_spec = strategy.get("search_scheduler")
                 search_scheduler_enabled = search_scheduler_spec is not None
@@ -1593,19 +1594,19 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 )
         for session_path in session_paths:
             session = load_json(session_path)
-            if isinstance(session.get("host"), str):
-                hosts.add(session["host"])
+            if isinstance(session.get("agent_harness"), str):
+                hosts.add(session["agent_harness"])
             candidate_id = session.get("candidate_id")
             if isinstance(candidate_id, str):
                 session_counts_by_candidate[candidate_id] = (
                     session_counts_by_candidate.get(candidate_id, 0) + 1
                 )
-            host_handle = session.get("host_handle") or {}
+            session_handle = session.get("session_handle") or {}
             launch = session.get("launch") or {}
             if launch.get("tool") in {"followup_task", "pi_search_pool_continue"}:
                 same_agent_continuation_session_count += 1
-            external_id = host_handle.get("external_id")
-            task_name = host_handle.get("task_name")
+            external_id = session_handle.get("external_id")
+            task_name = session_handle.get("task_name")
             is_bound = (
                 isinstance(candidate_id, str)
                 and (
@@ -1630,7 +1631,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 and counters["verifier_runs"] > 0
             ):
                 worker_verified_candidate_ids.add(candidate_id)
-            if worker_host == "codex" and isinstance(candidate_id, str):
+            if agent_harness == "codex" and isinstance(candidate_id, str):
                 lease_path = (
                     root
                     / "host-logs"
@@ -1647,7 +1648,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                             or session.get("updated_at"),
                         }
                     )
-        if worker_host == "pi-rpc":
+        if agent_harness == "pi":
             worker_intervals.extend(
                 {
                     "candidate_id": str(job.get("candidate_id") or ""),
@@ -1700,7 +1701,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "process_verifier_command_count": len(process_verifier_logs),
                 "promotion_verifier_command_count": len(promotion_verifier_logs),
                 "metric_direction": metric_direction,
-                "worker_host": worker_host,
+                "agent_harness": agent_harness,
                 "worker_budget": worker_budget,
                 "pi_pool_jobs": pi_pool_jobs_by_run.get(str(payload.get("run_id")), []),
                 "best_recorded_score": (
@@ -1846,7 +1847,7 @@ def goal_plus_incomplete_reason(
                 f"Search run {run.get('run_id')} frozen worker budget mismatch: "
                 + ", ".join(mismatches)
             )
-        if expected_lease and run.get("worker_host") == "pi-rpc":
+        if expected_lease and run.get("agent_harness") == "pi":
             jobs = run.get("pi_pool_jobs") or []
             if not jobs:
                 return (
@@ -3002,7 +3003,7 @@ def execute(args: argparse.Namespace) -> int:
                 wall_seconds=budget["wall_time_seconds"],
                 closeout_seconds=budget["soft_closeout_seconds"],
                 concurrency=budget["concurrency"],
-                worker_host="codex",
+                agent_harness="codex",
                 worker_model=args.model,
                 reasoning_effort=reasoning_effort,
                 search_scheduler=search_scheduler,
@@ -3039,7 +3040,7 @@ def execute(args: argparse.Namespace) -> int:
                 wall_seconds=budget["wall_time_seconds"],
                 closeout_seconds=budget["soft_closeout_seconds"],
                 concurrency=budget["concurrency"],
-                worker_host="pi-rpc",
+                agent_harness="pi",
                 worker_model=qualified_model,
                 reasoning_effort=reasoning_effort,
                 search_scheduler=search_scheduler,

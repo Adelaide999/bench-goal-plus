@@ -44,7 +44,7 @@ Goal Plus method 需要共享工具目录时增加 `--shared-dir`；Plain method
 campaign 不接受该选项。
 
 Goal Plus cell 的精确宿主命令必须显式包含 `max_parallel=K`、
-`workspace_backend=git_worktree`、`promotion_mode=apply`、
+`workspace_provider=git_worktree`、`promotion_mode=apply`、
 `strategy=agent_guided` 和
 `workers=MODEL*K`，并用 `annotator=MODEL` 固定已配置的 ViewAgent。这些字段同时进入
 manifest 的 `command_config`，不能只出现在目标

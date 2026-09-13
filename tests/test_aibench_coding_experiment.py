@@ -57,7 +57,7 @@ class AIBenchCodingContractTest(unittest.TestCase):
             task_text="Repair submission using public tests", artifact_name="submission",
             artifact_is_directory=True, metric_name=task_adapter.GOAL_PLUS_PROCESS_METRIC,
             metric_direction="maximize", wall_seconds=900, closeout_seconds=120,
-            concurrency=1, worker_host="pi-rpc", worker_model="zai/glm-5.3-flash",
+            concurrency=1, agent_harness="pi", worker_model="zai/glm-5.3-flash",
             controller_only_official_evaluation=True, evaluation_mode=task_adapter.EVALUATION_MODE,
         )
         self.assertIn("promotion_mode=apply", prompt)

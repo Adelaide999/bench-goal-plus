@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bench_goal_plus.goal_plus_evidence import frozen_worker_host
+from bench_goal_plus.goal_plus_evidence import frozen_agent_harness, session_agent_harness
 from bench_goal_plus.search_scheduler import (
     GoalPlusSearchScheduler,
     summarize_worker_concurrency,
@@ -216,7 +216,7 @@ def _usage_from_sessions(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     totals: dict[str, int | float] = {}
     covered = 0
     for session in sessions:
-        handle = session.get("host_handle") or {}
+        handle = session.get("session_handle") or {}
         metadata = handle.get("metadata") if isinstance(handle, dict) else {}
         metrics = metadata.get("pi_metrics") if isinstance(metadata, dict) else {}
         usage = metrics.get("usage_total") if isinstance(metrics, dict) else {}
@@ -256,7 +256,7 @@ def _evidence_annotations(run_dir: Path, expected_iterations: int) -> dict[str, 
                 "candidate_id": task.get("candidate_id"),
                 "iteration": task.get("iteration"),
                 "state": state,
-                "annotator_host": profile.get("host"),
+                "annotator_host": profile.get("agent_harness"),
                 "task_context_source": task.get("task_context_source"),
                 "task_context_ref": task.get("task_context_ref"),
                 "task_context_sha256": task.get("task_context_sha256"),
@@ -583,7 +583,7 @@ def collect_goal_plus_state(
     expected_worker_min_verifier_runs: int | None = None,
     expected_supplemental_evaluation_enabled: bool = False,
     expected_evidence_annotator_enabled: bool = False,
-    expected_worker_host: str = "pi-rpc",
+    expected_agent_harness: str = "pi",
     expected_worker_model: str | None = None,
     expected_search_scheduler: GoalPlusSearchScheduler | None = None,
 ) -> dict[str, Any]:
@@ -693,14 +693,14 @@ def collect_goal_plus_state(
         verifier_candidate_ids: set[str] = set()
         for session in sessions:
             candidate_id = session.get("candidate_id")
-            handle = session.get("host_handle") or {}
+            handle = session.get("session_handle") or {}
             bound_id = (
                 handle.get("external_id") or handle.get("task_name")
                 if isinstance(handle, dict)
                 else None
             )
             if (
-                session.get("host") == expected_worker_host
+                session_agent_harness(session) == expected_agent_harness
                 and isinstance(candidate_id, str)
                 and candidate_id
                 and isinstance(bound_id, str)
@@ -731,7 +731,7 @@ def collect_goal_plus_state(
                                 "ended_at": observed_interval.get("ended_at"),
                             }
                         )
-        if expected_worker_host == "pi-rpc":
+        if expected_agent_harness == "pi":
             worker_intervals.extend(pi_worker_intervals_by_run.get(run_id, []))
         worker_concurrency = summarize_worker_concurrency(worker_intervals)
         initial_worker_concurrency = summarize_worker_concurrency(
@@ -767,7 +767,7 @@ def collect_goal_plus_state(
                 "search_scheduler_enabled": (
                     strategy.get("search_scheduler") is not None
                 ),
-                "worker_host": frozen_worker_host(frozen),
+                "agent_harness": frozen_agent_harness(frozen),
                 "orchestration_mode": strategy.get("orchestration_mode"),
                 "worker_budget": worker_budget,
                 "strategy_config": strategy_config,
@@ -1130,16 +1130,16 @@ def collect_goal_plus_state(
             bool(selected_run and selected_run.get("max_parallel") == expected_k),
         ),
         "worker_topology": _check(
-            f"{expected_worker_host}/{expected_orchestration_mode}",
+            f"{expected_agent_harness}/{expected_orchestration_mode}",
             (
-                f"{selected_run.get('worker_host')}/"
+                f"{selected_run.get('agent_harness')}/"
                 f"{selected_run.get('orchestration_mode')}"
                 if selected_run
                 else None
             ),
             bool(
                 selected_run
-                and selected_run.get("worker_host") == expected_worker_host
+                and selected_run.get("agent_harness") == expected_agent_harness
                 and selected_run.get("orchestration_mode")
                 == expected_orchestration_mode
             ),
@@ -1429,7 +1429,7 @@ def collect_goal_plus_state(
                         selected_run.get("evidence_annotator_spec"), dict
                     )
                     and "host" not in selected_run["evidence_annotator_spec"]
-                    and selected_run.get("worker_host") == expected_worker_host
+                    and selected_run.get("agent_harness") == expected_agent_harness
                 )
             ),
         ),

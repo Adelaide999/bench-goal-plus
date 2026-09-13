@@ -61,7 +61,7 @@ def _goal_plus_command_config(
         strategy="agent_guided",
         worker_model=worker_model,
         annotator_model=annotator_model,
-        workspace_backend="git_worktree",
+        workspace_provider="git_worktree",
         promotion_mode="artifact_only",
     )
 
@@ -372,7 +372,7 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                             "entrypoint": goal_plus_entrypoint(
                                 "codex"
                                 if method == "goal-plus-codex"
-                                else "pi-rpc"
+                                else "pi"
                             ),
                             "command_config": _goal_plus_command_config(
                                 method=method,

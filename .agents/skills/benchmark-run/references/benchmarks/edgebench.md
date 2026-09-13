@@ -57,7 +57,7 @@ registration/resource，或通过手写 stdio client 调 server 都不能通过�
 这个 MCP 探针只验证工具连接，不能创建 Goal Plus。真实 cell 必须由 exact
 `$goal-plus ...` UserPromptSubmit 触发 project-local hook，hook 建立宿主授权后 Skill 才能解释
 工作流；`--disable plugins` 防止个人 plugin 改写入口。新 cell 的命令必须显式包含
-`mode=autonomous`、`max_parallel=K`、`workspace_backend=git_worktree`、
+`mode=autonomous`、`max_parallel=K`、`workspace_provider=git_worktree`、
 `promotion_mode=artifact_only`、`strategy=agent_guided`、`workers=MODEL*K`，以及 profile
 显式配置时的 `annotator=MODEL`。其中
 `artifact_only` 表示 benchmark-native `sforge-goal-plus-submit` 独占回写和 Judge，不能再由
@@ -170,22 +170,20 @@ Goal Plus + Codex 的 session allocation 本身不是 worker launch：
 - 至少 `K` 个 candidate-bound verifier records；
 - 必须有 promotion 和 official Judge trajectory。
 
-Codex worker 的 `strategy.worker_budget` 由每次
-`search_start_agent_session` 返回的 `launch.budget_control` 交给父会话强制执行。全部 `K`
-个 worker 绑定后，父会话必须立即进入 orchestration-only watchdog 阶段：只在非空的真实
-receiver thread ID 集合上执行 `wait_agent`，到各自 initial wait deadline 后发送一次配置的
-closeout message，再等待 final window，并在仍未终止时执行配置的 interrupt。worker 存活时
-不得用主工作区分析或独立优化填充等待时间。`worker_budget` 只进入 frozen spec、没有对应
-Codex host 操作证据，或父会话一直工作到外层 cutoff，都不算预算已执行。
+两端使用共同 session 控制合同。Main 用 `search_start_agent_session` 准备，
+`goal_plus_session_open` 取得控制句柄，再显式调用 `goal_plus_session_wake/wait`。
+`wake.timeout_seconds` 是整次模型调用的执行额度，仍受冻结 worker budget 和 Goal
+deadline 约束；`wait.timeout_seconds` 只是本次查询等待时长，不延长执行额度。
+交付后 Main 审查已有 Evidence，决定下一轮或调用 `goal_plus_session_close` 关闭。
 
-Codex `0.150.1` 的内置 collaboration schema 可能只暴露 `wait` 和 `close_agent`，而不暴露
-`send_message`/`interrupt_agent`。此时父会话仍须完成 initial wait 和 final wait，并只在 hard
-deadline 使用一次 `close_agent` 作为 hard-stop fallback。worker drain 后必须先读取
-`goal_plus_monitor_snapshot`；其中的 durable `verifier_ledger` 和
-`verifier_candidate_ids` 是 selection gate 的权威来源。`goal_plus_status` 不展示
-Search verifier ledger，不能单独用于判定缺少 worker evidence。coverage 达到
-`K/K` 后应立即执行 `search_select` 和 `search_promote`，期间不得进入主
-workspace 自行分析或优化。
+执行证据读取匹配 harness/provider/native identity 的
+`session_handle.metadata.dispatches`。每次 dispatch 保留独立 invocation 和起止时间，
+用于验证 K 和跨 generation 的峰值并发。仅 open、分配 session、登记或释放资源不能
+证明发生了模型调用或进程退出；不再通过 Pi pool、Codex lease 或 worker PID 推断。
+
+worker 返回后，Main 读取 durable verifier ledger，再决定 selection 和 promotion。
+`goal_plus_status` 不单独证明 Search verifier 覆盖。历史协议或无法完整读取的身份、
+缺失执行区间均保持 partial，不能补造已结束时间。
 
 `T` 截止必须是 SForge 的真实 agent segment boundary，不能把同一个 Codex 进程直接允许运行
 到 `T + finalization_grace`。若 Goal Plus 在 `T` 时仍未终态，SForge 终止探索 segment，并用

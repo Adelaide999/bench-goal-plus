@@ -92,7 +92,7 @@ limits, provider tool roundtrip, and API-only network isolation. Use the normal
 `check`, `plan`, and `launch --skip-bootstrap --skip-provision` lifecycle.
 
 Pi Node installation selects the native architecture. Goal Plus is installed
-through `install.sh --pi` in a container-local Python environment, and Pi loads
+through `install.sh --pi` with its managed Python 3.12, and Pi loads
 the registered package for both start and resume. Controller-provided source
 ownership is transferred to the container user and checked before installation.
 The Pi adapter fails if that source is unreadable; it cannot download another
@@ -103,6 +103,28 @@ the checkout and `PYTHONPATH` must select the same SForge code. Goal Plus uses
 `SFORGE_GOAL_PLUS_SOURCE_DIR` and `SFORGE_GOAL_PLUS_EXPECTED_REF`. Native doctor
 validates these actual checkouts; the global managed-environment doctor remains
 available independently. No managed tracking branch needs to change.
+
+For a bounded integration check, use
+[`vliw-goal-plus-pi-sol-low-arm64-smoke`](profiles/vliw-goal-plus-pi-sol-low-arm64-smoke.json):
+600 seconds of exploration, two direct Pi workers in one task cell, one repeat,
+240 seconds per initial worker invocation, and 300 seconds of finalization grace.
+It uses the same local task assets and Pi provider registry as the 30-minute
+example. Set `SFORGE_PI_MODELS_FILE` to the existing registry when it is outside
+`~/.pi/agent/models.json`; this does not modify native Pi configuration.
+
+```bash
+python3 scripts/bench.py check --benchmark edgebench \
+  --profile vliw-goal-plus-pi-sol-low-arm64-smoke
+python3 scripts/bench.py setup --benchmark edgebench \
+  --profile vliw-goal-plus-pi-sol-low-arm64-smoke \
+  --method goal-plus-pi-provider --skip-bootstrap --skip-provision
+python3 scripts/bench.py plan --benchmark edgebench \
+  --profile vliw-goal-plus-pi-sol-low-arm64-smoke \
+  --method goal-plus-pi-provider --skip-bootstrap --skip-provision
+```
+
+Use the same arguments with `launch` after reviewing the resolved source and
+budget. This is a local ARM64 integration scenario, not an official amd64 result.
 
 On a Linux host without passwordless sudo, an explicitly selected
 `SFORGE_IPTABLES_HELPER_IMAGE` can execute the same host iptables operations

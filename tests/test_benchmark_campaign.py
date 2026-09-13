@@ -91,7 +91,7 @@ class BenchmarkConditionTest(unittest.TestCase):
             wall_seconds=300,
             closeout_seconds=60,
             concurrency=2,
-            worker_host="codex",
+            agent_harness="codex",
             worker_model="test-model",
             coordination_condition="B3",
             search_space_mode="observe",
