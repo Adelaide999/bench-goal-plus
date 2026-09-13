@@ -187,10 +187,12 @@ worker 返回后，Main 读取 durable verifier ledger，再决定 selection 和
 
 `T` 截止必须是 SForge 的真实 agent segment boundary，不能把同一个 Codex 进程直接允许运行
 到 `T + finalization_grace`。若 Goal Plus 在 `T` 时仍未终态，SForge 终止探索 segment，并用
-控制器先 CAS 记录 harness_interruption，确认停止自己拥有的 Main，再以原生 session 加
+控制器先经 `FileGoalPlusRuntime.stop_for_host_retry` CAS 记录 harness_interruption，
+使用返回的 control version，确认停止自己拥有的 Main，再以原生 session 加
 显式 Goal Plus resume 启动 finalization-only segment。恢复资格被用户 pause/clear/edit 改变时
 不得重启。Main 首先重新读取 runtime/monitor 状态，只能整理已有 Evidence、选优、提升、
 Judge、结果记录和终态报告；不能重置 deadline 或启动新的优化 worker。
+冻结 process verifier 的 Evidence 必须在探索截止前提交；收尾宽限不解除其 deadline gate。
 
 恢复后的累计 worker/session 数可以超过 K，但必须另列 generation 0 的初始实际 worker
 和跨 generation 的实时/峰值并行数。仅分配 session 不算 launch，缺少区间证据记为 unknown/partial。

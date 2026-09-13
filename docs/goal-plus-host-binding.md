@@ -28,6 +28,14 @@ and execution intervals for concurrency evidence. Missing intervals remain
 unknown; process registration/release is not an execution interval. The live
 EdgeBench probe no longer checks Goal Plus worker PIDs or retired pool jobs.
 
+At its owned exploration cutoff, EdgeBench records conditional retry admission
+through `FileGoalPlusRuntime.stop_for_host_retry` and uses the returned control
+version for the same Main session's explicit resume. Goal Plus performs the
+state check; the benchmark controller stops its own execution handle. No Goal
+Plus process-identity or process-tree helper participates. Finalization grace
+does not extend the frozen exploration deadline or permit late process Evidence;
+workers must submit that Evidence before the cutoff.
+
 Scheduler CLI configuration now consists of `--search-scheduler-model`,
 `--search-scheduler-reasoning-effort`, `--search-scheduler-timeout-seconds`,
 `--search-scheduler-reward`, and `--search-scheduler-allocation`.
@@ -55,8 +63,11 @@ source without updating it, and plan/cell evidence records its actual branch and
 commit. The managed tracking branch is unchanged. Keep the same source selection
 through setup, plan, launch, and any resume.
 
-Search prompts use `strategy.config.reserve_closeout_seconds` so candidate
-continuation and verifier admission reserve the same finalization window.
+EdgeBench's optional worker minimum-time, verifier-count, and closeout-reserve
+settings are planning targets expressed to Main in the task prompt. They are
+not runtime-enforced minimums and are not written into SearchSpec. The current
+Goal Plus worker budget only receives the supported maximum runtime and
+`on_exceed=interrupt`; its deadline and Evidence gates remain authoritative.
 
 Controller closeout for `promotion_mode=apply` calls `search_apply_promotion`
 before recording the Search result. Applying a Git patch alone does not settle

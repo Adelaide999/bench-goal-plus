@@ -112,6 +112,14 @@ It uses the same local task assets and Pi provider registry as the 30-minute
 example. Set `SFORGE_PI_MODELS_FILE` to the existing registry when it is outside
 `~/.pi/agent/models.json`; this does not modify native Pi configuration.
 
+This short profile exercises installation and session wiring; it is not a
+completed optimization acceptance by itself. Spec preparation consumes part of
+the exploration budget, and a worker may exhaust its 240-second invocation
+before submitting Evidence. Use the 30-minute profile for the full optimization
+example. Completion still requires both workers' verifier records, promotion,
+Judge feedback, and terminal Goal/report evidence. A public local test or a
+baseline auto-evaluation alone does not satisfy those gates.
+
 ```bash
 python3 scripts/bench.py check --benchmark edgebench \
   --profile vliw-goal-plus-pi-sol-low-arm64-smoke
