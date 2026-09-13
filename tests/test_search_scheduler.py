@@ -362,7 +362,7 @@ class SearchSchedulerContractTest(unittest.TestCase):
             {
                 "goal_plus": {
                     "candidates": 4,
-                    "agent_harness": "pi", "execution_contract_valid": True,
+                    "agent_harness": "pi", "execution_contract_valid": True, "terminal_ready": True,
                     "confirmed_initial_worker_launches": 2,
                     "initial_candidates": 2,
                     "agent_sessions": 4,

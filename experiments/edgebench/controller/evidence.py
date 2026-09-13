@@ -188,6 +188,8 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
     selected_candidate_ids: set[str] = set()
     promoted_candidate_ids: set[str] = set()
     goal_statuses: list[dict[str, Any]] = []
+    goal_records_seen = 0
+    completed_goal_reports: list[bool] = []
     annotation_usage: dict[str, int | float] = {}
     annotation_tasks = 0
     annotation_attempts = 0
@@ -201,6 +203,10 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
     worker_intervals: list[dict[str, Any]] = []
     try:
         with tarfile.open(archive_path) as archive:
+            archive_files = {
+                member.name for member in archive.getmembers()
+                if member.isfile() and member.size > 0
+            }
             for member in archive:
                 run_match = re.search(r"/runs/([^/]+)/run\.json$", member.name)
                 if run_match:
@@ -252,12 +258,29 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                 if "/goal-plus/" in member.name and member.name.endswith(
                     "/goal.json"
                 ):
+                    goal_records_seen += 1
                     extracted = archive.extractfile(member)
                     if extracted:
                         try:
                             payload = json.loads(
                                 extracted.read().decode("utf-8", errors="replace")
                             )
+                            if not isinstance(payload, dict):
+                                continue
+                            linked = payload.get("linked_search")
+                            linked = linked if isinstance(linked, dict) else {}
+                            report_names = []
+                            for key in ("report_path", "html_report_path"):
+                                value = linked.get(key)
+                                if isinstance(value, str) and value.startswith("/home/agent/.goal-plus/"):
+                                    relative = value.removeprefix("/home/agent/.goal-plus/")
+                                    report_names.append(member.name.split("/goal-plus/", 1)[0] + "/" + relative)
+                            completed_goal_reports.append(bool(
+                                payload.get("status") == "complete"
+                                and linked.get("result_recorded_at")
+                                and len(report_names) == 2
+                                and all(name in archive_files for name in report_names)
+                            ))
                             goal_statuses.append(
                                 {
                                     key: payload.get(key)
@@ -532,6 +555,10 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
         "selected_candidate_ids": sorted(selected_candidate_ids),
         "promoted_candidate_ids": sorted(promoted_candidate_ids),
         "goal_statuses": goal_statuses,
+        "terminal_ready": bool(
+            goal_records_seen and len(completed_goal_reports) == goal_records_seen
+            and all(completed_goal_reports)
+        ),
         "search_run_contracts": search_run_contracts,
         "worker_concurrency": worker_concurrency,
         "initial_worker_concurrency": initial_worker_concurrency,
@@ -926,8 +953,10 @@ def goal_plus_completion_evidence(
     actual_scheduler_contracts: list[dict[str, Any]] = []
     scheduler_worker_evidence: list[dict[str, Any]] = []
     execution_contract_valid = bool(observations)
+    terminal_ready = bool(observations)
     for observation in observations:
         archived = observation.get("goal_plus") or {}
+        terminal_ready = terminal_ready and archived.get("terminal_ready") is True
         expected_harness = "codex" if cell["method"] == "goal-plus-codex" else "pi"
         execution_contract_valid = (
             execution_contract_valid and archived.get("execution_contract_valid") is True
@@ -1176,6 +1205,7 @@ def goal_plus_completion_evidence(
             "expected": expected_workers, "actual": actual_subagent_count,
         }
     checks["execution_contract"] = {"expected": True, "actual": execution_contract_valid}
+    checks["goal_terminal_and_reports"] = {"expected": True, "actual": terminal_ready}
     actual_subagent_count_matches_k = actual_subagent_count == expected_workers
     recovery_parallelism_passed = not recovery_agent_sessions or bool(
         recovery_concurrency and all(
@@ -1192,7 +1222,7 @@ def goal_plus_completion_evidence(
             "actual": {"initial_actual_workers": confirmed_initial_worker_launches,
                        "recovery_sessions": recovery_agent_sessions, "concurrency": recovery_concurrency},
         }
-    passed = required_evidence_present and actual_subagent_count_matches_k and recovery_parallelism_passed
+    passed = required_evidence_present and actual_subagent_count_matches_k and recovery_parallelism_passed and terminal_ready
     return {
         "required": True,
         "passed": passed,
@@ -1200,6 +1230,8 @@ def goal_plus_completion_evidence(
         "reason": (
             None
             if passed
+            else "Goal Plus Goal terminal status or final reports are missing"
+            if not terminal_ready
             else "Goal Plus method did not persist the required initial K actual "
             "subagents, scheduler candidate limit, verifier, promotion, and official "
             "trajectory evidence"
@@ -1250,7 +1282,10 @@ def successor_completion_evidence(
         )
         histories.append({"passed": history_passed, "completion_run_ids": sorted(current_ids), "concurrency": concurrency})
         for run in current:
-            result = goal_plus_completion_evidence(cell, [{"goal_plus": run}], valid_trajectories=valid_trajectories)
+            result = goal_plus_completion_evidence(
+                cell, [{"goal_plus": {**run, "terminal_ready": archived.get("terminal_ready")}}],
+                valid_trajectories=valid_trajectories,
+            )
             result["passed"] = result["passed"] and run.get("initial_bound_worker_handles") == expected_workers
             results.append(result)
         cumulative_candidates = max(cumulative_candidates, int(archived.get("candidates") or 0))

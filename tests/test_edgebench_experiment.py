@@ -4063,7 +4063,13 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         task_run = self.temp / "successor-task-run"
         task_run.mkdir()
         documents = {
-            ".goal-plus/goal-plus/gp-1/goal.json": {"linked_search": {"run_id": "run-2"}},
+            ".goal-plus/goal-plus/gp-1/goal.json": {"status": "complete", "linked_search": {
+                "run_id": "run-2", "result_recorded_at": "2026-01-01T00:06:00Z",
+                "report_path": "/home/agent/.goal-plus/runs/run-2/report.md",
+                "html_report_path": "/home/agent/.goal-plus/runs/run-2/report.html",
+            }},
+            ".goal-plus/runs/run-2/report.md": "report",
+            ".goal-plus/runs/run-2/report.html": "report",
             ".goal-plus/specs/spec-1/frozen_spec.json": {"agent_harness": "pi", "runtime_provider": "direct", "spec": {"workspace": {"provider": "git_worktree"}, "budget": {"max_parallel": 2}, "strategy": {"orchestration_mode": "parallel_loops"}}},
         }
         for number in (1, 2):
@@ -4092,7 +4098,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                     "counters": {"verifier_runs": 1 if number == 2 else 0},
                 }
         cell = {"method": "goal-plus-pi-provider", "outer_replicas": 1, "inner_search_concurrency": 2}
-        for fault in (None, "overlap", "missing_interval", "unbound", "active_predecessor", "missing_verifier", "old_frozen", "foreign_harness"):
+        for fault in (None, "overlap", "missing_interval", "unbound", "active_predecessor", "missing_verifier", "old_frozen", "foreign_harness", "active_goal", "missing_report", "unreadable_goal"):
             with self.subTest(fault=fault):
                 inputs = json.loads(json.dumps(documents))
                 session = ".goal-plus/agent_sessions/run-2-c002.json"
@@ -4114,6 +4120,12 @@ class EdgeBenchExperimentTest(unittest.TestCase):
                     inputs[session]["agent_harness"] = "codex"
                     inputs[session]["session_handle"]["agent_harness"] = "codex"
                     dispatches[0]["agent_harness"] = "codex"
+                elif fault == "active_goal":
+                    inputs[".goal-plus/goal-plus/gp-1/goal.json"]["status"] = "active"
+                elif fault == "missing_report":
+                    inputs.pop(".goal-plus/runs/run-2/report.html")
+                elif fault == "unreadable_goal":
+                    inputs[".goal-plus/goal-plus/unknown/goal.json"] = []
                 with tarfile.open(task_run / "goal-plus-state.tar", "w") as archive:
                     for name, document in inputs.items():
                         data = json.dumps(document).encode()
@@ -4188,7 +4200,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         complete = {
             "edgebench_score": 50.0,
             "goal_plus": {
-                "agent_harness": "codex", "execution_contract_valid": True,
+                "agent_harness": "codex", "execution_contract_valid": True, "terminal_ready": True,
                 "candidates": 2,
                 "agent_sessions": 2,
                 "worker_verifier_runs": 2,
@@ -4260,7 +4272,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
     def test_goal_plus_recovery_counts_generations_separately_from_live_k(self) -> None:
         cell = {"method": "goal-plus-pi", "outer_replicas": 1, "inner_search_concurrency": 2}
         archived = {
-            "agent_harness": "pi", "execution_contract_valid": True,
+            "agent_harness": "pi", "execution_contract_valid": True, "terminal_ready": True,
             "candidates": 2, "agent_sessions": 3, "recovery_agent_sessions": 1,
             "confirmed_initial_worker_launches": 2,
             "worker_verifier_runs": 3, "verifier_candidate_ids": ["c001", "c002"],
@@ -4284,7 +4296,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         complete = {
             "edgebench_score": 40.0,
             "goal_plus": {
-                "agent_harness": "pi", "execution_contract_valid": True,
+                "agent_harness": "pi", "execution_contract_valid": True, "terminal_ready": True,
                 "confirmed_initial_worker_launches": 2,
                 "candidates": 2,
                 "agent_sessions": 2,

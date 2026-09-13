@@ -19,6 +19,9 @@ read its managed runtime receipt. Source assets live under `assets/codex` and
 `assets/pi`; old source-root skill trees are not installed. Codex project hooks
 come from the generated immutable release and use its isolated launcher.
 Pi loads the installer-registered package for both start and resume.
+Host retry admission executes the virtualenv Python path from the installation
+receipt directly. It must not use a relocated Python symlink, which can lose
+the virtualenv's package search path. The task's default Python is preserved.
 
 Main prepares a candidate, calls `goal_plus_session_open`, then explicitly uses
 `goal_plus_session_wake/wait` for each invocation and closes the session after
@@ -35,6 +38,11 @@ state check; the benchmark controller stops its own execution handle. No Goal
 Plus process-identity or process-tree helper participates. Finalization grace
 does not extend the frozen exploration deadline or permit late process Evidence;
 workers must submit that Evidence before the cutoff.
+
+Final completion also requires the archived Goal to be complete, its linked
+Search result to be recorded, and both final report files to be present. Missing
+or undecodable Goal records fail this gate. Worker success, promotion, and a
+valid Judge score remain useful evidence but do not alone complete the Goal.
 
 Scheduler CLI configuration now consists of `--search-scheduler-model`,
 `--search-scheduler-reasoning-effort`, `--search-scheduler-timeout-seconds`,
