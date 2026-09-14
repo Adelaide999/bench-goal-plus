@@ -248,6 +248,27 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 "[mcp_servers.goal-plus]\n",
             )
 
+    def test_goal_plus_assets_materialize_installed_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            goal_plus = temp / "goal-plus"
+            codex = goal_plus / "assets/codex"
+            (codex / "skills/demo").mkdir(parents=True)
+            (codex / "skills/demo/SKILL.md").write_text("# demo\n")
+            (codex / "hooks.json").write_text('{"version": 1}\n')
+            (codex / "config.example.toml").write_text(
+                "[mcp_servers.goal-plus]\n"
+            )
+            workspace = temp / "workspace"
+            workspace.mkdir()
+
+            experiment.copy_goal_plus_assets(goal_plus, workspace)
+
+            self.assertTrue((workspace / ".codex/skills/demo/SKILL.md").is_file())
+            self.assertEqual(
+                (workspace / ".codex/hooks.json").read_text(), '{"version": 1}\n'
+            )
+
     def test_goal_plus_entrypoint_matches_worker_host(self) -> None:
         self.assertEqual(
             experiment.goal_plus_entrypoint("codex"),
@@ -265,6 +286,28 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             temp = Path(temp_dir)
             goal_plus = temp / "goal-plus"
             pi = goal_plus / ".pi"
+            (pi / "extensions").mkdir(parents=True)
+            (pi / "skills/goal-plus").mkdir(parents=True)
+            (pi / "prompts").mkdir(parents=True)
+            (pi / "extensions/goal-plus.ts").write_text("export default {}\n")
+            (pi / "skills/goal-plus/SKILL.md").write_text("# Goal Plus\n")
+            (pi / "prompts/search-candidate-worker.md").write_text("worker\n")
+            workspace = temp / "workspace"
+            workspace.mkdir()
+
+            experiment.copy_goal_plus_pi_assets(goal_plus, workspace)
+
+            self.assertTrue((workspace / ".pi/extensions/goal-plus.ts").is_file())
+            self.assertTrue((workspace / ".pi/skills/goal-plus/SKILL.md").is_file())
+            self.assertTrue(
+                (workspace / ".pi/prompts/search-candidate-worker.md").is_file()
+            )
+
+    def test_goal_plus_pi_assets_copy_installed_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            goal_plus = temp / "goal-plus"
+            pi = goal_plus / "assets/pi"
             (pi / "extensions").mkdir(parents=True)
             (pi / "skills/goal-plus").mkdir(parents=True)
             (pi / "prompts").mkdir(parents=True)
