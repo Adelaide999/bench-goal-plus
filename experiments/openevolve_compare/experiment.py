@@ -214,7 +214,7 @@ def configure_goal_plus_pi_runtime(
     root = goal_plus_root.expanduser().resolve()
     extension, skill = goal_plus_pi_asset_paths(root)
     environment["GOAL_PLUS_PI_DEV_ROOT"] = str(root)
-    environment["GOAL_PLUS_PYTHON"] = str(Path(sys.executable).resolve())
+    environment["GOAL_PLUS_PYTHON"] = str(Path(sys.executable).absolute())
     return extension, skill
 
 

@@ -370,7 +370,7 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertEqual(skill, pi_assets / "skills/goal-plus/SKILL.md")
         self.assertEqual(environment["GOAL_PLUS_PI_DEV_ROOT"], str(goal_plus_root))
         self.assertEqual(
-            environment["GOAL_PLUS_PYTHON"], str(Path(sys.executable).resolve())
+            environment["GOAL_PLUS_PYTHON"], str(Path(sys.executable).absolute())
         )
 
     def test_codex_rejects_anthropic_messages_provider(self) -> None:

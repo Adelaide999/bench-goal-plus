@@ -305,7 +305,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             self.assertEqual(environment["GOAL_PLUS_PI_DEV_ROOT"], str(goal_plus))
             self.assertEqual(
                 environment["GOAL_PLUS_PYTHON"],
-                str(Path(sys.executable).resolve()),
+                str(Path(sys.executable).absolute()),
             )
 
     def test_goal_prompt_uses_natural_entry_and_complete_configuration(self) -> None:
