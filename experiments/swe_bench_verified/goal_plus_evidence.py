@@ -10,9 +10,6 @@ from typing import Any
 
 from bench_goal_plus.goal_plus_evidence import (
     frozen_agent_harness, session_agent_harness, session_worker_intervals,
-)
-from bench_goal_plus.search_scheduler import (
-    GoalPlusSearchScheduler,
     summarize_worker_concurrency,
 )
 
@@ -522,7 +519,6 @@ def collect_goal_plus_state(
     expected_evidence_annotator_enabled: bool = False,
     expected_agent_harness: str = "pi",
     expected_worker_model: str | None = None,
-    expected_search_scheduler: GoalPlusSearchScheduler | None = None,
 ) -> dict[str, Any]:
     goal_records = []
     for path in sorted((root / "goal-plus").glob("gp_*/goal.json")):
@@ -666,10 +662,6 @@ def collect_goal_plus_state(
                 "frozen_spec_present": bool(frozen),
                 "max_parallel": budget.get("max_parallel"),
                 "max_candidates": budget.get("max_candidates"),
-                "search_scheduler": strategy.get("search_scheduler"),
-                "search_scheduler_enabled": (
-                    strategy.get("search_scheduler") is not None
-                ),
                 "agent_harness": frozen_agent_harness(frozen),
                 "orchestration_mode": strategy.get("orchestration_mode"),
                 "worker_budget": worker_budget,
@@ -716,25 +708,13 @@ def collect_goal_plus_state(
         if selected_run is not None
         else {}
     )
-    scheduler_enabled = bool(
-        selected_run and selected_run.get("search_scheduler_enabled")
-    )
-    scheduler_requested = expected_search_scheduler is not None
     cumulative_candidate_count = int(
         selected_run.get("candidate_count") or 0
     ) if selected_run else 0
-    expected_bound_candidate_count = (
-        cumulative_candidate_count if scheduler_enabled else expected_k
-    )
+    expected_bound_candidate_count = expected_k
     exact_one_session_per_candidate = bool(
         len(counts) == expected_bound_candidate_count
         and all(value == 1 for value in counts.values())
-    )
-    initial_candidate_ids = set(
-        selected_run.get("initial_candidate_ids") or []
-    ) if selected_run else set()
-    initial_bound_session_count = sum(
-        int(counts.get(candidate_id) or 0) for candidate_id in initial_candidate_ids
     )
     legacy_acceptance_contract = (
         selected_run.get("legacy_acceptance_view_contract")
@@ -957,50 +937,11 @@ def collect_goal_plus_state(
         )
     ]
     overlap_intervals = selected_run.get("worker_intervals", []) if selected_run else []
-    if scheduler_enabled:
-        overlap_intervals = [
-            interval
-            for interval in overlap_intervals
-            if interval.get("candidate_id") in initial_candidate_ids
-        ]
     worker_overlap = _worker_overlap(
         overlap_intervals,
         expected_k,
     )
-    expected_orchestration_mode = (
-        "adaptive_search" if scheduler_requested else "parallel_loops"
-    )
-    expected_scheduler_spec = (
-        expected_search_scheduler.scheduler_spec
-        if expected_search_scheduler is not None
-        else None
-    )
-    expected_max_candidates = (
-        expected_search_scheduler.max_candidates
-        if expected_search_scheduler is not None
-        else None
-    )
-    worker_concurrency = (
-        selected_run.get("worker_concurrency") or {} if selected_run else {}
-    )
-    initial_worker_concurrency = (
-        selected_run.get("initial_worker_concurrency") or {}
-        if selected_run
-        else {}
-    )
-    live_worker_evidence_passed = bool(
-        not scheduler_requested
-        or (
-            selected_run
-            and worker_concurrency.get("invalid_interval_count") == 0
-            and set(worker_concurrency.get("candidate_ids") or []) == candidate_ids
-            and isinstance(worker_concurrency.get("max_live_workers"), int)
-            and worker_concurrency["max_live_workers"] <= expected_k
-            and initial_worker_concurrency.get("invalid_interval_count") == 0
-            and set(initial_worker_concurrency.get("candidate_ids") or [])
-            == initial_candidate_ids
-        )
-    )
+    expected_orchestration_mode = "parallel_loops"
     checks = {
         "durable_state": _check(True, root.is_dir(), root.is_dir()),
         "terminal_goal": _check(
@@ -1033,41 +974,6 @@ def collect_goal_plus_state(
                 and selected_run.get("orchestration_mode")
                 == expected_orchestration_mode
             ),
-        ),
-        "search_scheduler_contract": _check(
-            {
-                "search_scheduler": expected_scheduler_spec,
-                "max_candidates": expected_max_candidates,
-            },
-            (
-                {
-                    "search_scheduler": selected_run.get("search_scheduler"),
-                    "max_candidates": selected_run.get("max_candidates"),
-                }
-                if selected_run
-                else None
-            ),
-            bool(
-                selected_run
-                and scheduler_enabled == scheduler_requested
-                and selected_run.get("search_scheduler") == expected_scheduler_spec
-                and selected_run.get("max_candidates") == expected_max_candidates
-            ),
-        ),
-        "scheduler_live_worker_limit": _check(
-            (
-                {
-                    "initial_worker_candidates": expected_k,
-                    "max_live_workers": expected_k,
-                }
-                if scheduler_requested
-                else "not required"
-            ),
-            {
-                "all": worker_concurrency,
-                "initial": initial_worker_concurrency,
-            },
-            live_worker_evidence_passed,
         ),
         "worker_runtime": _check(
             expected_worker_runtime_seconds,
@@ -1214,7 +1120,7 @@ def collect_goal_plus_state(
                 else "not required"
             ),
             worker_overlap,
-            bool(scheduler_requested or expected_k == 1 or worker_overlap["passed"]),
+            bool(expected_k == 1 or worker_overlap["passed"]),
         ),
         "view_agent_contract": _check(
             (
@@ -1236,41 +1142,16 @@ def collect_goal_plus_state(
             ),
         ),
         "candidates": _check(
-            (
-                {"initial": expected_k, "max_candidates": selected_run.get("max_candidates")}
-                if scheduler_enabled and selected_run
-                else expected_k
-            ),
-            cumulative_candidate_count,
-            bool(
-                selected_run
-                and (
-                    (
-                        selected_run.get("initial_candidate_count") == expected_k
-                        and cumulative_candidate_count >= expected_k
-                        and (
-                            selected_run.get("max_candidates") is None
-                            or cumulative_candidate_count
-                            <= int(selected_run["max_candidates"])
-                        )
-                    )
-                    if scheduler_enabled
-                    else cumulative_candidate_count == expected_k
-                )
-            ),
+            expected_k, cumulative_candidate_count,
+            bool(selected_run and cumulative_candidate_count == expected_k),
         ),
         "bound_pi_worker_sessions": _check(
             expected_bound_candidate_count,
             selected_run.get("bound_session_count") if selected_run else 0,
             bool(
                 selected_run
-                and selected_run.get("bound_session_count")
-                == expected_bound_candidate_count
+                and selected_run.get("bound_session_count") == expected_k
                 and exact_one_session_per_candidate
-                and (
-                    not scheduler_enabled
-                    or initial_bound_session_count == expected_k
-                )
             ),
         ),
         "worker_verifier_candidates": _check(
@@ -1278,12 +1159,7 @@ def collect_goal_plus_state(
             len(selected_run.get("verifier_candidate_ids", [])) if selected_run else 0,
             bool(
                 selected_run
-                and (
-                    len(selected_run.get("verifier_candidate_ids", [])) >= expected_k
-                    if scheduler_enabled
-                    else len(selected_run.get("verifier_candidate_ids", []))
-                    == expected_k
-                )
+                and len(selected_run.get("verifier_candidate_ids", [])) == expected_k
             ),
         ),
         "promotion": _check(
@@ -1318,9 +1194,7 @@ def collect_goal_plus_state(
             "enforcement": "Main planning; not a frozen runtime gate",
         },
         "actual_subagent_count": (
-            initial_bound_session_count
-            if scheduler_enabled
-            else int(selected_run.get("bound_session_count") or 0)
+            int(selected_run.get("bound_session_count") or 0)
             if selected_run
             else 0
         ),

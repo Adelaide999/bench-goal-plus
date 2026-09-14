@@ -257,7 +257,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             patch = run_path.parent / "promotion/selected.patch"
             goal = SimpleNamespace(goal_plus_id="gp_0001", status="complete",
                                    linked_search=SimpleNamespace(run_id="run_fixture", selected_candidate_id="c001"))
-            goal_runtime, search_runtime, search_tools = mock.Mock(), mock.Mock(), mock.Mock()
+            from goal_plus.tools import SearchTools
+
+            goal_runtime, search_runtime = mock.Mock(), mock.Mock()
+            search_tools = mock.Mock(spec_set=SearchTools)
             goal_runtime.status.return_value = goal
             modules = {
                 "goal_plus.evidence_annotator": SimpleNamespace(drain_evidence_annotations=mock.Mock(return_value=0)),
@@ -272,21 +275,21 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 search_runtime.promotion_record.return_value = SimpleNamespace(state="applied")
                 result = controller.closeout(root, source, session_timeout_seconds=10)
                 self.assertTrue(result["completed"], result)
-                search_tools.search_apply_promotion.assert_not_called()
+                search_tools.goal_plus_search_apply_promotion.assert_not_called()
                 goal_runtime.set_status.assert_not_called()
 
                 goal.status = "active"
                 search_runtime.promotion_record.return_value = SimpleNamespace(state="prepared")
-                search_tools.search_apply_promotion.return_value = {"state": "awaiting_main_integration"}
+                search_tools.goal_plus_search_apply_promotion.return_value = {"state": "awaiting_main_integration"}
                 result = controller.closeout(root, source, session_timeout_seconds=10)
                 self.assertFalse(result["completed"])
                 self.assertIn("publication has not been applied", result["error"])
                 goal_runtime.set_status.assert_not_called()
 
-                search_tools.search_apply_promotion.return_value = {"state": "applied"}
+                search_tools.goal_plus_search_apply_promotion.return_value = {"state": "applied"}
                 result = controller.closeout(root, source, session_timeout_seconds=10)
                 self.assertTrue(result["completed"], result)
-                search_tools.search_apply_promotion.assert_called_with("run_fixture")
+                search_tools.goal_plus_search_apply_promotion.assert_called_with("run_fixture")
                 goal_runtime.set_status.assert_called_once()
 
     def test_pi_package_resolution_is_independent_of_cli_layout(self) -> None:
@@ -347,7 +350,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         drain = controller.index(
             "annotated_in_closeout = drain_evidence_annotations("
         )
-        selection = controller.index("selection = tools.search_select(run_id)")
+        selection = controller.index("selection = tools.goal_plus_search_select(run_id)")
         existing_promotion = controller.index("if existing_promotion is not None:")
 
         self.assertLess(drain, selection)
@@ -1810,8 +1813,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             )
             self.assertNotIn(" -- ", prompt.splitlines()[0])
             self.assertNotIn("Set budget.max_parallel", prompt)
-            self.assertIn("Leave `strategy.search_scheduler` unset", prompt)
-            self.assertIn("omit `budget.max_candidates`", prompt)
+            self.assertIn('strategy.orchestration_mode="parallel_loops"', prompt)
+            self.assertNotIn("budget.max_candidates", prompt)
             self.assertIn("Public issue text", prompt)
             self.assertIn("Do not add acceptance_view", prompt)
             self.assertIn("open-ended, task-specific observations", prompt)

@@ -11,7 +11,6 @@ from bench_goal_plus.goal_plus_command import (
     goal_plus_command_config,
     goal_plus_entrypoint,
 )
-from bench_goal_plus.search_scheduler import search_scheduler_from_json
 
 from . import io
 from .context import current_paths
@@ -120,7 +119,6 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
     api_protocol = api_protocol_for_methods(methods)
     wall_time = int(args.wall_time_seconds or profile["wall_time_seconds"])
     concurrency = int(args.concurrency or profile["concurrency"])
-    search_scheduler = search_scheduler_from_json(profile.get("search_scheduler"))
     cell_concurrency = int(
         getattr(args, "cell_concurrency", None) or profile.get("cell_concurrency", 1)
     )
@@ -381,11 +379,6 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
                                 profile=profile,
                                 concurrency=concurrency,
                             ),
-                            **(
-                                {"search_scheduler": search_scheduler.as_dict()}
-                                if search_scheduler is not None
-                                else {}
-                            ),
                         }
                     }
                     if method in GOAL_PLUS_METHODS
@@ -472,11 +465,6 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
         "methods": methods,
         "model": model,
         "reasoning_effort": reasoning,
-        **(
-            {"search_scheduler": search_scheduler.as_dict()}
-            if search_scheduler is not None
-            else {}
-        ),
         **role_config,
         **global_evidence_config,
         **goal_plus_feature_config,
@@ -533,11 +521,6 @@ def prepare(args: argparse.Namespace, profile: dict[str, Any]) -> Path:
             "methods": methods,
             "model": model,
             "reasoning_effort": reasoning,
-            **(
-                {"search_scheduler": search_scheduler.as_dict()}
-                if search_scheduler is not None
-                else {}
-            ),
             **role_config,
             **global_evidence_config,
             **goal_plus_feature_config,

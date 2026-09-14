@@ -114,6 +114,8 @@ def parse_codex_event_text(text: str) -> dict[str, Any]:
         arguments = item.get("arguments")
         arguments = arguments if isinstance(arguments, dict) else {}
         structured = _structured_result(item)
+        if tool.startswith("goal_plus_search_"):
+            tool = tool.removeprefix("goal_plus_")
 
         run_id = arguments.get("run_id")
         if isinstance(run_id, str) and run_id:
@@ -132,6 +134,25 @@ def parse_codex_event_text(text: str) -> dict[str, Any]:
                 value = candidate.get("run_id")
                 if isinstance(value, str) and value:
                     run_ids.add(value)
+        elif tool == "goal_plus_session_run" and isinstance(structured, dict):
+            session_id = structured.get("session_id")
+            call_id = arguments.get("call_id")
+            if (
+                isinstance(session_id, str) and session_id
+                and isinstance(call_id, str) and call_id
+                and structured.get("call_id") == call_id
+            ):
+                agent_session_ids.add(session_id)
+                worker_sessions[session_id] = {
+                    "agent_session_id": session_id,
+                    "run_id": run_id,
+                    "candidate_id": candidate_id,
+                }
+                native_sessions[session_id] = (session_id, {
+                    "agent_harness": "codex", "runtime_provider": "direct",
+                    "native_session_id": structured.get("native_session_id"),
+                    "call_id": call_id,
+                })
         elif tool == "search_start_agent_session" and isinstance(structured, dict):
             session_id = structured.get("agent_session_id")
             if isinstance(session_id, str) and session_id:
@@ -171,6 +192,7 @@ def parse_codex_event_text(text: str) -> dict[str, Any]:
                     and opened.get("native_session_id") in {None, external_id}
                     and result.get("invocation_id")
                     and structured.get("call_id") == arguments.get("call_id")
+                    and opened.get("call_id", arguments.get("call_id")) == arguments.get("call_id")
                 ):
                     bound_worker_handles[session_id] = {
                         "agent_session_id": session_id,

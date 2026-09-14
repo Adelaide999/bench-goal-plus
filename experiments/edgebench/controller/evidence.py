@@ -17,8 +17,8 @@ from bench_goal_plus.goal_plus_evidence import (
     frozen_agent_harness,
     session_agent_harness,
     session_worker_intervals,
+    summarize_worker_concurrency,
 )
-from bench_goal_plus.search_scheduler import summarize_worker_concurrency
 from bench_runtime_paths import configure_temp_environment
 
 from . import io
@@ -448,7 +448,6 @@ def goal_plus_stats(task_run: Path) -> dict[str, Any] | None:
                 "max_parallel": budget.get("max_parallel"),
                 "max_candidates": budget.get("max_candidates"),
                 "orchestration_mode": strategy.get("orchestration_mode"),
-                "search_scheduler": strategy.get("search_scheduler"),
             }
         )
     initial_candidate_ids = {candidate_id for _, candidate_id in initial_candidates}
@@ -929,17 +928,8 @@ def goal_plus_completion_evidence(
     if any(int((item.get("goal_plus") or {}).get("search_runs") or 0) > 1 for item in observations):
         return successor_completion_evidence(cell, observations, valid_trajectories=valid_trajectories)
     expected_workers = int(cell["inner_search_concurrency"])
-    scheduler_contract = (cell.get("goal_plus_config") or {}).get(
-        "search_scheduler"
-    )
-    scheduler_enabled = isinstance(scheduler_contract, dict)
-    max_candidates = (
-        scheduler_contract.get("max_candidates") if scheduler_enabled else None
-    )
     candidates = 0
-    initial_candidates = 0
     agent_sessions = 0
-    initial_agent_sessions = 0
     recovery_agent_sessions = 0
     confirmed_initial_worker_launches = 0
     recovery_concurrency: list[dict[str, Any]] = []
@@ -947,11 +937,8 @@ def goal_plus_completion_evidence(
     verifier_runs = 0
     spawned_worker_threads = 0
     bound_worker_handles = 0
-    initial_bound_worker_handles = 0
     selected: set[str] = set()
     promoted: set[str] = set()
-    actual_scheduler_contracts: list[dict[str, Any]] = []
-    scheduler_worker_evidence: list[dict[str, Any]] = []
     execution_contract_valid = bool(observations)
     terminal_ready = bool(observations)
     for observation in observations:
@@ -969,18 +956,10 @@ def goal_plus_completion_evidence(
             int(archived.get("candidates") or 0),
             len(event_goal_plus.get("candidate_ids") or []),
         )
-        initial_candidates = max(
-            initial_candidates,
-            int(archived.get("initial_candidates") or 0),
-        )
         agent_sessions = max(
             agent_sessions,
             int(archived.get("agent_sessions") or 0),
             len(event_goal_plus.get("agent_session_ids") or []),
-        )
-        initial_agent_sessions = max(
-            initial_agent_sessions,
-            int(archived.get("initial_agent_sessions") or 0),
         )
         recovered = int(archived.get("recovery_agent_sessions") or 0)
         recovery_agent_sessions = max(recovery_agent_sessions, recovered)
@@ -996,10 +975,6 @@ def goal_plus_completion_evidence(
             bound_worker_handles,
             len(archived.get("bound_worker_handles") or []),
             int(event_goal_plus.get("bound_worker_handle_count") or 0),
-        )
-        initial_bound_worker_handles = max(
-            initial_bound_worker_handles,
-            int(archived.get("initial_bound_worker_handles") or 0),
         )
         ledger = event_goal_plus.get("verifier_ledger") or []
         verifier_runs = max(
@@ -1021,106 +996,18 @@ def goal_plus_completion_evidence(
         selected.update(event_goal_plus.get("selected_candidate_ids") or [])
         promoted.update(archived.get("promoted_candidate_ids") or [])
         promoted.update(event_goal_plus.get("promoted_candidate_ids") or [])
-        actual_scheduler_contracts.extend(
-            contract
-            for contract in archived.get("search_run_contracts") or []
-            if isinstance(contract, dict)
-        )
-        scheduler_worker_evidence.append(
-            {
-                "candidate_ids": archived.get("candidate_ids") or [],
-                "initial_candidate_ids": archived.get("initial_candidate_ids") or [],
-                "all": archived.get("worker_concurrency") or {},
-                "initial": archived.get("initial_worker_concurrency") or {},
-            }
-        )
 
-    requested_scheduler_spec = (
-        scheduler_contract.get("search_scheduler") if scheduler_enabled else None
-    )
-    scheduler_contract_passed = bool(
-        not scheduler_enabled
-        or (
-            actual_scheduler_contracts
-            and all(
-                contract.get("frozen_spec_present") is True
-                and contract.get("max_parallel") == expected_workers
-                and contract.get("max_candidates") == max_candidates
-                and contract.get("orchestration_mode") == "adaptive_search"
-                and contract.get("search_scheduler") == requested_scheduler_spec
-                for contract in actual_scheduler_contracts
-            )
-        )
-    )
-    live_worker_limit_passed = bool(
-        not scheduler_enabled
-        or (
-            scheduler_worker_evidence
-            and all(
-                evidence["all"].get("invalid_interval_count") == 0
-                and set(evidence["all"].get("candidate_ids") or [])
-                == set(evidence["candidate_ids"])
-                and isinstance(evidence["all"].get("max_live_workers"), int)
-                and evidence["all"]["max_live_workers"] <= expected_workers
-                and evidence["initial"].get("invalid_interval_count") == 0
-                and set(evidence["initial"].get("candidate_ids") or [])
-                == set(evidence["initial_candidate_ids"])
-                and len(evidence["initial_candidate_ids"]) == expected_workers
-                for evidence in scheduler_worker_evidence
-            )
-        )
-    )
-
-    candidate_limit_passed = (
-        candidates >= expected_workers
-        and (not scheduler_enabled or initial_candidates == expected_workers)
-        and (max_candidates is None or candidates <= int(max_candidates))
-    )
-    agent_sessions_passed = (
-        initial_agent_sessions == expected_workers and agent_sessions >= candidates
-        if scheduler_enabled
-        else agent_sessions >= expected_workers
-    )
-    actual_worker_launches_passed = (
-        initial_bound_worker_handles == expected_workers
-        if scheduler_enabled
-        else spawned_worker_threads >= expected_workers
-    )
-    spawn_coverage_passed = max(spawned_worker_threads, bound_worker_handles) >= (
-        candidates if scheduler_enabled else expected_workers
-    )
+    candidate_limit_passed = candidates == expected_workers
+    agent_sessions_passed = agent_sessions >= expected_workers
+    actual_worker_launches_passed = spawned_worker_threads >= expected_workers
+    spawn_coverage_passed = max(spawned_worker_threads, bound_worker_handles) >= expected_workers
     checks: dict[str, dict[str, Any]] = {
         "valid_trajectory": {
             "expected": 1,
             "actual": valid_trajectories,
         },
-        "candidates": {
-            "expected": (
-                {
-                    "initial": expected_workers,
-                    "cumulative_minimum": expected_workers,
-                    "cumulative_maximum": max_candidates,
-                }
-                if scheduler_enabled
-                else expected_workers
-            ),
-            "actual": candidates,
-        },
-        "agent_sessions": {
-            "expected": (
-                {"initial": expected_workers, "cumulative_minimum": candidates}
-                if scheduler_enabled
-                else expected_workers
-            ),
-            "actual": (
-                {
-                    "initial": initial_agent_sessions,
-                    "cumulative": agent_sessions,
-                }
-                if scheduler_enabled
-                else agent_sessions
-            ),
-        },
+        "candidates": {"expected": expected_workers, "actual": candidates},
+        "agent_sessions": {"expected": expected_workers, "actual": agent_sessions},
         "worker_verifier_runs": {
             "expected": expected_workers,
             "actual": verifier_runs,
@@ -1129,39 +1016,14 @@ def goal_plus_completion_evidence(
             "expected": 1,
             "actual": max(len(selected), len(promoted)),
         },
-        "search_scheduler_contract": {
-            "expected": (
-                {
-                    "max_parallel": expected_workers,
-                    "max_candidates": max_candidates,
-                    "orchestration_mode": "adaptive_search",
-                    "search_scheduler": requested_scheduler_spec,
-                }
-                if scheduler_enabled
-                else "not required"
-            ),
-            "actual": actual_scheduler_contracts,
-        },
-        "scheduler_live_worker_limit": {
-            "expected": (
-                {"initial_workers": expected_workers, "maximum_live": expected_workers}
-                if scheduler_enabled
-                else "not required"
-            ),
-            "actual": scheduler_worker_evidence,
-        },
     }
     if cell["method"] == "goal-plus-codex":
         checks["actual_worker_launches"] = {
             "expected": expected_workers,
-            "actual": (
-                initial_bound_worker_handles
-                if scheduler_enabled
-                else spawned_worker_threads
-            ),
+            "actual": spawned_worker_threads,
         }
         checks["spawn_agent_event_coverage"] = {
-            "expected": candidates if scheduler_enabled else expected_workers,
+            "expected": expected_workers,
             "actual": max(spawned_worker_threads, bound_worker_handles),
         }
     checks["verifier_candidate_coverage"] = {
@@ -1177,8 +1039,6 @@ def goal_plus_completion_evidence(
             verifier_runs >= expected_workers,
             max(len(selected), len(promoted)) >= 1,
             len(verifier_candidates) >= expected_workers,
-            scheduler_contract_passed,
-            live_worker_limit_passed,
             (
                 actual_worker_launches_passed and spawn_coverage_passed
                 if cell["method"] == "goal-plus-codex"
@@ -1194,9 +1054,6 @@ def goal_plus_completion_evidence(
     actual_subagent_count = (
         confirmed_initial_worker_launches
         if recovery_agent_sessions
-        else
-        initial_agent_sessions
-        if scheduler_enabled and cell["method"] != "goal-plus-codex"
         else int(actual_subagent_check["actual"])
     )
     if cell["method"] != "goal-plus-codex":
@@ -1233,10 +1090,9 @@ def goal_plus_completion_evidence(
             else "Goal Plus Goal terminal status or final reports are missing"
             if not terminal_ready
             else "Goal Plus method did not persist the required initial K actual "
-            "subagents, scheduler candidate limit, verifier, promotion, and official "
+            "subagents, verifier, promotion, and official "
             "trajectory evidence"
         ),
-        "search_scheduler_enabled": scheduler_enabled,
         "actual_subagent_count": actual_subagent_count,
         "cumulative_candidate_count": candidates,
         "cumulative_agent_session_count": agent_sessions,
@@ -1296,7 +1152,6 @@ def successor_completion_evidence(
         "checks": {"current_search": {"expected": expected_workers, "actual": results},
                    "successor_history": {"expected": "invalidated predecessors and trajectory live workers <= K", "actual": histories}},
         "reason": None if passed else "Goal Plus current Search evidence or successor worker isolation is incomplete",
-        "search_scheduler_enabled": isinstance((cell.get("goal_plus_config") or {}).get("search_scheduler"), dict),
         "actual_subagent_count": max((item["actual_subagent_count"] for item in results), default=0),
         "cumulative_candidate_count": cumulative_candidates,
         "cumulative_agent_session_count": cumulative_sessions,

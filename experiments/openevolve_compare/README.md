@@ -23,10 +23,11 @@ Preparation records these names and the qualified worker model. Z.AI uses Pi's
 native protocol metadata; the exact host model catalog entry is required and projected
 into the isolated model configuration without copying authentication data.
 
-The Search prompt uses the current linked-Search lifecycle. `search_start_batch`
-materializes candidates; both hosts prepare candidate sessions and use
-`goal_plus_session_open/wake/wait/close`. An open receipt alone does not prove
-worker execution; native invocation receipts provide that evidence. Search is not an
+The Search prompt uses the current linked-Search lifecycle. `goal_plus_search_start_batch`
+materializes candidates; both hosts start and continue candidates with
+`goal_plus_session_run`, observe with `goal_plus_session_wait`, and close with
+`goal_plus_session_close`. Session allocation alone does not prove worker execution;
+native invocation receipts provide that evidence. Search is not an
 ordinary dispatch work item. Controller closeout does not create or accept
 placeholder work items, or reactivate a paused or aborted Goal.
 

@@ -1,7 +1,61 @@
-"""Read the frozen Main identity for supported local Goal Plus evidence."""
+"""Read Goal Plus execution identities and summarize native worker evidence."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any, Literal
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def summarize_worker_concurrency(
+    intervals: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Summarize persisted worker intervals for campaign evidence."""
+    normalized: list[dict[str, str]] = []
+    invalid_interval_count = 0
+    events: list[tuple[datetime, int]] = []
+    candidate_ids: set[str] = set()
+    for interval in intervals:
+        candidate_id = interval.get("candidate_id")
+        started_at = interval.get("started_at")
+        ended_at = interval.get("ended_at")
+        started = _parse_timestamp(started_at)
+        ended = _parse_timestamp(ended_at)
+        if (
+            not isinstance(candidate_id, str)
+            or not candidate_id
+            or started is None
+            or ended is None
+            or ended <= started
+        ):
+            invalid_interval_count += 1
+            continue
+        normalized.append(
+            {"candidate_id": candidate_id, "started_at": str(started_at),
+             "ended_at": str(ended_at)}
+        )
+        candidate_ids.add(candidate_id)
+        events.extend(((started, 1), (ended, -1)))
+    live_workers = 0
+    max_live_workers = 0
+    for _, delta in sorted(events, key=lambda event: (event[0], event[1])):
+        live_workers += delta
+        max_live_workers = max(max_live_workers, live_workers)
+    return {
+        "interval_count": len(normalized),
+        "invalid_interval_count": invalid_interval_count,
+        "candidate_ids": sorted(candidate_ids),
+        "max_live_workers": max_live_workers if normalized else None,
+        "intervals": normalized,
+    }
 
 
 def session_agent_harness(session: Mapping[str, Any]) -> Literal["codex", "pi"] | None:

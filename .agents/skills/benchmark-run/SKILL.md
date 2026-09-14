@@ -130,9 +130,7 @@ ready
 SearchSpec 与显式配置一致。worker budget、verifier、edit surface、evaluation mode 和
 benchmark-native Judge bridge 等尚未进入通用 command schema 的字段，继续留在任务
 正文。
-`strategy.search_scheduler` 及其独立的 `budget.max_candidates` 仍属于 SearchSpec 配置，
-但必须由 `plan` 冻结到 campaign manifest 并逐层传给 runner。`max_candidates=null` 表示
-不限制累计唯一 candidate，不能被 adapter 改写为 `max_parallel=K`。
+Bench 使用 `parallel_loops` 固定候选模式，按 hard score 选择；不启用可选质量评分或分配策略。
 profile 明确关闭 annotator 时省略 `annotator=`，不能写占位值。
 
 Common/OpenEvolve 和 SWE-bench Verified 使用 run-local source，配置

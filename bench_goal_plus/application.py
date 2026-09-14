@@ -20,7 +20,6 @@ from .models import (
     EvidenceBundle,
     TargetDefinition,
 )
-from .search_scheduler import GoalPlusSearchScheduler, resolve_search_scheduler
 from .paths import ROOT, RUNS_ROOT
 from .runners.factory import create_runner
 from .runners.openevolve_batch import DEFAULT_METHODS as OPENEVOLVE_METHODS
@@ -145,12 +144,6 @@ class BenchmarkAgent:
         cell_concurrency: int | None = None,
         worker_runtime_seconds: int | None = None,
         worker_min_runtime_seconds: int | None = None,
-        search_scheduler_model: str | None = None,
-        search_scheduler_reasoning_effort: str | None = None,
-        search_scheduler_timeout_seconds: int | None = None,
-        search_scheduler_reward: str | None = None,
-        search_scheduler_allocation: str | None = None,
-        max_candidates: int | None = None,
         retain_containers: bool = False,
     ) -> CampaignSpec:
         targets, preset = self.resolve_targets(target_ids=target_ids, preset_id=preset_id)
@@ -183,14 +176,6 @@ class BenchmarkAgent:
         selected_methods = tuple(methods)
         selected_seeds = tuple(seeds) or (1,)
         selected_conditions = tuple(conditions)
-        requested_search_scheduler = resolve_search_scheduler(
-            model=search_scheduler_model,
-            reasoning_effort=search_scheduler_reasoning_effort,
-            timeout_seconds=search_scheduler_timeout_seconds,
-            reward=search_scheduler_reward,
-            allocation=search_scheduler_allocation,
-            max_candidates=max_candidates,
-        )
         if shared_dir and (
             runner_definition.kind != "common-matrix"
             or not selected_methods
@@ -220,14 +205,6 @@ class BenchmarkAgent:
 
         if preset:
             expected = preset.expected_profile
-            expected_search_scheduler: GoalPlusSearchScheduler | None = None
-            if expected.get("search_scheduler") is not None:
-                expected_search_scheduler = GoalPlusSearchScheduler.from_mapping(
-                    {
-                        **expected["search_scheduler"],
-                        "max_candidates": expected.get("max_candidates"),
-                    }
-                )
             overrides = {
                 "model": model,
                 "reasoning_effort": reasoning_effort,
@@ -244,18 +221,6 @@ class BenchmarkAgent:
                 drift["methods"] = {
                     "expected": expected.get("methods"),
                     "requested": list(selected_methods),
-                }
-            if (
-                requested_search_scheduler is not None
-                and requested_search_scheduler != expected_search_scheduler
-            ):
-                drift["search_scheduler"] = {
-                    "expected": (
-                        expected_search_scheduler.as_dict()
-                        if expected_search_scheduler is not None
-                        else None
-                    ),
-                    "requested": requested_search_scheduler.as_dict(),
                 }
             if drift:
                 raise ContractError(
@@ -283,9 +248,6 @@ class BenchmarkAgent:
                 cell_concurrency
                 if cell_concurrency is not None
                 else expected.get("cell_concurrency")
-            )
-            requested_search_scheduler = (
-                requested_search_scheduler or expected_search_scheduler
             )
 
         if runner_definition.kind == "native-profile" and not selected_profile:
@@ -387,17 +349,6 @@ class BenchmarkAgent:
                     "K>1 is unsupported: methods without a Plain outer-trajectory "
                     "or Goal Plus internal-subagent topology require K=1"
                 )
-        if requested_search_scheduler is not None:
-            if not selected_methods or selected_conditions or any(
-                not method.startswith("goal-plus-") for method in selected_methods
-            ):
-                raise ContractError(
-                    "Search Scheduler requires explicit Goal Plus methods and cannot "
-                    "be combined with B0-B4 conditions"
-                )
-            requested_search_scheduler.validate_max_candidates(
-                live_search_concurrency
-            )
         for method in selected_methods:
             contract = runner_definition.method_contracts.get(method, {})
             if contract.get("model_format") == "provider/model":
@@ -436,7 +387,6 @@ class BenchmarkAgent:
             cell_concurrency=cell_concurrency,
             worker_runtime_seconds=worker_runtime_seconds,
             worker_min_runtime_seconds=worker_min_runtime_seconds,
-            search_scheduler=requested_search_scheduler,
             retain_containers=retain_containers,
             campaign_dir=campaign_dir,
         )

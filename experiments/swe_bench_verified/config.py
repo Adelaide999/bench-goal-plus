@@ -8,8 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from bench_goal_plus.errors import ContractError
-from bench_goal_plus.search_scheduler import search_scheduler_from_json
 from bench_goal_plus.upstreams import registered_upstream_source_path
 
 
@@ -120,6 +118,8 @@ def load_profile(profile_id: str) -> tuple[Path, dict[str, Any]]:
 
 
 def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
+    if "search_scheduler" in profile:
+        raise SweBenchContractError("search_scheduler is no longer supported; remove it from the profile")
     architecture = profile.get("architecture", "x86_64")
     if architecture not in {"x86_64", "arm64"}:
         raise SweBenchContractError("unsupported SWE-bench architecture")
@@ -437,17 +437,6 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
                 f"{profile_id}: K=2 is restricted to the Astropy Goal Plus + Codex "
                 "supplemental peer-comparison profile"
             )
-        try:
-            search_scheduler = search_scheduler_from_json(
-                profile.get("search_scheduler")
-            )
-        except ContractError as error:
-            raise SweBenchContractError(f"{profile_id}: {error}") from error
-        if search_scheduler is not None:
-            try:
-                search_scheduler.validate_max_candidates(concurrency)
-            except ContractError as error:
-                raise SweBenchContractError(f"{profile_id}: {error}") from error
     elif profile.get("goal_plus") is not None:
         raise SweBenchContractError(
             f"{profile_id}: goal_plus configuration requires a Goal Plus method"

@@ -7,8 +7,6 @@ from typing import Any, Iterable
 
 import yaml
 
-from bench_goal_plus.errors import ContractError
-from bench_goal_plus.search_scheduler import search_scheduler_from_json
 
 from . import io
 from .asset_issues import excluded_task_issues
@@ -198,6 +196,8 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
     if not candidate.is_file():
         raise FileNotFoundError(f"EdgeBench profile not found: {candidate}")
     profile = io.read_json(candidate)
+    if "search_scheduler" in profile:
+        raise ValueError("search_scheduler is no longer supported; remove it from the profile")
     if profile.get("schema_version") != 1:
         raise ValueError("unsupported EdgeBench profile schema")
     for key in (
@@ -251,17 +251,6 @@ def load_profile(value: str | Path) -> tuple[Path, dict[str, Any]]:
             if not isinstance(value, bool):
                 raise ValueError(f"{field} must be boolean")
             profile[field] = value
-        try:
-            search_scheduler = search_scheduler_from_json(
-                profile.get("search_scheduler")
-            )
-        except ContractError as error:
-            raise ValueError(f"invalid Search Scheduler profile: {error}") from error
-        if search_scheduler is not None:
-            try:
-                search_scheduler.validate_max_candidates(int(profile["concurrency"]))
-            except ContractError as error:
-                raise ValueError(str(error)) from error
     else:
         goal_plus_fields = {
             "global_evidence_mode",

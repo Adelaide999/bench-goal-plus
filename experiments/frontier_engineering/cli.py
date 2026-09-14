@@ -7,10 +7,6 @@ import json
 from pathlib import Path
 
 from bench_runtime_paths import configure_temp_environment
-from bench_goal_plus.search_scheduler import (
-    add_internal_search_scheduler_argument,
-    search_scheduler_from_namespace,
-)
 
 from .config import SUPPORTED_METHODS, campaign_dir, load_profile, pi_provider_config, resolve_profile
 from .environment import doctor, provision, runtime_source
@@ -26,7 +22,6 @@ def build_parser() -> argparse.ArgumentParser:
     source_parser = children.add_parser("runtime-source")
     source_parser.add_argument("--profile", required=True)
     source_parser.add_argument("--method", action="append", choices=sorted(SUPPORTED_METHODS))
-    add_internal_search_scheduler_argument(source_parser)
 
     doctor_parser = children.add_parser("doctor")
     doctor_parser.add_argument("--profile", required=True)
@@ -48,7 +43,6 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--concurrency", type=int)
     prepare_parser.add_argument("--cell-concurrency", type=int)
     prepare_parser.add_argument("--retain-containers", action="store_true")
-    add_internal_search_scheduler_argument(prepare_parser)
 
     run_parser = children.add_parser("run")
     run_parser.add_argument("--campaign", required=True)
@@ -103,10 +97,6 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.retain_containers:
             raise ValueError("frontier-engineering does not own retainable containers")
-        search_scheduler = search_scheduler_from_namespace(args)
-        if search_scheduler is not None:
-            search_scheduler.validate_max_candidates(resolved["concurrency"])
-            resolved["search_scheduler"] = search_scheduler.as_dict()
         from .runtime import prepare
 
         destination = prepare(args.campaign_id, resolved, profile_path)

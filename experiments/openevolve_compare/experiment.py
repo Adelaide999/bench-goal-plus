@@ -39,18 +39,11 @@ from bench_goal_plus.goal_plus_command import (  # noqa: E402
 )
 from bench_goal_plus.goal_plus_evidence import (  # noqa: E402
     frozen_agent_harness, session_agent_harness, session_worker_intervals,
+    summarize_worker_concurrency,
 )
 from bench_goal_plus.goal_plus_installation import (  # noqa: E402
     bind_goal_plus_environment,
     install_goal_plus,
-)
-from bench_goal_plus.search_scheduler import (  # noqa: E402
-    GoalPlusSearchScheduler,
-    add_internal_search_scheduler_argument,
-    render_search_scheduler_instructions,
-    search_scheduler_from_json,
-    search_scheduler_from_namespace,
-    summarize_worker_concurrency,
 )
 from bench_goal_plus.upstreams import (  # noqa: E402
     external_goal_plus_source,
@@ -264,7 +257,6 @@ def render_goal(
     search_space_mode: str | None = None,
     shared_dir_enabled: bool = False,
     controller_only_official_evaluation: bool = False,
-    search_scheduler: GoalPlusSearchScheduler | None = None,
     evaluation_mode: str | None = None,
     early_stop_contract: dict[str, Any] | None = None,
     outer_deadline_at: str | None = None,
@@ -330,12 +322,12 @@ def render_goal(
             f"with its verifier result. {mode_behavior}"
         )
     initial_launch_contract = (
-        "- After the one initial `search_plan_next` call, call `search_start_batch` "
-        "once to materialize the candidates. Prepare each candidate with "
-        "`search_start_agent_session`, then use `goal_plus_session_open` and "
-        "explicit `goal_plus_session_wake` / `goal_plus_session_wait` calls. "
+        "- After `goal_plus_search_plan_next`, call `goal_plus_search_start_batch` "
+        "once to materialize the candidates. Start each candidate with "
+        "`goal_plus_session_run`, then observe it with `goal_plus_session_wait`. "
         "Start every initial worker before waiting. Review settled Evidence and "
-        "wake the same session again while useful work and time remain. Close "
+        "call `goal_plus_session_run` with a new call_id to continue the same session "
+        "while useful work and time remain. Close "
         "sessions with `goal_plus_session_close` before final selection or host closeout.\n"
     )
     minimum_planning = (
@@ -348,7 +340,7 @@ def render_goal(
         f"- The absolute outer deadline is {outer_deadline_at}. "
         if outer_deadline_at is not None else "- Read the outer deadline from Goal status. "
     ) + (
-        f"Before each wake or wait, check current UTC and reserve {closeout_seconds} "
+        f"Before each run or wait, check current UTC and reserve {closeout_seconds} "
         "seconds for completion. Bound both invocation and wait timeouts by the "
         "remaining exploration time, not the original worker maximum. Give the worker "
         "that exploration cutoff and ask it to commit and submit its verifier before "
@@ -403,7 +395,7 @@ def render_goal(
             "Plus receives only the public verifier and its safe shared Evidence.\n\n"
             "- Honor every leading typed command field in the SearchSpec.\n"
             "- Set `strategy.inner_agent=\"autoresearch\"`.\n"
-            + render_search_scheduler_instructions(search_scheduler)
+            + '- Set `strategy.orchestration_mode="parallel_loops"`; use hard-score selection.\n'
             + "- Use the Goal's linked Search lifecycle for this optimization.\n"
             + "- Set `strategy.config.global_evidence_mode=\"manual\"` so every worker can "
             "read settled public-verifier Evidence from the other candidates as reference.\n"
@@ -452,7 +444,7 @@ def render_goal(
             "such commit. Compliance is determined only by the public format checker; its "
             "binary public signal may appear in Global Evidence, but no official metric may "
             "enter Search state. Goal Plus may settle only on this public gate. Do not "
-            "call `search_select`, `search_promote`, or record a final Search result from the "
+            "call `goal_plus_search_select`, `goal_plus_search_promote`, or record a final Search result from the "
             "agent process. The host controller applies the frozen rule, performs the sole "
             "promotion gate, completes the goal audit, and writes the final Goal Plus report "
             "inside the reserved closeout window before invoking the official evaluator.\n"
@@ -466,7 +458,7 @@ def render_goal(
         "workspaces, selection, promotion, and final reporting.\n\n"
         "- Honor every leading typed command field in the SearchSpec.\n"
         "- Set `strategy.inner_agent=\"autoresearch\"`.\n"
-        + render_search_scheduler_instructions(search_scheduler)
+        + '- Set `strategy.orchestration_mode="parallel_loops"`; use hard-score selection.\n'
         + "- Use the Goal's linked Search lifecycle for this optimization.\n"
         + (
             "- Set top-level `shared_dir.enabled=true`.\n"
@@ -707,12 +699,6 @@ def write_openevolve_config(
 def prepare(args: argparse.Namespace) -> int:
     method = canonical_method(args.method)
     is_sky = sky_backend.is_method(method)
-    search_scheduler = search_scheduler_from_namespace(args)
-    if search_scheduler is not None and method not in {
-        "goal-plus-codex",
-        "goal-plus-pi",
-    }:
-        raise ValueError("Search Scheduler requires a Goal Plus method")
     if args.wall_time_seconds <= args.soft_closeout_seconds:
         raise ValueError("wall time must be greater than the soft closeout reserve")
     if args.concurrency < 1:
@@ -842,7 +828,6 @@ def prepare(args: argparse.Namespace) -> int:
             agent_harness=agent_harness,
             worker_model=worker_model,
             reasoning_effort=args.reasoning_effort,
-            search_scheduler=search_scheduler,
         )
         (workspace / "GOAL.md").write_text(goal)
         workspaces.append(workspace)
@@ -872,11 +857,6 @@ def prepare(args: argparse.Namespace) -> int:
                 annotator_model=worker_model,
                 workspace_provider="git_worktree",
                 promotion_mode="apply",
-            ),
-            **(
-                {"search_scheduler": search_scheduler.as_dict()}
-                if search_scheduler is not None
-                else {}
             ),
             "agent_harness": agent_harness,
             "runtime_provider": "direct",
@@ -1045,11 +1025,6 @@ def prepare_batch(args: argparse.Namespace) -> int:
     """Prepare every task/method cell in a reusable experiment campaign."""
     run_root = args.run_root.expanduser().absolute()
     methods = list(dict.fromkeys(canonical_method(item) for item in args.methods))
-    search_scheduler = search_scheduler_from_namespace(args)
-    if search_scheduler is not None and any(
-        not method.startswith("goal-plus-") for method in methods
-    ):
-        raise ValueError("Search Scheduler requires only Goal Plus batch methods")
     tasks = list_catalog_tasks(args.task_set)
     if getattr(args, "task_id", None) is not None:
         tasks = [task for task in tasks if task["task_id"] == args.task_id]
@@ -1081,9 +1056,6 @@ def prepare_batch(args: argparse.Namespace) -> int:
                 pi_api=getattr(args, "pi_api", "openai-responses"),
                 pi_api_key_env=getattr(args, "pi_api_key_env", PI_API_KEY_ENV),
                 pi_api_base_env=getattr(args, "pi_api_base_env", "OPENAI_BASE_URL"),
-                search_scheduler_config_json=getattr(
-                    args, "search_scheduler_config_json", None
-                ),
             )
             entry = {
                 "task_id": task_id,
@@ -1110,11 +1082,6 @@ def prepare_batch(args: argparse.Namespace) -> int:
         "prepared_count": prepared_count,
         "model": args.model,
         "reasoning_effort": args.reasoning_effort,
-        **(
-            {"search_scheduler": search_scheduler.as_dict()}
-            if search_scheduler is not None
-            else {}
-        ),
         "seed": args.seed,
         "budget": {
             "wall_time_seconds": args.wall_time_seconds,
@@ -1470,8 +1437,6 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
         metric_direction = None
         agent_harness = None
         worker_budget = None
-        search_scheduler_enabled = False
-        search_scheduler_spec = None
         orchestration_mode = None
         max_parallel = None
         max_candidates = None
@@ -1485,8 +1450,6 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 strategy = spec.get("strategy") or {}
                 agent_harness = frozen_agent_harness(frozen)
                 worker_budget = strategy.get("worker_budget")
-                search_scheduler_spec = strategy.get("search_scheduler")
-                search_scheduler_enabled = search_scheduler_spec is not None
                 orchestration_mode = strategy.get("orchestration_mode")
                 budget = spec.get("budget") or {}
                 max_parallel = budget.get("max_parallel")
@@ -1577,8 +1540,6 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "candidate_count": len(candidate_paths),
                 "initial_candidate_count": len(initial_candidate_ids),
                 "initial_candidate_ids": sorted(initial_candidate_ids),
-                "search_scheduler_enabled": search_scheduler_enabled,
-                "search_scheduler": search_scheduler_spec,
                 "orchestration_mode": orchestration_mode,
                 "max_parallel": max_parallel,
                 "max_candidates": max_candidates,
@@ -1678,7 +1639,6 @@ def goal_plus_incomplete_reason(
     minimum_worker_verified_candidates: int | None = None,
     expected_goal_plus_id: str | None = None,
     expected_run_id: str | None = None,
-    expected_search_scheduler: GoalPlusSearchScheduler | None = None,
 ) -> str | None:
     goals = state.get("goals") or []
     if not goals:
@@ -1740,73 +1700,8 @@ def goal_plus_incomplete_reason(
                 "expected concurrency"
             )
         for run in runs:
-            scheduler_enabled = bool(run.get("search_scheduler_enabled"))
             candidate_count = int(run.get("candidate_count") or 0)
-            if expected_search_scheduler is not None and not scheduler_enabled:
-                return (
-                    f"Search run {run.get('run_id')} did not freeze the requested "
-                    "Search Scheduler"
-                )
-            if scheduler_enabled:
-                if run.get("orchestration_mode") != "adaptive_search":
-                    return (
-                        f"Search run {run.get('run_id')} froze scheduler mode "
-                        f"{run.get('orchestration_mode')!r}; expected 'adaptive_search'"
-                    )
-                if run.get("max_parallel") != expected_concurrency:
-                    return (
-                        f"Search run {run.get('run_id')} froze max_parallel="
-                        f"{run.get('max_parallel')!r}; expected K={expected_concurrency}"
-                    )
-                if expected_search_scheduler is not None and (
-                    run.get("search_scheduler")
-                    != expected_search_scheduler.scheduler_spec
-                    or run.get("max_candidates")
-                    != expected_search_scheduler.max_candidates
-                ):
-                    return (
-                        f"Search run {run.get('run_id')} frozen scheduler contract "
-                        "does not match the campaign configuration"
-                    )
-                if run.get("initial_candidate_count") != expected_concurrency:
-                    return (
-                        f"Search run {run.get('run_id')} materialized "
-                        f"{run.get('initial_candidate_count')} initial candidates; "
-                        f"expected K={expected_concurrency}"
-                    )
-                max_candidates = run.get("max_candidates")
-                if (
-                    candidate_count < expected_concurrency
-                    or (
-                        isinstance(max_candidates, int)
-                        and candidate_count > max_candidates
-                    )
-                ):
-                    return (
-                        f"Search run {run.get('run_id')} materialized "
-                        f"{candidate_count} cumulative candidates outside the scheduler "
-                        f"contract K={expected_concurrency}, "
-                        f"max_candidates={max_candidates!r}"
-                    )
-                all_concurrency = run.get("worker_concurrency") or {}
-                initial_concurrency = run.get("initial_worker_concurrency") or {}
-                candidate_ids = set(
-                    (run.get("bound_session_counts_by_candidate") or {}).keys()
-                )
-                if (
-                    all_concurrency.get("invalid_interval_count") != 0
-                    or set(all_concurrency.get("candidate_ids") or []) != candidate_ids
-                    or not isinstance(all_concurrency.get("max_live_workers"), int)
-                    or all_concurrency["max_live_workers"] > expected_concurrency
-                    or initial_concurrency.get("invalid_interval_count") != 0
-                    or set(initial_concurrency.get("candidate_ids") or [])
-                    != set(run.get("initial_candidate_ids") or [])
-                ):
-                    return (
-                        f"Search run {run.get('run_id')} lacks complete worker interval "
-                        f"evidence proving initial K and live workers <= K: {all_concurrency}"
-                    )
-            elif candidate_count != expected_concurrency:
+            if candidate_count != expected_concurrency:
                 return (
                     f"Search run {run.get('run_id')} materialized "
                     f"{candidate_count} candidates; expected {expected_concurrency}"
@@ -1820,9 +1715,7 @@ def goal_plus_incomplete_reason(
                 for candidate_id, count in session_counts.items()
                 if count != 1
             }
-            expected_session_candidates = (
-                candidate_count if scheduler_enabled else expected_concurrency
-            )
+            expected_session_candidates = expected_concurrency
             if (
                 len(session_counts) != expected_session_candidates
                 or duplicate_sessions
@@ -2085,7 +1978,7 @@ def finalize_goal_plus_search(
                         # Selection may append a controller-verifier iteration. The
                         # deadline snapshot, not that closeout side effect, is authoritative.
                         public_gate_expected = _prepare_public_gate_selection(run_path)
-                        selection = tools.search_select(run_id)
+                        selection = tools.goal_plus_search_select(run_id)
                         _validate_existing_public_gate_selection(
                             run_path,
                             selection,
@@ -2101,7 +1994,7 @@ def finalize_goal_plus_search(
                                 for candidate_path in candidate_paths:
                                     candidate = load_json(candidate_path)
                                     if not candidate.get("iterations"):
-                                        tools.search_run_verifier(
+                                        tools.goal_plus_search_run_verifier(
                                             run_id,
                                             candidate["candidate_id"],
                                             hypothesis="controller post-deadline final verification",
@@ -2109,12 +2002,12 @@ def finalize_goal_plus_search(
                                         verified_in_closeout.append(
                                             candidate["candidate_id"]
                                         )
-                            selection = tools.search_select(run_id)
+                            selection = tools.goal_plus_search_select(run_id)
                             candidate_id = selection["selected_candidate_id"]
                             run_data = load_json(run_path)
                         else:
                             run_data, candidate_id, selection = selected
-                    promotion = tools.search_promote(run_id, candidate_id)
+                    promotion = tools.goal_plus_search_promote(run_id, candidate_id)
                 except RuntimeError:
                     existing = _existing_promotion(run_path)
                     if existing is not None:
@@ -2133,13 +2026,13 @@ def finalize_goal_plus_search(
                         if selected is None:
                             raise
                         run_data, candidate_id, selection = selected
-                        promotion = tools.search_promote(run_id, candidate_id)
+                        promotion = tools.goal_plus_search_promote(run_id, candidate_id)
             publication = search_runtime.promotion_record(run_id)
             if publication.promotion_mode == "apply":
                 if publication.state == "applied":
                     patch_status = "already_applied"
                 else:
-                    applied = tools.search_apply_promotion(run_id)
+                    applied = tools.goal_plus_search_apply_promotion(run_id)
                     if applied["state"] != "applied":
                         raise RuntimeError("Goal Plus publication has not been applied")
                     patch_status = "applied"
@@ -2182,7 +2075,7 @@ def finalize_goal_plus_search(
                 for goal_plus_id in goal_ids
             }
             final_run_data = load_json(run_path)
-            report = tools.search_report(run_id)
+            report = tools.goal_plus_search_report(run_id)
             result["runs"].append(
                 {
                     "goal_plus_ids": goal_ids,
@@ -2815,9 +2708,6 @@ def execute(args: argparse.Namespace) -> int:
             )
     else:
         workspace = Path(manifest["workspace"])
-        search_scheduler = search_scheduler_from_json(
-            (manifest.get("goal_plus_config") or {}).get("search_scheduler")
-        )
         write_json(run_dir / "seed-eval.json", evaluate_workspace(workspace, "public"))
         setup_evaluator_calls = evaluator_budget_for_workspace(workspace)[
             "total_claimed"
@@ -2838,7 +2728,6 @@ def execute(args: argparse.Namespace) -> int:
                 agent_harness="codex",
                 worker_model=args.model,
                 reasoning_effort=reasoning_effort,
-                search_scheduler=search_scheduler,
                 outer_deadline_at=deadline.isoformat(),
             )
             command = [
@@ -2876,7 +2765,6 @@ def execute(args: argparse.Namespace) -> int:
                 agent_harness="pi",
                 worker_model=qualified_model,
                 reasoning_effort=reasoning_effort,
-                search_scheduler=search_scheduler,
                 outer_deadline_at=deadline.isoformat(),
             )
             pi_home = run_dir / "pi-home"
@@ -2960,7 +2848,6 @@ def execute(args: argparse.Namespace) -> int:
         goal_reason = goal_plus_incomplete_reason(
             control["goal_plus"],
             expected_concurrency=budget["concurrency"],
-            expected_search_scheduler=search_scheduler,
             minimum_worker_verified_candidates=(1 if settled else None),
         )
         if goal_reason and not control.get("result_incomplete_reason"):
@@ -3062,9 +2949,6 @@ def repair_closeout(args: argparse.Namespace) -> int:
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=manifest["budget"]["concurrency"],
-        expected_search_scheduler=search_scheduler_from_json(
-            (manifest.get("goal_plus_config") or {}).get("search_scheduler")
-        ),
         minimum_worker_verified_candidates=(1 if settled else None),
     )
     if reason is None and not control.get("hard_killed"):
@@ -3113,7 +2997,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--checkout-root", type=Path, default=DEFAULT_CHECKOUT_ROOT
     )
     prepare_parser.add_argument("--venv", type=Path, default=DEFAULT_VENV)
-    add_internal_search_scheduler_argument(prepare_parser)
 
     prepare_batch_parser = subparsers.add_parser("prepare-batch")
     prepare_batch_parser.add_argument("--task-set", default="cpu_portable")
@@ -3150,7 +3033,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--checkout-root", type=Path, default=DEFAULT_CHECKOUT_ROOT
     )
     prepare_batch_parser.add_argument("--venv", type=Path, default=DEFAULT_VENV)
-    add_internal_search_scheduler_argument(prepare_batch_parser)
 
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--run-dir", type=Path, required=True)

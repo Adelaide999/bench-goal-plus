@@ -14,11 +14,10 @@ Goal Plus 把 `K` 映射为共享一份 Search 状态的内部 subagent。其他
 明确声明并验证其 K 拓扑后才能使用 `K>1`。
 必须保留每种方法的原生控制流，并在运行后报告实际 Agent/subagent 数、evaluator call、
 iteration、token、cost coverage 和实际墙钟时间。
-Goal Plus 的新 SearchSpec 只用 `budget.max_parallel` 承载 `K`；
-启用 `search_scheduler` 时，`budget.max_candidates` 是独立的累计唯一 candidate 上限。
-它可以是正整数（且不得小于 `K`），也可以是 `null`（无累计上限）；不得把它映射回 `K`。
-Scheduler 模式必须分别报告初始实际 worker 数、live worker 上限和累计 candidate/session 数；
-淘汰派生后累计数可以大于 `K`，不能据此把 campaign 误判为并发不匹配。
+Goal Plus 的 SearchSpec 用 `budget.max_parallel` 承载 `K`。
+Bench 使用 `parallel_loops` 固定候选模式，按 hard score 选择。
+EdgeBench 的受控 recovery 分别记录初始 worker、恢复 session 和实际峰值并发，
+按仓库贡献者规则校验初始 `K`，不把恢复 session 当作新增并发额度。
 新 cell 的精确 `$goal-plus`/`/goal-plus` 命令还必须显式包含 `max_parallel=K`；runtime
 把它持久化为 `command_config` 并机械约束 ready SearchSpec。只在目标正文写
 `budget.max_parallel=K` 不构成 K 配置证据。

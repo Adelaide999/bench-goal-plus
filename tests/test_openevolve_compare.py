@@ -278,8 +278,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         )
         self.assertNotIn(" -- ", prompt.splitlines()[0])
         self.assertNotIn("`budget.max_parallel=2`", prompt)
-        self.assertIn("Leave `strategy.search_scheduler` unset", prompt)
-        self.assertIn("omit `budget.max_candidates`", prompt)
+        self.assertIn('strategy.orchestration_mode="parallel_loops"', prompt)
+        self.assertNotIn("budget.max_candidates", prompt)
         self.assertIn("240 seconds", prompt)
         self.assertIn("not hard-capped", prompt)
         self.assertIn("GOAL_PLUS_OUTER_DEADLINE_AT", prompt)
@@ -293,8 +293,9 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("allow only `candidate.py`", prompt)
         self.assertNotIn("goal_plus_id=", prompt)
         self.assertIn("search_start_batch", prompt)
-        self.assertIn("goal_plus_session_open", prompt)
-        self.assertIn("goal_plus_session_wake", prompt)
+        self.assertIn("goal_plus_session_run", prompt)
+        self.assertNotIn("goal_plus_session_open", prompt)
+        self.assertNotIn("goal_plus_session_wake", prompt)
         self.assertIn("goal_plus_session_close", prompt)
         self.assertIn("goal_plus_session_wait", prompt)
         self.assertNotIn("actual `spawn_agent` call", prompt)
@@ -403,18 +404,20 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 "item": {
                     "type": "mcp_tool_call",
                     "server": "goal-plus",
-                    "tool": "search_start_agent_session",
+                    "tool": "goal_plus_session_run",
                     "status": "completed",
                     "arguments": {
                         "run_id": "run_test",
                         "candidate_id": "c001",
+                        "call_id": "call-1",
                     },
                     "result": {
                         "structured_content": {
                             "run_id": "run_test",
                             "candidate_id": "c001",
-                            "agent_session_id": "agent_001",
-                            "host": "codex",
+                            "session_id": "agent_001",
+                            "call_id": "call-1",
+                            "state": "running",
                         }
                     },
                 },
@@ -468,9 +471,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         events = []
         for session_id in ("agent_001", "agent_002"):
             for tool, arguments, result in (
-                ("goal_plus_session_open", {"agent_session_id": session_id}, {
-                    "session_id": session_id, "native_session_id": "native-worker",
-                    "agent_harness": "codex", "runtime_provider": "direct",
+                ("goal_plus_session_run", {"run_id": "run_test", "candidate_id": "c001", "call_id": "call-1"}, {
+                    "session_id": session_id, "call_id": "call-1", "state": "running",
                 }),
                 ("goal_plus_session_wait", {"session_id": session_id, "call_id": "call-1"}, {
                     "call_id": "call-1", "state": "completed", "result": {
@@ -494,6 +496,15 @@ class OpenEvolveComparisonTest(unittest.TestCase):
 
         self.assertEqual(result["goal_plus"]["bound_worker_session_count"], 2)
         self.assertEqual(result["goal_plus"]["bound_worker_handle_count"], 1)
+
+        from bench_goal_plus.agent_events import parse_codex_event_text
+
+        run_only = parse_codex_event_text(json.dumps(events[0]))
+        self.assertEqual(run_only["goal_plus"]["agent_session_ids"], ["agent_001"])
+        self.assertEqual(run_only["goal_plus"]["bound_worker_handle_count"], 0)
+        events[1]["item"]["arguments"]["call_id"] = "other-call"
+        mismatched = parse_codex_event_text("\n".join(json.dumps(item) for item in events[:2]))
+        self.assertEqual(mismatched["goal_plus"]["bound_worker_handle_count"], 0)
 
     def test_goal_plus_completion_requires_worker_verifier_evidence_for_every_candidate(
         self,
@@ -670,7 +681,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             worker_model="provider/model",
         )
 
-        self.assertIn("`goal_plus_session_open`", prompt)
+        self.assertIn("`goal_plus_session_run`", prompt)
         self.assertIn("`goal_plus_session_wait`", prompt)
         self.assertNotIn("`spawn_agent`", prompt)
 
@@ -760,14 +771,16 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             goal.status = "active"
             goal_runtime = mock.Mock()
             goal_runtime.status.return_value = goal
-            tools = mock.Mock()
-            tools.search_report.return_value = {"report_path": "report.md"}
+            from goal_plus.tools import SearchTools
+
+            tools = mock.Mock(spec_set=SearchTools)
+            tools.goal_plus_search_report.return_value = {"report_path": "report.md"}
             search_runtime = mock.Mock()
             search_runtime.promotion_record.return_value.promotion_mode = "apply"
-            tools.search_apply_promotion.return_value = {"state": "applied"}
+            tools.goal_plus_search_apply_promotion.return_value = {"state": "applied"}
 
             def require_applied_publication(*args, **kwargs):
-                tools.search_apply_promotion.assert_called_once_with("run_test")
+                tools.goal_plus_search_apply_promotion.assert_called_once_with("run_test")
 
             goal_runtime.record_search_result.side_effect = require_applied_publication
 
@@ -778,7 +791,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                     "cannot record verifier result: run run_test is in state promoted"
                 )
 
-            tools.search_select.side_effect = finish_promotion_then_fail
+            tools.goal_plus_search_select.side_effect = finish_promotion_then_fail
             with (
                 mock.patch.object(
                     experiment,
@@ -801,13 +814,13 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 result["runs"][0]["selection"]["reused_existing_promotion"]
             )
             apply_patch.assert_not_called()
-            tools.search_apply_promotion.assert_called_once_with("run_test")
-            tools.search_promote.assert_not_called()
+            tools.goal_plus_search_apply_promotion.assert_called_once_with("run_test")
+            tools.goal_plus_search_promote.assert_not_called()
             goal_runtime.upsert_work_items.assert_not_called()
             goal_runtime.record_work_event.assert_not_called()
 
             goal_runtime.record_search_result.reset_mock()
-            tools.search_apply_promotion.return_value = {"state": "awaiting_main_integration"}
+            tools.goal_plus_search_apply_promotion.return_value = {"state": "awaiting_main_integration"}
             with mock.patch.object(
                 experiment, "_goal_plus_runtime_types",
                 return_value=(mock.Mock(return_value=goal_runtime),
@@ -822,7 +835,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             search_runtime.promotion_record.return_value.state = "applied"
             goal.status = "complete"
             goal.linked_search.selected_candidate_id = "c001"
-            tools.search_apply_promotion.reset_mock()
+            tools.goal_plus_search_apply_promotion.reset_mock()
             goal_runtime.set_status.reset_mock()
             with mock.patch.object(
                 experiment, "_goal_plus_runtime_types",
@@ -833,7 +846,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 replay = experiment.finalize_goal_plus_search(workspace)
             self.assertTrue(replay["completed"], replay)
             self.assertEqual(replay["runs"][0]["source_patch_status"], "already_applied")
-            tools.search_apply_promotion.assert_not_called()
+            tools.goal_plus_search_apply_promotion.assert_not_called()
             goal_runtime.record_search_result.assert_not_called()
             goal_runtime.set_status.assert_not_called()
 
@@ -879,9 +892,11 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             goal.status = "active"
             goal_runtime = mock.Mock()
             goal_runtime.status.return_value = goal
-            tools = mock.Mock()
-            tools.search_promote.return_value = {"artifact_path": str(patch_path)}
-            tools.search_report.return_value = {"report_path": "report.md"}
+            from goal_plus.tools import SearchTools
+
+            tools = mock.Mock(spec_set=SearchTools)
+            tools.goal_plus_search_promote.return_value = {"artifact_path": str(patch_path)}
+            tools.goal_plus_search_report.return_value = {"report_path": "report.md"}
 
             with (
                 mock.patch.object(
@@ -903,9 +918,9 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             self.assertTrue(
                 result["runs"][0]["selection"]["reused_existing_selection"]
             )
-            tools.search_select.assert_not_called()
-            tools.search_run_verifier.assert_not_called()
-            tools.search_promote.assert_called_once_with("run_test", "c001")
+            tools.goal_plus_search_select.assert_not_called()
+            tools.goal_plus_search_run_verifier.assert_not_called()
+            tools.goal_plus_search_promote.assert_called_once_with("run_test", "c001")
 
     def test_evaluator_budget_snapshot_uses_controller_runtime_at_t0(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

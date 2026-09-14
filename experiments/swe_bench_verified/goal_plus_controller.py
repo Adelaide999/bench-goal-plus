@@ -140,7 +140,7 @@ def closeout(root: Path, source: Path, *, session_timeout_seconds: int) -> dict[
                 for candidate_path in candidates:
                     candidate = _read_json(candidate_path)
                     if not candidate.get("iterations"):
-                        tools.search_run_verifier(
+                        tools.goal_plus_search_run_verifier(
                             run_id,
                             str(candidate["candidate_id"]),
                             hypothesis="controller post-budget final verification",
@@ -156,12 +156,12 @@ def closeout(root: Path, source: Path, *, session_timeout_seconds: int) -> dict[
                 run, candidate_id, selection, promotion = existing_promotion
             else:
                 if existing_selection is None:
-                    selection = tools.search_select(run_id)
+                    selection = tools.goal_plus_search_select(run_id)
                     candidate_id = str(selection["selected_candidate_id"])
                     run = _read_json(run_path)
                 else:
                     run, candidate_id, selection = existing_selection
-                promotion = tools.search_promote(run_id, candidate_id)
+                promotion = tools.goal_plus_search_promote(run_id, candidate_id)
 
             patch = Path(str(promotion["artifact_path"])).resolve()
             expected_promotion_root = (run_path.parent / "promotion").resolve()
@@ -173,7 +173,7 @@ def closeout(root: Path, source: Path, *, session_timeout_seconds: int) -> dict[
             if publication.state == "applied":
                 patch_status = "already_applied"
             else:
-                applied = tools.search_apply_promotion(run_id)
+                applied = tools.goal_plus_search_apply_promotion(run_id)
                 if applied["state"] != "applied":
                     raise RuntimeError("Goal Plus publication has not been applied")
                 patch_status = "applied"
@@ -203,7 +203,7 @@ def closeout(root: Path, source: Path, *, session_timeout_seconds: int) -> dict[
                             }
                         ],
                     )
-            report = tools.search_report(run_id)
+            report = tools.goal_plus_search_report(run_id)
             result["runs"].append(
                 {
                     "run_id": run_id,

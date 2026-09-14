@@ -2,7 +2,7 @@
 
 Goal Plus derives the Agent family from its authorized Main session. SearchSpec
 does not accept `strategy.worker_host`, `worker_launch.agent_profile`,
-`evidence_annotator.host`, or `search_scheduler.host`. Models and reasoning remain
+or `evidence_annotator.host`. Models and reasoning remain
 role-specific; this migration does not change their defaults.
 
 Bench selects the native entrypoint through its method (`goal-plus-codex`,
@@ -25,9 +25,10 @@ Host retry admission executes the virtualenv Python path from the installation
 receipt directly. It must not use a relocated Python symlink, which can lose
 the virtualenv's package search path. The task's default Python is preserved.
 
-Main prepares a candidate, calls `goal_plus_session_open`, then explicitly uses
-`goal_plus_session_wake/wait` for each invocation and closes the session after
-delivery. Opening alone is not proof of a model invocation. Archived
+Main starts a candidate with `goal_plus_session_run`, observes it with
+`goal_plus_session_wait`, and continues the same session with a new call ID when
+needed. Main closes the session after delivery. Session allocation alone is not
+proof of a model invocation. Archived
 `session_handle.metadata.dispatches` provide exact native invocation identities
 and execution intervals for concurrency evidence. Missing intervals remain
 unknown; process registration/release is not an execution interval. The live
@@ -46,19 +47,15 @@ Search result to be recorded, and both final report files to be present. Missing
 or undecodable Goal records fail this gate. Worker success, promotion, and a
 valid Judge score remain useful evidence but do not alone complete the Goal.
 
-Scheduler CLI configuration now consists of `--search-scheduler-model`,
-`--search-scheduler-reasoning-effort`, `--search-scheduler-timeout-seconds`,
-`--search-scheduler-reward`, and `--search-scheduler-allocation`.
-Remove `--search-scheduler-host` and the nested `host` key from existing scheduler
-configuration files. A nested `host` is rejected instead of silently ignored.
-`K` remains `budget.max_parallel`; `max_candidates` is an independent cumulative
-limit for Adaptive Search. Without a Scheduler, prompts use `parallel_loops`.
+Bench uses `parallel_loops` with fixed candidates and hard-score selection.
+`K` remains `budget.max_parallel`. The retired Scheduler CLI and configuration
+are no longer supported. Goal Plus's optional quality scoring and Adaptive
+Allocation are not enabled by Bench.
 
 The EdgeBench adapter is owned by the separate checkout at
 `third_party/edgebench`, tracking the `mac` branch specified in
 `environment/upstreams.json`. Its Pi, provider Pi, Codex, and solo Codex prompts
-must be updated together. Codex and Pi consume the controller's encoded Scheduler
-instructions when configured. Updating only this control-plane repository does
+must be updated together. Updating only this control-plane repository does
 not update that fork. Retain and review both diffs before publishing either.
 
 Old Goal Plus frozen records require their original plugin version for runtime
@@ -81,9 +78,10 @@ Goal Plus worker budget only receives the supported maximum runtime and
 OpenEvolve's default worker maximum is the exploration allocation (`T` minus the
 planned closeout reserve); an explicit worker maximum takes precedence. It no
 longer imposes the old 30-60 second default. Main explicitly decides whether to
-wake a session again. Native invocation receipts replace Pi pool jobs and Codex
+run another turn in a session. Native invocation receipts replace Pi pool jobs
+and Codex
 minimum-lease files in execution and concurrency evidence.
-Before each wake or wait, Main receives the absolute deadline and must calculate
+Before each run or wait, Main receives the absolute deadline and must calculate
 the remaining exploration time after its planned closeout reserve. A wait timeout
 does not stop a native invocation. Common/OpenEvolve use the same persisted
 invocation evidence for Codex and Pi; outer `spawn_agent` events are diagnostic

@@ -7,10 +7,6 @@ import json
 from pathlib import Path
 
 from bench_runtime_paths import configure_temp_environment
-from bench_goal_plus.search_scheduler import (
-    add_internal_search_scheduler_argument,
-    search_scheduler_from_namespace,
-)
 
 from .config import SUPPORTED_METHODS, campaign_dir, load_profile, resolve_profile
 from .environment import doctor
@@ -44,7 +40,6 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--cell-concurrency", type=int)
     prepare_parser.add_argument("--seed", type=int, default=1)
     prepare_parser.add_argument("--retain-containers", action="store_true")
-    add_internal_search_scheduler_argument(prepare_parser)
 
     for command in ("run", "status", "finalize"):
         child = children.add_parser(command)
@@ -85,10 +80,6 @@ def main(argv: list[str] | None = None) -> int:
                 local_assets_only=args.local_assets_only,
                 allow_missing_local_assets=args.allow_missing_local_assets,
             )
-        search_scheduler = search_scheduler_from_namespace(args)
-        if search_scheduler is not None:
-            search_scheduler.validate_max_candidates(resolved["concurrency"])
-            resolved["search_scheduler"] = search_scheduler.as_dict()
         from .runtime import prepare
 
         prepare(args.campaign_id, resolved)

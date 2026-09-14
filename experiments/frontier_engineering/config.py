@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from bench_goal_plus.errors import ContractError
-from bench_goal_plus.search_scheduler import search_scheduler_from_json
 from bench_goal_plus.upstreams import registered_upstream_source_path
 
 
@@ -165,6 +163,8 @@ def load_profile(profile_id: str) -> tuple[Path, dict[str, Any]]:
 
 
 def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
+    if "search_scheduler" in profile:
+        raise FrontierEngineeringContractError("search_scheduler is no longer supported; remove it from the profile")
     if profile.get("schema_version") != 1 or profile.get("id") != profile_id:
         raise FrontierEngineeringContractError(
             f"{profile_id}: schema_version/id does not match profile"
@@ -245,21 +245,6 @@ def validate_profile(profile_id: str, profile: dict[str, Any]) -> None:
         raise FrontierEngineeringContractError(
             f"{profile_id}: non-Goal-Plus methods require K=1"
         )
-    try:
-        search_scheduler = search_scheduler_from_json(
-            profile.get("search_scheduler")
-        )
-    except ContractError as error:
-        raise FrontierEngineeringContractError(
-            f"{profile_id}: {error}"
-        ) from error
-    if search_scheduler is not None:
-        try:
-            search_scheduler.validate_max_candidates(profile["concurrency"])
-        except ContractError as error:
-            raise FrontierEngineeringContractError(
-                f"{profile_id}: {error}"
-            ) from error
     if profile["cell_concurrency"] != 1:
         raise FrontierEngineeringContractError(
             f"{profile_id}: Frontier-Engineering initially supports C=1"

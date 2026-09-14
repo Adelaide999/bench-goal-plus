@@ -36,12 +36,6 @@ from bench_goal_plus.goal_plus_command import (  # noqa: E402
     goal_plus_command_config,
     goal_plus_entrypoint,
 )
-from bench_goal_plus.search_scheduler import (  # noqa: E402
-    GoalPlusSearchScheduler,
-    add_internal_search_scheduler_argument,
-    search_scheduler_from_json,
-    search_scheduler_from_namespace,
-)
 from bench_runtime_paths import (  # noqa: E402
     configure_temp_environment,
 )
@@ -169,7 +163,6 @@ class PrepareConfig:
     hard_kill_grace_seconds: int = DEFAULT_HARD_KILL_GRACE_SECONDS
     worker_runtime_seconds: int = DEFAULT_WORKER_RUNTIME_SECONDS
     worker_min_runtime_seconds: int | None = None
-    search_scheduler: GoalPlusSearchScheduler | None = None
     iterations_ceiling: int = 1
     seed: int = 1
     reasoning_effort: str = DEFAULT_REASONING_EFFORT
@@ -208,7 +201,6 @@ def add_runtime_prepare_arguments(
     parser.add_argument("--pi-api", choices=PI_APIS, default="openai-responses")
     parser.add_argument("--pi-api-key-env", default=PI_API_KEY_ENV)
     parser.add_argument("--shared-dir", action="store_true")
-    add_internal_search_scheduler_argument(parser)
     parser.add_argument(
         "--reasoning-effort",
         choices=reasoning_choices,
@@ -530,12 +522,6 @@ def prepare(args: argparse.Namespace) -> int:
         task_id=getattr(args, "task_id", None),
         module_name=getattr(args, "adapter_module", None),
     )
-    search_scheduler = search_scheduler_from_namespace(args)
-    if search_scheduler is not None and args.method not in {
-        "goal-plus-codex",
-        "goal-plus-pi",
-    }:
-        raise ValueError("Search Scheduler requires a Goal Plus method")
     validate_controller_only_method(args.method)
     is_sky = sky_backend.is_method(args.method)
     condition = resolve_condition(
@@ -667,7 +653,6 @@ def prepare(args: argparse.Namespace) -> int:
             controller_only_official_evaluation=(
                 CONTROLLER_ONLY_OFFICIAL_EVALUATION
             ),
-            search_scheduler=search_scheduler,
         )
         prompt_contract = {
             "mode": f"{args.method.replace('-', '_')}_common_prompt",
@@ -754,11 +739,6 @@ def prepare(args: argparse.Namespace) -> int:
                     if EVALUATION_MODE == "blind"
                     else "apply"
                 ),
-            ),
-            **(
-                {"search_scheduler": search_scheduler.as_dict()}
-                if search_scheduler is not None
-                else {}
             ),
             "agent_harness": agent_harness,
             "runtime_provider": "direct",
@@ -2151,9 +2131,6 @@ def execute_goal_plus(
         ),
         api_base=None if is_pi else args.api_base,
     )
-    search_scheduler = search_scheduler_from_json(
-        (manifest.get("goal_plus_config") or {}).get("search_scheduler")
-    )
     prompt = render_goal(
         task_text=(workspace / "TASK.md").read_text(),
         artifact_name=ARTIFACT_NAME,
@@ -2178,7 +2155,6 @@ def execute_goal_plus(
             (manifest.get("goal_plus_config") or {}).get("shared_dir_enabled")
         ),
         controller_only_official_evaluation=controller_only,
-        search_scheduler=search_scheduler,
         evaluation_mode=EVALUATION_MODE,
         early_stop_contract=early_stop,
         outer_deadline_at=deadline.isoformat(),
