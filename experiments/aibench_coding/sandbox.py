@@ -115,6 +115,8 @@ def _runtime_mount(executable: Path) -> Path:
                 None,
             )
             return pnpm_store if pnpm_store is not None else parent
+    if resolved.name.startswith("python") and resolved.parent.name == "bin":
+        return resolved.parent.parent
     return resolved
 
 

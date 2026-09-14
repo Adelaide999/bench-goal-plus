@@ -1314,6 +1314,17 @@ class AIBenchCodingContractTest(unittest.TestCase):
         with mock.patch.object(sandbox.Path, "home", return_value=fake_home):
             self.assertEqual(sandbox._runtime_mount(binary), binary.resolve())
 
+    def test_bubblewrap_mounts_python_distribution_behind_venv_symlink(self) -> None:
+        runtime = self.root / "python-runtime"
+        interpreter = runtime / "bin/python3.12"
+        interpreter.parent.mkdir(parents=True)
+        interpreter.write_text("", encoding="utf-8")
+        venv_python = self.root / "venv/bin/python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.symlink_to(interpreter)
+
+        self.assertEqual(sandbox._runtime_mount(venv_python), runtime.resolve())
+
     def test_bubblewrap_preserves_npm_pi_symlink_for_nested_worker(self) -> None:
         fake_home = self.root / "home"
         node_modules = fake_home / ".local" / "lib" / "node_modules"
