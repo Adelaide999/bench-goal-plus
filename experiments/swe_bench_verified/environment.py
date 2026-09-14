@@ -525,44 +525,30 @@ def routed_pi_runtime(
 
 
 def goal_plus_install_script(*, pi_cli: str | None) -> str:
-    installer = (
-        "import os, sys; "
-        "cache = os.stat('/opt/pip-cache'); "
-        "os.chown('/opt/agent-tmp', cache.st_uid, cache.st_gid); "
-        "os.chown('/opt/goal-plus-runtime', cache.st_uid, cache.st_gid); "
-        "os.setgroups([]); "
-        "os.setgid(cache.st_gid); "
-        "os.setuid(cache.st_uid); "
-        "os.execv(sys.executable, [sys.executable, '-m', 'pip', 'install', "
-        "'--disable-pip-version-check', '--no-input', "
-        "'--target', '/opt/goal-plus-runtime', "
-        "'-r', '/opt/goal-plus-runtime-requirements.lock'])"
-    )
+    harness = "pi" if pi_cli is not None else "codex"
     commands = [
         "export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH",
         "mkdir -p /opt/goal-plus-runtime /opt/goal-plus-bin",
+        "export GOAL_PLUS_INSTALL_HOME=/opt/goal-plus-runtime/install",
+        "export CODEX_HOME=/opt/codex-home PI_CODING_AGENT_DIR=/opt/pi-home/.pi/agent",
+        "export npm_config_cache=/opt/agent-tmp/npm-cache",
     ]
     if pi_cli is not None:
-        commands.extend([
-            '"${GOAL_PLUS_BASE_PYTHON:-python}" -m venv /opt/goal-plus-runtime/venv',
-            "export GOAL_PLUS_PYTHON=/opt/goal-plus-runtime/venv/bin/python",
-            "export PATH=/opt/goal-plus-runtime/venv/bin:$PATH",
-        ])
-    commands.append(f'"${{GOAL_PLUS_PYTHON:-python}}" -c "{installer}"')
-    if pi_cli is not None:
-        commands.extend(
-            [
-                "mkdir -p /opt/pi-home/.pi/agent",
-                f"ln -sf {shlex.quote(pi_cli)} /opt/goal-plus-bin/pi",
-                'PIP_NO_CACHE_DIR=1 PYTHON="$GOAL_PLUS_PYTHON" /opt/goal-plus/install.sh --pi',
-                'for entry in /opt/goal-plus-runtime/venv/bin/goal-plus*; do ln -sf "$entry" /opt/goal-plus-bin/; done',
-            ]
-        )
+        commands.append(f"ln -sf {shlex.quote(pi_cli)} /opt/goal-plus-bin/pi")
     else:
-        commands.extend([
-            "printf '#!/bin/sh\\nexec python -m goal_plus.server \"$@\"\\n' > /opt/goal-plus-bin/goal-plus",
-            "chmod 0555 /opt/goal-plus-bin/goal-plus",
-        ])
+        commands.append(
+            "ln -sf /opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex /opt/goal-plus-bin/codex"
+        )
+    commands.extend([
+        f"/opt/goal-plus/install.sh --{harness} --yes",
+        "/opt/goal-plus/install.sh --runtime-info > /opt/goal-plus-runtime/receipt.json",
+        "GP_INSTALLED_PYTHON=$(python -c 'import json; print(json.load(open(\"/opt/goal-plus-runtime/receipt.json\"))[\"python\"])')",
+        'ln -sf "$(dirname "$GP_INSTALLED_PYTHON")/goal-plus" /opt/goal-plus-bin/goal-plus',
+        "printf '#!/bin/sh\\nexec \"%s\" -I \"$@\"\\n' \"$GP_INSTALLED_PYTHON\" > /opt/goal-plus-bin/goal-plus-python",
+        "chmod 0555 /opt/goal-plus-bin/goal-plus-python",
+        "export GOAL_PLUS_PYTHON=/opt/goal-plus-bin/goal-plus-python",
+        '"$GP_INSTALLED_PYTHON" -I -m goal_plus.installation',
+    ])
     return " && ".join(commands)
 
 
@@ -573,10 +559,8 @@ def goal_plus_runtime_environment(runtime: dict[str, Any] | None = None) -> dict
         "TMP": "/opt/agent-tmp",
         "TEMP": "/opt/agent-tmp",
         "PIP_CACHE_DIR": "/opt/pip-cache",
-        "PYTHONPATH": "/opt/goal-plus-runtime:/opt/goal-plus/src",
-        "GOAL_PLUS_PYTHON": (
-            "/opt/goal-plus-runtime/venv/bin/python" if (runtime or {}).get("goal_plus_install_pi") else "python"
-        ),
+        "GOAL_PLUS_INSTALL_HOME": "/opt/goal-plus-runtime/install",
+        "GOAL_PLUS_PYTHON": "/opt/goal-plus-bin/goal-plus-python",
         "GOAL_PLUS_BASE_PYTHON": (
             "/opt/goal-plus-python/bin/python3" if (runtime or {}).get("goal_plus_python_root") else "python"
         ),
@@ -983,7 +967,7 @@ def _goal_plus_container_probe(
                 if annotator_enabled
                 else ""
             )
-            + " && python -m goal_plus.pi_tool --help >/dev/null"
+            + " && \"$GOAL_PLUS_PYTHON\" -m goal_plus.pi_tool --help >/dev/null"
             + " && \"$GOAL_PLUS_PYTHON\" /opt/swebench-goal-plus-controller.py --help >/dev/null",
         ]
     )
@@ -1041,9 +1025,9 @@ def _goal_plus_codex_container_probe(
             + " && ln -sf "
             "/opt/codex/package/vendor/x86_64-unknown-linux-musl/bin/codex "
             "/opt/goal-plus-bin/codex"
-            + " && python -c \"import fastmcp, goal_plus, plotly, pydantic\""
+            + " && \"$GOAL_PLUS_PYTHON\" -c \"import fastmcp, goal_plus, plotly, pydantic\""
             + " && codex --version"
-            + " && python /opt/swebench-goal-plus-controller.py --help >/dev/null",
+            + " && \"$GOAL_PLUS_PYTHON\" /opt/swebench-goal-plus-controller.py --help >/dev/null",
         ]
     )
     return run_capture(command, timeout=600)
@@ -1314,7 +1298,7 @@ def doctor_payload(profile: dict[str, Any]) -> dict[str, Any]:
                 "goal_plus_controller",
             )
         ) and (
-            runtime["goal_plus_root"] / ".codex" / "skills" / "goal-plus"
+            runtime["goal_plus_root"] / "assets" / "codex"
         ).is_dir()
         checks.extend(
             [

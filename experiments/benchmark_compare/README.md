@@ -83,7 +83,11 @@ The same command shape works for every table row:
 ```
 
 `goal-plus-pi` 使用同一个 materializer、task prompt 和 evaluator，但把 worker
-host 固定为 `pi-rpc`。运行时必须显式传 `--api-base`；run-local
+身份为 `agent_harness=pi`、`runtime_provider=direct`，RPC 是传输协议。
+两端通过 run-local 公共安装器注册资产，并使用共同 session open/wake/wait/close。
+受保护 Pi worker 只挂载安装资产和 MCP 代理；工具白名单、归属校验、隐藏评价过滤
+继续由 benchmark proxy 执行，宿主状态和 Python 环境不进入 worker sandbox。
+运行时必须显式传 `--api-base`；run-local
 `pi-home/models.json` 只引用宿主环境中的 `$OPENAI_API_KEY`，不持久化密钥。
 
 These historical commands keep their previous behavior. For a claimable B3 or

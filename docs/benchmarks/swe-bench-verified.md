@@ -101,8 +101,8 @@ campaign-local Pi provider registry 选择 `bench-openai/gpt-5.6-luna`。该 reg
 image、raw metric/direction、Agent 与 evaluator 墙钟时间、finalization grace、token coverage、
 evaluator calls 和 patch apply 状态。缺失 token 数据保持 unavailable，不补零。
 
-Goal Plus + Pi 还保留 frozen spec、candidate、绑定 Pi worker session、worker verifier、pool
-终态和 promotion patch。`.gp` 在 Agent 容器停止/删除前导出；这些 completion evidence
+Goal Plus + Pi 还保留 frozen spec、candidate、绑定 Pi worker session、原生 invocation
+回执、worker verifier、session cleanup 和 promotion patch。`.gp` 在 Agent 容器停止/删除前导出；这些 completion evidence
 缺失时保留官方 raw score，但 cell/campaign 标记为 partial。
 
 单题 smoke 可以证明方法接线与官方评分边界，但不能用于声称整个 Verified split 的通过率，

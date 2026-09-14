@@ -14,11 +14,13 @@ The typed command uses `workspace_provider`, and sessions contain a matching
 guessed from transport labels, allocated sessions, or old SearchSpec fields.
 ThinkThread is outside these Bench execution paths.
 
-Both EdgeBench adapters install the selected source through `install.sh` and
+EdgeBench, Common/OpenEvolve and SWE-bench adapters install the selected source through `install.sh` and
 read its managed runtime receipt. Source assets live under `assets/codex` and
 `assets/pi`; old source-root skill trees are not installed. Codex project hooks
 come from the generated immutable release and use its isolated launcher.
 Pi loads the installer-registered package for both start and resume.
+Common/OpenEvolve keep their registration, immutable release and runtime receipt
+inside the individual run directory; they do not replace the user's installation.
 Host retry admission executes the virtualenv Python path from the installation
 receipt directly. It must not use a relocated Python symlink, which can lose
 the virtualenv's package search path. The task's default Python is preserved.
@@ -71,11 +73,32 @@ source without updating it, and plan/cell evidence records its actual branch and
 commit. The managed tracking branch is unchanged. Keep the same source selection
 through setup, plan, launch, and any resume.
 
-EdgeBench's optional worker minimum-time, verifier-count, and closeout-reserve
+The adapters' optional worker minimum-time, verifier-count, and closeout-reserve
 settings are planning targets expressed to Main in the task prompt. They are
 not runtime-enforced minimums and are not written into SearchSpec. The current
 Goal Plus worker budget only receives the supported maximum runtime and
 `on_exceed=interrupt`; its deadline and Evidence gates remain authoritative.
+OpenEvolve's default worker maximum is the exploration allocation (`T` minus the
+planned closeout reserve); an explicit worker maximum takes precedence. It no
+longer imposes the old 30-60 second default. Main explicitly decides whether to
+wake a session again. Native invocation receipts replace Pi pool jobs and Codex
+minimum-lease files in execution and concurrency evidence.
+Before each wake or wait, Main receives the absolute deadline and must calculate
+the remaining exploration time after its planned closeout reserve. A wait timeout
+does not stop a native invocation. Common/OpenEvolve use the same persisted
+invocation evidence for Codex and Pi; outer `spawn_agent` events are diagnostic
+and are not a prerequisite for workers launched through session tools.
+
+Protected Pi workers load the installed public assets and runtime receipt through
+read-only mounts. A benchmark-owned shim at the receipt's Python path routes MCP
+through the installed SDK and the existing Unix tool proxy. The host runtime,
+store, evaluator files and sibling workspaces remain outside those mounts.
+The proxy retains candidate/run identity checks, the tool whitelist, blind
+response filtering and one-time host callback capabilities.
+
+Common/OpenEvolve and SWE retain their existing controller closeout paths and
+runtime authorization gates. Their timeout policy is distinct from EdgeBench's
+same-Main retry: this update does not add automatic Main resume to other runners.
 
 Controller closeout for `promotion_mode=apply` calls `search_apply_promotion`
 before recording the Search result. Applying a Git patch alone does not settle

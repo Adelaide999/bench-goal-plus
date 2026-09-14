@@ -210,57 +210,33 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                 resumed_run.assert_not_called()
 
     def test_goal_plus_assets_copy_only_portable_project_files(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            goal_plus = temp / "goal-plus"
-            codex = goal_plus / ".codex"
-            (codex / "agents").mkdir(parents=True)
-            (codex / "skills/demo").mkdir(parents=True)
-            (codex / "agents/worker.toml").write_text("name='worker'\n")
-            (codex / "skills/demo/SKILL.md").write_text("# demo\n")
-            (codex / "hooks.json").write_text("{}\n")
-            (codex / "config.example.toml").write_text("[mcp_servers.goal-plus]\n")
-            (codex / "config.toml").write_text("secret='must-not-copy'\n")
-            workspace = temp / "workspace"
-            workspace.mkdir()
-
-            experiment.copy_goal_plus_assets(goal_plus, workspace)
-
-            target = workspace / ".codex"
-            self.assertTrue((target / "agents/worker.toml").is_file())
-            self.assertTrue((target / "skills/demo/SKILL.md").is_file())
-            self.assertEqual(
-                (target / "config.toml").read_text(),
-                "[mcp_servers.goal-plus]\n",
-            )
-            self.assertNotIn(
-                "must-not-copy",
-                "\n".join(p.read_text() for p in target.rglob("*.*")),
-            )
+        with mock.patch.object(experiment, "install_goal_plus") as install:
+            experiment.copy_goal_plus_assets(Path("/source"), Path("/run/workspace"))
+            install.assert_called_once_with(Path("/source"), Path("/run/workspace"), "codex")
 
     def test_goal_plus_assets_materialize_latest_example_hooks_layout(self) -> None:
+        from bench_goal_plus import goal_plus_installation as installation
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
-            goal_plus = temp / "goal-plus"
-            codex = goal_plus / ".codex"
-            (codex / "skills/demo").mkdir(parents=True)
-            (codex / "skills/demo/SKILL.md").write_text("# demo\n")
-            (codex / "hooks.example.json").write_text('{"version": 1}\n')
-            (codex / "config.example.toml").write_text(
-                "[mcp_servers.goal-plus]\n"
-            )
             workspace = temp / "workspace"
             workspace.mkdir()
-
-            experiment.copy_goal_plus_assets(goal_plus, workspace)
-
-            target = workspace / ".codex"
-            self.assertFalse((target / "agents").exists())
-            self.assertEqual((target / "hooks.json").read_text(), '{"version": 1}\n')
-            self.assertEqual(
-                (target / "config.toml").read_text(),
-                "[mcp_servers.goal-plus]\n",
-            )
+            python = temp / "release/venv/bin/python"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            package = temp / "release/package"
+            package.mkdir()
+            receipt = {"python": str(python), "package": str(package), "build": "test"}
+            with mock.patch.object(installation.subprocess, "run", return_value=mock.Mock(
+                stdout=json.dumps(receipt),
+            )) as run:
+                installation.install_goal_plus(Path("/source"), workspace, "codex")
+            self.assertEqual(run.call_args_list[0].args[0], ["/source/install.sh", "--codex", "--yes"])
+            self.assertEqual(run.call_args_list[0].kwargs["env"]["CODEX_HOME"], str(temp / "controller-runtime/codex-home"))
+            environment = {"PATH": "/usr/bin"}
+            installation.bind_goal_plus_environment(environment, temp)
+            self.assertEqual(environment["GOAL_PLUS_PYTHON"], str(python))
+            self.assertEqual(environment["PATH"].split(":")[0], str(python.parent))
+            self.assertFalse((workspace / ".gp").exists())
 
     def test_goal_plus_entrypoint_matches_agent_harness(self) -> None:
         self.assertEqual(
@@ -275,26 +251,9 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             experiment.goal_plus_entrypoint("unknown")
 
     def test_goal_plus_pi_assets_copy_only_project_runtime(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            goal_plus = temp / "goal-plus"
-            pi = goal_plus / ".pi"
-            (pi / "extensions").mkdir(parents=True)
-            (pi / "skills/goal-plus").mkdir(parents=True)
-            (pi / "prompts").mkdir(parents=True)
-            (pi / "extensions/goal-plus.ts").write_text("export default {}\n")
-            (pi / "skills/goal-plus/SKILL.md").write_text("# Goal Plus\n")
-            (pi / "prompts/search-candidate-worker.md").write_text("worker\n")
-            workspace = temp / "workspace"
-            workspace.mkdir()
-
-            experiment.copy_goal_plus_pi_assets(goal_plus, workspace)
-
-            self.assertTrue((workspace / ".pi/extensions/goal-plus.ts").is_file())
-            self.assertTrue((workspace / ".pi/skills/goal-plus/SKILL.md").is_file())
-            self.assertTrue(
-                (workspace / ".pi/prompts/search-candidate-worker.md").is_file()
-            )
+        with mock.patch.object(experiment, "install_goal_plus") as install:
+            experiment.copy_goal_plus_pi_assets(Path("/source"), Path("/run/workspace"))
+            install.assert_called_once_with(Path("/source"), Path("/run/workspace"), "pi")
 
     def test_goal_prompt_uses_natural_entry_and_complete_configuration(self) -> None:
         prompt = experiment.render_goal(
@@ -334,10 +293,10 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("allow only `candidate.py`", prompt)
         self.assertNotIn("goal_plus_id=", prompt)
         self.assertIn("search_start_batch", prompt)
-        self.assertIn("pi_search_pool_open", prompt)
-        self.assertIn("`candidate_ids`", prompt)
-        self.assertIn("`final_verify=true`", prompt)
-        self.assertIn("pi_search_pool_wait_any", prompt)
+        self.assertIn("goal_plus_session_open", prompt)
+        self.assertIn("goal_plus_session_wake", prompt)
+        self.assertIn("goal_plus_session_close", prompt)
+        self.assertIn("goal_plus_session_wait", prompt)
         self.assertNotIn("actual `spawn_agent` call", prompt)
 
     def test_blind_goal_prompt_uses_artifact_only_promotion(self) -> None:
@@ -367,7 +326,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("role `validity_gate`", prompt)
         self.assertIn("feedback policy `final_only`", prompt)
 
-    def test_pi_goal_prompt_names_pool_supervisor_minimum_lease(self) -> None:
+    def test_pi_goal_prompt_keeps_minimums_as_planning_targets(self) -> None:
         prompt = experiment.render_goal(
             task_text="# Objective\nImprove it.",
             artifact_name="candidate.py",
@@ -382,9 +341,10 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             worker_min_runtime_seconds=150,
         )
 
-        self.assertIn("pool supervisor", prompt)
-        self.assertIn("same native session", prompt)
-        self.assertIn("strategy.config.reserve_closeout_seconds=60", prompt)
+        self.assertNotIn("pool supervisor", prompt)
+        self.assertNotIn("strategy.worker_budget.min_", prompt)
+        self.assertNotIn("strategy.config.reserve_closeout_seconds", prompt)
+        self.assertIn("150 seconds", prompt)
         self.assertNotIn("SubagentStop", prompt)
 
     def test_plain_and_goal_plus_prompts_share_exact_common_body(self) -> None:
@@ -552,25 +512,9 @@ class OpenEvolveComparisonTest(unittest.TestCase):
                     "candidate_count": 2,
                     "agent_harness": "pi",
                     "worker_budget": {
-                        "min_runtime_seconds": 150,
-                        "min_verifier_runs": 1,
                         "max_runtime_seconds": 200,
                         "on_exceed": "interrupt",
                     },
-                    "pi_pool_jobs": [
-                        {
-                            "job_id": "job_1",
-                            "candidate_id": "c001",
-                            "status": "completed",
-                            "lease": {"satisfied": True},
-                        },
-                        {
-                            "job_id": "job_2",
-                            "candidate_id": "c002",
-                            "status": "completed",
-                            "lease": {"satisfied": True},
-                        },
-                    ],
                     "bound_candidate_count": 2,
                     "worker_verified_candidate_count": 2,
                     "unbound_agent_session_count": 0,
@@ -583,36 +527,12 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             "expected_concurrency": 2,
             "expected_goal_plus_id": "gp_0001",
             "expected_run_id": "run_test",
-            "expected_worker_min_runtime_seconds": 150,
-            "expected_worker_min_verifier_runs": 1,
         }
         self.assertIsNone(experiment.goal_plus_incomplete_reason(base_state, **kwargs))
 
-        self.assertIn(
-            "0 distinct spawned worker threads",
-            experiment.goal_plus_incomplete_reason(
-                base_state,
-                codex_events={"spawned_agent_thread_count": 0},
-                **kwargs,
-            ),
-        )
-        self.assertIsNone(
-            experiment.goal_plus_incomplete_reason(
-                base_state,
-                codex_events={"spawned_agent_thread_count": 2},
-                **kwargs,
-            )
-        )
-        self.assertIsNone(
-            experiment.goal_plus_incomplete_reason(
-                base_state,
-                codex_events={
-                    "spawned_agent_thread_count": 0,
-                    "goal_plus": {"bound_worker_handle_count": 2},
-                },
-                **kwargs,
-            )
-        )
+        codex_state = json.loads(json.dumps(base_state))
+        codex_state["runs"][0]["agent_harness"] = "codex"
+        self.assertIsNone(experiment.goal_plus_incomplete_reason(codex_state, **kwargs))
 
         missing_worker_evidence = json.loads(json.dumps(base_state))
         missing_worker_evidence["runs"][0]["worker_verified_candidate_count"] = 1
@@ -653,22 +573,6 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn(
             "duplicate Goal Plus records",
             experiment.goal_plus_incomplete_reason(duplicate_goal, **kwargs),
-        )
-
-        misplaced_budget = json.loads(json.dumps(base_state))
-        misplaced_budget["runs"][0]["worker_budget"].pop("min_runtime_seconds")
-        self.assertIn(
-            "frozen worker budget",
-            experiment.goal_plus_incomplete_reason(misplaced_budget, **kwargs),
-        )
-
-        unsatisfied_lease = json.loads(json.dumps(base_state))
-        unsatisfied_lease["runs"][0]["pi_pool_jobs"][0].update(
-            {"status": "timed_out", "lease": {"satisfied": False}}
-        )
-        self.assertIn(
-            "minimum lease",
-            experiment.goal_plus_incomplete_reason(unsatisfied_lease, **kwargs),
         )
 
     def test_natural_goal_plus_completion_ignores_aborted_search_history(
@@ -731,8 +635,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("`.goal-plus-verifiers/**`", prompt)
         self.assertIn("allow at most one changed file", prompt)
         self.assertIn('use `source_path="."`', prompt)
-        self.assertIn("backend and promotion mode come from", prompt)
-        self.assertIn("strategy.worker_budget.max_runtime_seconds=60", prompt)
+        self.assertIn("provider and promotion mode come from", prompt)
+        self.assertIn("strategy.worker_budget.max_runtime_seconds=240", prompt)
         self.assertIn("total budget, not a success criterion", prompt)
 
     def test_goal_plus_directory_artifact_allows_multiple_changed_files(self) -> None:
@@ -753,7 +657,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertIn("multiple changed files inside it are allowed", prompt)
         self.assertNotIn("allow at most one changed file", prompt)
 
-    def test_goal_plus_pi_prompt_uses_native_pool_launch_contract(self) -> None:
+    def test_goal_plus_pi_prompt_uses_native_session_launch_contract(self) -> None:
         prompt = experiment.render_goal(
             task_text="# Objective\nImprove it.",
             artifact_name="candidate.py",
@@ -766,8 +670,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             worker_model="provider/model",
         )
 
-        self.assertIn("`pi_search_pool_open`", prompt)
-        self.assertIn("`pi_search_pool_wait_any`", prompt)
+        self.assertIn("`goal_plus_session_open`", prompt)
+        self.assertIn("`goal_plus_session_wait`", prompt)
         self.assertNotIn("`spawn_agent`", prompt)
 
     def test_promotion_patch_is_applied_once(self) -> None:

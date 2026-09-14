@@ -60,10 +60,12 @@ still blocks direct-socket bypasses. A campaign accepts one positive attempt see
 same value in its Search strategy configuration, manifest, and report.
 
 Goal Plus + Pi starts one outer Pi JSON session through the project extension, then requires one
-candidate-bound `pi-rpc` worker in the shared Search state. Its frozen SearchSpec uses only an
+candidate-bound Pi worker (`agent_harness=pi`, `runtime_provider=direct`) in the shared Search state.
+Its frozen SearchSpec uses only an
 Agent-selected visible test command wrapped by the repository-owned numeric verifier. The wrapper
 does not read hidden dataset fields and is not the official score. On completion or timeout, the
-controller closes Pi pools, performs idempotent select/promote/apply closeout, exports `.gp` into the
+controller closes candidate sessions through their native execution scopes,
+performs authorized idempotent select/promote/apply closeout, exports `.gp` into the
 campaign, and only then disposes the Agent container. The separate official harness remains the sole
 owner of `resolved`.
 

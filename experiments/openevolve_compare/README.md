@@ -24,8 +24,9 @@ native protocol metadata; the exact host model catalog entry is required and pro
 into the isolated model configuration without copying authentication data.
 
 The Search prompt uses the current linked-Search lifecycle. `search_start_batch`
-materializes candidates; Pi starts them by passing their IDs to
-`pi_search_pool_open(candidate_ids=..., final_verify=true)`. Search is not an
+materializes candidates; both hosts prepare candidate sessions and use
+`goal_plus_session_open/wake/wait/close`. An open receipt alone does not prove
+worker execution; native invocation receipts provide that evidence. Search is not an
 ordinary dispatch work item. Controller closeout does not create or accept
 placeholder work items, or reactivate a paused or aborted Goal.
 
@@ -33,7 +34,14 @@ placeholder work items, or reactivate a paused or aborted Goal.
 
 ## What is outside and inside T
 
-`prepare` performs only task/config/workspace materialization. For Goal Plus it copies the portable project hook, skill, and MCP assets, but it does not create `.gp`, a Goal record, a frozen SearchSpec, a Search run, candidates, or sessions.
+`prepare` materializes the task/config/workspace and installs Goal Plus through
+`install.sh` into an isolated run-local environment. It records the managed
+release and Python receipt without creating `.gp`, a Goal record, a frozen
+SearchSpec, a Search run, candidates, or sessions.
+
+The default worker maximum uses the exploration allocation (`T` minus the
+planned closeout reserve). Optional minimum exploration targets remain Main
+planning guidance; they do not introduce a runtime lease or automatic continuation.
 
 Plain Codex receives one common task prompt. Codex + Goal Plus receives exactly
 the same common prompt after a typed `$goal-plus` command that freezes

@@ -1063,8 +1063,6 @@ def collect_doctor(
         "openevolve-run",
         "goal-plus",
         "goal-plus-pi-tool",
-        "goal-plus-pi-worker",
-        "goal-plus-pi-pool",
     ):
         path = venv_bin(venv) / executable
         result = run([str(path), "--help"], check=False) if path.is_file() else None

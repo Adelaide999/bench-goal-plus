@@ -313,23 +313,10 @@ def _container_name(campaign_id: str, method: str) -> str:
 
 
 def goal_plus_codex_project_asset_script() -> str:
-    """Materialize the managed plugin's project-local Codex fallback assets."""
+    """Verify the isolated installer registration before creating task state."""
     return (
-        "mkdir -p /testbed/.codex && "
-        "test ! -e /testbed/.codex/skills && "
-        "test ! -e /testbed/.codex/config.toml && "
-        "test ! -e /testbed/.codex/hooks.json && "
-        "cp -a /opt/goal-plus/.codex/skills /testbed/.codex/skills && "
-        "(if test -d /opt/goal-plus/.codex/agents; then "
-        "test ! -e /testbed/.codex/agents && "
-        "cp -a /opt/goal-plus/.codex/agents /testbed/.codex/agents; fi) && "
-        "cp /opt/goal-plus/.codex/config.example.toml "
-        "/testbed/.codex/config.toml && "
-        "(if test -f /opt/goal-plus/.codex/hooks.example.json; then "
-        "cp /opt/goal-plus/.codex/hooks.example.json /testbed/.codex/hooks.json; "
-        "elif test -f /opt/goal-plus/.codex/hooks.json; then "
-        "cp /opt/goal-plus/.codex/hooks.json /testbed/.codex/hooks.json; "
-        "else echo 'managed Goal Plus Codex hooks are missing' >&2; exit 1; fi) && "
+        "test -s /opt/goal-plus-runtime/receipt.json && "
+        "test -s /opt/codex-home/config.toml && "
     )
 
 
@@ -1072,30 +1059,24 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         workspace_provider="git_worktree",
         promotion_mode="apply",
     )
-    if codex_host and profile["concurrency"] > 1:
-        worker_instruction = (
-            "Keep each candidate on its existing bound Codex worker session; "
-            "do not create replacement lanes."
-        )
-    elif codex_host:
-        worker_instruction = (
-            "Use the bound Codex worker session; do not create replacement lanes."
-        )
-    else:
-        worker_instruction = (
-            "Continue the same bound Pi worker session; do not create replacement lanes."
-            " After search_start_batch, pass its candidate IDs to pi_search_pool_open "
-            f"with max_parallel={profile['concurrency']} and final_verify=true; "
-            "the pool creates and binds worker sessions."
-        )
+    worker_instruction = (
+        "After search_start_batch, prepare each candidate with search_start_agent_session, "
+        "then call goal_plus_session_open and goal_plus_session_wake. Start all initial "
+        "workers before goal_plus_session_wait. Review Evidence and explicitly wake the "
+        "same sessions while useful work and time remain; close them with "
+        "goal_plus_session_close before selection. Before each wake or wait, check "
+        "current UTC against the Goal deadline minus the planned closeout reserve; "
+        "bound the timeout by that remaining exploration time and give the worker "
+        "the same cutoff for committing and verification. A wait timeout does not "
+        "stop execution. Do not create replacement lanes."
+    )
     minimum_budget_instruction = ""
     if "worker_min_runtime_seconds" in goal_plus:
         minimum_budget_instruction = (
-            "Set strategy.worker_budget.min_runtime_seconds="
-            f"{goal_plus['worker_min_runtime_seconds']} and "
-            "strategy.worker_budget.min_verifier_runs="
-            f"{goal_plus['worker_min_verifier_runs']}. These are lower-bound search "
-            "gates: keep the same worker active until both are satisfied. "
+            f"Plan for about {goal_plus['worker_min_runtime_seconds']} seconds of "
+            f"worker exploration and {goal_plus['worker_min_verifier_runs']} verifier "
+            "results per worker, subject to the deadline. These are planning targets; "
+            "Main decides each continuation. "
         )
     if profile["concurrency"] == 1:
         candidate_instruction = "Use one fixed initial candidate. "
@@ -1128,9 +1109,8 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         + "Set strategy.worker_budget.max_runtime_seconds="
         f"{goal_plus['worker_runtime_seconds']}. "
         f"{minimum_budget_instruction}"
-        "Set "
-        "strategy.config.reserve_closeout_seconds="
-        f"{goal_plus['closeout_reserve_seconds']} and strategy.config.seed="
+        f"Reserve about {goal_plus['closeout_reserve_seconds']} seconds for final "
+        "selection, publication, Goal completion and reports. Set strategy.config.seed="
         f"{profile.get('seed', 1)}. {candidate_instruction}"
         "Set strategy.evidence_annotator.timeout_seconds="
         f"{annotator_timeout}; "
@@ -1184,7 +1164,7 @@ def build_goal_plus_prompt(task: dict[str, Any], profile: dict[str, Any]) -> str
         "target behavior rather than a missing runner, import, plugin, or dependency. "
         "Include that wrapper path in verifier_artifacts. "
         "Keep .gp and .goal-plus-verifiers outside the editable artifact surface. "
-        "After worker completion, close the pool, select and promote verifier-backed "
+        "After worker completion, close the sessions, select and promote verifier-backed "
         "Evidence, call search_apply_promotion to apply it to /testbed, record the Search result, "
         "and finish the Goal Plus record.\n\n"
         f"Public issue:\n{task['problem_statement']}\n"
@@ -1464,14 +1444,9 @@ def _agent_command(
                 "/testbed/.gp/host-sessions/pi-main",
                 "--session-id",
                 str(runtime["main_session_id"]),
-                "--no-extensions",
                 "--no-skills",
                 "--no-prompt-templates",
                 "--no-context-files",
-                "--extension",
-                "/opt/goal-plus/.pi/extensions/goal-plus.ts",
-                "--skill",
-                "/opt/goal-plus/.pi/skills/goal-plus/SKILL.md",
                 str(runtime["goal_prompt"]),
             ]
         )
@@ -1615,7 +1590,7 @@ def _goal_plus_closeout(
             "/testbed/.gp",
             "--source",
             "/testbed",
-            "--pool-timeout-seconds",
+            "--session-timeout-seconds",
             str(min(60, profile["goal_plus"]["closeout_reserve_seconds"])),
         ]
     )

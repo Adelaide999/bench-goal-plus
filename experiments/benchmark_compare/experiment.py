@@ -68,7 +68,8 @@ from experiments.openevolve_compare.experiment import (  # noqa: E402
     PI_API_KEY_ENV,
     PI_PROVIDER_ID,
     append_unique_lines,
-    close_pi_pools,
+    bind_goal_plus_environment,
+    close_candidate_sessions,
     codex_goal_plus_mcp_args,
     codex_provider_args,
     collect_evidence_annotator_usage,
@@ -2041,28 +2042,26 @@ def _goal_plus_agent_wall_time_seconds(
     return agent_wall_time
 
 
-def _pi_pool_cleanup_incomplete_reason(cleanup: Any) -> str | None:
+def _candidate_cleanup_incomplete_reason(cleanup: Any) -> str | None:
     if not isinstance(cleanup, list) or not cleanup:
-        return "posthoc selection lacks Pi pool shutdown evidence"
-    for pool in cleanup:
+        return "posthoc selection lacks candidate session cleanup evidence"
+    for receipt in cleanup:
         if (
-            not isinstance(pool, dict)
-            or pool.get("state") != "closed"
-            or pool.get("active_count") != 0
-            or pool.get("close_timed_out") is not False
+            not isinstance(receipt, dict)
+            or not receipt.get("run_id")
+            or receipt.get("active_count") != 0
         ):
-            pool_id = pool.get("pool_id") if isinstance(pool, dict) else "unknown"
-            return f"Pi pool {pool_id} was not fully closed before posthoc selection"
+            return "candidate sessions were not closed before posthoc selection"
     return None
 
 
 def _posthoc_prerequisite_incomplete_reason(
-    closeout_reason: str | None, pi_pool_cleanup: Any
+    closeout_reason: str | None, candidate_cleanup: Any
 ) -> str | None:
-    """Preserve an earlier closeout failure before checking pool evidence."""
+    """Preserve an earlier closeout failure before checking session cleanup."""
     if closeout_reason is not None:
         return closeout_reason
-    return _pi_pool_cleanup_incomplete_reason(pi_pool_cleanup)
+    return _candidate_cleanup_incomplete_reason(candidate_cleanup)
 
 
 def execute_goal_plus(
@@ -2182,6 +2181,7 @@ def execute_goal_plus(
         search_scheduler=search_scheduler,
         evaluation_mode=EVALUATION_MODE,
         early_stop_contract=early_stop,
+        outer_deadline_at=deadline.isoformat(),
     )
     (run_dir / "prompt.md").write_text(prompt)
     reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)
@@ -2214,14 +2214,9 @@ def execute_goal_plus(
             str(run_dir / "pi-main-session"),
             "--session-id",
             f"bench-{run_dir.name}",
-            "--no-extensions",
             "--no-skills",
             "--no-prompt-templates",
             "--no-context-files",
-            "--extension",
-            str(workspace / ".pi/extensions/goal-plus.ts"),
-            "--skill",
-            str(workspace / ".pi/skills/goal-plus/SKILL.md"),
             prompt,
         ]
         stdin_text = None
@@ -2244,6 +2239,7 @@ def execute_goal_plus(
     agent_wall_time_seconds = _goal_plus_agent_wall_time_seconds(
         budget, controller_only
     )
+    bind_goal_plus_environment(environment, run_dir)
     control = run_controlled(
         command,
         cwd=workspace,
@@ -2264,10 +2260,9 @@ def execute_goal_plus(
     control["controller_closeout_reserve_seconds"] = (
         budget["soft_closeout_seconds"] if controller_only else 0
     )
-    if is_pi:
-        control["pi_pool_cleanup"] = close_pi_pools(
-            workspace, budget["hard_kill_grace_seconds"]
-        )
+    control["candidate_session_cleanup"] = close_candidate_sessions(
+        workspace, budget["hard_kill_grace_seconds"]
+    )
     try:
         with controller_subprocess_environment(
             runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
@@ -2302,7 +2297,7 @@ def execute_goal_plus(
     if is_pi and posthoc_selection is not None:
         closeout_reason = _posthoc_prerequisite_incomplete_reason(
             closeout_reason,
-            control.get("pi_pool_cleanup"),
+            control.get("candidate_session_cleanup"),
         )
     final: dict[str, Any] | None = None
     posthoc_result: dict[str, Any] | None = None
@@ -2387,22 +2382,10 @@ def execute_goal_plus(
         control, final, early_stop
     )
     control["early_stop_completion_verified"] = early_stop_completion_verified
-    control["minimum_lease_completion_waived"] = bool(
-        early_stop_completion_verified
-        and budget.get("worker_min_runtime_seconds") is not None
-    )
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=budget["concurrency"],
         minimum_worker_verified_candidates=1,
-        expected_worker_min_runtime_seconds=budget.get(
-            "worker_min_runtime_seconds"
-        ),
-        expected_worker_min_verifier_runs=(
-            1 if budget.get("worker_min_runtime_seconds") is not None else None
-        ),
-        require_satisfied_pi_minimum_lease=not early_stop_completion_verified,
-        codex_events=control.get("codex"),
     )
     if reason:
         control["result_incomplete_reason"] = reason
@@ -2714,10 +2697,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
             "prepared Goal Plus config does not match the task posthoc-selection contract"
         )
     control = dict(manifest.get("execution") or {})
-    if manifest["method"] == "goal-plus-pi":
-        control["pi_pool_cleanup_repair"] = close_pi_pools(
-            workspace, manifest["budget"]["hard_kill_grace_seconds"]
-        )
+    control["candidate_session_cleanup_repair"] = close_candidate_sessions(
+        workspace, manifest["budget"]["hard_kill_grace_seconds"]
+    )
     try:
         with controller_subprocess_environment(
             runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
@@ -2745,7 +2727,7 @@ def repair_closeout(args: argparse.Namespace) -> int:
     if manifest["method"] == "goal-plus-pi" and posthoc_selection is not None:
         controller_only_closeout_reason = _posthoc_prerequisite_incomplete_reason(
             controller_only_closeout_reason,
-            control.get("pi_pool_cleanup_repair"),
+            control.get("candidate_session_cleanup_repair"),
         )
     final: dict[str, Any] | None = None
     posthoc_result: dict[str, Any] | None = None
@@ -2827,22 +2809,10 @@ def repair_closeout(args: argparse.Namespace) -> int:
         control, final, early_stop
     )
     control["early_stop_completion_verified"] = early_stop_completion_verified
-    control["minimum_lease_completion_waived"] = bool(
-        early_stop_completion_verified
-        and budget.get("worker_min_runtime_seconds") is not None
-    )
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=budget["concurrency"],
         minimum_worker_verified_candidates=1,
-        expected_worker_min_runtime_seconds=budget.get(
-            "worker_min_runtime_seconds"
-        ),
-        expected_worker_min_verifier_runs=(
-            1 if budget.get("worker_min_runtime_seconds") is not None else None
-        ),
-        require_satisfied_pi_minimum_lease=not early_stop_completion_verified,
-        codex_events=control.get("codex"),
     )
     if not control["goal_plus_controller_closeout_repair"].get("completed"):
         reason = (

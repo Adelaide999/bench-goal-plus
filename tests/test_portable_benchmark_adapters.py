@@ -274,6 +274,8 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                         experiment, "configure_evidence_annotator_environment"
                     ) as configure_annotator,
                     patch.object(experiment, "render_goal", return_value="prompt"),
+                    patch.object(experiment, "bind_goal_plus_environment"),
+                    patch.object(experiment, "close_candidate_sessions", return_value=[]),
                     patch.object(
                         experiment, "codex_command", return_value=["codex"]
                     ) as codex_command,
@@ -481,7 +483,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             local_vliw.run_source_evaluator(Path("source"), Path("solution.py"), "final")
             self.assertEqual(run.call_args.kwargs["timeout"], 180)
 
-    def test_codex_task_name_counts_as_a_bound_goal_plus_session(self) -> None:
+    def test_codex_task_name_does_not_prove_native_execution(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)
             run_dir = workspace / ".gp/runs/run_test"
@@ -514,12 +516,12 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
                 )
             )
             state = openevolve_experiment.collect_goal_plus_state(workspace)
-            self.assertEqual(state["runs"][0]["bound_agent_session_count"], 1)
-            self.assertEqual(state["runs"][0]["bound_candidate_count"], 1)
-            self.assertEqual(state["runs"][0]["unbound_agent_session_count"], 1)
+            self.assertEqual(state["runs"][0]["bound_agent_session_count"], 0)
+            self.assertEqual(state["runs"][0]["bound_candidate_count"], 0)
+            self.assertEqual(state["runs"][0]["unbound_agent_session_count"], 2)
             self.assertEqual(
                 state["runs"][0]["bound_session_counts_by_candidate"],
-                {"c001": 1},
+                {},
             )
 
     def test_goal_plus_collector_uses_frozen_metric_direction(self) -> None:
@@ -557,7 +559,7 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
             self.assertEqual(run["best_recorded_score"], 4.0)
             self.assertEqual(run["selected_score"], 4.0)
 
-    def test_goal_plus_collector_exposes_frozen_budget_and_pi_lease(self) -> None:
+    def test_goal_plus_collector_does_not_use_retired_pi_pool_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)
             root = workspace / ".gp"
@@ -612,8 +614,8 @@ class PortableBenchmarkAdapterTest(unittest.TestCase):
 
             self.assertEqual(run["agent_harness"], "pi")
             self.assertEqual(run["worker_budget"]["min_runtime_seconds"], 150)
-            self.assertEqual(run["pi_pool_jobs"][0]["status"], "timed_out")
-            self.assertFalse(run["pi_pool_jobs"][0]["lease"]["satisfied"])
+            self.assertNotIn("pi_pool_jobs", run)
+            self.assertEqual(run["bound_agent_session_count"], 0)
 
     def test_goal_plus_collector_excludes_failed_iteration_scores(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

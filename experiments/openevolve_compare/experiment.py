@@ -37,7 +37,13 @@ from bench_goal_plus.goal_plus_command import (  # noqa: E402
     goal_plus_entrypoint,
     render_goal_plus_command,
 )
-from bench_goal_plus.goal_plus_evidence import frozen_agent_harness  # noqa: E402
+from bench_goal_plus.goal_plus_evidence import (  # noqa: E402
+    frozen_agent_harness, session_agent_harness, session_worker_intervals,
+)
+from bench_goal_plus.goal_plus_installation import (  # noqa: E402
+    bind_goal_plus_environment,
+    install_goal_plus,
+)
 from bench_goal_plus.search_scheduler import (  # noqa: E402
     GoalPlusSearchScheduler,
     add_internal_search_scheduler_argument,
@@ -167,47 +173,11 @@ def canonical_method(method: str) -> str:
 
 
 def copy_goal_plus_assets(goal_plus_root: Path, workspace: Path) -> None:
-    source = goal_plus_root / ".codex"
-    required = (source / "skills", source / "config.example.toml")
-    for path in required:
-        if not path.exists():
-            raise FileNotFoundError(path)
-    hook_source = next(
-        (
-            path
-            for path in (source / "hooks.example.json", source / "hooks.json")
-            if path.is_file()
-        ),
-        None,
-    )
-    if hook_source is None:
-        raise FileNotFoundError(source / "hooks.example.json")
-
-    target = workspace / ".codex"
-    target.mkdir()
-    if (source / "agents").is_dir():
-        shutil.copytree(source / "agents", target / "agents")
-    shutil.copytree(source / "skills", target / "skills")
-    shutil.copy2(hook_source, target / "hooks.json")
-    shutil.copy2(source / "config.example.toml", target / "config.toml")
+    install_goal_plus(goal_plus_root, workspace, "codex")
 
 
 def copy_goal_plus_pi_assets(goal_plus_root: Path, workspace: Path) -> None:
-    source = goal_plus_root / ".pi"
-    required = (
-        source / "extensions" / "goal-plus.ts",
-        source / "skills" / "goal-plus" / "SKILL.md",
-        source / "prompts",
-    )
-    for path in required:
-        if not path.exists():
-            raise FileNotFoundError(path)
-
-    target = workspace / ".pi"
-    target.mkdir()
-    shutil.copytree(source / "extensions", target / "extensions")
-    shutil.copytree(source / "skills", target / "skills")
-    shutil.copytree(source / "prompts", target / "prompts")
+    install_goal_plus(goal_plus_root, workspace, "pi")
 
 
 def append_unique_lines(path: Path, lines: list[str]) -> None:
@@ -297,6 +267,7 @@ def render_goal(
     search_scheduler: GoalPlusSearchScheduler | None = None,
     evaluation_mode: str | None = None,
     early_stop_contract: dict[str, Any] | None = None,
+    outer_deadline_at: str | None = None,
 ) -> str:
     """Add the host-native Goal Plus entrypoint and config to the common prompt."""
     if evaluation_mode is None:
@@ -311,7 +282,7 @@ def render_goal(
     dispatch_seconds = (
         worker_runtime_seconds
         if worker_runtime_seconds is not None
-        else max(30, min(60, exploration_seconds // 3))
+        else exploration_seconds
     )
     if dispatch_seconds < 1 or dispatch_seconds > exploration_seconds:
         raise ValueError("worker runtime must fit inside the exploration budget")
@@ -358,34 +329,36 @@ def render_goal(
             "AtomicPlan before each material edit or evaluator call and close an accepted plan "
             f"with its verifier result. {mode_behavior}"
         )
-    minimum_lease_enforcement = (
-        "the Pi pool supervisor automatically resumes the same native session "
-        "until the cumulative minimum is satisfied"
-        if agent_harness == "pi"
-        else "SubagentStop blocks an early worker return"
-    )
-    pool_close_target = (
-        "returning control for host closeout"
-        if evaluation_mode == "blind"
-        else "selection"
-    )
     initial_launch_contract = (
         "- After the one initial `search_plan_next` call, call `search_start_batch` "
-        "once to materialize the candidates. Pass all returned candidate IDs as "
-        "`candidate_ids` to one `pi_search_pool_open`, with "
-        f"`max_parallel={concurrency}` and `final_verify=true`; the pool creates and binds "
-        "the worker sessions. Treat the pool's persisted jobs and native session ids as the "
-        "only evidence that workers started; use `pi_search_pool_wait_any`, continue "
-        f"ready candidates while useful, and close the pool before {pool_close_target}.\n"
-        if agent_harness == "pi"
-        else "- A successful `search_start_agent_session` only allocates a durable "
-        "Goal Plus session and returns a launch payload; it does not start a Codex "
-        "worker. For every initial candidate, immediately map that payload to an "
-        "actual `spawn_agent` call. Only bind the handle returned by the successful "
-        "spawn. Do not claim workers are running or call `wait_agent` until all "
-        "initial spawn calls have returned real agent handles. If a spawn is "
-        "unavailable or fails, leave the run incomplete and report the launch "
-        "failure instead of simulating worker progress.\n"
+        "once to materialize the candidates. Prepare each candidate with "
+        "`search_start_agent_session`, then use `goal_plus_session_open` and "
+        "explicit `goal_plus_session_wake` / `goal_plus_session_wait` calls. "
+        "Start every initial worker before waiting. Review settled Evidence and "
+        "wake the same session again while useful work and time remain. Close "
+        "sessions with `goal_plus_session_close` before final selection or host closeout.\n"
+    )
+    minimum_planning = (
+        f"- Exploration target: about {worker_min_runtime_seconds} seconds per worker "
+        "and at least one worker verifier result, subject to the remaining deadline. "
+        "Main decides each continuation; this is a planning target, not a SearchSpec field.\n"
+        if worker_min_runtime_seconds is not None else ""
+    )
+    time_planning = (
+        f"- The absolute outer deadline is {outer_deadline_at}. "
+        if outer_deadline_at is not None else "- Read the outer deadline from Goal status. "
+    ) + (
+        f"Before each wake or wait, check current UTC and reserve {closeout_seconds} "
+        "seconds for completion. Bound both invocation and wait timeouts by the "
+        "remaining exploration time, not the original worker maximum. Give the worker "
+        "that exploration cutoff and ask it to commit and submit its verifier before "
+        "then. When exploration time is exhausted, interrupt any active invocation, "
+        "wait for it to settle, and close the session. A wait timeout alone does not "
+        "stop a worker. "
+    ) + (
+        "Return control for the controller-owned closeout.\n"
+        if evaluation_mode == "blind" else
+        "Finish selection/publication, the Goal and both reports.\n"
     )
     common_prompt = (
         render_controller_only_task_prompt(
@@ -443,18 +416,12 @@ def render_goal(
             + f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
             "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "
             "lineages while useful work and outer time remain.\n"
-            + (
-                f"- `strategy.worker_budget.min_runtime_seconds={worker_min_runtime_seconds}` "
-                "and `strategy.worker_budget.min_verifier_runs=1`; preserve this minimum "
-                f"AutoResearch lease so {minimum_lease_enforcement}. Do not place either "
-                "field in `strategy.config`.\n"
-                if worker_min_runtime_seconds is not None
-                else ""
-            )
+            + minimum_planning
             + "- Keep `strategy.worker_launch.model` aligned with "
             "`command_config.workers` and set "
             f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
             f"{initial_launch_contract}"
+            f"{time_planning}"
             f"{coordination_text}"
             f"- Metric: `{metric_name}` with direction `{metric_direction}`; it is a public "
             "format gate only. No official evaluation value may enter this Search run.\n"
@@ -474,11 +441,9 @@ def render_goal(
             f"- Edit surface: allow only `{artifact_name}`; deny `public_check.py`, "
             "`task.json`, `TASK.md`, `AGENTS.md`, and `GOAL.md`; "
             f"{edit_surface_limit}"
-            "- Workspace: use `source_path=\".\"`; backend and promotion mode come "
+            "- Workspace: use `source_path=\".\"`; provider and promotion mode come "
             "from the typed command config.\n"
             "- Constraints: no network; preserve all controller-owned public task files.\n"
-            f"- `strategy.config.reserve_closeout_seconds={closeout_seconds}` so host "
-            "supervisors stop worker continuation before final completion work.\n"
             f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
             f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
             "Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as the authoritative upper deadline.\n"
@@ -511,18 +476,12 @@ def render_goal(
         + f"- `strategy.worker_budget.max_runtime_seconds={dispatch_seconds}` and "
         "`strategy.worker_budget.on_exceed=\"interrupt\"`; continue the same candidate "
         "lineages while useful work and outer time remain.\n"
-        + (
-            f"- `strategy.worker_budget.min_runtime_seconds={worker_min_runtime_seconds}` "
-            "and `strategy.worker_budget.min_verifier_runs=1`; preserve this minimum "
-            f"AutoResearch lease so {minimum_lease_enforcement}. Do not place either "
-            "field in `strategy.config`.\n"
-            if worker_min_runtime_seconds is not None
-            else ""
-        )
+        + minimum_planning
         + "- Keep `strategy.worker_launch.model` aligned with "
         "`command_config.workers` and set "
         f"`strategy.worker_launch.reasoning_effort=\"{reasoning_effort}\"`.\n"
         f"{initial_launch_contract}"
+        f"{time_planning}"
         f"{coordination_text}"
         f"- Metric: `{metric_name}` with direction `{metric_direction}`.\n"
         "- Process verifier: `python3 .goal-plus-verifiers/primary_metric.py`, role "
@@ -535,12 +494,10 @@ def render_goal(
         f"- Edit surface: allow only `{artifact_name}`; deny `evaluate.py`, "
         "`.goal-plus-verifiers/**`, `task.json`, `TASK.md`, `AGENTS.md`, and `GOAL.md`; "
         f"{edit_surface_limit}"
-        "- Workspace: use `source_path=\".\"`; backend and promotion mode come from "
+        "- Workspace: use `source_path=\".\"`; provider and promotion mode come from "
         "the typed command config.\n"
         "- Constraints: no network; preserve the artifact's controller-checked fixed regions.\n"
         f"{early_stop_text}"
-        f"- `strategy.config.reserve_closeout_seconds={closeout_seconds}` so host "
-        "supervisors stop worker continuation before final completion work.\n"
         f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
         f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
         "Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as the authoritative upper deadline.\n"
@@ -637,7 +594,7 @@ def configure_isolated_codex_home(
 ) -> Path:
     """Load project hooks without inheriting the user's Codex configuration."""
     codex_home = run_dir / "controller-runtime" / "codex-home"
-    codex_home.mkdir(parents=True, exist_ok=False)
+    codex_home.mkdir(parents=True, exist_ok=True)
     environment["CODEX_HOME"] = str(codex_home)
     return codex_home
 
@@ -1494,26 +1451,6 @@ def collect_search_space_state(run_dir: Path) -> dict[str, Any]:
 
 def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
     root = workspace / ".gp"
-    pi_pool_jobs_by_run: dict[str, list[dict[str, Any]]] = {}
-    for job_path in sorted(
-        (root / "host-pools" / "pi").glob("pool_*/jobs/job_*/job.json")
-    ):
-        job = load_json(job_path)
-        run_id = job.get("run_id")
-        if not isinstance(run_id, str):
-            continue
-        result_path = job_path.parent / "result.json"
-        result = load_json(result_path) if result_path.is_file() else {}
-        pi_pool_jobs_by_run.setdefault(run_id, []).append(
-            {
-                "job_id": job.get("job_id"),
-                "candidate_id": job.get("candidate_id"),
-                "status": job.get("status"),
-                "started_at": job.get("started_at"),
-                "finished_at": job.get("finished_at"),
-                "lease": result.get("lease") if isinstance(result, dict) else None,
-            }
-        )
     goals = []
     for path in sorted((root / "goal-plus").glob("gp_*/goal.json")):
         payload = load_json(path)
@@ -1601,21 +1538,14 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 session_counts_by_candidate[candidate_id] = (
                     session_counts_by_candidate.get(candidate_id, 0) + 1
                 )
-            session_handle = session.get("session_handle") or {}
-            launch = session.get("launch") or {}
-            if launch.get("tool") in {"followup_task", "pi_search_pool_continue"}:
+            intervals = session_worker_intervals(session)
+            if len(intervals) > 1:
                 same_agent_continuation_session_count += 1
-            external_id = session_handle.get("external_id")
-            task_name = session_handle.get("task_name")
             is_bound = (
                 isinstance(candidate_id, str)
-                and (
-                    (isinstance(external_id, str) and external_id)
-                    or (
-                        isinstance(task_name, str)
-                        and task_name.startswith("/")
-                    )
-                )
+                and agent_harness is not None
+                and session_agent_harness(session) == agent_harness
+                and bool(intervals)
             )
             if is_bound:
                 bound_candidate_ids.add(candidate_id)
@@ -1631,32 +1561,8 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 and counters["verifier_runs"] > 0
             ):
                 worker_verified_candidate_ids.add(candidate_id)
-            if agent_harness == "codex" and isinstance(candidate_id, str):
-                lease_path = (
-                    root
-                    / "host-logs"
-                    / "codex-autoresearch-leases"
-                    / f"{session.get('agent_session_id')}.json"
-                )
-                lease = load_json(lease_path) if lease_path.is_file() else {}
-                if lease:
-                    worker_intervals.append(
-                        {
-                            "candidate_id": candidate_id,
-                            "started_at": lease.get("started_at"),
-                            "ended_at": lease.get("released_at")
-                            or session.get("updated_at"),
-                        }
-                    )
-        if agent_harness == "pi":
-            worker_intervals.extend(
-                {
-                    "candidate_id": str(job.get("candidate_id") or ""),
-                    "started_at": job.get("started_at"),
-                    "ended_at": job.get("finished_at"),
-                }
-                for job in pi_pool_jobs_by_run.get(str(payload.get("run_id")), [])
-            )
+            if is_bound:
+                worker_intervals.extend(intervals)
         worker_concurrency = summarize_worker_concurrency(worker_intervals)
         initial_worker_concurrency = summarize_worker_concurrency(
             interval
@@ -1703,7 +1609,6 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "metric_direction": metric_direction,
                 "agent_harness": agent_harness,
                 "worker_budget": worker_budget,
-                "pi_pool_jobs": pi_pool_jobs_by_run.get(str(payload.get("run_id")), []),
                 "best_recorded_score": (
                     min(best_scores)
                     if best_scores and metric_direction == "minimize"
@@ -1736,8 +1641,8 @@ def goal_plus_settled_selection(
     before closeout) committed a selection and promotion, or once a verified
     candidate reached the frozen target score.  A settled run carries a real
     PASS / NOT_PASS score; it must not be reported as INFRA just because the
-    host interrupted the pi workers before they each satisfied the minimum
-    lease.  Unsettled runs -- no materialized selection, no verified target
+    host interrupted workers at the exploration deadline.
+    Unsettled runs -- no materialized selection, no verified target
     candidate, or no run at all (the seed never started, or the run is frozen
     in selection_blocked) -- are genuine INFRA and stay incomplete.
     """
@@ -1771,12 +1676,8 @@ def goal_plus_incomplete_reason(
     *,
     expected_concurrency: int | None = None,
     minimum_worker_verified_candidates: int | None = None,
-    expected_worker_min_runtime_seconds: int | None = None,
-    expected_worker_min_verifier_runs: int | None = None,
-    require_satisfied_pi_minimum_lease: bool = True,
     expected_goal_plus_id: str | None = None,
     expected_run_id: str | None = None,
-    codex_events: dict[str, Any] | None = None,
     expected_search_scheduler: GoalPlusSearchScheduler | None = None,
 ) -> str | None:
     goals = state.get("goals") or []
@@ -1827,64 +1728,7 @@ def goal_plus_incomplete_reason(
         runs = [item for item in runs if item.get("run_id") in linked_run_ids]
         if len(runs) != len(linked_run_ids):
             return "one or more Goal Plus linked Search runs are missing"
-    expected_lease = {
-        key: value
-        for key, value in {
-            "min_runtime_seconds": expected_worker_min_runtime_seconds,
-            "min_verifier_runs": expected_worker_min_verifier_runs,
-        }.items()
-        if value is not None
-    }
-    for run in runs:
-        actual_budget = run.get("worker_budget") or {}
-        mismatches = [
-            f"{key}={actual_budget.get(key)!r} (expected {expected!r})"
-            for key, expected in expected_lease.items()
-            if actual_budget.get(key) != expected
-        ]
-        if mismatches:
-            return (
-                f"Search run {run.get('run_id')} frozen worker budget mismatch: "
-                + ", ".join(mismatches)
-            )
-        if expected_lease and run.get("agent_harness") == "pi":
-            jobs = run.get("pi_pool_jobs") or []
-            if not jobs:
-                return (
-                    f"Search run {run.get('run_id')} has no Pi minimum lease evidence"
-                )
-            if require_satisfied_pi_minimum_lease:
-                unsatisfied = [
-                    str(job.get("job_id") or job.get("candidate_id") or "unknown")
-                    for job in jobs
-                    if job.get("status") != "completed"
-                    or not isinstance(job.get("lease"), dict)
-                    or job["lease"].get("satisfied") is not True
-                ]
-                if unsatisfied:
-                    return (
-                        f"Search run {run.get('run_id')} did not satisfy the Pi minimum lease "
-                        "for jobs: " + ", ".join(unsatisfied)
-                    )
     if expected_concurrency is not None:
-        if codex_events is not None:
-            spawned_workers = int(
-                codex_events.get("spawned_agent_thread_count") or 0
-            )
-            bound_workers = int(
-                (codex_events.get("goal_plus") or {}).get(
-                    "bound_worker_handle_count"
-                )
-                or 0
-            )
-            if max(spawned_workers, bound_workers) < expected_concurrency:
-                return (
-                    "Codex recorded "
-                    f"{spawned_workers} distinct spawned worker threads; "
-                    f"Goal Plus recorded {bound_workers} distinct bound worker handles; "
-                    "expected at least "
-                    f"{expected_concurrency} actual workers"
-                )
         required_worker_evidence = (
             expected_concurrency
             if minimum_worker_verified_candidates is None
@@ -1969,7 +1813,6 @@ def goal_plus_incomplete_reason(
                 )
             session_counts = (
                 run.get("bound_session_counts_by_candidate")
-                or run.get("session_counts_by_candidate")
                 or {}
             )
             duplicate_sessions = {
@@ -2001,37 +1844,26 @@ def goal_plus_incomplete_reason(
     return None
 
 
-def close_pi_pools(workspace: Path, timeout_seconds: int) -> list[dict[str, Any]]:
-    from goal_plus.pi_pool import close_pi_search_pool
+def close_candidate_sessions(workspace: Path, timeout_seconds: int) -> list[dict[str, Any]]:
+    from goal_plus.host_scope import close_run_candidates, execution_scope_for_run
 
     root = workspace / ".gp"
     summaries = []
-    for path in sorted((root / "host-pools" / "pi").glob("pool_*/pool.json")):
-        pool_id = path.parent.name
-        snapshot = close_pi_search_pool(
-            root_dir=root,
-            pool_id=pool_id,
-            mode="interrupt",
+    for path in sorted((root / "runs").glob("run_*/run.json")):
+        run_id = path.parent.name
+        scope = execution_scope_for_run(root_dir=root, run_id=run_id)
+        if scope is None:
+            raise RuntimeError(f"Search run {run_id} has no native execution scope")
+        if scope.get("state") == "closed":
+            cleanup = scope.get("cleanup") or {}
+            if cleanup.get("active_count") != 0 or cleanup.get("errors") != []:
+                raise RuntimeError(f"Search run {run_id} lacks successful scope cleanup")
+            summaries.append({"run_id": run_id, "active_count": 0, "scope_id": scope["scope_id"]})
+            continue
+        summaries.append(close_run_candidates(
+            root_dir=root, scope_id=scope["scope_id"], run_id=run_id,
             timeout_seconds=timeout_seconds,
-        )
-        summaries.append(
-            {
-                "pool_id": pool_id,
-                "state": snapshot.get("state"),
-                "active_count": snapshot.get("active_count"),
-                "terminal_count": snapshot.get("terminal_count"),
-                "close_timed_out": bool(snapshot.get("close_timed_out")),
-                "jobs": [
-                    {
-                        "job_id": job.get("job_id"),
-                        "candidate_id": job.get("candidate_id"),
-                        "status": job.get("status"),
-                        "lease": (job.get("result") or {}).get("lease"),
-                    }
-                    for job in snapshot.get("jobs", [])
-                ],
-            }
-        )
+        ))
     return summaries
 
 
@@ -3007,6 +2839,7 @@ def execute(args: argparse.Namespace) -> int:
                 worker_model=args.model,
                 reasoning_effort=reasoning_effort,
                 search_scheduler=search_scheduler,
+                outer_deadline_at=deadline.isoformat(),
             )
             command = [
                 args.codex_bin,
@@ -3044,6 +2877,7 @@ def execute(args: argparse.Namespace) -> int:
                 worker_model=qualified_model,
                 reasoning_effort=reasoning_effort,
                 search_scheduler=search_scheduler,
+                outer_deadline_at=deadline.isoformat(),
             )
             pi_home = run_dir / "pi-home"
             write_pi_models_config(
@@ -3072,19 +2906,15 @@ def execute(args: argparse.Namespace) -> int:
                 str(run_dir / "pi-main-session"),
                 "--session-id",
                 f"bench-{run_dir.name}",
-                "--no-extensions",
                 "--no-skills",
                 "--no-prompt-templates",
                 "--no-context-files",
-                "--extension",
-                str(workspace / ".pi/extensions/goal-plus.ts"),
-                "--skill",
-                str(workspace / ".pi/skills/goal-plus/SKILL.md"),
                 prompt,
             ]
             stdout_path = run_dir / "events.jsonl"
             recorded_command = [*command[:-1], "<goal-prompt>"]
         (run_dir / "prompt.md").write_text(prompt)
+        bind_goal_plus_environment(environment, run_dir)
         control = run_controlled(
             command,
             cwd=workspace,
@@ -3096,10 +2926,9 @@ def execute(args: argparse.Namespace) -> int:
             hard_kill_grace_seconds=budget["hard_kill_grace_seconds"],
             recorded_command=recorded_command,
         )
-        if method == "goal-plus-pi":
-            control["pi_pool_cleanup"] = close_pi_pools(
-                workspace, budget["hard_kill_grace_seconds"]
-            )
+        control["candidate_session_cleanup"] = close_candidate_sessions(
+            workspace, budget["hard_kill_grace_seconds"]
+        )
         control["goal_plus_controller_closeout"] = finalize_goal_plus_search(workspace)
         final = evaluate_workspace(workspace, "final")
         write_json(run_dir / "final-eval.json", final)
@@ -3126,28 +2955,13 @@ def execute(args: argparse.Namespace) -> int:
         target_score = early_stop_cfg.get("target_score")
         settled = goal_plus_settled_selection(control["goal_plus"], target_score=target_score)
         if settled:
-            # The run materialized a real, committed selection/promotion (or a
-            # verified live pass) before the host stopped the pi workers.  It
-            # carries a genuine PASS / NOT_PASS score, so the interrupted lease
-            # and reduced worker evidence must not reclassify it as INFRA.
-            control["minimum_lease_completion_waived"] = True
             if control.get("early_stop_triggered"):
                 control["early_stop_completion_verified"] = True
         goal_reason = goal_plus_incomplete_reason(
             control["goal_plus"],
             expected_concurrency=budget["concurrency"],
-            codex_events=(
-                control.get("codex") if method == "goal-plus-codex" else None
-            ),
-            expected_worker_min_runtime_seconds=budget.get(
-                "worker_min_runtime_seconds"
-            ),
-            expected_worker_min_verifier_runs=(
-                1 if budget.get("worker_min_runtime_seconds") is not None else None
-            ),
             expected_search_scheduler=search_scheduler,
             minimum_worker_verified_candidates=(1 if settled else None),
-            require_satisfied_pi_minimum_lease=(not settled),
         )
         if goal_reason and not control.get("result_incomplete_reason"):
             control["result_incomplete_reason"] = goal_reason
@@ -3227,10 +3041,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
         raise ValueError("closeout is only valid for Goal Plus runs")
     workspace = Path(manifest["workspace"])
     control = dict(manifest.get("execution") or {})
-    if method == "goal-plus-pi":
-        control["pi_pool_cleanup_repair"] = close_pi_pools(
-            workspace, manifest["budget"]["hard_kill_grace_seconds"]
-        )
+    control["candidate_session_cleanup_repair"] = close_candidate_sessions(
+        workspace, manifest["budget"]["hard_kill_grace_seconds"]
+    )
     control["goal_plus_controller_closeout_repair"] = finalize_goal_plus_search(
         workspace
     )
@@ -3244,32 +3057,15 @@ def repair_closeout(args: argparse.Namespace) -> int:
         control["goal_plus"], target_score=target_score
     )
     if settled:
-        # A fixed-budget Search run that materialized a committed selection or
-        # a verified live pass before the host stopped the workers is a real
-        # PASS / NOT_PASS, not INFRA.  The relaxation below mirrors the main
-        # execute() gate so repair_closeout does not re-flag it incomplete.
-        control["minimum_lease_completion_waived"] = True
         if control.get("early_stop_triggered"):
             control["early_stop_completion_verified"] = True
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=manifest["budget"]["concurrency"],
-        codex_events=(
-            control.get("codex") if method == "goal-plus-codex" else None
-        ),
-        expected_worker_min_runtime_seconds=manifest["budget"].get(
-            "worker_min_runtime_seconds"
-        ),
-        expected_worker_min_verifier_runs=(
-            1
-            if manifest["budget"].get("worker_min_runtime_seconds") is not None
-            else None
-        ),
         expected_search_scheduler=search_scheduler_from_json(
             (manifest.get("goal_plus_config") or {}).get("search_scheduler")
         ),
         minimum_worker_verified_candidates=(1 if settled else None),
-        require_satisfied_pi_minimum_lease=(not settled),
     )
     if reason is None and not control.get("hard_killed"):
         control.pop("result_incomplete_reason", None)

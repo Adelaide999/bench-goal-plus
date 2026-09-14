@@ -17,27 +17,25 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _close_pi_pools(root: Path, timeout_seconds: int) -> list[dict[str, Any]]:
-    from goal_plus.pi_pool import close_pi_search_pool
+def _close_candidate_sessions(root: Path, timeout_seconds: int) -> list[dict[str, Any]]:
+    from goal_plus.host_scope import close_run_candidates, execution_scope_for_run
 
     summaries = []
-    for path in sorted((root / "host-pools" / "pi").glob("pool_*/pool.json")):
-        pool_id = path.parent.name
-        snapshot = close_pi_search_pool(
-            root_dir=root,
-            pool_id=pool_id,
-            mode="interrupt",
-            timeout_seconds=timeout_seconds,
-        )
-        summaries.append(
-            {
-                "pool_id": pool_id,
-                "state": snapshot.get("state"),
-                "active_count": snapshot.get("active_count"),
-                "terminal_count": snapshot.get("terminal_count"),
-                "close_timed_out": bool(snapshot.get("close_timed_out")),
-            }
-        )
+    for path in sorted((root / "runs").glob("run_*/run.json")):
+        run_id = path.parent.name
+        scope = execution_scope_for_run(root_dir=root, run_id=run_id)
+        if scope is None:
+            raise RuntimeError(f"Search run {run_id} has no native execution scope")
+        if scope.get("state") == "closed":
+            cleanup = scope.get("cleanup") or {}
+            if cleanup.get("active_count") != 0 or cleanup.get("errors") != []:
+                raise RuntimeError(f"Search run {run_id} lacks successful scope cleanup")
+            summaries.append({"run_id": run_id, "active_count": 0, "scope_id": scope["scope_id"]})
+        else:
+            summaries.append(close_run_candidates(
+                root_dir=root, scope_id=scope["scope_id"], run_id=run_id,
+                timeout_seconds=timeout_seconds,
+            ))
     return summaries
 
 
@@ -87,7 +85,7 @@ def _existing_promotion(
     )
 
 
-def closeout(root: Path, source: Path, *, pool_timeout_seconds: int) -> dict[str, Any]:
+def closeout(root: Path, source: Path, *, session_timeout_seconds: int) -> dict[str, Any]:
     """Drain host workers and idempotently finish every linked Search run."""
     from goal_plus.evidence_annotator import drain_evidence_annotations
     from goal_plus.goal_plus import FileGoalPlusRuntime
@@ -101,11 +99,11 @@ def closeout(root: Path, source: Path, *, pool_timeout_seconds: int) -> dict[str
         "completed": False,
         "root": str(root),
         "source": str(source),
-        "pi_pools": [],
+        "candidate_session_cleanup": [],
         "runs": [],
     }
     try:
-        result["pi_pools"] = _close_pi_pools(root, pool_timeout_seconds)
+        result["candidate_session_cleanup"] = _close_candidate_sessions(root, session_timeout_seconds)
         goal_runtime = FileGoalPlusRuntime(root)
         search_runtime = FileSearchRuntime(root)
         tools = SearchTools(search_runtime)
@@ -233,12 +231,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path("/testbed/.gp"))
     parser.add_argument("--source", type=Path, default=Path("/testbed"))
-    parser.add_argument("--pool-timeout-seconds", type=int, default=60)
+    parser.add_argument("--session-timeout-seconds", type=int, default=60)
     args = parser.parse_args(argv)
     payload = closeout(
         args.root,
         args.source,
-        pool_timeout_seconds=args.pool_timeout_seconds,
+        session_timeout_seconds=args.session_timeout_seconds,
     )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0 if payload["completed"] else 1

@@ -193,15 +193,15 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(passing.returncode, 0)
         self.assertEqual(json.loads(passing.stdout)["visible_test_score"], 1.0)
 
-    def test_goal_plus_installer_uses_the_bind_cache_owner(self) -> None:
+    def test_goal_plus_installer_uses_managed_runtime_receipt(self) -> None:
         script = environment.goal_plus_install_script(
             pi_cli="/opt/pi/dist/bundle/cli.js"
         )
 
-        self.assertIn("os.stat('/opt/pip-cache')", script)
-        self.assertIn("os.setgid(cache.st_gid)", script)
-        self.assertIn("os.setuid(cache.st_uid)", script)
-        self.assertIn("'/opt/goal-plus-runtime-requirements.lock'", script)
+        self.assertIn("/opt/goal-plus/install.sh --pi --yes", script)
+        self.assertIn("/opt/goal-plus/install.sh --runtime-info", script)
+        self.assertIn('"$GP_INSTALLED_PYTHON" -I -m goal_plus.installation', script)
+        self.assertNotIn("--target", script)
         self.assertIn("PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH", script)
         self.assertIn(
             "ln -sf /opt/pi/dist/bundle/cli.js /opt/goal-plus-bin/pi", script
@@ -213,7 +213,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         )
 
         codex_script = environment.goal_plus_install_script(pi_cli=None)
-        self.assertIn("goal_plus.server", codex_script)
+        self.assertIn("/opt/goal-plus/install.sh --codex --yes", codex_script)
         self.assertNotIn("/opt/pi/dist", codex_script)
         self.assertNotIn("/opt/goal-plus-bin/pi", codex_script)
 
@@ -232,10 +232,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertTrue(runtime._goal_plus_closeout("fixture-container", profile, runtime_info)["completed"])
         command = run.call_args.args[0]
         interpreter = command[command.index("fixture-container") + 1]
-        self.assertEqual(interpreter, "/opt/goal-plus-runtime/venv/bin/python")
+        self.assertEqual(interpreter, "/opt/goal-plus-bin/goal-plus-python")
         self.assertIn(f"GOAL_PLUS_PYTHON={interpreter}", command)
         script = environment.goal_plus_install_script(pi_cli=str(runtime_info["container_pi_cli"]))
-        self.assertIn('PYTHON="$GOAL_PLUS_PYTHON" /opt/goal-plus/install.sh --pi', script)
+        self.assertIn('/opt/goal-plus/install.sh --pi --yes', script)
         syntax = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
         self.assertEqual(syntax.returncode, 0, syntax.stderr)
         command = runtime._agent_command("fixture-container", profile, runtime_info)
@@ -267,10 +267,10 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             }
             promotion = ({}, "c001", {"selected_score": 1.0}, {"artifact_path": str(patch)})
             with mock.patch.dict(sys.modules, modules), \
-                    mock.patch.object(controller, "_close_pi_pools", return_value=[]), \
+                    mock.patch.object(controller, "_close_candidate_sessions", return_value=[]), \
                     mock.patch.object(controller, "_existing_promotion", return_value=promotion):
                 search_runtime.promotion_record.return_value = SimpleNamespace(state="applied")
-                result = controller.closeout(root, source, pool_timeout_seconds=10)
+                result = controller.closeout(root, source, session_timeout_seconds=10)
                 self.assertTrue(result["completed"], result)
                 search_tools.search_apply_promotion.assert_not_called()
                 goal_runtime.set_status.assert_not_called()
@@ -278,13 +278,13 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 goal.status = "active"
                 search_runtime.promotion_record.return_value = SimpleNamespace(state="prepared")
                 search_tools.search_apply_promotion.return_value = {"state": "awaiting_main_integration"}
-                result = controller.closeout(root, source, pool_timeout_seconds=10)
+                result = controller.closeout(root, source, session_timeout_seconds=10)
                 self.assertFalse(result["completed"])
                 self.assertIn("publication has not been applied", result["error"])
                 goal_runtime.set_status.assert_not_called()
 
                 search_tools.search_apply_promotion.return_value = {"state": "applied"}
-                result = controller.closeout(root, source, pool_timeout_seconds=10)
+                result = controller.closeout(root, source, session_timeout_seconds=10)
                 self.assertTrue(result["completed"], result)
                 search_tools.search_apply_promotion.assert_called_with("run_fixture")
                 goal_runtime.set_status.assert_called_once()
@@ -309,13 +309,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
     def test_goal_plus_codex_project_assets_follow_latest_muyuan_layout(self) -> None:
         script = runtime.goal_plus_codex_project_asset_script()
 
-        self.assertIn(".codex/config.example.toml", script)
-        self.assertIn(".codex/hooks.example.json", script)
-        self.assertIn(".codex/hooks.json", script)
-        self.assertLess(
-            script.index(".codex/hooks.example.json"),
-            script.rindex(".codex/hooks.json"),
-        )
+        self.assertIn("/opt/goal-plus-runtime/receipt.json", script)
+        self.assertIn("/opt/codex-home/config.toml", script)
         self.assertNotIn("cp -a /opt/goal-plus/.codex /testbed/.codex", script)
 
     def test_goal_plus_codex_profile_uses_native_auth_and_codex_workers(self) -> None:
@@ -624,6 +619,14 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                         "runtime_provider": "direct",
                         "external_id": f"agent_{index}",
                         "metadata": {
+                            "dispatches": [{
+                                "agent_harness": agent_harness,
+                                "runtime_provider": "direct",
+                                "native_session_id": f"agent_{index}",
+                                "invocation_id": f"turn_{index}",
+                                "started_at": "2026-08-06T12:00:00Z",
+                                "ended_at": "2026-08-06T12:10:00Z",
+                            }],
                             "pi_metrics": {
                                 "usage_total": {"input_tokens": 10 + index}
                             }
@@ -691,7 +694,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "codex/parallel_loops",
         )
 
-    def test_completion_requires_current_frozen_closeout_reserve_key(self) -> None:
+    def test_closeout_reserve_is_a_benchmark_planning_target(self) -> None:
         with self.temporary_directory() as directory:
             root = Path(directory)
             self.write_goal_plus_state(root)
@@ -699,13 +702,14 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                             expected_closeout_reserve_seconds=300,
                             expected_visible_verifier_timeout_seconds=300)
             state = goal_plus_evidence.collect_goal_plus_state(root, **expected)
-            self.assertTrue(state["completion"]["checks"]["closeout_reserve"]["passed"])
+            self.assertNotIn("closeout_reserve", state["completion"]["checks"])
+            self.assertEqual(state["planning_targets"]["closeout_seconds"], 300)
             path = root / "specs/spec_test/frozen_spec.json"
             frozen = read_json(path)
-            frozen["spec"]["strategy"]["config"] = {"closeout_reserve_seconds": 300}
+            frozen["spec"]["strategy"]["config"] = {}
             write_json(path, frozen)
             state = goal_plus_evidence.collect_goal_plus_state(root, **expected)
-            self.assertFalse(state["completion"]["checks"]["closeout_reserve"]["passed"])
+            self.assertTrue(state["completion"]["passed"])
 
     def test_completion_rejects_worker_model_substitution(self) -> None:
         with self.temporary_directory() as directory:
@@ -784,12 +788,13 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
 
             second_lease_path = (
                 root
-                / "host-logs/codex-autoresearch-leases/agent_1.json"
+                / "runs/run_test/agent_sessions/agent_1.json"
             )
-            second_lease = read_json(second_lease_path)
+            second_session = read_json(second_lease_path)
+            second_lease = second_session["session_handle"]["metadata"]["dispatches"][0]
             second_lease["started_at"] = "2026-08-06T12:11:00Z"
-            second_lease["released_at"] = "2026-08-06T12:21:00Z"
-            write_json(second_lease_path, second_lease)
+            second_lease["ended_at"] = "2026-08-06T12:21:00Z"
+            write_json(second_lease_path, second_session)
             serialized_state = goal_plus_evidence.collect_goal_plus_state(
                 root,
                 expected_k=2,
@@ -808,8 +813,8 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 ]
             )
             second_lease["started_at"] = "2026-08-06T12:00:00Z"
-            second_lease["released_at"] = "2026-08-06T12:10:00Z"
-            write_json(second_lease_path, second_lease)
+            second_lease["ended_at"] = "2026-08-06T12:10:00Z"
+            write_json(second_lease_path, second_session)
             self.assertEqual(
                 len(influence["actual"]["valid_peer_influence_windows"]),
                 1,
@@ -877,7 +882,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "peer_view_influence", missing_state["completion"]["reason"]
             )
 
-    def test_goal_plus_codex_completion_enforces_worker_minimums(self) -> None:
+    def test_goal_plus_completion_requires_actual_native_invocations(self) -> None:
         with self.temporary_directory() as temporary:
             root = Path(temporary)
             self.write_goal_plus_state(
@@ -899,61 +904,15 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             )
 
             self.assertTrue(state["completion"]["passed"])
-            self.assertTrue(
-                state["completion"]["checks"]["worker_minimum_observed"][
-                    "passed"
-                ]
-            )
+            self.assertNotIn("worker_minimum_observed", state["completion"]["checks"])
+            self.assertEqual(state["planning_targets"]["worker_seconds"], 600)
 
             session_path = (
                 root
                 / "runs/run_test/agent_sessions/agent_0.json"
             )
             session = read_json(session_path)
-            session["updated_at"] = "2026-08-06T12:10:01Z"
-            write_json(session_path, session)
-
-            lease_path = (
-                root
-                / "host-logs"
-                / "codex-autoresearch-leases"
-                / "agent_0.json"
-            )
-            lease = read_json(lease_path)
-            lease.update(
-                {
-                    "status": "active",
-                    "started_at": "2026-08-06T12:00:00Z",
-                    "elapsed_seconds": 544,
-                    "verifier_runs": 2,
-                }
-            )
-            lease.pop("release_reason")
-            write_json(lease_path, lease)
-            recovered = goal_plus_evidence.collect_goal_plus_state(
-                root,
-                expected_k=1,
-                expected_worker_runtime_seconds=1500,
-                expected_closeout_reserve_seconds=300,
-                expected_visible_verifier_timeout_seconds=300,
-                expected_worker_min_runtime_seconds=600,
-                expected_worker_min_verifier_runs=2,
-                expected_agent_harness="codex",
-            )
-            observation = recovered["completion"]["checks"][
-                "worker_minimum_observed"
-            ]
-            self.assertTrue(observation["passed"])
-            self.assertEqual(
-                observation["actual"]["leases"][0]["minimum_observation"][
-                    "basis"
-                ],
-                "terminal_session_timestamps",
-            )
-
-            lease["verifier_runs"] = 1
-            write_json(lease_path, lease)
-            session["counters"]["verifier_runs"] = 1
+            session["session_handle"]["metadata"]["dispatches"] = []
             write_json(session_path, session)
             failed = goal_plus_evidence.collect_goal_plus_state(
                 root,
@@ -966,7 +925,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 expected_agent_harness="codex",
             )
             self.assertFalse(failed["completion"]["passed"])
-            self.assertIn("worker_minimum_observed", failed["completion"]["reason"])
+            self.assertEqual(failed["actual_subagent_count"], 0)
 
     def test_finalize_revalidates_goal_plus_codex_with_codex_workers(self) -> None:
         profile = self.profile("sympy-16886-goal-plus-codex-smoke")
@@ -1880,8 +1839,9 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 prompt,
             )
             self.assertIn("other exit-code suppressor", prompt)
-            self.assertIn("/opt/goal-plus/.pi/extensions/goal-plus.ts", command)
-            self.assertIn("/opt/goal-plus/.pi/skills/goal-plus/SKILL.md", command)
+            self.assertNotIn("--no-extensions", command)
+            self.assertNotIn("--extension", command)
+            self.assertIn("PI_CODING_AGENT_DIR=/opt/pi-home/.pi/agent", command)
             self.assertIn("--print", command)
             self.assertIn("GOAL_PLUS_ROOT=/testbed/.gp", command)
             self.assertIn("GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED=1", command)

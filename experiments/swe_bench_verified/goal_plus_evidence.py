@@ -8,14 +8,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bench_goal_plus.goal_plus_evidence import frozen_agent_harness, session_agent_harness
+from bench_goal_plus.goal_plus_evidence import (
+    frozen_agent_harness, session_agent_harness, session_worker_intervals,
+)
 from bench_goal_plus.search_scheduler import (
     GoalPlusSearchScheduler,
     summarize_worker_concurrency,
 )
 
 
-ACTIVE_POOL_STATES = {"starting", "running"}
 VISIBLE_VERIFIER_SUFFIX = ".goal-plus-verifiers/visible_test_verifier.py"
 VISIBLE_VERIFIER_PATH = (
     Path(__file__).resolve().parent / "verifiers" / "visible_test_verifier.py"
@@ -71,16 +72,13 @@ def _timestamp_not_after(left: Any, right: Any) -> bool:
         return False
 
 
-def _worker_overlap(leases: list[dict[str, Any]], expected_k: int) -> dict[str, Any]:
+def _worker_overlap(receipts: list[dict[str, Any]], expected_k: int) -> dict[str, Any]:
     intervals = []
     parsed = []
-    for lease in leases:
-        interval = lease.get("observed_interval")
-        if not isinstance(interval, dict):
-            continue
+    for interval in receipts:
         started_at = _timestamp(interval.get("started_at"))
         ended_at = _timestamp(interval.get("ended_at"))
-        candidate_id = lease.get("candidate_id")
+        candidate_id = interval.get("candidate_id")
         if (
             started_at is None
             or ended_at is None
@@ -97,98 +95,37 @@ def _worker_overlap(leases: list[dict[str, Any]], expected_k: int) -> dict[str, 
         intervals.append(
             {
                 "candidate_id": candidate_id,
-                "agent_session_id": lease.get("agent_session_id"),
+                "agent_session_id": interval.get("agent_session_id"),
                 **interval,
             }
         )
         parsed.append((candidate_id, started_at, ended_at))
 
     overlap_seconds = 0.0
-    if len(parsed) == expected_k:
-        try:
-            overlap_seconds = max(
-                0.0,
-                (
-                    min(item[2] for item in parsed)
-                    - max(item[1] for item in parsed)
-                ).total_seconds(),
-            )
-        except TypeError:
-            overlap_seconds = 0.0
+    active: dict[str, int] = {}
+    previous = None
+    events = [(start, 1, candidate) for candidate, start, _ in parsed]
+    events.extend((end, -1, candidate) for candidate, _, end in parsed)
+    try:
+        for when, delta, candidate in sorted(events):
+            if previous is not None and len(active) == expected_k:
+                overlap_seconds += (when - previous).total_seconds()
+            active[candidate] = active.get(candidate, 0) + delta
+            if active[candidate] == 0:
+                del active[candidate]
+            previous = when
+    except TypeError:
+        overlap_seconds = 0.0
     candidate_ids = {item[0] for item in parsed}
     return {
         "expected_k": expected_k,
         "intervals": intervals,
         "overlap_seconds": round(overlap_seconds, 3),
         "passed": bool(
-            len(parsed) == expected_k
+            len(parsed) == len(receipts)
             and len(candidate_ids) == expected_k
             and overlap_seconds > 0
         ),
-    }
-
-
-def _observed_autoresearch_lease(
-    lease: dict[str, Any], session: dict[str, Any], *, run_state: Any
-) -> dict[str, Any]:
-    minimum_runtime = int(lease.get("min_runtime_seconds") or 0)
-    minimum_verifiers = int(lease.get("min_verifier_runs") or 0)
-    session_verifiers = int((session.get("counters") or {}).get("verifier_runs") or 0)
-    observed_verifiers = max(
-        int(lease.get("verifier_runs") or 0), session_verifiers
-    )
-    observed_elapsed = float(lease.get("elapsed_seconds") or 0)
-    started_at = _timestamp(lease.get("started_at"))
-    released_at = _timestamp(lease.get("released_at"))
-    session_updated_at = _timestamp(session.get("updated_at"))
-    if started_at is not None and session_updated_at is not None:
-        observed_elapsed = max(
-            observed_elapsed,
-            max(0.0, (session_updated_at - started_at).total_seconds()),
-        )
-
-    released = (
-        lease.get("status") == "released"
-        and lease.get("release_reason") == "lease_satisfied"
-    )
-    terminal_session = (
-        run_state == "promoted"
-        and observed_elapsed >= minimum_runtime
-        and observed_verifiers >= minimum_verifiers
-    )
-    basis = (
-        "released_lease"
-        if released
-        else "terminal_session_timestamps"
-        if terminal_session
-        else "insufficient"
-    )
-    interval_end = released_at or session_updated_at
-    observed_interval = (
-        {
-            "started_at": lease.get("started_at"),
-            "ended_at": (
-                lease.get("released_at")
-                if released_at is not None
-                else session.get("updated_at")
-            ),
-            "end_basis": (
-                "released_at" if released_at is not None else "session_updated_at"
-            ),
-        }
-        if started_at is not None and interval_end is not None
-        else None
-    )
-    return {
-        **lease,
-        "observed_interval": observed_interval,
-        "minimum_observation": {
-            "passed": released or terminal_session,
-            "basis": basis,
-            "run_state": run_state,
-            "observed_elapsed_seconds": round(observed_elapsed, 3),
-            "observed_verifier_runs": observed_verifiers,
-        },
     }
 
 
@@ -608,20 +545,6 @@ def collect_goal_plus_state(
     runs: list[dict[str, Any]] = []
     all_bound_sessions: list[dict[str, Any]] = []
     candidate_records_by_run: dict[str, list[dict[str, Any]]] = {}
-    pi_worker_intervals_by_run: dict[str, list[dict[str, Any]]] = {}
-    for job_path in sorted(
-        (root / "host-pools" / "pi").glob("pool_*/jobs/job_*/job.json")
-    ):
-        job = _read_object(job_path)
-        run_id = job.get("run_id")
-        if isinstance(run_id, str):
-            pi_worker_intervals_by_run.setdefault(run_id, []).append(
-                {
-                    "candidate_id": job.get("candidate_id"),
-                    "started_at": job.get("started_at"),
-                    "ended_at": job.get("finished_at"),
-                }
-            )
     for path in sorted((root / "runs").glob("run_*/run.json")):
         payload = _read_object(path)
         run_id = str(payload.get("run_id") or path.parent.name)
@@ -687,7 +610,6 @@ def collect_goal_plus_state(
             for session_path in sorted(path.parent.glob("agent_sessions/agent_*.json"))
         ]
         bound_sessions: list[dict[str, Any]] = []
-        autoresearch_leases: list[dict[str, Any]] = []
         worker_intervals: list[dict[str, Any]] = []
         bound_counts: dict[str, int] = {}
         verifier_candidate_ids: set[str] = set()
@@ -701,6 +623,8 @@ def collect_goal_plus_state(
             )
             if (
                 session_agent_harness(session) == expected_agent_harness
+                and frozen_agent_harness(frozen) == expected_agent_harness
+                and bool(session_worker_intervals(session))
                 and isinstance(candidate_id, str)
                 and candidate_id
                 and isinstance(bound_id, str)
@@ -711,28 +635,7 @@ def collect_goal_plus_state(
                 counters = session.get("counters") or {}
                 if isinstance(counters, dict) and int(counters.get("verifier_runs") or 0) > 0:
                     verifier_candidate_ids.add(candidate_id)
-                lease = _read_object(
-                    root
-                    / "host-logs"
-                    / "codex-autoresearch-leases"
-                    / f"{session.get('agent_session_id')}.json"
-                )
-                if lease:
-                    observed_lease = _observed_autoresearch_lease(
-                        lease, session, run_state=payload.get("state")
-                    )
-                    autoresearch_leases.append(observed_lease)
-                    observed_interval = observed_lease.get("observed_interval")
-                    if isinstance(observed_interval, dict):
-                        worker_intervals.append(
-                            {
-                                "candidate_id": candidate_id,
-                                "started_at": observed_interval.get("started_at"),
-                                "ended_at": observed_interval.get("ended_at"),
-                            }
-                        )
-        if expected_agent_harness == "pi":
-            worker_intervals.extend(pi_worker_intervals_by_run.get(run_id, []))
+                worker_intervals.extend(session_worker_intervals(session))
         worker_concurrency = summarize_worker_concurrency(worker_intervals)
         initial_worker_concurrency = summarize_worker_concurrency(
             interval
@@ -794,7 +697,7 @@ def collect_goal_plus_state(
                     int((session.get("counters") or {}).get("verifier_runs") or 0)
                     for session in bound_sessions
                 ],
-                "autoresearch_leases": autoresearch_leases,
+                "worker_intervals": worker_intervals,
                 "worker_concurrency": worker_concurrency,
                 "initial_worker_concurrency": initial_worker_concurrency,
                 "verifier_candidate_ids": sorted(verifier_candidate_ids),
@@ -806,19 +709,6 @@ def collect_goal_plus_state(
                 ),
             }
         )
-
-    active_pool_jobs = []
-    for path in sorted((root / "host-pools" / "pi").glob("pool_*/jobs/job_*/job.json")):
-        job = _read_object(path)
-        if job.get("status") in ACTIVE_POOL_STATES:
-            active_pool_jobs.append(
-                {
-                    "pool_id": job.get("pool_id"),
-                    "job_id": job.get("job_id"),
-                    "candidate_id": job.get("candidate_id"),
-                    "status": job.get("status"),
-                }
-            )
 
     selected_run = runs[0] if len(runs) == 1 else None
     counts = (
@@ -1066,15 +956,15 @@ def collect_goal_plus_state(
             for reference in window.get("completed_views", [])
         )
     ]
-    overlap_leases = selected_run.get("autoresearch_leases", []) if selected_run else []
+    overlap_intervals = selected_run.get("worker_intervals", []) if selected_run else []
     if scheduler_enabled:
-        overlap_leases = [
-            lease
-            for lease in overlap_leases
-            if lease.get("candidate_id") in initial_candidate_ids
+        overlap_intervals = [
+            interval
+            for interval in overlap_intervals
+            if interval.get("candidate_id") in initial_candidate_ids
         ]
     worker_overlap = _worker_overlap(
-        overlap_leases,
+        overlap_intervals,
         expected_k,
     )
     expected_orchestration_mode = (
@@ -1194,77 +1084,6 @@ def collect_goal_plus_state(
                 == expected_worker_runtime_seconds
             ),
         ),
-        "worker_minimum_budget": _check(
-            {
-                "min_runtime_seconds": expected_worker_min_runtime_seconds,
-                "min_verifier_runs": expected_worker_min_verifier_runs,
-            },
-            (
-                {
-                    "min_runtime_seconds": selected_run.get(
-                        "worker_budget", {}
-                    ).get("min_runtime_seconds"),
-                    "min_verifier_runs": selected_run.get(
-                        "worker_budget", {}
-                    ).get("min_verifier_runs"),
-                }
-                if selected_run
-                else None
-            ),
-            bool(
-                selected_run
-                and selected_run.get("worker_budget", {}).get(
-                    "min_runtime_seconds"
-                )
-                == expected_worker_min_runtime_seconds
-                and selected_run.get("worker_budget", {}).get(
-                    "min_verifier_runs"
-                )
-                == expected_worker_min_verifier_runs
-            ),
-        ),
-        "worker_minimum_observed": _check(
-            (
-                {
-                    "min_runtime_seconds": expected_worker_min_runtime_seconds,
-                    "min_verifier_runs": expected_worker_min_verifier_runs,
-                    "evidence": (
-                        "released lease or promoted-run terminal session timestamps"
-                    ),
-                }
-                if expected_worker_min_runtime_seconds is not None
-                else "not configured"
-            ),
-            (
-                {
-                    "verifier_runs": selected_run.get(
-                        "bound_session_verifier_runs", []
-                    ),
-                    "leases": selected_run.get("autoresearch_leases", []),
-                }
-                if selected_run and expected_worker_min_runtime_seconds is not None
-                else "not configured"
-            ),
-            bool(
-                expected_worker_min_runtime_seconds is None
-                or (
-                    selected_run
-                    and len(selected_run.get("autoresearch_leases", []))
-                    == expected_k
-                    and all(
-                        int(value) >= int(expected_worker_min_verifier_runs or 0)
-                        for value in selected_run.get(
-                            "bound_session_verifier_runs", []
-                        )
-                    )
-                    and all(
-                        (lease.get("minimum_observation") or {}).get("passed")
-                        is True
-                        for lease in selected_run.get("autoresearch_leases", [])
-                    )
-                )
-            ),
-        ),
         "worker_model": _check(
             expected_worker_model,
             selected_run.get("bound_worker_models") if selected_run else None,
@@ -1272,23 +1091,6 @@ def collect_goal_plus_state(
                 selected_run
                 and selected_run.get("bound_worker_models")
                 and all(model == expected_worker_model for model in selected_run["bound_worker_models"])
-            ),
-        ),
-        "closeout_reserve": _check(
-            expected_closeout_reserve_seconds,
-            (
-                selected_run.get("strategy_config", {}).get(
-                    "reserve_closeout_seconds"
-                )
-                if selected_run
-                else None
-            ),
-            bool(
-                selected_run
-                and selected_run.get("strategy_config", {}).get(
-                    "reserve_closeout_seconds"
-                )
-                == expected_closeout_reserve_seconds
             ),
         ),
         "visible_verifiers": _check(
@@ -1407,7 +1209,7 @@ def collect_goal_plus_state(
         ),
         "live_worker_overlap": _check(
             (
-                "all candidate-bound worker lease intervals overlap"
+                "all candidate-bound native invocation intervals overlap"
                 if expected_k > 1
                 else "not required"
             ),
@@ -1502,7 +1304,6 @@ def collect_goal_plus_state(
                 and selected_run.get("promotion_artifact")
             ),
         ),
-        "active_pi_pool_jobs": _check(0, len(active_pool_jobs), not active_pool_jobs),
     }
     failed = [name for name, check in checks.items() if not check["passed"]]
     return {
@@ -1510,7 +1311,12 @@ def collect_goal_plus_state(
         "exists": root.is_dir(),
         "goals": goal_records,
         "runs": runs,
-        "active_pi_pool_jobs": active_pool_jobs,
+        "planning_targets": {
+            "worker_seconds": expected_worker_min_runtime_seconds,
+            "worker_verifier_runs": expected_worker_min_verifier_runs,
+            "closeout_seconds": expected_closeout_reserve_seconds,
+            "enforcement": "Main planning; not a frozen runtime gate",
+        },
         "actual_subagent_count": (
             initial_bound_session_count
             if scheduler_enabled

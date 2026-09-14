@@ -13,6 +13,8 @@ from unittest import mock
 from pathlib import Path
 from typing import Any
 
+from bench_runtime_paths import ensure_temp_root
+
 try:
     import pytest
 except ModuleNotFoundError as exc:
@@ -45,6 +47,86 @@ def _context(workspace: Path) -> LaunchContext:
 
 
 class CurrentGoalPlusContractTest(unittest.TestCase):
+    def test_mcp_manifest_and_calls_keep_worker_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            proxy = WorkerToolProxy(
+                root=base / ".gp", context=_context(base / "candidate"),
+                socket_dir=base / "proxy", evaluation_mode="blind",
+            )
+            manifest = {"tools": [{"name": name, "inputSchema": {"type": "object"}} for name in (
+                "search_get_agent_context", "search_get_evidence_detail", "search_promote",
+            )]}
+            with mock.patch(
+                "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
+                return_value=manifest,
+            ) as host:
+                result = proxy.dispatch({"tool": "host_mcp_manifest", "args": {}})
+                self.assertEqual([tool["name"] for tool in result["result"]["tools"]],
+                                 ["search_get_agent_context"])
+                host.reset_mock()
+                for native_id in (None, "foreign"):
+                    with self.assertRaises(PermissionError):
+                        proxy.dispatch({"tool": "search_get_agent_context",
+                                        "args": {"agent_session_id": "agent_1"},
+                                        "native_session_id": native_id})
+                host.assert_not_called()
+
+    @unittest.skipUnless(os.environ.get("BENCH_TEST_GOAL_PLUS_PACKAGE"), "installed MCP SDK required")
+    def test_installed_mcp_sdk_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ensure_temp_root()) as temporary:
+            base = Path(temporary)
+            proxy = WorkerToolProxy(
+                root=base / ".gp", context=_context(base / "candidate"),
+                socket_dir=base / "proxy", evaluation_mode="visible",
+            )
+            def call(_root, tool, args, _environment):
+                if tool == "host_mcp_manifest":
+                    return {"tools": [{"name": "search_list_iterations", "inputSchema": {
+                        "type": "object", "properties": {"agent_session_id": {"type": "string"}},
+                    }}, {"name": "search_promote", "inputSchema": {"type": "object"}}]}
+                self.assertEqual(tool, "search_list_iterations")
+                self.assertEqual(args, {"agent_session_id": "agent_1"})
+                return [{"iteration": 1}]
+            script = """
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+import assert from 'node:assert/strict';
+const require = createRequire(join(process.env.BENCH_GOAL_PLUS_PACKAGE, 'assets/pi/package.json'));
+const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+const client = new Client({name: 'test', version: '1'});
+try {
+  await client.connect(new StdioClientTransport({command: 'node', args: [process.env.TEST_MCP_SERVER], env: process.env}));
+  const manifest = await client.listTools();
+  assert.deepEqual(manifest.tools.map(tool => tool.name), ['search_list_iterations']);
+  const args = {name: 'search_list_iterations', arguments: {agent_session_id: 'agent_1'}};
+  const good = await client.callTool({...args, _meta: {threadId: 'agent_1'}});
+  assert.deepEqual(JSON.parse(good.content[0].text), [{iteration: 1}]);
+  for (const threadId of ['foreign', null]) {
+    const bad = await client.callTool({...args, _meta: {threadId}});
+    assert.equal(bad.isError, true);
+  }
+  const denied = await client.callTool({name: 'search_promote', arguments: {}, _meta: {threadId: 'agent_1'}});
+  assert.equal(denied.isError, true);
+} finally { await client.close(); }
+"""
+            proxy.start()
+            try:
+                with mock.patch("experiments.benchmark_compare.pi_worker_launcher._run_host_tool", side_effect=call):
+                    completed = subprocess.run(
+                        ["node", "--input-type=module", "-e", script], capture_output=True,
+                        text=True, timeout=30, env={**os.environ,
+                            "BENCH_GOAL_PLUS_PACKAGE": os.environ["BENCH_TEST_GOAL_PLUS_PACKAGE"],
+                            TOOL_SOCKET_ENV: str(proxy.socket_path),
+                            "TEST_MCP_SERVER": str(Path(__file__).resolve().parents[1]
+                                / "experiments/benchmark_compare/bin/worker-mcp.mjs"),
+                        },
+                    )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+            finally:
+                proxy.close()
+
     def test_visible_context_projects_only_bound_immutable_generation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
@@ -261,8 +343,13 @@ def _candidate_paths(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _fixture_extension(tmp_path: Path) -> Path:
-    extension_dir = tmp_path / "pi-extension"
-    extension_dir.mkdir()
+    package = tmp_path / "goal-plus-package"
+    extension_dir = package / "assets/pi/extensions"
+    extension_dir.mkdir(parents=True)
+    (package / ".goal-plus-runtime.json").write_text(json.dumps({
+        "schema": "goal-plus.managed-runtime.v1", "build": "test-build",
+        "python": str(tmp_path / "managed-python/bin/python"),
+    }))
     extension = extension_dir / "goal-plus.ts"
     extension.write_text(
         "export default function fixture() {}\n",
@@ -278,7 +365,8 @@ def _write_session_record(
     session_id: str = "agent_1",
     run_id: str = "run_1",
     candidate_id: str = "c001",
-    host: str = "pi-rpc",
+    agent_harness: str = "pi",
+    runtime_provider: str = "direct",
 ) -> Path:
     path = root / "runs" / run_id / "agent_sessions" / f"{session_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -288,7 +376,8 @@ def _write_session_record(
                 "agent_session_id": session_id,
                 "run_id": run_id,
                 "candidate_id": candidate_id,
-                "host": host,
+                "agent_harness": agent_harness,
+                "runtime_provider": runtime_provider,
                 "workspace": str(workspace.resolve()),
                 "launch": {"role": "worker"},
             }
@@ -445,7 +534,8 @@ def test_bench_pi_shim_derives_a_trusted_worker_context(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("mutation", "error"),
     (
-        ("host", "does not match"),
+        ("agent_harness", "does not match"),
+        ("runtime_provider", "does not match"),
         ("candidate", "does not match"),
         ("session", "no trusted"),
         ("cwd", "outside"),
@@ -459,12 +549,13 @@ def test_bench_pi_shim_rejects_tampered_worker_identity(
 ) -> None:
     root, workspace = _candidate_paths(tmp_path)
     workspace.mkdir()
-    host = "codex" if mutation == "host" else "pi-rpc"
+    agent_harness = "codex" if mutation == "agent_harness" else "pi"
     candidate = "c002" if mutation == "candidate" else "c001"
     _write_session_record(
         root,
         workspace,
-        host=host,
+        agent_harness=agent_harness,
+        runtime_provider="thinkthread" if mutation == "runtime_provider" else "direct",
         candidate_id=candidate,
     )
     session_id = (
@@ -574,6 +665,48 @@ def test_extension_bundle_must_not_overlap_runtime_root(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="disjoint from GOAL_PLUS_ROOT"):
         worker.prepare()
+
+
+def test_installed_transport_mounts_do_not_expose_host_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, workspace = _candidate_paths(tmp_path)
+    workspace.mkdir()
+    _init_git(workspace)
+    extension = _fixture_extension(tmp_path)
+    package = extension.parents[3]
+    receipt = json.loads((package / ".goal-plus-runtime.json").read_text())
+    pi_home = tmp_path / "pi-home"
+    pi_home.mkdir()
+    session_root = root / "host-sessions/pi"
+    session_root.mkdir(parents=True)
+    original_which = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda command, **kwargs:
+                        "/usr/bin/bwrap" if command == "bwrap" else original_which(command, **kwargs))
+    socket_root = tempfile.TemporaryDirectory(dir=ensure_temp_root())
+    monkeypatch.setattr("experiments.benchmark_compare.pi_worker_launcher._worker_proxy_base",
+                        lambda _environment: Path(socket_root.name))
+    worker = BubblewrapWorker(
+        context=_context(workspace), policy=_policy(),
+        command=_worker_command("pass", session_root=session_root, extension=extension),
+        environment={**os.environ, "GOAL_PLUS_ROOT": str(root),
+                     "PI_CODING_AGENT_DIR": str(pi_home), "GOAL_PLUS_PYTHON": receipt["python"]},
+    )
+    try:
+        command, environment = worker.prepare()
+        mounts = [(command[index + 1], command[index + 2]) for index, value in enumerate(command)
+                  if value == "--ro-bind"]
+        proxy_script = Path(__file__).resolve().parents[1] / "experiments/benchmark_compare/bin/goal-plus-pi-tool"
+        assert (str(proxy_script), receipt["python"]) in mounts
+        assert (str(package / "assets"), str(package / "assets")) in mounts
+        assert (str(package / ".goal-plus-runtime.json"), str(package / ".goal-plus-runtime.json")) in mounts
+        assert not any(source in {str(root), str(package), str(Path(receipt["python"]).parent.parent)}
+                       for source, _ in mounts)
+        assert environment["BENCH_GOAL_PLUS_BUILD"] == receipt["build"]
+        assert "GOAL_PLUS_PYTHON" not in environment
+    finally:
+        worker.close()
+        socket_root.cleanup()
 
 
 def test_host_tool_proxy_enforces_worker_identity(
@@ -1065,6 +1198,13 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             "], capture_output=True, text=True)",
             "assert allowed.returncode == 0, allowed.stderr",
             "assert json.loads(allowed.stdout)['candidate_id'] == 'c001'",
+            f"receipt = json.loads(pathlib.Path({str(extension.parents[3] / '.goal-plus-runtime.json')!r}).read_text())",
+            "installed = subprocess.run([receipt['python'], '-I', '-m', 'goal_plus.installation',",
+            " '--expected-build', receipt['build'], '--module', 'goal_plus.pi_tool',",
+            " '--root', '.gp', '--args-json', json.dumps({'agent_session_id': 'agent_1'}),",
+            " 'search_get_agent_context'], capture_output=True, text=True)",
+            "assert installed.returncode == 0, installed.stderr",
+            "assert json.loads(installed.stdout)['candidate_id'] == 'c001'",
             "generation = pathlib.Path(os.environ['GOAL_PLUS_ROOT']) / 'runs/run_1/candidates/c001/candidate.json'",
             f"if {evaluation_mode!r} == 'visible':",
             " assert json.loads(generation.read_text()) == {'execution_generation': 0}",

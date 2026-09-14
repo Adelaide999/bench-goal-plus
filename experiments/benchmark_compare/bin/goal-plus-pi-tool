@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Forward the existing Goal Plus Pi CLI contract to the host proxy."""
+"""Forward installed Pi transport invocations to the bounded host proxy."""
 
 from __future__ import annotations
 
@@ -14,6 +14,15 @@ MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:3] == ["-I", "-m", "goal_plus.installation"]:
+        expected = ["--expected-build", os.environ.get("BENCH_GOAL_PLUS_BUILD"),
+                    "--module", "goal_plus.pi_tool"]
+        if arguments[3:7] != expected:
+            raise RuntimeError("worker transport invocation does not match its installed build")
+        arguments = arguments[7:]
+    if arguments[-1:] == ["host_mcp_serve"]:
+        os.execvp("node", ["node", "/opt/bench-goal-plus/bin/worker-mcp.mjs"])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root")
     parser.add_argument("--args-json", required=True)
@@ -21,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host-entrypoint", action="store_true")
     parser.add_argument("--host-capability")
     parser.add_argument("tool")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     try:
         tool_args = json.loads(args.args_json)
         if not isinstance(tool_args, dict):

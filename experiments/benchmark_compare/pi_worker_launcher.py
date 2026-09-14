@@ -44,6 +44,8 @@ _RESERVED_ENV_NAMES = {
     SANDBOX_POLICY_ENV,
     TOOL_SOCKET_ENV,
     REAL_PI_BIN_ENV,
+    "BENCH_GOAL_PLUS_PACKAGE",
+    "BENCH_GOAL_PLUS_BUILD",
 }
 _WORKER_TOOLS = {
     "search_get_agent_context",
@@ -56,9 +58,6 @@ _WORKER_TOOLS = {
 }
 _SESSION_SCOPED_TOOLS = _WORKER_TOOLS
 _TOOL_PROXY_BIN = Path(__file__).resolve().parent / "bin" / "goal-plus-pi-tool"
-_HOST_TOOL_BIN = (
-    Path(__file__).resolve().parent / "main-bin" / "goal-plus-pi-tool"
-)
 _SANDBOX_TOOL_BIN = Path("/opt/bench-goal-plus/bin")
 _SANDBOX_GIT_DIR = Path("/opt/bench-goal-plus/git-admin")
 _BLIND_PUBLIC_METRIC = "format_valid"
@@ -85,7 +84,8 @@ _BLIND_CONTEXT_SOURCE_FIELDS = {
     "candidate_id",
     "candidate_task",
     "execution_generation",
-    "host",
+    "agent_harness",
+    "runtime_provider",
     "inner_agent",
     "iteration_count",
     "latest_result",
@@ -427,10 +427,13 @@ class LaunchContext:
             "agent_session_id": session_id,
             "run_id": run_id,
             "candidate_id": candidate_id,
-            "host": "pi-rpc",
+            "agent_harness": "pi",
+            "runtime_provider": "direct",
             "workspace": str(workspace),
         }
-        if any(session.get(key) != value for key, value in expected.items()):
+        if any(key in session for key in ("host", "host_handle")) or any(
+            session.get(key) != value for key, value in expected.items()
+        ):
             raise RuntimeError("Pi worker session record does not match its process identity")
         launch = session.get("launch")
         if not isinstance(launch, dict) or launch.get("role", "worker") != "worker":
@@ -968,7 +971,10 @@ def _run_host_tool(
     *,
     host_capability: str | None = None,
 ) -> Any:
-    command = [str(_HOST_TOOL_BIN), "--root", str(root), tool]
+    python = environment.get("GOAL_PLUS_PYTHON")
+    if not python or not Path(python).is_absolute():
+        raise RuntimeError("worker proxy requires the installed Goal Plus Python")
+    command = [python, "-I", "-m", "goal_plus.pi_tool", "--root", str(root), tool]
     if host_capability is not None:
         command.extend(["--host-entrypoint", "--host-capability", host_capability])
     completed = subprocess.run(
@@ -1061,6 +1067,16 @@ class WorkerToolProxy:
             return self._dispatch_host_callback(request)
         tool = request.get("tool")
         args = request.get("args")
+        if tool == "host_mcp_manifest" and args == {}:
+            manifest = _run_host_tool(self.root, tool, {}, self.host_environment)
+            allowed = _WORKER_TOOLS - (
+                _BLIND_BLOCKED_TOOLS if self.evaluation_mode == "blind" else set()
+            )
+            return {"ok": True, "result": {
+                "tools": [item for item in manifest["tools"] if item["name"] in allowed],
+            }}
+        if "native_session_id" in request and request["native_session_id"] != self.context.agent_session_id:
+            raise PermissionError("Pi worker MCP requires the bound native session")
         if tool not in _WORKER_TOOLS:
             raise PermissionError(f"Pi worker proxy does not allow tool {tool!r}")
         if not isinstance(args, dict):
@@ -1245,6 +1261,8 @@ class BubblewrapWorker:
         pi_runtime = _executable_runtime_root(executable_path)
         extension = _command_path_argument(self.command, "-e")
         extension_bundle = extension.parent
+        package = extension.parents[3]
+        receipt_path = package / ".goal-plus-runtime.json"
         session_root = _command_path_argument(self.command, "--session-dir")
         session_id = _command_argument(self.command, "--session-id")
         if not extension.is_file():
@@ -1374,6 +1392,18 @@ class BubblewrapWorker:
             readonly=True,
             created=created,
         )
+        # Expose installed assets and a transport shim, never the host store or Python runtime.
+        receipt = json.loads(receipt_path.read_text())
+        python = Path(receipt["python"])
+        if (
+            receipt.get("schema") != "goal-plus.managed-runtime.v1"
+            or not receipt.get("build") or not python.is_absolute()
+            or self.environment.get("GOAL_PLUS_PYTHON", str(python)) != str(python)
+        ):
+            raise ValueError("Pi worker requires its installed Goal Plus runtime receipt")
+        _add_bind(args, package / "assets", package / "assets", readonly=True, created=created)
+        _add_bind(args, receipt_path, receipt_path, readonly=True, created=created)
+        _add_bind(args, _TOOL_PROXY_BIN, python, readonly=True, created=created)
         _add_bind(
             args,
             _TOOL_PROXY_BIN.parent,
@@ -1418,6 +1448,8 @@ class BubblewrapWorker:
             agent_session_id=self.context.agent_session_id,
             private_git_admin=self.private_git_admin,
         )
+        sandbox_env["BENCH_GOAL_PLUS_PACKAGE"] = str(package)
+        sandbox_env["BENCH_GOAL_PLUS_BUILD"] = receipt["build"]
         args.extend(
             [
                 "--chdir",
