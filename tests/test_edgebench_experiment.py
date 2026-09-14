@@ -236,6 +236,29 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertTrue(status["terminal_ready"])
         self.assertEqual(status["state_sources"], ["goal-plus-live-status.json"])
 
+    def test_archived_terminal_evidence_overrides_live_snapshot(self) -> None:
+        task_run = self.temp / "task-run"
+        task_run.mkdir()
+        (task_run / "goal-plus-live-status.json").write_text(
+            json.dumps({"terminal_ready": True}), encoding="utf-8",
+        )
+        payload = json.dumps({
+            "status": "complete", "linked_search": {
+                "run_id": "run-1", "result_recorded_at": "2026-09-14T15:44:44Z",
+                "report_path": "/tmp/judge-receipt.json",
+                "html_report_path": "/home/agent/.goal-plus/runs/run-1/report.html",
+            },
+        }).encode()
+        member = tarfile.TarInfo(".goal-plus/goal-plus/gp-1/goal.json")
+        member.size = len(payload)
+        with tarfile.open(task_run / "goal-plus-state.tar", "w") as archive:
+            archive.addfile(member, io.BytesIO(payload))
+        status = EDGE_EVIDENCE.live_goal_plus_status(
+            self.temp, {"method": "goal-plus-pi", "task_id": "fixture", "sforge_run_id": "archive-test"}, task_run,
+        )
+        self.assertFalse(status["terminal_ready"])
+        self.assertIn("goal-plus-state.tar", status["state_sources"])
+
     def test_live_goal_plus_codex_does_not_count_allocated_sessions_as_workers(
         self,
     ) -> None:

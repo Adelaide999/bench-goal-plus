@@ -188,14 +188,19 @@ deadline 约束；`wait.timeout_seconds` 只是本次查询等待时长，不延
 用于验证 K 和跨 generation 的峰值并发。仅分配 session、登记或释放资源不能
 证明发生了模型调用或进程退出；不再通过 Pi pool、Codex lease 或 worker PID 推断。
 
-worker 返回后，Main 读取 durable verifier ledger，再决定 selection 和 promotion。
+冻结时配置独立的确定性 `promotion_verifiers`（`role=promotion_gate`），在最终交付前重新检查
+所选 artifact 的正确性；它不是可选 LLM quality/Allocation。worker 返回后，Main 读取
+durable verifier ledger，再决定 selection 和 promotion。
 关闭候选后通过 `goal_plus_search_select`、`goal_plus_search_promote` 提升结果。
 `artifact_only` 下由 `sforge-goal-plus-submit` 物化提升记录绑定的准确 Git artifact 并调用
 Judge；不得再调用 Goal Plus apply。提交桥拒绝缺少通过的 promotion Evidence、已失效
-run，以及新 run 尚未提升时回退提交旧 run。成功后记录 Search 结果，按
+run，以及新 run 尚未提升时回退提交旧 run。已通过独立验证且标记为 no-op 的 publication
+可以提交：从准确 selected commit 读取提交文件，核对或物化源目录，而不要求非空 diff。
+成功后记录 Search 结果，评测回执放入 summary；Markdown/HTML 路径由 runtime 预留。按
 `goal_plus_status` 完成必要独立检查及真实终态，最后调用 `goal_plus_search_report`。
 `goal_plus_status` 不单独证明 Search verifier 覆盖。历史协议或无法完整读取的身份、
 缺失执行区间均保持 partial，不能补造已结束时间。
+归档后的终态检查以 `goal-plus-state.tar` 为准，live snapshot 不能覆盖缺失的最终报告证据。
 
 `T` 截止必须是 SForge 的真实 agent segment boundary，不能把同一个 Codex 进程直接允许运行
 到 `T + finalization_grace`。若 Goal Plus 在 `T` 时仍未终态，SForge 终止探索 segment，并用

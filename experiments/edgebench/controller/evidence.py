@@ -839,7 +839,7 @@ def live_goal_plus_status(
         ),
         "evidence_annotations": evidence_annotations,
         "goal_statuses": goal_statuses,
-        "terminal_ready": (live or {}).get("terminal_ready"),
+        "terminal_ready": (archived if archived is not None else live or {}).get("terminal_ready"),
         "snapshot_at": (live or {}).get("captured_at"),
         "state_sources": state_sources,
         "remaining": remaining_time(cell, task_run),
