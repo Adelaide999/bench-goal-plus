@@ -1292,6 +1292,10 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertIn(
             ["--ro-bind", str(benchmark_compare), str(benchmark_compare)], triples
         )
+        self.assertNotIn(
+            ["--ro-bind", str(ROOT / "adapters"), str(ROOT / "adapters")], triples
+        )
+        self.assertNotIn(str(ROOT / "adapters" / "registry.py"), command)
         self.assertIn(("--bind", str(workspace)), pairs)
         self.assertIn(
             ["--ro-bind", str(public_tests), str(public_tests)], triples
@@ -1303,6 +1307,27 @@ class AIBenchCodingContractTest(unittest.TestCase):
             ["--setenv", "AIBENCH_PUBLIC_TESTS", "/aibench-public-tests"], triples
         )
         self.assertEqual(command[-3:], [str(binary), "exec", "--json"])
+
+    def test_task_adapter_import_does_not_load_full_control_plane(self) -> None:
+        script = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(ROOT)!r})\n"
+            "import experiments.aibench_coding.task_adapter\n"
+            "assert 'bench_goal_plus.application' not in sys.modules\n"
+            "assert 'adapters.registry' not in sys.modules\n"
+            "from bench_goal_plus import BenchmarkAgent, Catalog\n"
+            "assert BenchmarkAgent.__name__ == 'BenchmarkAgent'\n"
+            "assert Catalog.__name__ == 'Catalog'\n"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", script],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_bubblewrap_does_not_mount_agent_home_as_runtime(self) -> None:
         fake_home = self.root / "home"
