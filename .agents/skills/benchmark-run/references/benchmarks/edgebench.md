@@ -170,18 +170,25 @@ Goal Plus + Codex 的 session allocation 本身不是 worker launch：
 - 至少 `K` 个 candidate-bound verifier records；
 - 必须有 promotion 和 official Judge trajectory。
 
-两端使用共同 session 控制合同。Main 用 `search_start_agent_session` 准备，
-`goal_plus_session_open` 取得控制句柄，再显式调用 `goal_plus_session_wake/wait`。
-`wake.timeout_seconds` 是整次模型调用的执行额度，仍受冻结 worker budget 和 Goal
+两端使用共同 session 控制合同。Main 用 `goal_plus_session_run` 准备并启动候选，
+使用唯一 `call_id`，通过 `goal_plus_session_wait` 观察准确调用。
+`run.timeout_seconds` 是整次模型调用的执行额度，仍受冻结 worker budget 和 Goal
 deadline 约束；`wait.timeout_seconds` 只是本次查询等待时长，不延长执行额度。
-交付后 Main 审查已有 Evidence，决定下一轮或调用 `goal_plus_session_close` 关闭。
+交付后 Main 审查已有 Evidence，使用新 `call_id` 在同 session 续跑，或调用
+`goal_plus_session_close` 关闭。普通配置固定 `parallel_loops`，按 `hard_score` 选择，
+不启用质量评分和 Allocation。
 
 执行证据读取匹配 harness/provider/native identity 的
 `session_handle.metadata.dispatches`。每次 dispatch 保留独立 invocation 和起止时间，
-用于验证 K 和跨 generation 的峰值并发。仅 open、分配 session、登记或释放资源不能
+用于验证 K 和跨 generation 的峰值并发。仅分配 session、登记或释放资源不能
 证明发生了模型调用或进程退出；不再通过 Pi pool、Codex lease 或 worker PID 推断。
 
 worker 返回后，Main 读取 durable verifier ledger，再决定 selection 和 promotion。
+关闭候选后通过 `goal_plus_search_select`、`goal_plus_search_promote` 提升结果。
+`artifact_only` 下由 `sforge-goal-plus-submit` 物化提升记录绑定的准确 Git artifact 并调用
+Judge；不得再调用 Goal Plus apply。提交桥拒绝缺少通过的 promotion Evidence、已失效
+run，以及新 run 尚未提升时回退提交旧 run。成功后记录 Search 结果，按
+`goal_plus_status` 完成必要独立检查及真实终态，最后调用 `goal_plus_search_report`。
 `goal_plus_status` 不单独证明 Search verifier 覆盖。历史协议或无法完整读取的身份、
 缺失执行区间均保持 partial，不能补造已结束时间。
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import re
+import subprocess
 
 from sforge.harness.agent.factory import get_agent_class
 from sforge.harness.agent.pi import PiAgent
@@ -26,6 +28,21 @@ class EdgeBenchUpstreamGoalPlusContractTest(unittest.TestCase):
                 self.assertNotIn("agent_profile", command)
                 self.assertNotIn("evidence_annotator.host", command)
                 self.assertIn("parallel_loops", command)
+                self.assertIn("strategy.selection.ranking_keys", command)
+                self.assertIn("hard_score", command)
+                self.assertIn("strategy.allocation null", command)
+                self.assertNotIn("search_scheduler", command)
+                self.assertNotIn("Search-routed work item", command)
+                for tool in (
+                    "goal_plus_status", "goal_plus_search_freeze_spec", "goal_plus_search_create",
+                    "goal_plus_session_run", "goal_plus_session_wait", "goal_plus_session_close",
+                    "goal_plus_search_select", "goal_plus_search_promote",
+                    "goal_plus_record_search_result", "goal_plus_set_status", "goal_plus_search_report",
+                ):
+                    self.assertIn(tool, command)
+                self.assertIsNone(re.search(r"\b(?:search_promote|search_report|search_start_agent_session|goal_plus_session_open|goal_plus_session_wake)\b", command))
+                checked = subprocess.run(["bash", "-n", "-c", command], capture_output=True, text=True)
+                self.assertEqual(checked.returncode, 0, checked.stderr)
 
     def test_pi_methods_pin_reasoning_and_register_goal_plus_host(self) -> None:
         plain = PiAgent(SForgeConfig())
