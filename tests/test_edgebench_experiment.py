@@ -2345,6 +2345,7 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         )
 
         self.assertTrue(status["valid"])
+        self.assertIsNone(status["model_registered"])
         self.assertEqual(status["credential_env"], "ZAI_API_KEY")
         self.assertEqual(
             status["api_base_url"],
@@ -2384,6 +2385,13 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         def fake_run_capture(command, *, env=None, timeout_seconds=None):
             if command[-1] == "--version":
                 return {"returncode": 0, "stdout": "0.84.1", "stderr": ""}
+            if command[:2] == ["bash", "-c"]:
+                self.assertEqual(env["PI_PROVIDER"], "dynamic-provider")
+                self.assertEqual(env["PI_MODEL"], "dynamic-model")
+                self.assertEqual(env["PI_CATALOG_EXECUTABLE"], "/opt/pi/bin/pi")
+                self.assertEqual(env["SFORGE_PI_AUX_MODELS"], "")
+                captured["catalog_agent_dir"] = env["PI_CODING_AGENT_DIR"]
+                return {"returncode": 0, "stdout": "", "stderr": ""}
             captured["command"] = command
             captured["env"] = dict(env or {})
             copied = Path(str(env["PI_CODING_AGENT_DIR"])) / "models.json"
@@ -2439,6 +2447,8 @@ class EdgeBenchExperimentTest(unittest.TestCase):
 
         command = captured["command"]
         self.assertTrue(result["passed"])
+        self.assertTrue(result["model_registered"])
+        self.assertEqual(captured["catalog_agent_dir"], captured["env"]["PI_CODING_AGENT_DIR"])
         self.assertEqual(captured["registry"], registry)
         self.assertEqual(command[command.index("--provider") + 1], "dynamic-provider")
         self.assertEqual(command[command.index("--model") + 1], "dynamic-model")
@@ -2447,6 +2457,38 @@ class EdgeBenchExperimentTest(unittest.TestCase):
         self.assertTrue(result["tool_roundtrip"])
         self.assertNotIn("rotating-secret-value", json.dumps(result))
         self.assertNotIn("rotating-secret-value", json.dumps(command))
+
+    def test_pi_host_probe_rejects_unregistered_model_before_api_call(self) -> None:
+        from sforge.harness.agent.pi_provider import PI_PROVIDER_RUNTIME_GATE_CMD
+
+        calls = []
+
+        def fake_run_capture(command, *, env=None, timeout_seconds=None):
+            calls.append(command)
+            if command[-1] == "--version":
+                return {"returncode": 0, "stdout": "0.84.2", "stderr": ""}
+            self.assertEqual(command, ["bash", "-c", PI_PROVIDER_RUNTIME_GATE_CMD])
+            self.assertFalse((Path(env["PI_CODING_AGENT_DIR"]) / "models-store.json").exists())
+            script = (
+                'pi() { printf "provider model context max-out thinking images\\n'
+                'zai glm-5.3 1M 131K yes no\\n"; };\n' + command[2]
+            )
+            completed = subprocess.run(
+                ["bash", "-c", script],
+                env={**env, "PI_CATALOG_EXECUTABLE": "pi"},
+                capture_output=True, text=True,
+            )
+            return {"returncode": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr}
+
+        with mock.patch.object(EDGE_ENV.io, "run_capture", fake_run_capture):
+            result = EDGE_ENV.pi_host_provider_probe(
+                "zai/glm-5.3-flash", expected_pi_version="0.84.2",
+                env={"SFORGE_PI_HOST_EXECUTABLE": "/opt/pi/bin/pi", "ZAI_API_KEY": "secret"},
+            )
+        self.assertFalse(result["passed"])
+        self.assertFalse(result["model_registered"])
+        self.assertIn("not registered", result["error"])
+        self.assertEqual(len(calls), 2)
 
     def test_codex_host_probe_uses_dynamic_provider_and_real_tool_roundtrip(
         self,

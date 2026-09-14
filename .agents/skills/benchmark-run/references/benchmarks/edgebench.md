@@ -84,6 +84,11 @@ Pi registry 的所选 provider/model 原样复制到仓库本地的隔离
 reasoning model 还必须出现 thinking event/content 或非零 reasoning usage。只读取配置、
 只做 controller HTTP 请求，或只看到普通 assistant 文本都不够。
 
+真实 API 探针之前，宿主与容器执行同一份离线模型目录检查，逐项精确匹配 provider/model，
+覆盖 Main、worker 和 annotation。内置 provider 的凭据存在不代表模型已登记；
+Pi 接受未登记的自定义模型 ID 并完成请求，也不能代替目录检查。安装包缺少新模型时，
+使用显式 registry 将选定模型定义同步到两端；不得依赖宿主个人模型缓存或子串匹配。
+
 协议和 API route 由外部 Pi registry 的 `api` 与 `baseUrl` 决定。控制面不得追加
 `/responses`、`/chat/completions` 或其他协议路径，不得探测后改写 registry，也不得静默
 回退到另一 wire API/provider/model。宿主 gate 让 Pi 自己按这份配置完成语义验证；诊断

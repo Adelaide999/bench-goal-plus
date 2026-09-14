@@ -529,7 +529,7 @@ def resolve_pi_provider(
         expected = " or ".join(builtin_keys)
         result.update(
             {
-                "model_registered": True,
+                "model_registered": None,
                 "credential_mode": "environment",
                 "credential_env": key_name or builtin_keys[0],
                 "credential_env_candidates": list(builtin_keys),
@@ -1378,6 +1378,8 @@ def pi_host_provider_probe(
     timeout_seconds: int = 90,
 ) -> dict[str, Any]:
     """Exercise one Pi provider with the exact host registry and credentials."""
+    from sforge.harness.agent.pi_provider import PI_PROVIDER_RUNTIME_GATE_CMD
+
     source = dict(os.environ if env is None else env)
     bundle = resolve_pi_provider_bundle([model_ref], source)
     provider, separator, model_id = model_ref.partition("/")
@@ -1442,6 +1444,31 @@ def pi_host_provider_probe(
         probe_file.write_text(marker + "\n", encoding="utf-8")
         source["PI_CODING_AGENT_DIR"] = str(agent_dir)
         source["PI_OFFLINE"] = "1"
+        catalog_env = {
+            **source,
+            "PI_CATALOG_EXECUTABLE": executable,
+            "PI_PROVIDER": provider,
+            "PI_MODEL": model_id,
+            "SFORGE_PI_AUX_MODELS": "",
+        }
+        catalog = io.run_capture(
+            ["bash", "-c", PI_PROVIDER_RUNTIME_GATE_CMD],
+            env=catalog_env,
+            timeout_seconds=timeout_seconds,
+        )
+        if catalog["returncode"] != 0:
+            return {
+                "passed": False,
+                "model_ref": model_ref,
+                "pi_version": actual_version,
+                "expected_pi_version": expected_pi_version,
+                "model_registered": False,
+                "error": _redact_secret_values(
+                    catalog["stderr"] or "Pi model catalog check failed",
+                    list(bundle["credential_envs"]),
+                    source,
+                ),
+            }
         command = [
             executable,
             "--offline",
@@ -1500,6 +1527,7 @@ def pi_host_provider_probe(
         "pi_version": actual_version,
         "expected_pi_version": expected_pi_version,
         "credential_envs": list(bundle["credential_envs"]),
+        "model_registered": True,
         **observations,
         "error": "; ".join(failures) if failures else None,
     }
