@@ -197,22 +197,25 @@ def copy_goal_plus_assets(goal_plus_root: Path, workspace: Path) -> None:
     shutil.copy2(source / "config.example.toml", target / "config.toml")
 
 
-def copy_goal_plus_pi_assets(goal_plus_root: Path, workspace: Path) -> None:
-    source = goal_plus_host_assets(goal_plus_root, "pi")
-    required = (
-        source / "extensions" / "goal-plus.ts",
-        source / "skills" / "goal-plus" / "SKILL.md",
-        source / "prompts",
-    )
+def goal_plus_pi_asset_paths(goal_plus_root: Path) -> tuple[Path, Path]:
+    source = goal_plus_root.expanduser().resolve() / "assets" / "pi"
+    extension = source / "extensions" / "goal-plus.ts"
+    skill = source / "skills" / "goal-plus" / "SKILL.md"
+    required = (extension, skill, source / "prompts")
     for path in required:
         if not path.exists():
             raise FileNotFoundError(path)
+    return extension, skill
 
-    target = workspace / ".pi"
-    target.mkdir()
-    shutil.copytree(source / "extensions", target / "extensions")
-    shutil.copytree(source / "skills", target / "skills")
-    shutil.copytree(source / "prompts", target / "prompts")
+
+def configure_goal_plus_pi_runtime(
+    environment: dict[str, str], goal_plus_root: Path
+) -> tuple[Path, Path]:
+    root = goal_plus_root.expanduser().resolve()
+    extension, skill = goal_plus_pi_asset_paths(root)
+    environment["GOAL_PLUS_PI_DEV_ROOT"] = str(root)
+    environment["GOAL_PLUS_PYTHON"] = str(Path(sys.executable).resolve())
+    return extension, skill
 
 
 def append_unique_lines(path: Path, lines: list[str]) -> None:
@@ -886,7 +889,7 @@ def prepare(args: argparse.Namespace) -> int:
             worker_host = "codex"
             worker_model = args.model
         else:
-            copy_goal_plus_pi_assets(goal_plus_root, workspace)
+            goal_plus_pi_asset_paths(goal_plus_root)
             append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
             worker_host = "pi-rpc"
             worker_model = f"{PI_PROVIDER_ID}/{args.model}"
@@ -3075,6 +3078,10 @@ def execute(args: argparse.Namespace) -> int:
             recorded_command = None
         else:
             qualified_model = f"{PI_PROVIDER_ID}/{args.model}"
+            goal_plus_root = Path(manifest["environment"]["goal_plus_root"])
+            extension, skill = configure_goal_plus_pi_runtime(
+                environment, goal_plus_root
+            )
             prompt = render_goal(
                 task_text=(workspace / "TASK.md").read_text(),
                 artifact_name=manifest["task"]["artifact_name"],
@@ -3117,9 +3124,9 @@ def execute(args: argparse.Namespace) -> int:
                 "--no-prompt-templates",
                 "--no-context-files",
                 "--extension",
-                str(workspace / ".pi/extensions/goal-plus.ts"),
+                str(extension),
                 "--skill",
-                str(workspace / ".pi/skills/goal-plus/SKILL.md"),
+                str(skill),
                 prompt,
             ]
             stdout_path = run_dir / "events.jsonl"

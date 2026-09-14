@@ -281,29 +281,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported Goal Plus worker host"):
             experiment.goal_plus_entrypoint("unknown")
 
-    def test_goal_plus_pi_assets_copy_only_project_runtime(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            goal_plus = temp / "goal-plus"
-            pi = goal_plus / ".pi"
-            (pi / "extensions").mkdir(parents=True)
-            (pi / "skills/goal-plus").mkdir(parents=True)
-            (pi / "prompts").mkdir(parents=True)
-            (pi / "extensions/goal-plus.ts").write_text("export default {}\n")
-            (pi / "skills/goal-plus/SKILL.md").write_text("# Goal Plus\n")
-            (pi / "prompts/search-candidate-worker.md").write_text("worker\n")
-            workspace = temp / "workspace"
-            workspace.mkdir()
-
-            experiment.copy_goal_plus_pi_assets(goal_plus, workspace)
-
-            self.assertTrue((workspace / ".pi/extensions/goal-plus.ts").is_file())
-            self.assertTrue((workspace / ".pi/skills/goal-plus/SKILL.md").is_file())
-            self.assertTrue(
-                (workspace / ".pi/prompts/search-candidate-worker.md").is_file()
-            )
-
-    def test_goal_plus_pi_assets_copy_installed_layout(self) -> None:
+    def test_goal_plus_pi_assets_use_upstream_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             goal_plus = temp / "goal-plus"
@@ -314,15 +292,20 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             (pi / "extensions/goal-plus.ts").write_text("export default {}\n")
             (pi / "skills/goal-plus/SKILL.md").write_text("# Goal Plus\n")
             (pi / "prompts/search-candidate-worker.md").write_text("worker\n")
-            workspace = temp / "workspace"
-            workspace.mkdir()
+            alias = temp / "goal-plus-link"
+            alias.symlink_to(goal_plus, target_is_directory=True)
+            environment: dict[str, str] = {}
 
-            experiment.copy_goal_plus_pi_assets(goal_plus, workspace)
+            extension, skill = experiment.configure_goal_plus_pi_runtime(
+                environment, alias
+            )
 
-            self.assertTrue((workspace / ".pi/extensions/goal-plus.ts").is_file())
-            self.assertTrue((workspace / ".pi/skills/goal-plus/SKILL.md").is_file())
-            self.assertTrue(
-                (workspace / ".pi/prompts/search-candidate-worker.md").is_file()
+            self.assertEqual(extension, pi / "extensions/goal-plus.ts")
+            self.assertEqual(skill, pi / "skills/goal-plus/SKILL.md")
+            self.assertEqual(environment["GOAL_PLUS_PI_DEV_ROOT"], str(goal_plus))
+            self.assertEqual(
+                environment["GOAL_PLUS_PYTHON"],
+                str(Path(sys.executable).resolve()),
             )
 
     def test_goal_prompt_uses_natural_entry_and_complete_configuration(self) -> None:

@@ -26,7 +26,6 @@ from experiments.benchmark_compare.pi_worker_launcher import (
     SandboxPolicy,
     WorkerToolProxy,
     _OPAQUE_RESULTS_LEDGER,
-    _goal_plus_dev_runtime,
     _runtime_root,
     _sandbox_environment,
     _shim_worker_launch,
@@ -119,26 +118,9 @@ def _fixture_extension(tmp_path: Path) -> Path:
     return extension
 
 
-def test_goal_plus_dev_runtime_requires_the_source_extension(tmp_path: Path) -> None:
-    root = tmp_path / "goal-plus"
-    extension = root / "assets/pi/extensions/goal-plus.ts"
-    extension.parent.mkdir(parents=True)
-    extension.write_text("export default function fixture() {}\n")
-    environment = {
-        "GOAL_PLUS_PI_DEV_ROOT": str(root),
-        "GOAL_PLUS_PYTHON": sys.executable,
-    }
-
-    resolved = _goal_plus_dev_runtime(environment, extension.resolve())
-
-    assert resolved is not None
-    assert resolved[0] == root.resolve()
-    assert resolved[1]
-    with pytest.raises(ValueError, match="does not match"):
-        _goal_plus_dev_runtime(environment, Path(sys.executable).resolve())
-
-
-def test_worker_sandbox_inherits_goal_plus_dev_runtime(tmp_path: Path) -> None:
+def test_worker_sandbox_routes_goal_plus_tools_through_host_proxy(
+    tmp_path: Path,
+) -> None:
     environment = {
         "GOAL_PLUS_PI_DEV_ROOT": str(tmp_path / "goal-plus"),
         "GOAL_PLUS_PYTHON": sys.executable,
@@ -154,7 +136,7 @@ def test_worker_sandbox_inherits_goal_plus_dev_runtime(tmp_path: Path) -> None:
     )
 
     assert sandbox["GOAL_PLUS_PI_DEV_ROOT"] == environment["GOAL_PLUS_PI_DEV_ROOT"]
-    assert sandbox["GOAL_PLUS_PYTHON"] == sys.executable
+    assert sandbox["GOAL_PLUS_PYTHON"] == "/opt/bench-goal-plus/bin/goal-plus-pi-tool"
 
 
 def _write_session_record(

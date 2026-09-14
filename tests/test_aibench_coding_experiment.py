@@ -166,6 +166,75 @@ class AIBenchCodingContractTest(unittest.TestCase):
             runtime_root.resolve(),
         )
 
+    def test_worker_proxy_accepts_only_goal_plus_python_transport(self) -> None:
+        proxy = (
+            ROOT
+            / "experiments"
+            / "benchmark_compare"
+            / "bin"
+            / "goal-plus-pi-tool"
+        )
+        command = [
+            sys.executable,
+            str(proxy),
+            "-I",
+            "-c",
+            "from goal_plus.pi_tool import main; raise SystemExit(main())",
+            "--root",
+            ".gp",
+            "--args-json",
+            "{}",
+            "search_get_agent_context",
+        ]
+        accepted = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(accepted.returncode, 1)
+        self.assertIn(pi_worker_launcher.TOOL_SOCKET_ENV, accepted.stderr)
+        self.assertNotIn("unrecognized arguments", accepted.stderr)
+
+        host_kick = [
+            *command[:-1],
+            "--host-entrypoint",
+            "--host-capability",
+            "fixture-token",
+            "goal_plus_host_kick_internal_agents",
+        ]
+        no_op = subprocess.run(
+            host_kick,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(no_op.returncode, 0, no_op.stderr)
+        self.assertEqual(
+            json.loads(no_op.stdout),
+            {"ok": True, "disposition": "worker_noop"},
+        )
+
+        host_kick[-1] = "goal_plus_host_control"
+        rejected_host = subprocess.run(
+            host_kick,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(rejected_host.returncode, 1)
+        self.assertIn("worker proxy rejected host entrypoint", rejected_host.stderr)
+
+        command[4] = "print('not a Goal Plus transport')"
+        rejected = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn("unsupported Goal Plus Python transport", rejected.stderr)
+
     def _anthropic_pi_profile(self, methods: list[str]) -> dict[str, object]:
         _path, profile = load_profile("smoke")
         profile["methods"] = methods
@@ -286,25 +355,22 @@ class AIBenchCodingContractTest(unittest.TestCase):
     def test_latest_pi_assets_use_the_isolated_development_runtime(self) -> None:
         goal_plus_root = self.root / "goal-plus"
         pi_assets = goal_plus_root / "assets/pi"
-        pi_assets.mkdir(parents=True)
-        workspace = self.root / "workspace"
+        (pi_assets / "extensions").mkdir(parents=True)
+        (pi_assets / "skills/goal-plus").mkdir(parents=True)
+        (pi_assets / "prompts").mkdir(parents=True)
+        (pi_assets / "extensions/goal-plus.ts").write_text("extension\n")
+        (pi_assets / "skills/goal-plus/SKILL.md").write_text("skill\n")
         environment: dict[str, str] = {}
-        manifest = {
-            "environment": {
-                "goal_plus_root": str(goal_plus_root),
-                "runtime_bin": str(self.root / "runtime/bin"),
-            }
-        }
 
-        extension, skill = benchmark_compare._goal_plus_pi_runtime_assets(
-            manifest, workspace, environment
+        extension, skill = benchmark_compare.configure_goal_plus_pi_runtime(
+            environment, goal_plus_root
         )
 
         self.assertEqual(extension, pi_assets / "extensions/goal-plus.ts")
         self.assertEqual(skill, pi_assets / "skills/goal-plus/SKILL.md")
         self.assertEqual(environment["GOAL_PLUS_PI_DEV_ROOT"], str(goal_plus_root))
         self.assertEqual(
-            environment["GOAL_PLUS_PYTHON"], str(self.root / "runtime/bin/python")
+            environment["GOAL_PLUS_PYTHON"], str(Path(sys.executable).resolve())
         )
 
     def test_codex_rejects_anthropic_messages_provider(self) -> None:

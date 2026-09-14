@@ -59,6 +59,7 @@ _HOST_TOOL_BIN = (
     Path(__file__).resolve().parent / "main-bin" / "goal-plus-pi-tool"
 )
 _SANDBOX_TOOL_BIN = Path("/opt/bench-goal-plus/bin")
+_SANDBOX_TOOL_PROXY = _SANDBOX_TOOL_BIN / _TOOL_PROXY_BIN.name
 _SANDBOX_GIT_DIR = Path("/opt/bench-goal-plus/git-admin")
 _BLIND_PUBLIC_METRIC = "format_valid"
 _BLIND_RESPONSE_REJECTED = {
@@ -1203,7 +1204,6 @@ class BubblewrapWorker:
         pi_runtime = pi_runtime_roots[0]
         extension = _command_path_argument(self.command, "-e")
         extension_bundle = extension.parent
-        goal_plus_dev_runtime = _goal_plus_dev_runtime(self.environment, extension)
         session_root = _command_path_argument(self.command, "--session-dir")
         session_id = _command_argument(self.command, "--session-id")
         if not extension.is_file():
@@ -1353,28 +1353,13 @@ class BubblewrapWorker:
             readonly=False,
             created=created,
         )
-        extension_mount = (
-            goal_plus_dev_runtime[0]
-            if goal_plus_dev_runtime is not None
-            else extension_bundle
-        )
         _add_bind(
             args,
-            extension_mount,
-            extension_mount,
+            extension_bundle,
+            extension_bundle,
             readonly=True,
             created=created,
         )
-        if goal_plus_dev_runtime is not None:
-            for runtime in goal_plus_dev_runtime[1]:
-                if not _is_system_path(runtime):
-                    _add_bind(
-                        args,
-                        runtime,
-                        runtime,
-                        readonly=True,
-                        created=created,
-                    )
         _add_bind(
             args,
             _TOOL_PROXY_BIN.parent,
@@ -1551,42 +1536,6 @@ def _executable_runtime_root(executable: Path) -> Path:
 def _executable_entrypoint(executable: Path) -> Path:
     """Return the mounted target instead of a sandbox-invisible symlink alias."""
     return executable.resolve(strict=True)
-
-
-def _goal_plus_dev_runtime(
-    environment: Mapping[str, str], extension: Path
-) -> tuple[Path, tuple[Path, ...]] | None:
-    root_text = environment.get("GOAL_PLUS_PI_DEV_ROOT")
-    python_text = environment.get("GOAL_PLUS_PYTHON")
-    if root_text is None and python_text is None:
-        return None
-    if not root_text or not python_text:
-        raise RuntimeError(
-            "GOAL_PLUS_PI_DEV_ROOT and GOAL_PLUS_PYTHON must be configured together"
-        )
-    root = Path(root_text)
-    python = Path(python_text)
-    if not root.is_absolute() or not python.is_absolute():
-        raise ValueError("Goal Plus Pi development runtime paths must be absolute")
-    root = root.resolve(strict=True)
-    python = python.absolute()
-    resolved_python = python.resolve(strict=True)
-    if not python.is_file() or not os.access(python, os.X_OK):
-        raise PermissionError(f"Goal Plus Python is not executable: {python}")
-    expected_extension = root / "assets/pi/extensions/goal-plus.ts"
-    if extension != expected_extension.resolve(strict=True):
-        raise ValueError(
-            "Goal Plus Pi development extension does not match GOAL_PLUS_PI_DEV_ROOT"
-        )
-    runtime_roots = tuple(
-        dict.fromkeys(
-            (
-                _executable_runtime_root(python),
-                _executable_runtime_root(resolved_python),
-            )
-        )
-    )
-    return root, runtime_roots
 
 
 def _is_system_path(path: Path) -> bool:
@@ -2022,6 +1971,8 @@ def _sandbox_environment(
     for name in sorted(inherited_names):
         if name in environment:
             result[name] = environment[name]
+    if "GOAL_PLUS_PYTHON" in result:
+        result["GOAL_PLUS_PYTHON"] = str(_SANDBOX_TOOL_PROXY)
     return result
 
 
