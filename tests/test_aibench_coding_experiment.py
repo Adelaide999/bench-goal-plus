@@ -41,8 +41,15 @@ class AIBenchCodingContractTest(unittest.TestCase):
             "BENCH_GOAL_PLUS_EXPECTED_REF": "current",
             "PI_CODING_AGENT_DIR": "/trusted/pi",
             "UNRELATED_SECRET": "not-for-agent",
-        }):
+        }), mock.patch.object(
+            runtime, "_worker_proxy_base", return_value=self.root
+        ) as proxy_base:
             environment = runtime._agent_environment(Path("/cell"), profile, "goal-plus-pi")
+        proxy_base.assert_called_once()
+        self.assertEqual(
+            Path(environment["AIBENCH_PROXY_RUNTIME_DIR"]).parent,
+            self.root,
+        )
         self.assertEqual(environment["BENCH_GOAL_PLUS_SOURCE_DIR"], "/trusted/goal-plus")
         self.assertEqual(environment["BENCH_GOAL_PLUS_EXPECTED_REF"], "current")
         self.assertEqual(environment["PI_CODING_AGENT_DIR"], "/trusted/pi")
@@ -579,6 +586,9 @@ class AIBenchCodingContractTest(unittest.TestCase):
             mock.patch.object(
                 runtime.shutil, "which", side_effect=lambda name: f"/bin/{name}"
             ),
+            mock.patch.object(
+                runtime, "_worker_proxy_base", return_value=self.root
+            ),
         ):
             result = runtime._run_cell(
                 profile,
@@ -793,7 +803,7 @@ class AIBenchCodingContractTest(unittest.TestCase):
         ), self.assertRaisesRegex(RuntimeError, "shared_dir.enabled=true"):
             pi_worker_launcher._run_host_tool(
                 self.root / ".gp",
-                "search_run_verifier",
+                "goal_plus_search_run_verifier",
                 {},
                 {"GOAL_PLUS_PYTHON": sys.executable},
             )
@@ -878,7 +888,10 @@ class AIBenchCodingContractTest(unittest.TestCase):
         hidden = self.root / "hidden"
         hidden.mkdir()
         (hidden / "gold.txt").write_text("not public")
-        with tempfile.TemporaryDirectory(prefix="ab-", dir=ensure_temp_root()) as scratch:
+        with tempfile.TemporaryDirectory(
+            prefix="ab-",
+            dir=pi_worker_launcher._worker_proxy_base(os.environ),
+        ) as scratch:
             environment = {
                 "AIBENCH_AGENT_ROLE": "pi", "AIBENCH_METHOD": "goal-plus-pi",
                 "AIBENCH_REAL_PI_BIN": sys.executable,

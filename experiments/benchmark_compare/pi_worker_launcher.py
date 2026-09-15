@@ -48,13 +48,13 @@ _RESERVED_ENV_NAMES = {
     "BENCH_GOAL_PLUS_BUILD",
 }
 _WORKER_TOOLS = {
-    "search_get_agent_context",
-    "search_get_global_evidence",
-    "search_stage_shared_tool",
-    "search_copy_shared_tool",
-    "search_get_evidence_detail",
-    "search_run_verifier",
-    "search_list_iterations",
+    "goal_plus_search_get_agent_context",
+    "goal_plus_search_get_global_evidence",
+    "goal_plus_search_stage_shared_tool",
+    "goal_plus_search_copy_shared_tool",
+    "goal_plus_search_get_evidence_detail",
+    "goal_plus_search_run_verifier",
+    "goal_plus_search_list_iterations",
 }
 _SESSION_SCOPED_TOOLS = _WORKER_TOOLS
 _TOOL_PROXY_BIN = Path(__file__).resolve().parent / "bin" / "goal-plus-pi-tool"
@@ -66,7 +66,7 @@ _BLIND_RESPONSE_REJECTED = {
     "error": "worker tool response is unavailable",
 }
 _BLIND_BLOCKED_TOOLS = {
-    "search_get_evidence_detail",
+    "goal_plus_search_get_evidence_detail",
 }
 _BLIND_SYSTEM_PROMPT = (
     "This ZSoft Search worker has a permanent benchmark-owned confidentiality "
@@ -939,17 +939,17 @@ def _blind_copied_shared_tool(
 def _blind_tool_response(
     tool: str, result: Any, context: LaunchContext
 ) -> Any:
-    if tool == "search_get_agent_context":
+    if tool == "goal_plus_search_get_agent_context":
         return _blind_context_response(result, context)
-    if tool == "search_run_verifier":
+    if tool == "goal_plus_search_run_verifier":
         return _blind_verifier_receipt(result, context)
-    if tool == "search_list_iterations":
+    if tool == "goal_plus_search_list_iterations":
         return _blind_iteration_receipts(result, context)
-    if tool == "search_get_global_evidence":
+    if tool == "goal_plus_search_get_global_evidence":
         return _blind_global_evidence(result)
-    if tool == "search_stage_shared_tool":
+    if tool == "goal_plus_search_stage_shared_tool":
         return _blind_staged_shared_tool(result, context)
-    if tool == "search_copy_shared_tool":
+    if tool == "goal_plus_search_copy_shared_tool":
         return _blind_copied_shared_tool(result, context)
     return _INVALID_BLIND_RESPONSE
 
@@ -1070,9 +1070,16 @@ class WorkerToolProxy:
             allowed = _WORKER_TOOLS - (
                 _BLIND_BLOCKED_TOOLS if self.evaluation_mode == "blind" else set()
             )
-            return {"ok": True, "result": {
-                "tools": [item for item in manifest["tools"] if item["name"] in allowed],
-            }}
+            tools = []
+            for item in manifest["tools"]:
+                if item["name"] not in allowed:
+                    continue
+                if not isinstance(item.get("inputSchema"), dict):
+                    raise ValueError("worker MCP tool requires an inputSchema object")
+                tools.append(
+                    {key: value for key, value in item.items() if value is not None}
+                )
+            return {"ok": True, "result": {"tools": tools}}
         if "native_session_id" in request and request["native_session_id"] != self.context.agent_session_id:
             raise PermissionError("Pi worker MCP requires the bound native session")
         if tool not in _WORKER_TOOLS:
@@ -1090,7 +1097,10 @@ class WorkerToolProxy:
                 args,
                 self.host_environment,
             )
-            if tool == "search_get_agent_context" and self.evaluation_mode == "visible":
+            if (
+                tool == "goal_plus_search_get_agent_context"
+                and self.evaluation_mode == "visible"
+            ):
                 self._project_worker_generation(result)
         except Exception:  # workers must not receive raw host exceptions
             return dict(_BLIND_RESPONSE_REJECTED)
@@ -1185,18 +1195,21 @@ class WorkerToolProxy:
         if "run_id" in args and args["run_id"] != self.context.run_id:
             raise PermissionError("Pi worker proxy rejected a different run_id")
         if (
-            tool == "search_run_verifier"
+            tool == "goal_plus_search_run_verifier"
             and args.get("candidate_id") != self.context.candidate_id
         ):
             raise PermissionError("Pi worker proxy rejected a different candidate_id")
         if (
-            tool == "search_list_iterations"
+            tool == "goal_plus_search_list_iterations"
             and set(args) != {"agent_session_id"}
         ):
             raise PermissionError(
                 "Pi iteration listing accepts only the bound agent_session_id"
             )
-        if tool == "search_run_verifier" and args.get("scope", "process") != "process":
+        if (
+            tool == "goal_plus_search_run_verifier"
+            and args.get("scope", "process") != "process"
+        ):
             raise PermissionError("Pi workers may only run process verifiers")
 
     def close(self) -> None:

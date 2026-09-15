@@ -18,7 +18,10 @@ from bench_artifacts import sanitize_id, utc_now
 from bench_goal_plus.upstreams import external_goal_plus_source, registered_upstream_branch
 from bench_runtime_paths import configure_temp_environment, ensure_temp_root
 from experiments.benchmark_compare import experiment as standalone
-from experiments.benchmark_compare.pi_worker_launcher import REAL_PI_BIN_ENV
+from experiments.benchmark_compare.pi_worker_launcher import (
+    REAL_PI_BIN_ENV,
+    _worker_proxy_base,
+)
 
 from . import task_adapter
 from .config import (
@@ -499,7 +502,9 @@ def _agent_environment(
     if real_pi is not None:
         environment[REAL_PI_BIN_ENV] = real_pi
     if method == "goal-plus-pi":
-        proxy_runtime = tempfile.mkdtemp(prefix="ab-", dir=ensure_temp_root())
+        proxy_runtime = tempfile.mkdtemp(
+            prefix="ab-", dir=_worker_proxy_base(environment)
+        )
         environment["AIBENCH_PROXY_RUNTIME_DIR"] = proxy_runtime
         environment["XDG_RUNTIME_DIR"] = proxy_runtime
     return environment
