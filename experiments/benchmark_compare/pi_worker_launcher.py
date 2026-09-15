@@ -982,7 +982,10 @@ def _run_host_tool(
         check=False,
     )
     if completed.returncode != 0:
-        raise RuntimeError("host tool call failed")
+        detail = completed.stderr.strip()
+        if len(detail) > 500:
+            detail = f"{detail[:500]}..."
+        raise RuntimeError(detail or "host tool call failed")
     return json.loads(completed.stdout)
 
 
@@ -1253,7 +1256,16 @@ class BubblewrapWorker:
         if executable is None:
             raise FileNotFoundError(f"Pi executable not found: {self.command[0]}")
         executable_path = Path(executable).absolute()
-        pi_runtime = _executable_runtime_root(executable_path)
+        executable_entrypoint = _executable_entrypoint(executable_path)
+        pi_runtime_roots = tuple(
+            dict.fromkeys(
+                (
+                    _executable_runtime_root(executable_path),
+                    _executable_runtime_root(executable_entrypoint),
+                )
+            )
+        )
+        pi_runtime = pi_runtime_roots[0]
         extension = _command_path_argument(self.command, "-e")
         extension_bundle = extension.parent
         package = extension.parents[3]
@@ -1296,28 +1308,34 @@ class BubblewrapWorker:
             "--unshare-all",
             "--share-net",
             "--unshare-user",
-            "--disable-userns",
-            "--cap-drop",
-            "ALL",
-            "--hostname",
-            "zsoft-goal-plus-worker",
-            "--proc",
-            "/proc",
-            "--dev",
-            "/dev",
-            "--tmpfs",
-            "/tmp",
-            "--dir",
-            "/run",
-            "--dir",
-            "/home",
-            "--dir",
-            "/home/pi",
         ]
+        if _bwrap_supports_option(bwrap, "--disable-userns", self.environment):
+            args.append("--disable-userns")
+        args.extend(
+            [
+                "--cap-drop",
+                "ALL",
+                "--hostname",
+                "zsoft-goal-plus-worker",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+                "--dir",
+                "/run",
+                "--dir",
+                "/home",
+                "--dir",
+                "/home/pi",
+            ]
+        )
         created = {"/proc", "/dev", "/tmp", "/run", "/home", "/home/pi"}
         _mount_system(args)
-        if not _is_system_path(pi_runtime):
-            _add_bind(args, pi_runtime, pi_runtime, readonly=True, created=created)
+        for runtime in pi_runtime_roots:
+            if not _is_system_path(runtime):
+                _add_bind(args, runtime, runtime, readonly=True, created=created)
         _add_tmpfs(args, self.root, created)
         protected_paths = _validated_workspace_paths(
             self.context.workspace,
@@ -1561,7 +1579,41 @@ def _safe_name(value: str) -> str:
 def _executable_runtime_root(executable: Path) -> Path:
     if executable.parent.name == "bin":
         return executable.parent.parent.resolve()
-    return executable.resolve()
+    if (
+        executable.parent.name == ".bin"
+        and executable.parent.parent.name == "node_modules"
+    ):
+        return executable.parent.parent.parent.resolve()
+    resolved = executable.resolve()
+    for parent in resolved.parents:
+        if parent.name == "node_modules":
+            return parent.parent
+    if resolved.parent.name == "bin":
+        return resolved.parent.parent
+    return resolved
+
+
+def _executable_entrypoint(executable: Path) -> Path:
+    return executable.resolve(strict=True)
+
+
+def _bwrap_supports_option(
+    executable: str,
+    option: str,
+    environment: Mapping[str, str],
+) -> bool:
+    completed = subprocess.run(
+        [executable, "--help"],
+        env=dict(environment),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"failed to inspect Bubblewrap options: {completed.stderr.strip()}"
+        )
+    return option in f"{completed.stdout}\n{completed.stderr}".split()
 
 
 def _is_system_path(path: Path) -> bool:

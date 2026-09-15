@@ -1905,7 +1905,7 @@ def execute_plain(
     selection_pool = valid_lane_results or lane_results
     selected = (
         min(selection_pool, key=lambda item: item["lane"])
-        if controller_only
+        if controller_only and EVALUATION_MODE == "blind"
         else min(
             selection_pool,
             key=lambda item: score_order_key(item["evaluation"]),
@@ -2277,7 +2277,18 @@ def execute_goal_plus(
         )
     final: dict[str, Any] | None = None
     posthoc_result: dict[str, Any] | None = None
-    if closeout_reason is None:
+    if posthoc_selection is None and (closeout_reason is None or controller_only):
+        final = evaluate_with_controller_runtime(
+            workspace,
+            "final",
+            run_dir / "controller-runtime/final",
+            benchmark_root,
+        )
+        write_json(run_dir / "final-eval.json", final)
+        copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
+        if closeout_reason is not None:
+            control["result_incomplete_reason"] = closeout_reason
+    elif closeout_reason is None:
         if posthoc_selection is not None:
             try:
                 posthoc_result = finalize_posthoc_official_selection(
@@ -2309,15 +2320,6 @@ def execute_goal_plus(
                 control["result_incomplete_reason"] = (
                     "controller posthoc official selection failed"
                 )
-        else:
-            final = evaluate_with_controller_runtime(
-                workspace,
-                "final",
-                run_dir / "controller-runtime/final",
-                benchmark_root,
-            )
-            write_json(run_dir / "final-eval.json", final)
-            copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
     else:
         control["official_evaluation_withheld"] = True
         control["result_incomplete_reason"] = closeout_reason
@@ -2707,7 +2709,23 @@ def repair_closeout(args: argparse.Namespace) -> int:
         )
     final: dict[str, Any] | None = None
     posthoc_result: dict[str, Any] | None = None
-    if controller_only_closeout_reason is None:
+    if posthoc_selection is None and (
+        controller_only_closeout_reason is None or controller_only
+    ):
+        final_path = run_dir / "final-eval.json"
+        if final_path.is_file():
+            final = load_json(final_path)
+        else:
+            final = evaluate_with_controller_runtime(
+                workspace,
+                "final",
+                run_dir / "controller-runtime/final",
+                benchmark_root,
+            )
+            write_json(final_path, final)
+            copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
+        control.pop("official_evaluation_withheld", None)
+    elif controller_only_closeout_reason is None:
         if posthoc_selection is not None:
             try:
                 posthoc_result = finalize_posthoc_official_selection(
@@ -2737,15 +2755,6 @@ def repair_closeout(args: argparse.Namespace) -> int:
                 control.pop("official_evaluation_withheld", None)
             else:
                 control["official_evaluation_withheld"] = True
-        else:
-            final = evaluate_with_controller_runtime(
-                workspace,
-                "final",
-                run_dir / "controller-runtime/final",
-                benchmark_root,
-            )
-            write_json(run_dir / "final-eval.json", final)
-            copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
     else:
         control["official_evaluation_withheld"] = True
     control["goal_plus"] = collect_goal_plus_state(workspace)
