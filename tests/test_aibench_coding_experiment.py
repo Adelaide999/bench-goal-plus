@@ -86,6 +86,179 @@ class AIBenchCodingContractTest(unittest.TestCase):
         closeout["runs"][0]["goal_statuses"]["gp_0001"] = "active"
         self.assertIsNotNone(reason(closeout, deterministic_public_gate=False))
 
+    def test_failed_closeout_keeps_official_score_through_repair(self) -> None:
+        self.addCleanup(benchmark_compare.configure_adapter, "heurigym")
+        benchmark_compare.configure_adapter(
+            "aibench-coding-native",
+            module_name="experiments.aibench_coding.task_adapter",
+        )
+        run_dir = self.root / "goal-plus-closeout-failure"
+        workspace = run_dir / "workspace"
+        (workspace / "submission").mkdir(parents=True)
+        (workspace / "submission" / "solution.py").write_text(
+            "RESULT = 1\n", encoding="utf-8"
+        )
+        (workspace / "TASK.md").write_text("fix it\n", encoding="utf-8")
+        manifest = {
+            "method": "goal-plus-codex",
+            "workspace": str(workspace),
+            "reasoning_effort": "medium",
+            "environment": {"runtime_bin": str(self.root / "bin")},
+            "task": {
+                "controller_only_official_evaluation": True,
+                "goal_plus_early_stop": None,
+                "goal_plus_posthoc_selection": None,
+            },
+            "goal_plus_config": {
+                "early_stop": None,
+                "posthoc_selection": None,
+                "shared_dir_enabled": False,
+            },
+            "budget": {
+                "wall_time_seconds": 300,
+                "soft_closeout_seconds": 60,
+                "hard_kill_grace_seconds": 5,
+                "concurrency": 1,
+                "worker_runtime_seconds": 200,
+                "worker_min_runtime_seconds": None,
+            },
+        }
+        args = SimpleNamespace(
+            model="gpt-test",
+            api_base=None,
+            codex_bin="codex-test",
+            pi_provider_id="openai",
+            pi_api="openai-responses",
+            pi_api_key_env="OPENAI_API_KEY",
+        )
+        seed = {"valid": True, "budget": {"total_claimed": 1}}
+        final = {
+            "valid": True,
+            "mode": "final",
+            "primary_metric": {"name": "task_success", "value": True},
+            "budget": {"total_claimed": 1},
+        }
+
+        with (
+            mock.patch.object(
+                benchmark_compare,
+                "evaluate_with_controller_runtime",
+                side_effect=[seed, final],
+            ) as evaluate,
+            mock.patch.object(benchmark_compare, "configure_isolated_codex_home"),
+            mock.patch.object(
+                benchmark_compare, "configure_evidence_annotator_environment"
+            ),
+            mock.patch.object(benchmark_compare, "bind_goal_plus_environment"),
+            mock.patch.object(benchmark_compare, "render_goal", return_value="prompt"),
+            mock.patch.object(
+                benchmark_compare, "codex_command", return_value=["codex-test"]
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "run_controlled",
+                return_value={
+                    "returncode": 0,
+                    "deadline_reached": False,
+                    "hard_killed": False,
+                    "controller_interrupted": False,
+                },
+            ),
+            mock.patch.object(
+                benchmark_compare, "close_candidate_sessions", return_value=[]
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "finalize_goal_plus_search",
+                return_value={
+                    "completed": False,
+                    "runs": [],
+                    "error": "recovery pending",
+                },
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "parse_codex_events",
+                return_value={"top_level_usage": {}},
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "collect_goal_plus_state",
+                return_value={"runs": [], "goals": []},
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "collect_evidence_annotator_usage",
+                return_value={},
+            ),
+            mock.patch.object(
+                benchmark_compare, "goal_plus_incomplete_reason", return_value=None
+            ),
+        ):
+            control = benchmark_compare.execute_goal_plus(
+                manifest, run_dir, args, {}
+            )
+
+        self.assertEqual(evaluate.call_count, 2)
+        self.assertTrue((run_dir / "final-eval.json").is_file())
+        self.assertEqual(control["evaluator_calls"]["controller_final_claimed"], 1)
+        self.assertNotIn("official_evaluation_withheld", control)
+        self.assertIn("recovery pending", control["result_incomplete_reason"])
+
+        control["official_evaluation_withheld"] = True
+        manifest.update(
+            {
+                "benchmark_adapter": "aibench-coding-native",
+                "benchmark_adapter_module": (
+                    "experiments.aibench_coding.task_adapter"
+                ),
+                "execution": control,
+                "status": "incomplete",
+            }
+        )
+        (run_dir / "experiment.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with (
+            mock.patch.object(
+                benchmark_compare, "close_candidate_sessions", return_value=[]
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "finalize_goal_plus_search",
+                return_value={
+                    "completed": False,
+                    "runs": [],
+                    "error": "recovery pending",
+                },
+            ),
+            mock.patch.object(
+                benchmark_compare, "evaluate_with_controller_runtime"
+            ) as repair_evaluate,
+            mock.patch.object(
+                benchmark_compare,
+                "collect_goal_plus_state",
+                return_value={"runs": [], "goals": []},
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "collect_evidence_annotator_usage",
+                return_value={},
+            ),
+        ):
+            result = benchmark_compare.repair_closeout(
+                SimpleNamespace(run_dir=run_dir)
+            )
+
+        repaired = json.loads((run_dir / "experiment.json").read_text())
+        self.assertEqual(result, 2)
+        repair_evaluate.assert_not_called()
+        self.assertNotIn("official_evaluation_withheld", repaired["execution"])
+        self.assertEqual(
+            repaired["execution"]["evaluator_calls"]["controller_final_claimed"],
+            1,
+        )
+
     def test_bwrap_option_detection_supports_old_and_new_versions(self) -> None:
         for help_output, expected in (
             ("--unshare-user --disable-userns --cap-drop", True),
@@ -155,6 +328,23 @@ class AIBenchCodingContractTest(unittest.TestCase):
             pi_worker_launcher._executable_runtime_root(target),
             runtime_root.resolve(),
         )
+
+    def test_pi_host_tool_preserves_a_short_rejection_detail(self) -> None:
+        completed = subprocess.CompletedProcess(
+            [sys.executable, "-m", "goal_plus.pi_tool"],
+            1,
+            stdout="",
+            stderr="toolization_decision requires shared_dir.enabled=true\n",
+        )
+        with mock.patch.object(
+            pi_worker_launcher.subprocess, "run", return_value=completed
+        ), self.assertRaisesRegex(RuntimeError, "shared_dir.enabled=true"):
+            pi_worker_launcher._run_host_tool(
+                self.root / ".gp",
+                "goal_plus_search_run_verifier",
+                {},
+                {"GOAL_PLUS_PYTHON": sys.executable},
+            )
 
     def test_hidden_grading_only_blocks_native_closeout_for_blind_search(self) -> None:
         manifest = {
@@ -476,6 +666,44 @@ class AIBenchCodingContractTest(unittest.TestCase):
         self.assertIn(("--tmpfs", str(cell.parent)), pairs)
         self.assertIn(("--bind", str(workspace)), pairs)
         self.assertEqual(command[-3:], [str(binary), "exec", "--json"])
+
+    def test_bubblewrap_masks_symlinked_hidden_checkout_target(self) -> None:
+        cell = self.root / "campaign" / "cells" / "cell-1"
+        workspace = cell / "workspaces" / "lane-00"
+        hidden = self.root / "hidden-real"
+        hidden_link = self.root / "hidden-link"
+        binary = self.root / "codex"
+        workspace.mkdir(parents=True)
+        hidden.mkdir()
+        hidden_link.symlink_to(hidden, target_is_directory=True)
+        binary.write_text("", encoding="utf-8")
+        environment = {
+            "AIBENCH_AGENT_ROLE": "codex",
+            "AIBENCH_METHOD": "plain-codex",
+            "AIBENCH_REAL_CODEX_BIN": str(binary),
+            "AIBENCH_HIDDEN_CHECKOUT": str(hidden_link),
+            "AIBENCH_CELL_ROOT": str(cell),
+        }
+        previous = Path.cwd()
+        try:
+            os.chdir(workspace)
+            with (
+                mock.patch.dict(os.environ, environment, clear=False),
+                mock.patch.object(
+                    sandbox.shutil, "which", return_value="/usr/bin/bwrap"
+                ),
+            ):
+                command = sandbox.build_command([])
+        finally:
+            os.chdir(previous)
+
+        tmpfs_targets = [
+            command[index + 1]
+            for index, value in enumerate(command[:-1])
+            if value == "--tmpfs"
+        ]
+        self.assertIn(str(hidden.resolve()), tmpfs_targets)
+        self.assertNotIn(str(hidden_link.absolute()), tmpfs_targets)
 
     @unittest.skipUnless(shutil.which("bwrap"), "requires Bubblewrap")
     def test_goal_plus_pi_outer_sandbox_can_create_worker_socket(self) -> None:
