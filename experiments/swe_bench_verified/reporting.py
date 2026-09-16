@@ -237,6 +237,7 @@ def _record(campaign: Path, manifest: dict[str, Any], cell: dict[str, Any]) -> d
                 "supplemental_evaluation_enabled": cell.get("supplemental_evaluation_enabled"),
                 "completion": goal_plus_completion or None,
                 "actual_subagent_count": goal_plus.get("actual_subagent_count"),
+                "comparison_eligible": goal_plus.get("comparison_eligible"),
                 "runs": goal_plus.get("runs") or [],
                 "active_pi_pool_jobs": goal_plus.get("active_pi_pool_jobs") or [],
                 "evidence_annotator": (

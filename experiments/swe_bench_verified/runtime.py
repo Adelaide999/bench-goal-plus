@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import time
 from contextlib import ExitStack, contextmanager
@@ -649,7 +650,10 @@ def _create_agent_container(
             raise SweBenchContractError(
                 f"Pi credential for provider {runtime['provider']} is missing"
             )
-        if not all(runtime.get(name) for name in ("node_root", "package_root")):
+        if not all(
+            runtime.get(name)
+            for name in ("node_root", "package_root", "container_pi_cli")
+        ):
             raise SweBenchContractError("Pi Node.js or package runtime is missing")
         command.extend(
             [
@@ -906,7 +910,11 @@ def _initialize_agent_container(
         if os.environ.get("PIP_INDEX_URL"):
             install_command.extend(["-e", "PIP_INDEX_URL"])
         install_script = goal_plus_install_script(
-            include_pi=method == "goal-plus-pi"
+            pi_cli=(
+                str(runtime["container_pi_cli"])
+                if method == "goal-plus-pi"
+                else None
+            )
         )
         if runtime.get("goal_plus_evidence_annotator") is not None:
             install_script += (
@@ -1347,7 +1355,7 @@ def _agent_command(
                 'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH; exec "$@"',
                 "swe-bench-goal-plus",
                 "/opt/node/bin/node",
-                "/opt/pi/dist/cli.js",
+                str(runtime["container_pi_cli"]),
                 "--mode",
                 "json",
                 "--provider",
@@ -1394,7 +1402,7 @@ def _agent_command(
         *bridge_environment,
         container_id,
         "/opt/node/bin/node",
-        "/opt/pi/dist/cli.js",
+        str(runtime["container_pi_cli"]),
         "--mode",
         "json",
         "--print",
@@ -1994,11 +2002,16 @@ def _run_agent(
             timed_out = True
             trajectory_runtime_seconds = time.monotonic() - trajectory_started
             if method in {"goal-plus-codex", "goal-plus-pi"}:
-                terminate_command = (
-                    "pkill -TERM -x codex 2>/dev/null || true"
-                    if method == "goal-plus-codex"
-                    else "pkill -TERM -f '/opt/pi/dist/[c]li.js' 2>/dev/null || true"
-                )
+                terminate_command = "pkill -TERM -x codex 2>/dev/null || true"
+                if method == "goal-plus-pi":
+                    pi_cli = Path(str(runtime["container_pi_cli"]))
+                    pi_pattern = pi_cli.with_name(
+                        f"[{pi_cli.name[0]}]{pi_cli.name[1:]}"
+                    )
+                    terminate_command = (
+                        f"pkill -TERM -f {shlex.quote(str(pi_pattern))} "
+                        "2>/dev/null || true"
+                    )
                 _docker_checked(
                     [
                         "docker",
@@ -2378,6 +2391,11 @@ def status_payload(campaign: Path) -> dict[str, Any]:
                 "actual_subagent_count": (
                     ((cell.get("agent") or {}).get("goal_plus") or {}).get(
                         "actual_subagent_count"
+                    )
+                ),
+                "comparison_eligible": (
+                    ((cell.get("agent") or {}).get("goal_plus") or {}).get(
+                        "comparison_eligible"
                     )
                 ),
                 "goal_plus_completion": (

@@ -98,23 +98,46 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertEqual(json.loads(passing.stdout)["visible_test_score"], 1.0)
 
     def test_goal_plus_installer_uses_the_bind_cache_owner(self) -> None:
-        script = environment.goal_plus_install_script()
+        pi_cli = "/opt/pi/dist/bundle/cli.js"
+        script = environment.goal_plus_install_script(pi_cli=pi_cli)
 
         self.assertIn("os.stat('/opt/pip-cache')", script)
         self.assertIn("os.setgid(cache.st_gid)", script)
         self.assertIn("os.setuid(cache.st_uid)", script)
         self.assertIn("'/opt/goal-plus-runtime-requirements.lock'", script)
         self.assertIn("PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH", script)
+        self.assertIn(f"ln -sf {pi_cli} /opt/goal-plus-bin/pi", script)
         self.assertNotIn("PATH", environment.goal_plus_runtime_environment())
         self.assertEqual(
             environment.goal_plus_runtime_environment()["HOME"],
             "/opt/agent-tmp",
         )
 
-        codex_script = environment.goal_plus_install_script(include_pi=False)
+        codex_script = environment.goal_plus_install_script(pi_cli=None)
         self.assertIn("goal_plus.server", codex_script)
         self.assertNotIn("/opt/pi/dist", codex_script)
         self.assertNotIn("/opt/goal-plus-bin/pi", codex_script)
+
+    def test_pi_package_resolution_is_independent_of_cli_layout(self) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary)
+            for relative_cli in (Path("dist/cli.js"), Path("dist/bundle/cli.js")):
+                with self.subTest(relative_cli=relative_cli):
+                    package = root / relative_cli.parent.name
+                    cli = package / relative_cli
+                    cli.parent.mkdir(parents=True)
+                    cli.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+                    (package / "package.json").write_text(
+                        json.dumps({"name": environment.PI_PACKAGE_NAME}),
+                        encoding="utf-8",
+                    )
+
+                    package_root, container_cli = environment._resolve_pi_package(
+                        cli.resolve()
+                    )
+
+                    self.assertEqual(package_root, package)
+                    self.assertEqual(container_cli, f"/opt/pi/{relative_cli}")
 
     def test_goal_plus_codex_profile_uses_native_auth_and_codex_workers(self) -> None:
         profile = self.profile("sympy-16886-goal-plus-codex-acceptance-smoke")
@@ -521,10 +544,44 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             )
 
         self.assertTrue(state["completion"]["passed"])
+        self.assertTrue(state["comparison_eligible"])
         self.assertEqual(
             state["completion"]["checks"]["worker_topology"]["actual"],
             "codex/parallel_loops",
         )
+
+    def test_active_goal_preserves_observed_subagent_count_without_comparison_eligibility(
+        self,
+    ) -> None:
+        with self.temporary_directory() as temporary:
+            root = Path(temporary)
+            self.write_goal_plus_state(
+                root,
+                max_parallel=2,
+                session_count=2,
+                candidate_count=2,
+            )
+            goal_path = root / "goal-plus/gp_test/goal.json"
+            goal = read_json(goal_path)
+            goal.update({"status": "active", "phase": "final_audit"})
+            write_json(goal_path, goal)
+
+            state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=2,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+            )
+
+        self.assertEqual(state["actual_subagent_count"], 2)
+        self.assertEqual(len(state["runs"]), 1)
+        self.assertTrue(
+            state["completion"]["checks"]["bound_pi_worker_sessions"]["passed"]
+        )
+        self.assertFalse(state["completion"]["checks"]["terminal_goal"]["passed"])
+        self.assertFalse(state["completion"]["passed"])
+        self.assertFalse(state["comparison_eligible"])
 
     def test_goal_plus_k2_requires_peer_comparison_and_search_influence(self) -> None:
         with self.temporary_directory() as temporary:
@@ -667,7 +724,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "peer_view_influence", missing_state["completion"]["reason"]
             )
 
-    def test_goal_plus_v2_observations_use_independent_comparison_receipts(
+    def test_goal_plus_v2_observations_use_automatic_task_comparisons(
         self,
     ) -> None:
         with self.temporary_directory() as temporary:
@@ -722,36 +779,55 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                         }
                     ]
                 }
-                write_json(annotation_path, annotation)
-
-            session_path = root / "runs/run_test/agent_sessions/agent_0.json"
-            session = read_json(session_path)
-            session["global_evidence_comparisons"] = [
-                {
-                    "compared_at": "2026-08-06T12:01:30Z",
-                    "selection_mode": "explicit",
-                    "topic_id": None,
-                    "observation_refs": [
-                        {
-                            "candidate_id": "c001",
-                            "iteration": 2,
-                            "commit": commits[("c001", 2)],
-                            "observation_ordinal": 1,
-                        },
-                        {
-                            "candidate_id": "c002",
-                            "iteration": 1,
-                            "commit": commits[("c002", 1)],
-                            "observation_ordinal": 1,
-                        },
-                    ],
-                    "selected_count": 2,
-                    "candidate_cursor": None,
-                    "next_candidate_cursor": None,
-                    "remaining": 0,
+                peer_id = (
+                    "c002" if annotation["candidate_id"] == "c001" else "c001"
+                )
+                references = [
+                    {
+                        "candidate_id": annotation["candidate_id"],
+                        "iteration": annotation["iteration"],
+                        "commit": commits[
+                            (annotation["candidate_id"], annotation["iteration"])
+                        ],
+                        "observation_ordinal": 1,
+                    },
+                    {
+                        "candidate_id": peer_id,
+                        "iteration": 1,
+                        "commit": commits[(peer_id, 1)],
+                        "observation_ordinal": 1,
+                    },
+                ]
+                annotation["comparison_state"] = "completed"
+                annotation["comparison_usage"] = {
+                    "input_tokens": 20,
+                    "output_tokens": 5,
                 }
-            ]
-            write_json(session_path, session)
+                annotation["comparison"] = {
+                    "schema_version": 1,
+                    "gist": "The visible implementation observations differ.",
+                    "selections": [
+                        {
+                            "reference": reference,
+                            "reason": "Compare the current View with one peer View.",
+                        }
+                        for reference in references
+                    ],
+                    "agreements": [],
+                    "differences": [
+                        {
+                            "text": "The implementations use distinct visible branches.",
+                            "observation_refs": references,
+                        }
+                    ],
+                    "unique_observations": [],
+                    "unresolved": [],
+                    "catalog_view_count": 2,
+                    "catalog_observation_count": 2,
+                    "catalog_truncated": False,
+                    "created_at": "2026-08-06T12:00:45Z",
+                }
+                write_json(annotation_path, annotation)
 
             state = goal_plus_evidence.collect_goal_plus_state(
                 root,
@@ -772,10 +848,38 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                     "passed"
                 ]
             )
-            receipts = state["completion"]["checks"][
-                "global_evidence_read_receipts"
+            comparisons = state["completion"]["checks"][
+                "dynamic_peer_comparison"
             ]["actual"]
-            self.assertEqual(receipts["valid_comparison_count"], 1)
+            self.assertEqual(len(comparisons), 3)
+            self.assertEqual(state["evidence_annotator_usage"]["input_tokens"], 180)
+
+            annotation_path = next(
+                root.glob(
+                    "runs/run_test/candidates/*/evidence-annotations/*.json"
+                )
+            )
+            incomplete = read_json(annotation_path)
+            incomplete["comparison_state"] = "terminal_error"
+            incomplete["comparison"] = None
+            write_json(annotation_path, incomplete)
+            incomplete_state = goal_plus_evidence.collect_goal_plus_state(
+                root,
+                expected_k=2,
+                expected_worker_runtime_seconds=1500,
+                expected_closeout_reserve_seconds=300,
+                expected_visible_verifier_timeout_seconds=300,
+                expected_worker_min_runtime_seconds=600,
+                expected_worker_min_verifier_runs=2,
+                expected_supplemental_evaluation_enabled=True,
+                expected_evidence_annotator_enabled=True,
+                expected_worker_host="codex",
+            )
+            self.assertFalse(
+                incomplete_state["completion"]["checks"][
+                    "dynamic_peer_comparison"
+                ]["passed"]
+            )
 
     def test_goal_plus_codex_completion_enforces_worker_minimums(self) -> None:
         with self.temporary_directory() as temporary:
@@ -1770,11 +1874,13 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "model_id": "glm-5.2",
             "node_root": Path("/opt/node-host"),
             "package_root": Path("/opt/pi-host"),
+            "container_pi_cli": "/opt/pi/runtime/entry.mjs",
         }
         with mock.patch.dict(os.environ, {"ZAI_API_KEY": secret}, clear=False):
             command = runtime._agent_command("container-id", profile, runtime_info)
 
         self.assertIn("ZAI_API_KEY", command)
+        self.assertIn(runtime_info["container_pi_cli"], command)
         self.assertFalse(any(secret in argument for argument in command))
         self.assertNotIn(f"ZAI_API_KEY={secret}", command)
 
@@ -1783,6 +1889,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             environment._pi_container_probe(profile["tasks"][0]["image"], runtime_info)
         probe = capture.call_args.args[0]
         self.assertIn("ZAI_API_KEY", probe)
+        self.assertIn(runtime_info["container_pi_cli"], probe)
         self.assertFalse(any(secret in argument for argument in probe))
 
     def test_custom_pi_container_probe_mounts_generated_provider_config(self) -> None:
@@ -1797,6 +1904,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "model_id": "gpt-5.6-luna",
                 "node_root": Path("/opt/node-host"),
                 "package_root": Path("/opt/pi-host"),
+                "container_pi_cli": "/opt/pi/dist/bundle/cli.js",
                 "models_file": models_file,
                 "bridge_host": "192.0.2.10",
             }
@@ -1818,6 +1926,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
         self.assertIn("dst=/opt/provider,readonly", joined)
         self.assertIn("PI_CODING_AGENT_DIR=/opt/pi-home/.pi/agent", command)
         self.assertIn("NO_PROXY=192.0.2.10", command)
+        self.assertIn(runtime_info["container_pi_cli"], joined)
         self.assertNotIn(secret, joined)
 
     def test_goal_plus_container_mounts_and_outer_pi_command_are_explicit(self) -> None:
@@ -1835,13 +1944,25 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             controller.write_text("print('{}')\n", encoding="utf-8")
             pip_cache = assets / "pip-cache"
             pip_cache.mkdir()
+            pi_package = assets / "pi-package"
+            pi_cli = pi_package / "dist/bundle/cli.js"
+            pi_cli.parent.mkdir(parents=True)
+            pi_cli.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+            (pi_package / "package.json").write_text(
+                json.dumps({"name": environment.PI_PACKAGE_NAME}),
+                encoding="utf-8",
+            )
+            package_root, container_pi_cli = environment._resolve_pi_package(
+                pi_cli.resolve()
+            )
             runtime_info = {
                 "credential_env": "ZAI_API_KEY",
                 "credential_present": True,
                 "provider": "zai",
                 "model_id": "glm-5.2",
                 "node_root": Path("/host/node"),
-                "package_root": Path("/host/pi"),
+                "package_root": package_root,
+                "container_pi_cli": container_pi_cli,
                 "goal_plus_root": goal_plus_root,
                 "goal_plus_dependency_lock": dependency_lock,
                 "goal_plus_visible_verifier": verifier,
@@ -1853,13 +1974,26 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             def docker_checked(command: list[str], *, timeout: int = 120) -> str:
                 del timeout
                 docker_commands.append(command)
-                return "container-id" if command[:2] == ["docker", "create"] else ""
+                if command[:2] == ["docker", "create"]:
+                    return "container-id"
+                if "rev-parse" in command:
+                    return (
+                        profile["tasks"][0]["base_commit"]
+                        if command[-1] == "HEAD"
+                        else "tree"
+                    )
+                if "sha256sum" in command:
+                    return hashlib.sha256(verifier.read_bytes()).hexdigest()
+                return ""
 
             with mock.patch.object(
                 runtime, "_docker_checked", side_effect=docker_checked
             ):
                 runtime._create_agent_container(
                     "goal-plus-campaign", profile, runtime_info
+                )
+                checkout = runtime._initialize_agent_container(
+                    "container-id", profile, runtime_info
                 )
 
             create = docker_commands[0]
@@ -1875,6 +2009,16 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertIn(
                 "/opt/goal-plus-runtime:rw,exec,nosuid,nodev,size=512m", create
             )
+            install = next(
+                command
+                for command in docker_commands
+                if "/opt/goal-plus-bin/pi" in " ".join(command)
+            )
+            self.assertIn(
+                f"ln -sf {container_pi_cli} /opt/goal-plus-bin/pi",
+                " ".join(install),
+            )
+            self.assertEqual(checkout["observed_head"], profile["tasks"][0]["base_commit"])
 
             prompt = runtime.build_goal_plus_prompt(
                 {"problem_statement": "Public issue text"}, profile
@@ -1933,6 +2077,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 'export PATH=/opt/goal-plus-bin:/opt/node/bin:$PATH; exec "$@"',
                 command,
             )
+            self.assertIn(runtime_info["container_pi_cli"], command)
             self.assertIn("ZAI_API_KEY", command)
             self.assertFalse(any(secret in argument for argument in command))
 
@@ -1963,6 +2108,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "model_id": "gpt-5.6-luna",
                 "node_root": Path("/host/node"),
                 "package_root": Path("/host/pi"),
+                "container_pi_cli": "/opt/pi/dist/bundle/cli.js",
                 "runtime_api_base_url": "http://192.0.2.10:45678/v1",
                 "outer_deadline_at": "2026-08-03T12:00:00+00:00",
                 "goal_plus_evidence_annotator": profile["goal_plus"][
@@ -2577,6 +2723,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "provider": "zai",
             "node_root": Path("/node"),
             "package_root": Path("/pi"),
+            "container_pi_cli": "/opt/pi/runtime/entry.mjs",
         }
         with self.temporary_directory() as temporary:
             campaign = Path(temporary)
@@ -2639,6 +2786,7 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             "provider": "zai",
             "node_root": Path("/node"),
             "package_root": Path("/pi"),
+            "container_pi_cli": "/opt/pi/runtime/entry.mjs",
             "goal_plus_root": Path("/goal-plus"),
             "goal_plus_dependency_lock": Path("/requirements.lock"),
             "goal_plus_visible_verifier": Path("/visible.py"),
@@ -2662,28 +2810,31 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
                 "source": {"goal_plus_commit": "a" * 40},
             }
             sequence: list[str] = []
+            termination_commands: list[str] = []
 
             def docker_checked(command: list[str], *, timeout: int = 120) -> str:
                 del timeout
                 if "pkill" in " ".join(command):
                     sequence.append("terminate-pi")
+                    termination_commands.append(" ".join(command))
                 if "diff" in command:
                     return "diff --git a/a b/a\n"
                 if "status" in command:
                     return " M a"
                 return ""
 
-            def closeout(*_args, **_kwargs):
-                sequence.append("closeout")
-                return {"completed": True}
-
             def export_state(*_args, **_kwargs):
                 sequence.append("export")
                 return {
                     "actual_subagent_count": 1,
+                    "comparison_eligible": True,
                     "completion": {"passed": True, "reason": None},
                     "worker_usage": {"coverage": "persisted_pi_worker_usage"},
                 }
+
+            def closeout(*_args, **_kwargs):
+                sequence.append("closeout")
+                return {"completed": True}
 
             def dispose(*_args, **_kwargs):
                 sequence.append("dispose")
@@ -2730,10 +2881,12 @@ class SweBenchVerifiedContractTest(unittest.TestCase):
             self.assertEqual(
                 sequence, ["terminate-pi", "closeout", "export", "dispose"]
             )
+            self.assertIn("/opt/pi/runtime/[e]ntry.mjs", termination_commands[0])
             self.assertEqual(result["state"], "completed")
             self.assertTrue(result["timed_out"])
             self.assertTrue(result["patch_exists"])
             self.assertEqual(result["goal_plus"]["actual_subagent_count"], 1)
+            self.assertTrue(result["goal_plus"]["comparison_eligible"])
 
     def test_unconfirmed_agent_cleanup_blocks_official_evaluator(self) -> None:
         with self.temporary_directory() as temporary:
