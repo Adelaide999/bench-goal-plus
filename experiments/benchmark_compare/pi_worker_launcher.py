@@ -982,10 +982,7 @@ def _run_host_tool(
         check=False,
     )
     if completed.returncode != 0:
-        detail = completed.stderr.strip()
-        if len(detail) > 500:
-            detail = f"{detail[:500]}..."
-        raise RuntimeError(detail or "host tool call failed")
+        raise RuntimeError("host tool call failed")
     return json.loads(completed.stdout)
 
 

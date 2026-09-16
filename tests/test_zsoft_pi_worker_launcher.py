@@ -31,6 +31,7 @@ from experiments.benchmark_compare.pi_worker_launcher import (
     SandboxPolicy,
     WorkerToolProxy,
     _OPAQUE_RESULTS_LEDGER,
+    _WORKER_TOOLS,
     _runtime_root,
     _shim_worker_launch,
     run_pi_shim,
@@ -48,6 +49,18 @@ def _context(workspace: Path) -> LaunchContext:
 
 class CurrentGoalPlusContractTest(unittest.TestCase):
     def test_mcp_manifest_and_calls_keep_worker_boundaries(self) -> None:
+        self.assertEqual(
+            _WORKER_TOOLS,
+            {
+                "goal_plus_search_get_agent_context",
+                "goal_plus_search_get_global_evidence",
+                "goal_plus_search_stage_shared_tool",
+                "goal_plus_search_copy_shared_tool",
+                "goal_plus_search_get_evidence_detail",
+                "goal_plus_search_run_verifier",
+                "goal_plus_search_list_iterations",
+            },
+        )
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             proxy = WorkerToolProxy(
@@ -56,7 +69,12 @@ class CurrentGoalPlusContractTest(unittest.TestCase):
             )
             manifest = {
                 "tools": [
-                    {"name": name, "inputSchema": {"type": "object"}}
+                    {
+                        "name": name,
+                        "inputSchema": {"type": "object"},
+                        "icons": None,
+                        "outputSchema": None,
+                    }
                     for name in (
                         "goal_plus_search_get_agent_context",
                         "goal_plus_search_get_evidence_detail",
@@ -71,6 +89,13 @@ class CurrentGoalPlusContractTest(unittest.TestCase):
                 result = proxy.dispatch({"tool": "host_mcp_manifest", "args": {}})
                 self.assertEqual([tool["name"] for tool in result["result"]["tools"]],
                                  ["goal_plus_search_get_agent_context"])
+                self.assertEqual(
+                    result["result"]["tools"][0],
+                    {
+                        "name": "goal_plus_search_get_agent_context",
+                        "inputSchema": {"type": "object"},
+                    },
+                )
                 host.reset_mock()
                 for native_id in (None, "foreign"):
                     with self.assertRaises(PermissionError):
@@ -78,6 +103,19 @@ class CurrentGoalPlusContractTest(unittest.TestCase):
                                         "args": {"agent_session_id": "agent_1"},
                                         "native_session_id": native_id})
                 host.assert_not_called()
+
+            with mock.patch(
+                "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
+                return_value={
+                    "tools": [
+                        {
+                            "name": "goal_plus_search_get_agent_context",
+                            "inputSchema": None,
+                        }
+                    ]
+                },
+            ), self.assertRaisesRegex(ValueError, "inputSchema object"):
+                proxy.dispatch({"tool": "host_mcp_manifest", "args": {}})
 
     @unittest.skipUnless(os.environ.get("BENCH_TEST_GOAL_PLUS_PACKAGE"), "installed MCP SDK required")
     def test_installed_mcp_sdk_round_trip(self) -> None:
