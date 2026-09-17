@@ -31,6 +31,7 @@ from experiments.benchmark_compare.pi_worker_launcher import (
     SandboxPolicy,
     WorkerToolProxy,
     _OPAQUE_RESULTS_LEDGER,
+    _WORKER_TOOLS,
     _runtime_root,
     _shim_worker_launch,
     run_pi_shim,
@@ -48,29 +49,77 @@ def _context(workspace: Path) -> LaunchContext:
 
 class CurrentGoalPlusContractTest(unittest.TestCase):
     def test_mcp_manifest_and_calls_keep_worker_boundaries(self) -> None:
+        self.assertEqual(
+            _WORKER_TOOLS,
+            {
+                "goal_plus_search_get_agent_context",
+                "goal_plus_search_get_global_evidence",
+                "goal_plus_search_reference_open",
+                "goal_plus_search_stage_shared_tool",
+                "goal_plus_search_copy_shared_tool",
+                "goal_plus_search_get_evidence_detail",
+                "goal_plus_search_run_verifier",
+                "goal_plus_search_list_iterations",
+            },
+        )
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             proxy = WorkerToolProxy(
                 root=base / ".gp", context=_context(base / "candidate"),
                 socket_dir=base / "proxy", evaluation_mode="blind",
             )
-            manifest = {"tools": [{"name": name, "inputSchema": {"type": "object"}} for name in (
-                "search_get_agent_context", "search_get_evidence_detail", "search_promote",
-            )]}
+            manifest = {
+                "tools": [
+                    {
+                        "name": name,
+                        "inputSchema": {"type": "object"},
+                        "icons": None,
+                        "outputSchema": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        },
+                    }
+                    for name in (
+                        "goal_plus_search_get_agent_context",
+                        "goal_plus_search_get_evidence_detail",
+                        "goal_plus_search_promote",
+                    )
+                ]
+            }
             with mock.patch(
                 "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
                 return_value=manifest,
             ) as host:
                 result = proxy.dispatch({"tool": "host_mcp_manifest", "args": {}})
                 self.assertEqual([tool["name"] for tool in result["result"]["tools"]],
-                                 ["search_get_agent_context"])
+                                 ["goal_plus_search_get_agent_context"])
+                self.assertEqual(
+                    result["result"]["tools"][0],
+                    {
+                        "name": "goal_plus_search_get_agent_context",
+                        "inputSchema": {"type": "object"},
+                    },
+                )
                 host.reset_mock()
                 for native_id in (None, "foreign"):
                     with self.assertRaises(PermissionError):
-                        proxy.dispatch({"tool": "search_get_agent_context",
+                        proxy.dispatch({"tool": "goal_plus_search_get_agent_context",
                                         "args": {"agent_session_id": "agent_1"},
                                         "native_session_id": native_id})
                 host.assert_not_called()
+
+            with mock.patch(
+                "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
+                return_value={
+                    "tools": [
+                        {
+                            "name": "goal_plus_search_get_agent_context",
+                            "inputSchema": None,
+                        }
+                    ]
+                },
+            ), self.assertRaisesRegex(ValueError, "inputSchema object"):
+                proxy.dispatch({"tool": "host_mcp_manifest", "args": {}})
 
     @unittest.skipUnless(os.environ.get("BENCH_TEST_GOAL_PLUS_PACKAGE"), "installed MCP SDK required")
     def test_installed_mcp_sdk_round_trip(self) -> None:
@@ -82,10 +131,26 @@ class CurrentGoalPlusContractTest(unittest.TestCase):
             )
             def call(_root, tool, args, _environment):
                 if tool == "host_mcp_manifest":
-                    return {"tools": [{"name": "search_list_iterations", "inputSchema": {
-                        "type": "object", "properties": {"agent_session_id": {"type": "string"}},
-                    }}, {"name": "search_promote", "inputSchema": {"type": "object"}}]}
-                self.assertEqual(tool, "search_list_iterations")
+                    return {"tools": [{
+                        "name": "goal_plus_search_list_iterations",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "agent_session_id": {"type": "string"},
+                            },
+                        },
+                        "icons": None,
+                        "outputSchema": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        },
+                        "annotations": None,
+                        "execution": None,
+                    }, {
+                        "name": "goal_plus_search_promote",
+                        "inputSchema": {"type": "object"},
+                    }]}
+                self.assertEqual(tool, "goal_plus_search_list_iterations")
                 self.assertEqual(args, {"agent_session_id": "agent_1"})
                 return [{"iteration": 1}]
             script = """
@@ -99,15 +164,15 @@ const client = new Client({name: 'test', version: '1'});
 try {
   await client.connect(new StdioClientTransport({command: 'node', args: [process.env.TEST_MCP_SERVER], env: process.env}));
   const manifest = await client.listTools();
-  assert.deepEqual(manifest.tools.map(tool => tool.name), ['search_list_iterations']);
-  const args = {name: 'search_list_iterations', arguments: {agent_session_id: 'agent_1'}};
+  assert.deepEqual(manifest.tools.map(tool => tool.name), ['goal_plus_search_list_iterations']);
+  const args = {name: 'goal_plus_search_list_iterations', arguments: {agent_session_id: 'agent_1'}};
   const good = await client.callTool({...args, _meta: {threadId: 'agent_1'}});
   assert.deepEqual(JSON.parse(good.content[0].text), [{iteration: 1}]);
   for (const threadId of ['foreign', null]) {
     const bad = await client.callTool({...args, _meta: {threadId}});
     assert.equal(bad.isError, true);
   }
-  const denied = await client.callTool({name: 'search_promote', arguments: {}, _meta: {threadId: 'agent_1'}});
+  const denied = await client.callTool({name: 'goal_plus_search_promote', arguments: {}, _meta: {threadId: 'agent_1'}});
   assert.equal(denied.isError, true);
 } finally { await client.close(); }
 """
@@ -141,7 +206,7 @@ try {
                 "candidate_task": {"workspace": str(context.workspace)},
                 "private_metadata": "must not be projected",
             }
-            request = {"tool": "search_get_agent_context", "args": {
+            request = {"tool": "goal_plus_search_get_agent_context", "args": {
                 "agent_session_id": "agent_1",
             }}
             destination = proxy.socket_dir / "runtime/runs/run_1/candidates/c001/candidate.json"
@@ -238,14 +303,14 @@ try {
             "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
             side_effect=[report, [iteration]],
         ) as host:
-            result = proxy.dispatch({"tool": "search_run_verifier", "args": {
+            result = proxy.dispatch({"tool": "goal_plus_search_run_verifier", "args": {
                 "run_id": "run_1", "candidate_id": "c001",
                 "agent_session_id": "agent_1", "hypothesis": "public check",
             }})
             self.assertEqual(result, {"ok": True, "result": {
                 "run_id": "run_1", "candidate_id": "c001", "recorded": True,
             }})
-            result = proxy.dispatch({"tool": "search_list_iterations", "args": {
+            result = proxy.dispatch({"tool": "goal_plus_search_list_iterations", "args": {
                 "agent_session_id": "agent_1",
             }})
         self.assertEqual(result, {"ok": True, "result": [
@@ -271,7 +336,7 @@ try {
             "experiments.benchmark_compare.pi_worker_launcher._run_host_tool",
             return_value=[entry],
         ):
-            result = proxy.dispatch({"tool": "search_get_global_evidence", "args": {
+            result = proxy.dispatch({"tool": "goal_plus_search_get_global_evidence", "args": {
                 "agent_session_id": "agent_1",
             }})
         self.assertTrue(result["ok"])
@@ -735,29 +800,29 @@ def test_host_tool_proxy_enforces_worker_identity(
 
     response = proxy.dispatch(
         {
-            "tool": "search_get_agent_context",
+            "tool": "goal_plus_search_get_agent_context",
             "args": {"agent_session_id": "agent_1"},
         }
     )
     assert response == {"ok": True, "result": context_response}
-    assert calls[0][1] == "search_get_agent_context"
+    assert calls[0][1] == "goal_plus_search_get_agent_context"
 
     with pytest.raises(PermissionError, match="bound agent_session_id"):
         proxy.dispatch(
             {
-                "tool": "search_get_global_evidence",
+                "tool": "goal_plus_search_get_global_evidence",
                 "args": {"agent_session_id": "agent_other"},
             }
         )
     with pytest.raises(PermissionError, match="accepts only the bound agent_session_id"):
         proxy.dispatch(
             {
-                "tool": "search_list_iterations",
+                "tool": "goal_plus_search_list_iterations",
                 "args": {"agent_session_id": "agent_1", "candidate_id": "c002"},
             }
         )
     with pytest.raises(PermissionError, match="does not allow"):
-        proxy.dispatch({"tool": "search_select", "args": {"run_id": "run_1"}})
+        proxy.dispatch({"tool": "goal_plus_search_select", "args": {"run_id": "run_1"}})
 
 
 def test_blind_tool_proxy_exposes_only_frozen_context_and_receipt_contracts(
@@ -771,7 +836,7 @@ def test_blind_tool_proxy_exposes_only_frozen_context_and_receipt_contracts(
         evaluation_mode="blind",
     )
     context_request = {
-        "tool": "search_get_agent_context",
+        "tool": "goal_plus_search_get_agent_context",
         "args": {"agent_session_id": "agent_1"},
     }
     context_result = {
@@ -892,7 +957,7 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
         evaluation_mode="blind",
     )
     verifier_request = {
-        "tool": "search_run_verifier",
+        "tool": "goal_plus_search_run_verifier",
         "args": {
             "run_id": "run_1",
             "candidate_id": "c001",
@@ -985,7 +1050,7 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
     assert "private-verifier-exception" not in json.dumps(verifier_error)
 
     iteration_request = {
-        "tool": "search_list_iterations",
+        "tool": "goal_plus_search_list_iterations",
         "args": {
             "agent_session_id": "agent_1",
         },
@@ -1060,7 +1125,7 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
     assert legacy_iteration_marker not in json.dumps(legacy_iterations)
 
     wrong_session_request = {
-        "tool": "search_list_iterations",
+        "tool": "goal_plus_search_list_iterations",
         "args": {
             "agent_session_id": "agent_other",
         },
@@ -1069,7 +1134,7 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
         proxy.dispatch(wrong_session_request)
 
     evidence_request = {
-        "tool": "search_get_global_evidence",
+        "tool": "goal_plus_search_get_global_evidence",
         "args": {"agent_session_id": "agent_1"},
     }
     called = False
@@ -1090,7 +1155,7 @@ def test_blind_tool_proxy_reduces_verifier_and_iteration_results_to_receipts(
     monkeypatch.setattr("experiments.benchmark_compare.pi_worker_launcher._run_host_tool", must_not_call)
     blocked = proxy.dispatch(
         {
-            "tool": "search_get_evidence_detail",
+            "tool": "goal_plus_search_get_evidence_detail",
             "args": {
                 "agent_session_id": "agent_1",
                 "candidate_id": "c001",
@@ -1137,7 +1202,7 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
     (pi_home / "models-store.json").write_text("{}\n", encoding="utf-8")
 
     def fake_call(_root: Path, tool: str, args: dict[str, Any], _environment: dict[str, str]) -> dict[str, Any]:
-        assert tool == "search_get_agent_context"
+        assert tool == "goal_plus_search_get_agent_context"
         assert args == {"agent_session_id": "agent_1"}
         return {
             "agent_session_id": "agent_1",
@@ -1194,7 +1259,7 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             "allowed = subprocess.run([",
             " 'goal-plus-pi-tool', '--root', '.gp', '--args-json',",
             " json.dumps({'agent_session_id': 'agent_1'}),",
-            " 'search_get_agent_context'",
+            " 'goal_plus_search_get_agent_context'",
             "], capture_output=True, text=True)",
             "assert allowed.returncode == 0, allowed.stderr",
             "assert json.loads(allowed.stdout)['candidate_id'] == 'c001'",
@@ -1202,7 +1267,7 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             "installed = subprocess.run([receipt['python'], '-I', '-m', 'goal_plus.installation',",
             " '--expected-build', receipt['build'], '--module', 'goal_plus.pi_tool',",
             " '--root', '.gp', '--args-json', json.dumps({'agent_session_id': 'agent_1'}),",
-            " 'search_get_agent_context'], capture_output=True, text=True)",
+            " 'goal_plus_search_get_agent_context'], capture_output=True, text=True)",
             "assert installed.returncode == 0, installed.stderr",
             "assert json.loads(installed.stdout)['candidate_id'] == 'c001'",
             "generation = pathlib.Path(os.environ['GOAL_PLUS_ROOT']) / 'runs/run_1/candidates/c001/candidate.json'",
@@ -1215,7 +1280,7 @@ def test_bubblewrap_hides_runtime_and_ground_truth_but_keeps_host_tools(
             "  pass",
             "denied = subprocess.run([",
             " 'goal-plus-pi-tool', '--root', '.gp', '--args-json',",
-            " json.dumps({'run_id': 'run_1'}), 'search_select'",
+            " json.dumps({'run_id': 'run_1'}), 'goal_plus_search_select'",
             "], capture_output=True, text=True)",
             "assert denied.returncode != 0",
         )

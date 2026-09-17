@@ -58,7 +58,7 @@ runtime. An external Goal Plus checkout can be selected with
 `BENCH_GOAL_PLUS_SOURCE_DIR` and `BENCH_GOAL_PLUS_EXPECTED_REF`; setup validates
 its clean revision and prepare records that identity for execution checks.
 Each Pi cell receives a private writable socket directory under `.tmp/`.
-Isolated candidates use `search_run_verifier` to execute public tests in the
+Isolated candidates use `goal_plus_search_run_verifier` to execute public tests in the
 host grading environment; `python3 evaluate.py` is the Main/Plain entrypoint.
 
 The initial integration remains `partial` until a real Linux+bwrap campaign is

@@ -129,7 +129,7 @@ def _task_text(metadata: dict[str, Any]) -> str:
         f"{metadata['prompt']}\n\n"
         "# Verification\n\n"
         "Main and Plain agents run `python3 evaluate.py` for public tests. "
-        "Isolated Goal Plus candidates call `search_run_verifier` for those tests; "
+        "Isolated Goal Plus candidates call `goal_plus_search_run_verifier` for those tests; "
         "the test runtime is available through that host tool. The controller runs hidden "
         "tests exactly once after selection. Do not inspect parent directories or "
         "benchmark metadata. Leave the complete solution under `submission/`.\n"
@@ -184,7 +184,7 @@ def materialize_workspace(source_root: Path, workspace: Path) -> dict[str, Any]:
         "# aibench task rules\n\n"
         "- Edit only files below `submission/`.\n"
         "- Main and Plain agents use `python3 evaluate.py` for public feedback; "
-        "isolated Goal Plus candidates use `search_run_verifier`.\n"
+        "isolated Goal Plus candidates use `goal_plus_search_run_verifier`.\n"
         "- Do not inspect parent directories, benchmark cases, or hidden tests.\n",
         encoding="utf-8",
     )
