@@ -74,7 +74,10 @@ class CurrentGoalPlusContractTest(unittest.TestCase):
                         "name": name,
                         "inputSchema": {"type": "object"},
                         "icons": None,
-                        "outputSchema": None,
+                        "outputSchema": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        },
                     }
                     for name in (
                         "goal_plus_search_get_agent_context",
@@ -137,7 +140,10 @@ class CurrentGoalPlusContractTest(unittest.TestCase):
                             },
                         },
                         "icons": None,
-                        "outputSchema": None,
+                        "outputSchema": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        },
                         "annotations": None,
                         "execution": None,
                     }, {

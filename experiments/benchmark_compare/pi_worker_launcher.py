@@ -1077,8 +1077,13 @@ class WorkerToolProxy:
                     continue
                 if not isinstance(item.get("inputSchema"), dict):
                     raise ValueError("worker MCP tool requires an inputSchema object")
+                # The worker bridge returns JSON as text, without structuredContent.
                 tools.append(
-                    {key: value for key, value in item.items() if value is not None}
+                    {
+                        key: value
+                        for key, value in item.items()
+                        if value is not None and key != "outputSchema"
+                    }
                 )
             return {"ok": True, "result": {"tools": tools}}
         if "native_session_id" in request and request["native_session_id"] != self.context.agent_session_id:
