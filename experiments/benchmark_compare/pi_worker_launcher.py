@@ -50,6 +50,7 @@ _RESERVED_ENV_NAMES = {
 _WORKER_TOOLS = {
     "goal_plus_search_get_agent_context",
     "goal_plus_search_get_global_evidence",
+    "goal_plus_search_reference_open",
     "goal_plus_search_stage_shared_tool",
     "goal_plus_search_copy_shared_tool",
     "goal_plus_search_get_evidence_detail",
