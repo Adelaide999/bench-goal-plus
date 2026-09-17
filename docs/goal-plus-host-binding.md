@@ -21,6 +21,16 @@ come from the generated immutable release and use its isolated launcher.
 Pi loads the installer-registered package for both start and resume.
 Common/OpenEvolve keep their registration, immutable release and runtime receipt
 inside the individual run directory; they do not replace the user's installation.
+Before invoking the installer, bench verifies a local uv-managed Python 3.12 with
+downloads disabled. It checks the existing bootstrap directory, the controller's
+managed Python store, then uv's default store. A new run's `bootstrap/python`
+links to that verified store, so the installer's run-local path reuses the
+interpreter without copying a virtualenv or downloading Python again. The chosen
+store and interpreter are recorded in `goal-plus-bootstrap-python.json`.
+If no managed Python 3.12 is available, preparation fails immediately with a setup
+instruction. Existing unusable bootstrap directories are preserved, not replaced.
+Goal Plus releases, dependency virtualenvs, and host registrations remain run-local;
+their package installation may still need network access.
 Host retry admission executes the virtualenv Python path from the installation
 receipt directly. It must not use a relocated Python symlink, which can lose
 the virtualenv's package search path. The task's default Python is preserved.

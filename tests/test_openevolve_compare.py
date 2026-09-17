@@ -226,7 +226,7 @@ class OpenEvolveComparisonTest(unittest.TestCase):
             package = temp / "release/package"
             package.mkdir()
             receipt = {"python": str(python), "package": str(package), "build": "test"}
-            with mock.patch.object(installation.subprocess, "run", return_value=mock.Mock(
+            with mock.patch.object(installation, "prepare_bootstrap_python"), mock.patch.object(installation.subprocess, "run", return_value=mock.Mock(
                 stdout=json.dumps(receipt),
             )) as run:
                 installation.install_goal_plus(Path("/source"), workspace, "codex")
@@ -279,6 +279,8 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertNotIn(" -- ", prompt.splitlines()[0])
         self.assertNotIn("`budget.max_parallel=2`", prompt)
         self.assertIn('strategy.orchestration_mode="parallel_loops"', prompt)
+        self.assertIn('strategy.selection.ranking_keys=["hard_score"]', prompt)
+        self.assertIn("Do not use `metric_name` as a ranking key", prompt)
         self.assertNotIn("budget.max_candidates", prompt)
         self.assertIn("240 seconds", prompt)
         self.assertIn("not hard-capped", prompt)
@@ -377,6 +379,42 @@ class OpenEvolveComparisonTest(unittest.TestCase):
         self.assertNotIn("controller-prepared", prompt)
         self.assertNotIn("goal_plus_upsert_work_items", prompt)
         self.assertNotIn("search_routed", prompt)
+
+    def test_adapter_public_checker_in_plain_and_goal_prompts(self) -> None:
+        from adapters.zsoft_l1.adapter import PUBLIC_FEEDBACK_COMMAND
+
+        task = "# Objective\nImprove the PoC."
+        plain = experiment.render_plain_prompt(
+            task, 300, 60, public_feedback_command=PUBLIC_FEEDBACK_COMMAND
+        )
+        goal = experiment.render_goal(
+            task_text=task,
+            artifact_name="poc",
+            metric_name="success",
+            metric_direction="maximize",
+            wall_seconds=300,
+            closeout_seconds=60,
+            concurrency=2,
+            agent_harness="pi",
+            worker_model="provider/model",
+            public_feedback_command=PUBLIC_FEEDBACK_COMMAND,
+        )
+        for prompt in (plain, goal):
+            self.assertIn("Use only `python3 public_check.py`", prompt)
+            self.assertNotIn("python3 evaluate.py", prompt)
+            self.assertIn("Search only inside the task workspace", prompt)
+        self.assertIn(plain.rstrip(), goal)
+        self.assertIn(
+            "Use only `python3 evaluate.py`",
+            experiment.render_plain_prompt(task, 300, 60),
+        )
+        blind = experiment.render_plain_prompt(
+            task, 300, 60,
+            controller_only_official_evaluation=True,
+            public_feedback_command="python3 evaluate.py",
+        )
+        self.assertIn("Use only `python3 public_check.py`", blind)
+        self.assertIn("no behavioral quality signal", blind)
 
     def test_codex_event_parser_records_actual_worker_launches(self) -> None:
         events = [

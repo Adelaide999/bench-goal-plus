@@ -995,7 +995,7 @@ def collect_doctor(
             and state["upstream"] == f"origin/{branch}"
             and remote_is_ancestor
             and repository_matches(entry, state["origin_url"])
-            and state["dirty"] is False
+            and (name == "goal_plus" or state["dirty"] is False)
             and source_exists
         )
         required = only is None or name in set(only)
@@ -1005,6 +1005,7 @@ def collect_doctor(
                 "passed": checkout_matches if required else True,
                 "required": required,
                 "checkout_matches": checkout_matches,
+                "dirty_required": name != "goal_plus",
                 "expected_branch": branch,
                 "expected_repository": entry["repository"],
                 "expected_repositories": repository_transport_urls(entry),

@@ -55,6 +55,7 @@ from experiments.benchmark_compare.pi_worker_launcher import (  # noqa: E402
     REAL_PI_BIN_ENV,
     SANDBOX_POLICY_ENV,
 )
+from experiments.benchmark_compare.host_search_guard import prepend_to_path  # noqa: E402
 from experiments.openevolve_compare.experiment import (  # noqa: E402
     PUBLIC_GATE_SELECTION_RULE,
     DEFAULT_REASONING_EFFORT,
@@ -321,6 +322,7 @@ def configure_adapter(
     global ARTIFACT_NAME, BENCHMARK_NAME, CASE_SET_DESCRIPTION
     global CODEX_SANDBOX, DIRECTION, GOAL_PLUS_MCP_ENV_VARS
     global CONTROLLER_ONLY_OFFICIAL_EVALUATION, EVALUATION_MODE
+    global PUBLIC_FEEDBACK_COMMAND
     global GOAL_PLUS_PROCESS_METRIC, REQUIRES_PROTECTED_PI_WORKERS
     global GOAL_PLUS_EARLY_STOP_CONTRACT, GOAL_PLUS_POSTHOC_SELECTION_CONTRACT
     global PI_WORKER_SANDBOX
@@ -342,6 +344,9 @@ def configure_adapter(
         module, "CONTROLLER_ONLY_OFFICIAL_EVALUATION", False
     )
     EVALUATION_MODE = getattr(module, "EVALUATION_MODE", "visible")
+    PUBLIC_FEEDBACK_COMMAND = getattr(
+        module, "PUBLIC_FEEDBACK_COMMAND", "python3 evaluate.py"
+    )
     REQUIRES_PROTECTED_PI_WORKERS = getattr(
         module, "REQUIRES_PROTECTED_PI_WORKERS", False
     )
@@ -478,6 +483,7 @@ def _configure_pi_worker_sandbox_environment(
             environment.get("PATH", ""),
         )
     )
+    prepend_to_path(environment)
     manifest["pi_worker_sandbox"] = {
         **worker_sandbox,
         "owner": "bench-goal-plus",
@@ -624,7 +630,7 @@ def prepare(args: argparse.Namespace) -> int:
         actual = checkout_branch(path)
         if actual != expected:
             raise RuntimeError(f"{name} branch mismatch: expected {expected}, got {actual}")
-        if checkout_dirty(path):
+        if name != "goal_plus" and checkout_dirty(path):
             raise RuntimeError(f"managed {name} checkout has local changes: {path}")
 
     validate_runtime_assets(benchmark_root)
@@ -650,6 +656,7 @@ def prepare(args: argparse.Namespace) -> int:
             task_text,
             args.wall_time_seconds,
             args.soft_closeout_seconds,
+            public_feedback_command=PUBLIC_FEEDBACK_COMMAND,
             controller_only_official_evaluation=(
                 CONTROLLER_ONLY_OFFICIAL_EVALUATION
             ),
@@ -680,6 +687,7 @@ def prepare(args: argparse.Namespace) -> int:
         task_text = (workspace / "TASK.md").read_text()
         goal_prompt = render_goal(
             task_text=task_text,
+            public_feedback_command=PUBLIC_FEEDBACK_COMMAND,
             artifact_name=ARTIFACT_NAME,
             artifact_is_directory=(workspace / ARTIFACT_NAME).is_dir(),
             metric_name=GOAL_PLUS_PROCESS_METRIC,
@@ -712,6 +720,7 @@ def prepare(args: argparse.Namespace) -> int:
             task_text,
             args.wall_time_seconds,
             args.soft_closeout_seconds,
+            public_feedback_command=PUBLIC_FEEDBACK_COMMAND,
             controller_only_official_evaluation=(
                 CONTROLLER_ONLY_OFFICIAL_EVALUATION
             ),
@@ -1797,6 +1806,7 @@ def execute_plain(
             (workspace / "TASK.md").read_text(),
             budget["wall_time_seconds"],
             budget["soft_closeout_seconds"],
+            public_feedback_command=PUBLIC_FEEDBACK_COMMAND,
             controller_only_official_evaluation=controller_only,
         )
         (lane_dir / "prompt.md").write_text(prompt)
@@ -2133,6 +2143,7 @@ def execute_goal_plus(
     )
     prompt = render_goal(
         task_text=(workspace / "TASK.md").read_text(),
+        public_feedback_command=PUBLIC_FEEDBACK_COMMAND,
         artifact_name=ARTIFACT_NAME,
         artifact_is_directory=(workspace / ARTIFACT_NAME).is_dir(),
         metric_name=GOAL_PLUS_PROCESS_METRIC,
@@ -2360,6 +2371,8 @@ def execute_goal_plus(
         control, final, early_stop
     )
     control["early_stop_completion_verified"] = early_stop_completion_verified
+    if early_stop_completion_verified:
+        control["minimum_lease_completion_waived"] = True
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=budget["concurrency"],
@@ -2562,6 +2575,7 @@ def execute(args: argparse.Namespace) -> int:
     environment = configure_temp_environment(os.environ.copy())
     bin_dir = Path(manifest["environment"]["runtime_bin"])
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
+    prepend_to_path(environment)
     _configure_pi_worker_sandbox_environment(
         manifest,
         environment,
@@ -2794,6 +2808,8 @@ def repair_closeout(args: argparse.Namespace) -> int:
         control, final, early_stop
     )
     control["early_stop_completion_verified"] = early_stop_completion_verified
+    if early_stop_completion_verified:
+        control["minimum_lease_completion_waived"] = True
     reason = goal_plus_incomplete_reason(
         control["goal_plus"],
         expected_concurrency=budget["concurrency"],

@@ -52,6 +52,13 @@ or public bundles fail closed before worker startup.
 The proxy follows the current Goal Plus session contract: worker calls run with
 the bound `GOAL_PLUS_AGENT_SESSION_ID`, iteration listing accepts that session ID
 alone, and candidate workspace identity is read from `candidate_task.workspace`.
+Its MCP allowlist uses the public `goal_plus_search_*` tool names. Optional null
+fields in Python's tool manifest are omitted before forwarding to the JavaScript
+MCP client; nested JSON Schema values are preserved. Both requirements are needed
+for the installed Pi worker extension to load. Startup regression coverage lives
+in `tests/test_pi_worker_mcp_contract.py`; set `BENCH_TEST_GOAL_PLUS_PACKAGE` to an
+existing installed package to exercise real Pi/Bubblewrap startup without a model
+request. The pure contract tests run without pytest or an installed package.
 Artifact handles and settlement metadata from the current context, verifier,
 iteration, and Global Evidence schemas are accepted but removed from blind
 worker responses. Unknown response fields still fail closed. Detect posthoc
@@ -104,6 +111,12 @@ The representative task is `sample-asan-crash`. Preparation exports the public
 task bundle and a single `poc` artifact. The benchmark-owned Docker differential
 judge evaluates the same submission against vulnerable and fixed builds. The
 native metric is binary `success`; it is not averaged with Detect F1.
+The L1 adapter declares `PUBLIC_FEEDBACK_COMMAND = "python3 public_check.py"`.
+Both prepared and execution-time Plain/Goal Plus prompts use that entrypoint for
+format diagnostics; the shared runner defaults to `python3 evaluate.py` for
+other visible-feedback adapters. Official L1 scores still come from the process
+verifier. Diagnostic commands are instructed to stay within the task workspace
+and use at most 30 seconds; this is prompt guidance, not an enforced process limit.
 L1 has the same host-filesystem risk as Detect: each upstream task directory
 contains private reference PoCs, negative PoCs, judge code, and fix patches.
 Goal Plus Pi therefore uses the same Bubblewrap boundary for L1, exposing only
