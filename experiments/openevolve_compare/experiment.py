@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -38,7 +39,10 @@ from bench_goal_plus.goal_plus_command import (  # noqa: E402
     render_goal_plus_command,
 )
 from bench_goal_plus.goal_plus_evidence import (  # noqa: E402
-    frozen_agent_harness, session_agent_harness, session_worker_intervals,
+    frozen_agent_harness,
+    overlapping_bound_candidates,
+    session_agent_harness,
+    session_worker_intervals,
     summarize_worker_concurrency,
 )
 from bench_goal_plus.goal_plus_installation import (  # noqa: E402
@@ -51,6 +55,7 @@ from bench_goal_plus.upstreams import (  # noqa: E402
     upstream_source_path,
 )
 from bench_runtime_paths import configure_temp_environment  # noqa: E402
+from experiments.benchmark_compare.host_search_guard import prepend_to_path  # noqa: E402
 from adapters.openevolve_examples.adapter import (  # noqa: E402
     describe_task,
     evaluate_workspace,
@@ -195,6 +200,7 @@ def render_common_task_prompt(
     task_text: str,
     wall_seconds: int,
     closeout_seconds: int,
+    public_feedback_command: str = "python3 evaluate.py",
 ) -> str:
     exploration_seconds = max(1, wall_seconds - closeout_seconds)
     return (
@@ -204,8 +210,12 @@ def render_common_task_prompt(
         f"- Use about {exploration_seconds} seconds for exploration and reserve "
         f"{closeout_seconds} seconds to make the best evaluator-verified artifact ready for "
         "final evaluation.\n"
-        "- Use only `python3 evaluate.py` for public task feedback. Do not modify the evaluator "
+        f"- Use only `{public_feedback_command}` for public task feedback. Do not modify the evaluator "
         "or any controller-owned verifier.\n"
+        "- Limit diagnostic commands to 30 seconds or the remaining exploration budget, "
+        "whichever is shorter. Search only inside the task workspace; never search the "
+        "entire host filesystem. If the documented checker is missing, report the missing "
+        "entrypoint instead of searching outside the workspace.\n"
         "- Public evaluator calls are not hard-capped. The experiment records actual calls, "
         "tokens, cost coverage, and wall time after the run.\n"
         "- The wall-clock value is the total budget, not a success criterion. Stop when the "
@@ -260,6 +270,7 @@ def render_goal(
     evaluation_mode: str | None = None,
     early_stop_contract: dict[str, Any] | None = None,
     outer_deadline_at: str | None = None,
+    public_feedback_command: str = "python3 evaluate.py",
 ) -> str:
     """Add the host-native Goal Plus entrypoint and config to the common prompt."""
     if evaluation_mode is None:
@@ -357,7 +368,9 @@ def render_goal(
             task_text, wall_seconds, closeout_seconds
         )
         if evaluation_mode == "blind"
-        else render_common_task_prompt(task_text, wall_seconds, closeout_seconds)
+        else render_common_task_prompt(
+            task_text, wall_seconds, closeout_seconds, public_feedback_command
+        )
     )
     edit_surface_limit = (
         "omit `max_file_changes` because this artifact is a directory and multiple "
@@ -395,7 +408,7 @@ def render_goal(
             "Plus receives only the public verifier and its safe shared Evidence.\n\n"
             "- Honor every leading typed command field in the SearchSpec.\n"
             "- Set `strategy.inner_agent=\"autoresearch\"`.\n"
-            + '- Set `strategy.orchestration_mode="parallel_loops"`; use hard-score selection.\n'
+            + '- Set `strategy.orchestration_mode="parallel_loops"`; set `strategy.selection.ranking_keys=["hard_score"]` and `ranking_tolerance=[0.0]`. Do not use `metric_name` as a ranking key.\n'
             + "- Use the Goal's linked Search lifecycle for this optimization.\n"
             + "- Set `strategy.config.global_evidence_mode=\"manual\"` so every worker can "
             "read settled public-verifier Evidence from the other candidates as reference.\n"
@@ -458,7 +471,7 @@ def render_goal(
         "workspaces, selection, promotion, and final reporting.\n\n"
         "- Honor every leading typed command field in the SearchSpec.\n"
         "- Set `strategy.inner_agent=\"autoresearch\"`.\n"
-        + '- Set `strategy.orchestration_mode="parallel_loops"`; use hard-score selection.\n'
+        + '- Set `strategy.orchestration_mode="parallel_loops"`; set `strategy.selection.ranking_keys=["hard_score"]` and `ranking_tolerance=[0.0]`. Do not use `metric_name` as a ranking key.\n'
         + "- Use the Goal's linked Search lifecycle for this optimization.\n"
         + (
             "- Set top-level `shared_dir.enabled=true`.\n"
@@ -509,12 +522,15 @@ def render_plain_prompt(
     wall_seconds: int,
     closeout_seconds: int,
     controller_only_official_evaluation: bool = False,
+    public_feedback_command: str = "python3 evaluate.py",
 ) -> str:
     if controller_only_official_evaluation:
         return render_controller_only_task_prompt(
             task_text, wall_seconds, closeout_seconds
         )
-    return render_common_task_prompt(task_text, wall_seconds, closeout_seconds)
+    return render_common_task_prompt(
+        task_text, wall_seconds, closeout_seconds, public_feedback_command
+    )
 
 
 def codex_provider_args(api_base: str) -> list[str]:
@@ -741,7 +757,7 @@ def prepare(args: argparse.Namespace) -> int:
             raise RuntimeError(
                 f"{name} branch mismatch: expected {expected_branch}, got {actual_branch}"
             )
-        if checkout_dirty(path):
+        if name != "goal_plus" and checkout_dirty(path):
             raise RuntimeError(f"managed {name} checkout has local changes: {path}")
     python = runtime_python(args.venv.expanduser().absolute())
     if not python.is_file():
@@ -1532,6 +1548,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
             for interval in worker_intervals
             if interval.get("candidate_id") in initial_candidate_ids
         )
+        overlapping_candidates = overlapping_bound_candidates(worker_intervals)
         search_space = collect_search_space_state(run_dir)
         runs.append(
             {
@@ -1561,6 +1578,7 @@ def collect_goal_plus_state(workspace: Path) -> dict[str, Any]:
                 "bound_session_counts_by_candidate": (
                     bound_session_counts_by_candidate
                 ),
+                "overlapping_bound_candidates": overlapping_candidates,
                 "same_agent_continuation_session_count": (
                     same_agent_continuation_session_count
                 ),
@@ -1710,20 +1728,34 @@ def goal_plus_incomplete_reason(
                 run.get("bound_session_counts_by_candidate")
                 or {}
             )
-            duplicate_sessions = {
+            missing_sessions = {
                 candidate_id: count
                 for candidate_id, count in session_counts.items()
-                if count != 1
+                if not isinstance(count, int) or count < 1
             }
             expected_session_candidates = expected_concurrency
-            if (
-                len(session_counts) != expected_session_candidates
-                or duplicate_sessions
-            ):
+            if len(session_counts) != expected_session_candidates or missing_sessions:
                 return (
-                    f"Search run {run.get('run_id')} did not keep exactly one bound session per "
+                    f"Search run {run.get('run_id')} did not keep a bound session for every "
                     f"candidate: {session_counts}"
                 )
+            overlapping_candidates = run.get("overlapping_bound_candidates")
+            if overlapping_candidates:
+                return (
+                    f"Search run {run.get('run_id')} had overlapping bound sessions for "
+                    f"candidates: {overlapping_candidates}"
+                )
+            if overlapping_candidates is None:
+                duplicate_sessions = {
+                    candidate_id: count
+                    for candidate_id, count in session_counts.items()
+                    if count != 1
+                }
+                if duplicate_sessions:
+                    return (
+                        f"Search run {run.get('run_id')} did not keep exactly one bound "
+                        f"session per candidate: {session_counts}"
+                    )
             worker_verified_count = run.get("worker_verified_candidate_count")
             if (
                 not isinstance(worker_verified_count, int)
@@ -1924,6 +1956,53 @@ def _validate_existing_public_gate_selection(
         )
 
 
+def _controller_closeout_allows_goal_status(
+    status: str, *, deterministic_public_gate: bool
+) -> bool:
+    """Blind closeout still owns select/promote after the stop hook forces blocked."""
+    if status in {"active", "complete"}:
+        return True
+    return deterministic_public_gate and status == "blocked"
+
+
+def _controller_closeout_resume_blocked_goal(goal_runtime: Any, goal: Any) -> Any:
+    """Host-resume a stop-hook blocked Goal so controller select/promote is authorized."""
+    session = goal.active_session
+    if session is None:
+        raise RuntimeError(
+            f"Goal {goal.goal_plus_id} is blocked without an attached native session"
+        )
+    from goal_plus.models import GoalPlusHostCommandInvocation
+
+    harness = str(
+        getattr(session, "agent_harness", None) or getattr(session, "host", "pi")
+    )
+    nonce = uuid.uuid4().hex
+    invocation_id = f"resume:controller-closeout:{nonce}"
+    payload: dict[str, Any] = {
+        "transport": (
+            "pi_extension_command" if harness == "pi" else "codex_user_prompt_submit"
+        ),
+        "command": "/goal-plus" if harness == "pi" else "$goal-plus",
+        "action": "resume",
+        "session_id": str(session.session_id),
+        "native_entry_id": f"controller-closeout-{nonce}",
+        "invocation_id": invocation_id,
+        "raw_input_sha256": sha256_text(invocation_id),
+        "invoked_at": utc_now(),
+    }
+    fields = getattr(GoalPlusHostCommandInvocation, "model_fields", {})
+    if "agent_harness" in fields:
+        payload["agent_harness"] = harness
+    else:
+        payload["host"] = harness
+    goal_runtime.control_from_host_command(
+        goal.goal_plus_id,
+        invocation=GoalPlusHostCommandInvocation.model_validate(payload),
+    )
+    return goal_runtime.status(goal.goal_plus_id)
+
+
 def finalize_goal_plus_search(
     workspace: Path,
     deterministic_public_gate: bool = False,
@@ -1949,8 +2028,13 @@ def finalize_goal_plus_search(
         goals_by_run: dict[str, list[str]] = {}
         for goal_path in goal_paths:
             goal = goal_runtime.status(goal_path.parent.name)
-            if goal.status not in {"active", "complete"}:
+            if not _controller_closeout_allows_goal_status(
+                str(goal.status),
+                deterministic_public_gate=deterministic_public_gate,
+            ):
                 raise RuntimeError(f"Goal {goal.goal_plus_id} requires host resume: {goal.status}")
+            if deterministic_public_gate and str(goal.status) == "blocked":
+                goal = _controller_closeout_resume_blocked_goal(goal_runtime, goal)
             if goal.linked_search is not None and goal.linked_search.run_id:
                 goals_by_run.setdefault(goal.linked_search.run_id, []).append(
                     goal.goal_plus_id
@@ -2053,7 +2137,10 @@ def finalize_goal_plus_search(
                     )
                 goal = goal_runtime.status(goal_plus_id)
                 if goal.status != "complete":
-                    if goal.status != "active":
+                    if not _controller_closeout_allows_goal_status(
+                        str(goal.status),
+                        deterministic_public_gate=deterministic_public_gate,
+                    ):
                         raise RuntimeError(f"Goal {goal_plus_id} requires host resume: {goal.status}")
                     goal_runtime.set_status(
                         goal_plus_id,
@@ -2394,6 +2481,7 @@ def execute(args: argparse.Namespace) -> int:
     environment = configure_temp_environment(os.environ.copy())
     bin_dir = runtime_bin(args.venv.expanduser().absolute())
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
+    prepend_to_path(environment)
     if method in {"goal-plus-codex", "goal-plus-pi"}:
         configure_isolated_codex_home(environment, run_dir)
         configure_evidence_annotator_environment(

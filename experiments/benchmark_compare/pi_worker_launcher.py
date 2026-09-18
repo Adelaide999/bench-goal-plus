@@ -1077,7 +1077,9 @@ class WorkerToolProxy:
                     continue
                 if not isinstance(item.get("inputSchema"), dict):
                     raise ValueError("worker MCP tool requires an inputSchema object")
-                # The worker bridge returns JSON as text, without structuredContent.
+                # Python's manifest includes absent optional fields as null; MCP's
+                # JavaScript client requires them to be omitted, not null. The worker
+                # bridge also returns JSON as text, without structuredContent.
                 tools.append(
                     {
                         key: value

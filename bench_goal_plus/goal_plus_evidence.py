@@ -58,6 +58,37 @@ def summarize_worker_concurrency(
     }
 
 
+def overlapping_bound_candidates(
+    intervals: Iterable[Mapping[str, Any]],
+) -> list[str]:
+    """Candidates whose persisted worker intervals overlap in wall time."""
+    events_by_candidate: dict[str, list[tuple[datetime, int]]] = {}
+    for interval in intervals:
+        candidate_id = interval.get("candidate_id")
+        started = _parse_timestamp(interval.get("started_at"))
+        ended = _parse_timestamp(interval.get("ended_at"))
+        if (
+            not isinstance(candidate_id, str)
+            or not candidate_id
+            or started is None
+            or ended is None
+            or ended <= started
+        ):
+            continue
+        events_by_candidate.setdefault(candidate_id, []).extend(
+            ((started, 1), (ended, -1))
+        )
+    overlapping: list[str] = []
+    for candidate_id, events in events_by_candidate.items():
+        live_workers = 0
+        for _, delta in sorted(events, key=lambda event: (event[0], event[1])):
+            live_workers += delta
+            if live_workers > 1:
+                overlapping.append(candidate_id)
+                break
+    return sorted(overlapping)
+
+
 def session_agent_harness(session: Mapping[str, Any]) -> Literal["codex", "pi"] | None:
     handle = session.get("session_handle")
     harness = session.get("agent_harness")
@@ -76,18 +107,13 @@ def session_agent_harness(session: Mapping[str, Any]) -> Literal["codex", "pi"] 
     return harness
 
 
-def session_worker_intervals(session: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Use native invocation receipts; allocation and resource release are not execution."""
-    harness = session_agent_harness(session)
-    if harness is None:
-        return []
-    handle = session["session_handle"]
-    metadata = handle.get("metadata")
-    if not isinstance(metadata, Mapping):
-        return []
-    dispatches = metadata.get("dispatches")
-    if not isinstance(dispatches, list):
-        return []
+def _session_worker_intervals_from_dispatches(
+    session: Mapping[str, Any],
+    *,
+    harness: Literal["codex", "pi"],
+    handle: Mapping[str, Any],
+    dispatches: list[Any],
+) -> list[dict[str, Any]]:
     receipts: dict[str, Mapping[str, Any]] = {}
     for receipt in dispatches:
         if (
@@ -115,6 +141,83 @@ def session_worker_intervals(session: Mapping[str, Any]) -> list[dict[str, Any]]
         }
         for invocation, receipt in receipts.items()
     ]
+
+
+def _session_binding_invocation_id(session: Mapping[str, Any]) -> str | None:
+    run_requests = session.get("run_requests")
+    if isinstance(run_requests, list):
+        for request in run_requests:
+            if (
+                isinstance(request, Mapping)
+                and isinstance(request.get("call_id"), str)
+                and request["call_id"]
+            ):
+                return request["call_id"]
+    agent_session_id = session.get("agent_session_id")
+    if isinstance(agent_session_id, str) and agent_session_id:
+        return agent_session_id
+    return None
+
+
+def _session_worker_intervals_from_binding(
+    session: Mapping[str, Any],
+    *,
+    metadata: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Accept Goal Plus native-rpc sessions that bound workers but omitted dispatches."""
+    candidate_id = session.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id:
+        return []
+    bound_at = metadata.get("bound_at")
+    if not isinstance(bound_at, str) or not bound_at:
+        return []
+    started_at = bound_at
+    ended_at = session.get("updated_at")
+    if not isinstance(ended_at, str) or not ended_at:
+        return []
+    started = _parse_timestamp(started_at)
+    ended = _parse_timestamp(ended_at)
+    if started is None or ended is None:
+        return []
+    if ended <= started:
+        created_at = session.get("created_at")
+        if isinstance(created_at, str) and created_at:
+            started_at = created_at
+            started = _parse_timestamp(started_at)
+        if started is None or ended <= started:
+            return []
+    invocation_id = _session_binding_invocation_id(session)
+    if invocation_id is None:
+        return []
+    return [{
+        "run_id": session.get("run_id"),
+        "candidate_id": candidate_id,
+        "agent_session_id": session.get("agent_session_id"),
+        "execution_generation": session.get("execution_generation", 0),
+        "invocation_id": invocation_id,
+        "started_at": started_at,
+        "ended_at": ended_at,
+    }]
+
+
+def session_worker_intervals(session: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Use native invocation receipts; allocation and resource release are not execution."""
+    harness = session_agent_harness(session)
+    if harness is None:
+        return []
+    handle = session["session_handle"]
+    metadata = handle.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return []
+    dispatches = metadata.get("dispatches")
+    if isinstance(dispatches, list) and dispatches:
+        return _session_worker_intervals_from_dispatches(
+            session,
+            harness=harness,
+            handle=handle,
+            dispatches=dispatches,
+        )
+    return _session_worker_intervals_from_binding(session, metadata=metadata)
 
 
 def frozen_agent_harness(frozen: Mapping[str, Any]) -> Literal["codex", "pi"] | None:

@@ -860,12 +860,9 @@ run_case_attempt() {
         .execution.evaluator_calls.controller_final_claimed == 1 and
         .execution.posthoc_official_selection.official_evaluator_calls ==
             .execution.posthoc_official_selection.unique_artifact_count and
-        (.execution.pi_pool_cleanup | type) == "array" and
-        (.execution.pi_pool_cleanup | length) > 0 and
-        all(.execution.pi_pool_cleanup[];
-            .state == "closed" and
-            .active_count == 0 and
-            .close_timed_out == false) and
+        (.execution.candidate_session_cleanup | type) == "array" and
+        (.execution.candidate_session_cleanup | length) > 0 and
+        all(.execution.candidate_session_cleanup[]; .active_count == 0) and
         (.execution.early_stop_triggered != true) and
         ((.execution.result_incomplete_reason // null) == null) and
         (.execution.goal_plus_controller_closeout.runs | type) == "array" and

@@ -36,6 +36,7 @@ ZSOFT_ROOT = Path(
     os.environ.get("BENCH_GOAL_PLUS_ZSOFT_ROOT", ROOT / "third_party" / "zsoft-bench")
 ).expanduser().resolve()
 BENCHMARK_ROOT = ZSOFT_ROOT / "benchmarks" / "vulnerability" / "zsoft-l1"
+ZSOFT_EVALUATOR_PYTHON = ROOT / ".bench-env" / "venv" / "bin" / "python"
 
 BENCHMARK_NAME = "zsoft-l1"
 TASK_ID = "sample-asan-crash"
@@ -46,6 +47,7 @@ ARTIFACT_NAME = "poc"
 PRIMARY_METRIC = "success"
 GOAL_PLUS_PROCESS_METRIC = PRIMARY_METRIC
 PUBLIC_FORMAT_METRIC = PUBLIC_METRIC
+PUBLIC_FEEDBACK_COMMAND = "python3 public_check.py"
 CONTROLLER_ONLY_OFFICIAL_EVALUATION = False
 EVALUATION_MODE = "visible"
 REQUIRES_PROTECTED_PI_WORKERS = True
@@ -100,8 +102,15 @@ def _run_cli(
     environment["PYTHONPATH"] = (
         source_dir if not existing else source_dir + os.pathsep + existing
     )
+    if not ZSOFT_EVALUATOR_PYTHON.is_file() or not os.access(
+        ZSOFT_EVALUATOR_PYTHON, os.X_OK
+    ):
+        raise AdapterError(
+            "ZSoft evaluator Python is missing or not executable: "
+            f"{ZSOFT_EVALUATOR_PYTHON}"
+        )
     completed = subprocess.run(
-        [sys.executable, "-m", "zsoft_poc", *arguments],
+        [str(ZSOFT_EVALUATOR_PYTHON), "-m", "zsoft_poc", *arguments],
         cwd=str(benchmark_root),
         capture_output=True,
         text=True,
