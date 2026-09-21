@@ -578,6 +578,8 @@ class CandidateJudgeTest(unittest.TestCase):
                         "score": score,
                         "process_passed": True,
                         "git_head": f"{index:040d}",
+                        "settlement_id": f"settlement-{candidate_id}-{index}",
+                        "artifact_hash": f"artifact-{candidate_id}-{index}",
                         "git_artifact_clean": True,
                         "touched_denied_files": False,
                         "changed_outside_allowed": False,

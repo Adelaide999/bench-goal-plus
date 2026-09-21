@@ -188,6 +188,10 @@ def _publicly_compliant_iteration(iteration: Any) -> bool:
         and type(iteration.get("iteration")) is int
         and iteration["iteration"] >= 1
         and isinstance(iteration.get("git_head"), str)
+        and isinstance(iteration.get("settlement_id"), str)
+        and bool(iteration.get("settlement_id"))
+        and isinstance(iteration.get("artifact_hash"), str)
+        and bool(iteration.get("artifact_hash"))
         and artifact_clean is True
         and not iteration.get("touched_denied_files", False)
         and not iteration.get("changed_outside_allowed", False)
