@@ -65,3 +65,34 @@ The initial integration remains `partial` until a real Linux+bwrap campaign is
 archived for each method. For `K>1`, the report exposes selected-result success
 but deliberately leaves pass@K/pass^K unset because unselected trajectories are
 not sent to the hidden grader.
+
+## Optional final candidate judge
+
+Goal Plus can use a controller-only tie-breaker after the hard/process gate:
+
+```bash
+export GOAL_PLUS_JUDGE=off                 # default
+# or: jev / llm-as-a-verifier
+```
+
+The switch is accepted only by `goal-plus-codex` and `goal-plus-pi`; plain
+methods fail before launch when it is enabled.
+
+`jev` uses `OPENROUTER_API_KEY` (optionally `GOAL_PLUS_JEV_ENDPOINT` and
+`GOAL_PLUS_JEV_MODEL`); `GOAL_PLUS_JUDGE_TIMEOUT_SECONDS` bounds the request.
+`llm-as-a-verifier` loads the optional `llm_verifier` package and uses its
+dedicated `GOAL_PLUS_LLM_VERIFIER_*` settings (a dedicated key must be paired
+with `GOAL_PLUS_LLM_VERIFIER_BASE_URL`), or an OpenAI-compatible/native backend
+key already present in the controller. Use a separate judge key when strict
+controller/worker credential separation is required. The
+controller runtime must provide the optional `llm_verifier` package; otherwise
+the enabled run is recorded as incomplete rather than silently falling back.
+The judge runs once on candidates tied for the best hard/process score, records a bounded selection
+receipt, and cannot send feedback to workers or request another search round.
+Native Goal Plus Evidence Annotation is disabled while either judge mode is on;
+the judge is the only optional quality selector in that run.
+`off` performs no network call. Judge-specific credentials are never written to
+the manifest and are removed before worker launch; the Agent's own provider
+credential remains available to that Agent. The receipt's `calls` field counts the
+single controller invocation; the verifier's internal pairwise requests are
+reported separately as `comparisons` when available.

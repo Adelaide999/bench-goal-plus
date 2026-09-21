@@ -514,6 +514,54 @@ class AIBenchCodingContractTest(unittest.TestCase):
             environment[benchmark_compare.REAL_PI_BIN_ENV], "/host/bin/pi"
         )
 
+    def test_candidate_judge_env_is_controller_only_for_goal_plus(self) -> None:
+        profile = self._zai_profile(["goal-plus-codex"])
+        judge_values = {
+            "PATH": "/usr/bin",
+            "ZAI_BASE_URL": "https://agent.example/v1",
+            "ZAI_API_KEY": "agent-key",
+            "GOAL_PLUS_JUDGE": "jev",
+            "OPENROUTER_API_KEY": "judge-key",
+            "GOAL_PLUS_JEV_ENDPOINT": "https://judge.example/decisions",
+            "GOAL_PLUS_JEV_MODEL": "typesafe/jev-1.13",
+            "GOAL_PLUS_JUDGE_TIMEOUT_SECONDS": "15",
+            "GOAL_PLUS_LLM_VERIFIER_MODEL": "judge-model",
+            "GOAL_PLUS_LLM_VERIFIER_API_KEY": "llm-judge-key",
+            "GOAL_PLUS_LLM_VERIFIER_BASE_URL": "https://llm-judge.example/v1",
+            "GOAL_PLUS_LLM_VERIFIER_EVALUATIONS": "2",
+            "GOAL_PLUS_LLM_VERIFIER_PIVOTS": "1",
+            "OPENAI_API_KEY": "openai-judge-key",
+            "OPENAI_BASE_URL": "https://openai-judge.example/v1",
+            "DEEPSEEK_API_KEY": "deepseek-agent-key",
+            "VERTEX_API_KEY": "vertex-agent-key",
+        }
+        with mock.patch.dict(os.environ, judge_values, clear=True):
+            goal_environment = runtime._agent_environment(
+                self.root / "goal-plus", profile, "goal-plus-codex"
+            )
+            plain_environment = runtime._agent_environment(
+                self.root / "plain", profile, "plain-codex"
+            )
+
+        for name, value in judge_values.items():
+            if name in runtime._CANDIDATE_JUDGE_CONTROLLER_ENV:
+                self.assertEqual(goal_environment.get(name), value)
+                self.assertNotIn(name, plain_environment)
+
+        worker_environment = dict(goal_environment)
+        worker_environment.update(
+            {
+                "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL": "old-annotator",
+                "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV": "OPENAI_API_KEY",
+            }
+        )
+        benchmark_compare._hide_candidate_judge_from_workers(worker_environment)
+        for name in runtime._CANDIDATE_JUDGE_CONTROLLER_ENV:
+            self.assertNotIn(name, worker_environment)
+        self.assertNotIn(
+            "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL", worker_environment
+        )
+
     def _metadata(self) -> dict[str, object]:
         return {
             "schema_version": 1,

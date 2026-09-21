@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "jev-three-previous-failures",
+  "benchmark_id": "aibench-coding",
+  "case_set": "_clean2026",
+  "expected_case_set_fingerprint": "9149d02169845dc5",
+  "task_ids": [
+    "rev-863e003d8ddf0a78",
+    "rev-98478339eba2368e",
+    "rev-b8d1d015a9c3a458"
+  ],
+  "validity_policy": "valid-only",
+  "methods": ["goal-plus-pi"],
+  "model": "zai/glm-5.2",
+  "reasoning_effort": "medium",
+  "agent_provider": {
+    "id": "zai",
+    "name": "ZAI Anthropic-compatible coding provider",
+    "auth_mode": "anthropic-compatible",
+    "base_url_env": "ZAI_BASE_URL",
+    "api_key_env": "ZAI_API_KEY",
+    "wire_api": "anthropic-messages"
+  },
+  "goal_plus_search": {
+    "orchestration_mode": "adaptive_search",
+    "verifier": {
+      "scores": ["progress_reward", "allocation_utility"]
+    },
+    "allocation": {
+      "policy": "swe_search_uct/v1"
+    },
+    "max_candidates": 3
+  },
+  "wall_time_seconds": 1800,
+  "concurrency": 3,
+  "cell_concurrency": 3,
+  "soft_closeout_seconds": 120,
+  "hard_kill_grace_seconds": 30,
+  "worker_runtime_seconds": 120,
+  "verifier_timeout_seconds": 120,
+  "seeds": [1]
+}

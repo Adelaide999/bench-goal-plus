@@ -47,6 +47,27 @@ SANDBOX_SOURCE = Path(__file__).resolve().with_name("sandbox.py")
 TERMINAL_CELL_STATES = {"completed", "partial", "failed", "interrupted"}
 _NODE_VERSION = re.compile(r"v?(\d+)(?:\.|$)")
 
+# These values configure the controller-side optional candidate judge.  They
+# are passed to the standalone controller only for Goal Plus cells; the
+# controller removes them before it starts any worker process.
+_CANDIDATE_JUDGE_CONTROLLER_ENV = (
+    "GOAL_PLUS_JUDGE",
+    "OPENROUTER_API_KEY",
+    "GOAL_PLUS_JEV_ENDPOINT",
+    "GOAL_PLUS_JEV_MODEL",
+    "GOAL_PLUS_JUDGE_TIMEOUT_SECONDS",
+    "GOAL_PLUS_LLM_VERIFIER_MODEL",
+    "GOAL_PLUS_LLM_VERIFIER_API_KEY",
+    "GOAL_PLUS_LLM_VERIFIER_BASE_URL",
+    "GOAL_PLUS_LLM_VERIFIER_EVALUATIONS",
+    "GOAL_PLUS_LLM_VERIFIER_PIVOTS",
+    "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "VERTEX_API_KEY",
+)
+
 
 def _capture(command: list[str], *, cwd: Path | None = None) -> tuple[bool, str]:
     try:
@@ -483,6 +504,8 @@ def _agent_environment(
         "no_proxy",
         *provider_env_names,
     }
+    if method in GOAL_PLUS_METHODS:
+        allowed.update(_CANDIDATE_JUDGE_CONTROLLER_ENV)
     environment = {name: os.environ[name] for name in allowed if name in os.environ}
     environment = dict(configure_temp_environment(environment))
     real_codex = shutil.which("codex")
