@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +26,22 @@ sys.path.insert(0, str(ROOT))
 
 from bench_artifacts import read_json as load_json  # noqa: E402
 from bench_artifacts import utc_now, write_json, write_json_atomic  # noqa: E402
+from bench_goal_plus.candidate_judge import (  # noqa: E402
+    ANNOTATOR_DISABLED_ENV,
+    JEV_ENDPOINT,
+    JEV_ENDPOINT_ENV,
+    JEV_MODEL,
+    JEV_MODEL_ENV,
+    JUDGE_ENV,
+    LLM_BASE_URL_ENV,
+    LLM_MODEL_ENV,
+    MODE_JEV,
+    MODE_LLM,
+    MODE_OFF,
+    judge_candidates,
+    normalize_endpoint,
+    normalize_mode,
+)
 from bench_goal_plus.upstreams import (  # noqa: E402
     external_goal_plus_source,
     require_prepared_goal_plus_source,
@@ -108,6 +124,142 @@ GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED_ENV = (
 GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED_ENV = (
     "GOAL_PLUS_SUPPLEMENTAL_EVALUATION_REQUIRED"
 )
+ANNOTATOR_CONFIG_ENV = (
+    "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL",
+    "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT",
+    "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL",
+    "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID",
+    "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME",
+    "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV",
+    "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API",
+)
+
+
+def _candidate_judge_callback(
+    environment: dict[str, str], *, mode_override: str | None = None
+) -> tuple[str, Any | None]:
+    mode = normalize_mode(
+        mode_override
+        if mode_override is not None
+        else environment.get(JUDGE_ENV, os.environ.get(JUDGE_ENV))
+    )
+    if mode == MODE_OFF:
+        return mode, None
+    judge_environment = dict(environment)
+
+    def callback(problem: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+        return judge_candidates(
+            problem, candidates, mode=mode, environment=judge_environment
+        )
+
+    return mode, callback
+
+
+def _hide_candidate_judge_from_workers(
+    environment: dict[str, str], *, preserve: set[str] | None = None
+) -> None:
+    """Keep controller-only judge credentials and switches out of workers."""
+    preserved = preserve or set()
+    for name in (
+        JUDGE_ENV,
+        "OPENROUTER_API_KEY",
+        JEV_ENDPOINT_ENV,
+        JEV_MODEL_ENV,
+        "GOAL_PLUS_JUDGE_TIMEOUT_SECONDS",
+        "GOAL_PLUS_LLM_VERIFIER_MODEL",
+        "GOAL_PLUS_LLM_VERIFIER_API_KEY",
+        "GOAL_PLUS_LLM_VERIFIER_BASE_URL",
+        "GOAL_PLUS_LLM_VERIFIER_EVALUATIONS",
+        "GOAL_PLUS_LLM_VERIFIER_PIVOTS",
+        ANNOTATOR_DISABLED_ENV,
+        "DEEPSEEK_API_KEY",
+        "VERTEX_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        *ANNOTATOR_CONFIG_ENV,
+    ):
+        if name not in preserved:
+            environment.pop(name, None)
+
+
+def _candidate_judge_contract(environment: Mapping[str, str]) -> dict[str, Any]:
+    mode = normalize_mode(environment.get(JUDGE_ENV, os.environ.get(JUDGE_ENV)))
+    if mode == MODE_OFF:
+        endpoint = ""
+        model = ""
+    elif mode == MODE_JEV:
+        endpoint = normalize_endpoint(environment.get(JEV_ENDPOINT_ENV), JEV_ENDPOINT)
+        model = str(environment.get(JEV_MODEL_ENV) or JEV_MODEL).strip() or JEV_MODEL
+    else:
+        dedicated_base = environment.get(LLM_BASE_URL_ENV)
+        if dedicated_base:
+            endpoint = normalize_endpoint(dedicated_base)
+        elif environment.get("OPENAI_API_KEY") and environment.get("OPENAI_BASE_URL"):
+            endpoint = normalize_endpoint(environment.get("OPENAI_BASE_URL"))
+        else:
+            endpoint = ""
+        model = str(environment.get(LLM_MODEL_ENV) or "").strip()
+    return {
+        "mode": mode,
+        "endpoint": endpoint,
+        "model": model,
+        "selection_scope": "hard-best-ties-only",
+        "timing": "after_agent_closeout_before_promotion",
+        "worker_feedback": False,
+        "native_annotation": "disabled" if mode != MODE_OFF else "unchanged",
+    }
+
+
+def _bind_prepared_candidate_judge(
+    prepared: Mapping[str, Any], environment: dict[str, str]
+) -> dict[str, Any]:
+    """Keep the prepared provider identity stable while leaving its key transient."""
+    expected = {
+        "mode": normalize_mode(prepared.get("mode")),
+        "endpoint": str(prepared.get("endpoint") or ""),
+        "model": str(prepared.get("model") or ""),
+    }
+    runtime = _candidate_judge_contract(environment)
+    if any(runtime[key] != expected[key] for key in expected):
+        raise RuntimeError(
+            "candidate judge mode, endpoint, or model differs from the prepared manifest; "
+            "re-run prepare"
+        )
+    environment[JUDGE_ENV] = expected["mode"]
+    if expected["mode"] == MODE_JEV:
+        environment[JEV_ENDPOINT_ENV] = expected["endpoint"]
+        environment[JEV_MODEL_ENV] = expected["model"]
+    elif expected["mode"] == MODE_LLM:
+        if expected["endpoint"]:
+            environment[LLM_BASE_URL_ENV] = expected["endpoint"]
+        if expected["model"]:
+            environment[LLM_MODEL_ENV] = expected["model"]
+    return expected
+
+
+def _candidate_judge_incomplete_reason(closeout: Any, mode: str) -> str | None:
+    if mode == MODE_OFF:
+        return None
+    if not isinstance(closeout, dict) or closeout.get("completed") is not True:
+        return None
+    runs = closeout.get("runs")
+    if not isinstance(runs, list) or not runs:
+        return "enabled candidate judge left no Search-run receipt"
+    for item in runs:
+        receipt = item.get("candidate_judge") if isinstance(item, dict) else None
+        selection = item.get("selection") if isinstance(item, dict) else None
+        if (
+            not isinstance(receipt, dict)
+            or receipt.get("mode") != mode
+            or receipt.get("status") != "selected"
+            or not isinstance(selection, dict)
+            or receipt.get("selected_candidate_id")
+            != selection.get("selected_candidate_id")
+        ):
+            if not isinstance(receipt, dict):
+                return "enabled candidate judge left no selection receipt"
+            return "enabled candidate judge did not produce a trusted selection receipt"
+    return None
 METHODS = (
     "plain-codex",
     "plain-pi",
@@ -556,6 +708,18 @@ def prepare(args: argparse.Namespace) -> int:
         1 <= args.worker_min_runtime_seconds <= args.worker_runtime_seconds
     ):
         raise ValueError("worker minimum runtime must fit inside the worker budget")
+    candidate_judge = _candidate_judge_contract(os.environ)
+    if candidate_judge["mode"] != MODE_OFF and args.method not in {
+        "goal-plus-codex",
+        "goal-plus-pi",
+    }:
+        raise ValueError("candidate judge requires a Goal Plus method")
+    if (
+        candidate_judge["mode"] == MODE_JEV
+        and args.method == "goal-plus-pi"
+        and args.pi_api_key_env == "OPENROUTER_API_KEY"
+    ):
+        raise ValueError("Pi provider key must not reuse the controller-only Jev key")
     environment = load_json(args.environment_manifest)
     upstreams = environment["upstreams"]
     checkout_root = args.checkout_root.expanduser().absolute()
@@ -710,6 +874,7 @@ def prepare(args: argparse.Namespace) -> int:
             ),
             evaluation_mode=EVALUATION_MODE,
             early_stop_contract=GOAL_PLUS_EARLY_STOP_CONTRACT,
+            candidate_judge_mode=candidate_judge["mode"],
         )
         (workspace / "GOAL.md").write_text(goal_prompt)
         workspaces.append(workspace)
@@ -741,7 +906,9 @@ def prepare(args: argparse.Namespace) -> int:
                 max_parallel=args.concurrency,
                 strategy="agent_guided",
                 worker_model=worker_model,
-                annotator_model=worker_model,
+                annotator_model=(
+                    None if candidate_judge["mode"] != MODE_OFF else worker_model
+                ),
                 workspace_provider="git_worktree",
                 promotion_mode=(
                     "artifact_only"
@@ -759,6 +926,7 @@ def prepare(args: argparse.Namespace) -> int:
             ),
             "early_stop": GOAL_PLUS_EARLY_STOP_CONTRACT,
             "posthoc_selection": GOAL_PLUS_POSTHOC_SELECTION_CONTRACT,
+            "candidate_judge": candidate_judge,
             "artifact_name": ARTIFACT_NAME,
             "artifact_is_directory": (workspace / ARTIFACT_NAME).is_dir(),
             "shared_dir_enabled": getattr(args, "shared_dir", False),
@@ -857,6 +1025,7 @@ def prepare(args: argparse.Namespace) -> int:
             else None
         ),
         "reasoning_effort": args.reasoning_effort,
+        "candidate_judge": candidate_judge,
         "seed": args.seed,
         "budget": {
             "wall_time_seconds": args.wall_time_seconds,
@@ -1973,7 +2142,10 @@ def execute_plain(
 
 
 def _controller_only_closeout_incomplete_reason(
-    closeout: Any, *, deterministic_public_gate: bool = True
+    closeout: Any,
+    *,
+    deterministic_public_gate: bool = True,
+    candidate_judge_mode: str = MODE_OFF,
 ) -> str | None:
     if not isinstance(closeout, dict) or closeout.get("completed") is not True:
         error = closeout.get("error") if isinstance(closeout, dict) else None
@@ -1990,11 +2162,17 @@ def _controller_only_closeout_incomplete_reason(
         selection = item.get("selection")
         promotion = item.get("promotion")
         goal_statuses = item.get("goal_statuses")
+        expected_selection_rule = PUBLIC_GATE_SELECTION_RULE
+        if candidate_judge_mode != MODE_OFF:
+            expected_selection_rule += f"+{candidate_judge_mode}"
         if (
             not isinstance(selection, dict)
             or not isinstance(selection.get("selected_candidate_id"), str)
             or not selection["selected_candidate_id"]
-            or (deterministic_public_gate and selection.get("selection_rule") != PUBLIC_GATE_SELECTION_RULE)
+            or (
+                deterministic_public_gate
+                and selection.get("selection_rule") != expected_selection_rule
+            )
         ):
             return (
                 "controller-only Goal Plus closeout lacks deterministic selection evidence"
@@ -2077,6 +2255,34 @@ def execute_goal_plus(
             "prepared Goal Plus config does not match the task posthoc-selection contract"
         )
     is_pi = manifest.get("method", "goal-plus-codex") == "goal-plus-pi"
+    prepared_judge = manifest.get("candidate_judge") or {"mode": MODE_OFF}
+    judge_mode = _bind_prepared_candidate_judge(prepared_judge, environment)["mode"]
+    if judge_mode == MODE_JEV and is_pi:
+        agent_key_env = pi_provider_config(args)[2]
+        if agent_key_env == "OPENROUTER_API_KEY":
+            raise RuntimeError(
+                "Pi provider key must not reuse the controller-only Jev key"
+            )
+    judge_mode, judge_callback = _candidate_judge_callback(
+        environment, mode_override=judge_mode
+    )
+    if judge_mode != MODE_OFF:
+        preserve = {pi_provider_config(args)[2]} if is_pi else {"OPENAI_API_KEY"}
+        _hide_candidate_judge_from_workers(environment, preserve=preserve)
+        environment[ANNOTATOR_DISABLED_ENV] = "1"
+    else:
+        # A stale judge switch must never leak into an off-mode worker, while the
+        # native annotator configuration remains untouched.
+        _hide_candidate_judge_from_workers(
+            environment, preserve={
+                "OPENAI_API_KEY",
+                "OPENAI_BASE_URL",
+                "DEEPSEEK_API_KEY",
+                "VERTEX_API_KEY",
+                ANNOTATOR_DISABLED_ENV,
+                *ANNOTATOR_CONFIG_ENV,
+            }
+        )
     if is_pi and controller_only and EVALUATION_MODE == "blind":
         environment[CONTROLLER_ONLY_CLOSEOUT_ENV] = "1"
     else:
@@ -2131,16 +2337,17 @@ def execute_goal_plus(
         run_dir / "controller-runtime/goal-plus"
     )
     configure_isolated_codex_home(environment, run_dir)
-    configure_evidence_annotator_environment(
-        environment,
-        model=(
-            f"{pi_provider_id}/{args.model}" if is_pi else args.model
-        ),
-        reasoning_effort=manifest.get(
-            "reasoning_effort", DEFAULT_REASONING_EFFORT
-        ),
-        api_base=None if is_pi else args.api_base,
-    )
+    if judge_mode == MODE_OFF:
+        configure_evidence_annotator_environment(
+            environment,
+            model=(
+                f"{pi_provider_id}/{args.model}" if is_pi else args.model
+            ),
+            reasoning_effort=manifest.get(
+                "reasoning_effort", DEFAULT_REASONING_EFFORT
+            ),
+            api_base=None if is_pi else args.api_base,
+        )
     prompt = render_goal(
         task_text=(workspace / "TASK.md").read_text(),
         public_feedback_command=PUBLIC_FEEDBACK_COMMAND,
@@ -2169,6 +2376,7 @@ def execute_goal_plus(
         evaluation_mode=EVALUATION_MODE,
         early_stop_contract=early_stop,
         outer_deadline_at=deadline.isoformat(),
+        candidate_judge_mode=judge_mode,
     )
     (run_dir / "prompt.md").write_text(prompt)
     reasoning_effort = manifest.get("reasoning_effort", DEFAULT_REASONING_EFFORT)
@@ -2250,6 +2458,11 @@ def execute_goal_plus(
     control["candidate_session_cleanup"] = close_candidate_sessions(
         workspace, budget["hard_kill_grace_seconds"]
     )
+    control["candidate_judge_config"] = {
+        "mode": judge_mode,
+        "selection_scope": "hard-best-ties-only",
+        "timing": "after_agent_closeout_before_promotion",
+    }
     try:
         with controller_subprocess_environment(
             runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
@@ -2261,6 +2474,8 @@ def execute_goal_plus(
                 verify_unsettled_candidates=not control.get(
                     "early_stop_triggered", False
                 ),
+                candidate_judge=judge_callback,
+                candidate_judge_mode=judge_mode,
             )
     except Exception as exc:
         closeout = {
@@ -2269,9 +2484,12 @@ def execute_goal_plus(
             "error": f"{type(exc).__name__}: {exc}",
         }
     control["goal_plus_controller_closeout"] = closeout
+    judge_reason = _candidate_judge_incomplete_reason(closeout, judge_mode)
     closeout_reason = (
         _controller_only_closeout_incomplete_reason(
-            closeout, deterministic_public_gate=EVALUATION_MODE == "blind"
+            closeout,
+            deterministic_public_gate=EVALUATION_MODE == "blind",
+            candidate_judge_mode=judge_mode,
         )
         if controller_only
         else None
@@ -2281,6 +2499,8 @@ def execute_goal_plus(
             "Goal Plus controller closeout failed: "
             + closeout.get("error", "unknown error")
         )
+    if judge_reason and not closeout_reason:
+        closeout_reason = judge_reason
     if is_pi and posthoc_selection is not None:
         closeout_reason = _posthoc_prerequisite_incomplete_reason(
             closeout_reason,
@@ -2573,6 +2793,10 @@ def execute(args: argparse.Namespace) -> int:
     if args.api_base and not os.environ.get(credential_env):
         raise RuntimeError(f"{credential_env} is required with --api-base")
     environment = configure_temp_environment(os.environ.copy())
+    if manifest["method"] in {"goal-plus-codex", "goal-plus-pi"}:
+        _bind_prepared_candidate_judge(
+            manifest.get("candidate_judge") or {"mode": MODE_OFF}, environment
+        )
     bin_dir = Path(manifest["environment"]["runtime_bin"])
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
     prepend_to_path(environment)
@@ -2688,6 +2912,25 @@ def repair_closeout(args: argparse.Namespace) -> int:
         raise RuntimeError(
             "prepared Goal Plus config does not match the task posthoc-selection contract"
         )
+    prepared_judge = manifest.get("candidate_judge") or {"mode": MODE_OFF}
+    judge_mode = normalize_mode(prepared_judge.get("mode"))
+    judge_environment = dict(os.environ)
+    judge_environment[JUDGE_ENV] = judge_mode
+    if judge_mode == MODE_JEV:
+        judge_environment[JEV_ENDPOINT_ENV] = str(
+            prepared_judge.get("endpoint") or JEV_ENDPOINT
+        )
+        judge_environment[JEV_MODEL_ENV] = str(
+            prepared_judge.get("model") or JEV_MODEL
+        )
+    elif judge_mode == MODE_LLM:
+        if prepared_judge.get("endpoint"):
+            judge_environment[LLM_BASE_URL_ENV] = str(prepared_judge["endpoint"])
+        if prepared_judge.get("model"):
+            judge_environment[LLM_MODEL_ENV] = str(prepared_judge["model"])
+    _, judge_callback = _candidate_judge_callback(
+        judge_environment, mode_override=judge_mode
+    )
     control = dict(manifest.get("execution") or {})
     control["candidate_session_cleanup_repair"] = close_candidate_sessions(
         workspace, manifest["budget"]["hard_kill_grace_seconds"]
@@ -2698,7 +2941,10 @@ def repair_closeout(args: argparse.Namespace) -> int:
             verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
         ):
             closeout = finalize_goal_plus_search(
-                workspace, deterministic_public_gate=controller_only and EVALUATION_MODE == "blind"
+                workspace,
+                deterministic_public_gate=controller_only and EVALUATION_MODE == "blind",
+                candidate_judge=judge_callback,
+                candidate_judge_mode=judge_mode,
             )
     except Exception as exc:
         if not controller_only:
@@ -2709,9 +2955,12 @@ def repair_closeout(args: argparse.Namespace) -> int:
             "error": f"{type(exc).__name__}: {exc}",
         }
     control["goal_plus_controller_closeout_repair"] = closeout
+    judge_reason = _candidate_judge_incomplete_reason(closeout, judge_mode)
     controller_only_closeout_reason = (
         _controller_only_closeout_incomplete_reason(
-            closeout, deterministic_public_gate=EVALUATION_MODE == "blind"
+            closeout,
+            deterministic_public_gate=EVALUATION_MODE == "blind",
+            candidate_judge_mode=judge_mode,
         )
         if controller_only
         else None
@@ -2771,6 +3020,8 @@ def repair_closeout(args: argparse.Namespace) -> int:
                 control["official_evaluation_withheld"] = True
     else:
         control["official_evaluation_withheld"] = True
+    if judge_reason:
+        control["result_incomplete_reason"] = judge_reason
     control["goal_plus"] = collect_goal_plus_state(workspace)
     control["evidence_annotator_usage"] = collect_evidence_annotator_usage(
         workspace

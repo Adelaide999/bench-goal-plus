@@ -377,6 +377,20 @@ class AIBenchCodingContractTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def _zai_profile(self, methods: list[str]) -> dict[str, object]:
+        _path, profile = load_profile("smoke")
+        profile["methods"] = methods
+        profile["model"] = "zai/glm-5.2"
+        profile["agent_provider"] = {
+            "id": "zai",
+            "name": "Z.AI Anthropic-compatible API",
+            "auth_mode": "anthropic-compatible",
+            "base_url_env": "ZAI_BASE_URL",
+            "api_key_env": "ZAI_API_KEY",
+            "wire_api": "anthropic-messages",
+        }
+        return profile
+
     def test_catalog_exposes_four_methods_and_native_capabilities(self) -> None:
         catalog = Catalog()
         runner = catalog.runners["aibench-coding-native"]

@@ -21,16 +21,6 @@
     "api_key_env": "ZAI_API_KEY",
     "wire_api": "anthropic-messages"
   },
-  "goal_plus_search": {
-    "orchestration_mode": "adaptive_search",
-    "verifier": {
-      "scores": ["progress_reward", "allocation_utility"]
-    },
-    "allocation": {
-      "policy": "swe_search_uct/v1"
-    },
-    "max_candidates": 3
-  },
   "wall_time_seconds": 1800,
   "concurrency": 3,
   "cell_concurrency": 3,

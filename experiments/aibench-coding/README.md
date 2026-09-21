@@ -58,7 +58,8 @@ runtime. An external Goal Plus checkout can be selected with
 `BENCH_GOAL_PLUS_SOURCE_DIR` and `BENCH_GOAL_PLUS_EXPECTED_REF`; setup validates
 its clean revision and prepare records that identity for execution checks.
 Each Pi cell receives a private writable socket directory under `.tmp/`.
-Isolated candidates use `goal_plus_search_run_verifier` to execute public tests in the
+Isolated candidates use `search_run_verifier` (legacy host alias
+`goal_plus_search_run_verifier`) to execute public tests in the
 host grading environment; `python3 evaluate.py` is the Main/Plain entrypoint.
 
 The initial integration remains `partial` until a real Linux+bwrap campaign is
@@ -67,6 +68,9 @@ but deliberately leaves pass@K/pass^K unset because unselected trajectories are
 not sent to the hidden grader.
 
 ## Optional final candidate judge
+
+This plug-in is wired into the AIBench native `benchmark_compare` controller path;
+other native runners keep their existing closeout behavior unless they opt in.
 
 Goal Plus can use a controller-only tie-breaker after the hard/process gate:
 
@@ -87,7 +91,7 @@ key already present in the controller. Use a separate judge key when strict
 controller/worker credential separation is required. The
 controller runtime must provide the optional `llm_verifier` package; otherwise
 the enabled run is recorded as incomplete rather than silently falling back.
-The judge runs once on candidates tied for the best hard/process score, records a bounded selection
+The judge runs once per Search run on candidates tied for the best hard/process score, records a bounded selection
 receipt, and cannot send feedback to workers or request another search round.
 Native Goal Plus Evidence Annotation is disabled while either judge mode is on;
 the judge is the only optional quality selector in that run.

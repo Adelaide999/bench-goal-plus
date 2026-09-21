@@ -197,17 +197,21 @@ def normalize_endpoint(value: Any, default: str = "") -> str:
 
 def _llm_backend(environment: Mapping[str, str]) -> tuple[str, str, str] | None:
     """Resolve one explicit backend/key pair for the optional verifier."""
-    base_url = normalize_endpoint(
-        environment.get(LLM_BASE_URL_ENV) or environment.get(OPENAI_BASE_URL_ENV)
-    )
-    if base_url:
-        key = (
-            environment.get(LLM_API_KEY_ENV)
-            or environment.get(OPENAI_API_KEY_ENV)
-            or environment.get(DEEPSEEK_API_KEY_ENV)
-            or environment.get(VERTEX_API_KEY_ENV)
-        )
+    # An ambient OPENAI_BASE_URL is not evidence that a DeepSeek or Vertex key
+    # belongs there.  Prefer an explicitly configured verifier/OpenAI pair and
+    # otherwise resolve provider-native credentials below.
+    dedicated_key = environment.get(LLM_API_KEY_ENV)
+    dedicated_base_url = environment.get(LLM_BASE_URL_ENV)
+    if dedicated_base_url:
+        base_url = normalize_endpoint(dedicated_base_url)
+        key = dedicated_key or environment.get(OPENAI_API_KEY_ENV)
         return ("openai", key, base_url) if key else None
+    if dedicated_key:
+        return None
+    openai_key = environment.get(OPENAI_API_KEY_ENV)
+    openai_base_url = environment.get(OPENAI_BASE_URL_ENV)
+    if openai_key and openai_base_url:
+        return ("openai", openai_key, normalize_endpoint(openai_base_url))
     if environment.get(DEEPSEEK_API_KEY_ENV):
         return (
             "deepseek",

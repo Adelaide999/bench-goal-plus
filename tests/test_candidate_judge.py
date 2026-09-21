@@ -453,7 +453,7 @@ class CandidateJudgeTest(unittest.TestCase):
             wall_seconds=60,
             closeout_seconds=10,
             concurrency=2,
-            worker_host="codex",
+            agent_harness="codex",
             worker_model="gpt-5.6-luna",
             candidate_judge_mode="jev",
         )
