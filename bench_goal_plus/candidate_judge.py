@@ -79,9 +79,22 @@ MODE_LLM = "llm-as-a-verifier"
 SUPPORTED_MODES = frozenset({MODE_OFF, MODE_JEV, MODE_LLM})
 
 DEFAULT_CRITERIA = {
-    "correctness": "best match for the task objective and the hard verifier evidence",
-    "minimality": "small, focused change with no unnecessary behavior changes",
-    "compatibility": "preserves the existing interfaces and surrounding behavior",
+    "root_cause_problem_alignment": (
+        "identifies the real root cause and changes the code path that produces "
+        "the defect instead of bypassing the symptom"
+    ),
+    "implementation_correctness_quality": (
+        "has correct logic, syntax, APIs, types, control flow, compatibility, "
+        "edge-case handling, and no unrelated side effects"
+    ),
+    "empirical_verification": (
+        "reproduces the issue, observes failure before the fix and success after "
+        "it, and runs relevant regression tests"
+    ),
+    "completion_completeness": (
+        "has no unfinished work, known failures, or unverified final changes and "
+        "does not claim completion prematurely"
+    ),
 }
 MAX_TEXT = 8_000
 

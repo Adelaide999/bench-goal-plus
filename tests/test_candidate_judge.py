@@ -13,6 +13,7 @@ from unittest import mock
 
 from bench_goal_plus.candidate_judge import (
     ANNOTATOR_DISABLED_ENV,
+    DEFAULT_CRITERIA,
     judge_candidates,
     normalize_endpoint,
     normalize_mode,
@@ -176,6 +177,7 @@ class CandidateJudgeTest(unittest.TestCase):
             ["c001", "c002"],
         )
         self.assertEqual(observed["body"]["model"], "typesafe/jev-1.13")
+        self.assertEqual(observed["body"]["state"]["rubric"], DEFAULT_CRITERIA)
         choices = observed["body"]["questions"]["best_candidate"]["criteria"]
         self.assertEqual(set(choices), {"c001", "c002"})
         self.assertNotIn("bad", choices)
@@ -336,8 +338,7 @@ class CandidateJudgeTest(unittest.TestCase):
         self.assertEqual(result["comparisons"], 3)
         self.assertEqual(result["calls"], 1)
         module.select.assert_called_once()
-        self.assertIsInstance(module.select.call_args.kwargs["criteria"], dict)
-        self.assertIn("correctness", module.select.call_args.kwargs["criteria"])
+        self.assertEqual(module.select.call_args.kwargs["criteria"], DEFAULT_CRITERIA)
         self.assertEqual(module.select.call_args.kwargs["on_error"], "raise")
 
     def test_llm_verifier_accepts_deepseek_backend_without_openai_url(self) -> None:
