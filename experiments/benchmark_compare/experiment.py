@@ -1540,7 +1540,6 @@ def finalize_posthoc_official_selection(
     closeout: dict[str, Any],
     contract: dict[str, Any],
     worker_shutdown_verified: bool,
-    candidate_judge_mode: str = MODE_OFF,
 ) -> dict[str, Any]:
     """Score hidden committed snapshots posthoc and publish the best result."""
     if worker_shutdown_verified is not True:
@@ -1702,7 +1701,6 @@ def finalize_posthoc_official_selection(
                                     "final",
                                     attempt_root / "scores" / snapshot_sha256,
                                     benchmark_root,
-                                    candidate_judge_mode=candidate_judge_mode,
                                 )
                                 metric_value = _posthoc_metric_value(
                                     evaluation, contract
@@ -2538,15 +2536,15 @@ def execute_goal_plus(
     elif closeout_reason is None:
         if posthoc_selection is not None:
             try:
-                posthoc_result = finalize_posthoc_official_selection(
-                    run_dir=run_dir,
-                    workspace=workspace,
-                    benchmark_root=benchmark_root,
-                    closeout=closeout,
-                    contract=posthoc_selection,
-                    worker_shutdown_verified=True,
-                    candidate_judge_mode=judge_mode,
-                )
+                with scrub_controller_judge_environment(judge_mode):
+                    posthoc_result = finalize_posthoc_official_selection(
+                        run_dir=run_dir,
+                        workspace=workspace,
+                        benchmark_root=benchmark_root,
+                        closeout=closeout,
+                        contract=posthoc_selection,
+                        worker_shutdown_verified=True,
+                    )
             except Exception as exc:
                 posthoc_result = {
                     "completed": False,
@@ -3012,15 +3010,15 @@ def repair_closeout(args: argparse.Namespace) -> int:
     elif controller_only_closeout_reason is None:
         if posthoc_selection is not None:
             try:
-                posthoc_result = finalize_posthoc_official_selection(
-                    run_dir=run_dir,
-                    workspace=workspace,
-                    benchmark_root=benchmark_root,
-                    closeout=closeout,
-                    contract=posthoc_selection,
-                    worker_shutdown_verified=True,
-                    candidate_judge_mode=judge_mode,
-                )
+                with scrub_controller_judge_environment(judge_mode):
+                    posthoc_result = finalize_posthoc_official_selection(
+                        run_dir=run_dir,
+                        workspace=workspace,
+                        benchmark_root=benchmark_root,
+                        closeout=closeout,
+                        contract=posthoc_selection,
+                        worker_shutdown_verified=True,
+                    )
             except Exception as exc:
                 posthoc_result = {
                     "completed": False,
