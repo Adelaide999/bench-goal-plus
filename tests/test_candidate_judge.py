@@ -12,9 +12,11 @@ from pathlib import Path
 from unittest import mock
 
 from bench_goal_plus.candidate_judge import (
+    ANNOTATOR_DISABLED_ENV,
     judge_candidates,
     normalize_endpoint,
     normalize_mode,
+    scrub_controller_judge_environment,
 )
 from experiments.benchmark_compare import experiment as benchmark_compare
 from experiments.openevolve_compare import experiment as openevolve_compare
@@ -46,6 +48,60 @@ def _candidates() -> list[dict[str, object]]:
 
 
 class CandidateJudgeTest(unittest.TestCase):
+    def test_controller_subprocess_fence_restores_judge_secrets(self) -> None:
+        values = {
+            "OPENROUTER_API_KEY": "judge-secret",
+            "GOAL_PLUS_JEV_MODEL": "typesafe/jev-1.13",
+            "OPENAI_API_KEY": "fallback-secret",
+            ANNOTATOR_DISABLED_ENV: "previous",
+            "ZAI_API_KEY": "worker-secret",
+        }
+        with mock.patch.dict(os.environ, values, clear=False):
+            with scrub_controller_judge_environment("jev"):
+                self.assertNotIn("OPENROUTER_API_KEY", os.environ)
+                self.assertNotIn("GOAL_PLUS_JEV_MODEL", os.environ)
+                self.assertNotIn("OPENAI_API_KEY", os.environ)
+                self.assertEqual(os.environ[ANNOTATOR_DISABLED_ENV], "1")
+                self.assertEqual(os.environ["ZAI_API_KEY"], "worker-secret")
+            for name, value in values.items():
+                self.assertEqual(os.environ[name], value)
+
+    def test_controller_evaluation_fences_judge_secrets(self) -> None:
+        observed: dict[str, str | None] = {}
+
+        def fake_evaluate(*_args: object) -> dict[str, object]:
+            observed["judge_key"] = os.environ.get("OPENROUTER_API_KEY")
+            observed["agent_key"] = os.environ.get("ZAI_API_KEY")
+            observed["annotator_disabled"] = os.environ.get(
+                ANNOTATOR_DISABLED_ENV
+            )
+            return {"valid": True}
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "OPENROUTER_API_KEY": "judge-secret",
+                    "ZAI_API_KEY": "worker-secret",
+                },
+                clear=False,
+            ),
+            mock.patch.object(
+                benchmark_compare, "evaluate", side_effect=fake_evaluate
+            ),
+        ):
+            result = benchmark_compare.evaluate_with_controller_runtime(
+                Path("workspace"),
+                "public",
+                Path("controller-runtime"),
+                candidate_judge_mode="jev",
+            )
+            self.assertEqual(os.environ["OPENROUTER_API_KEY"], "judge-secret")
+        self.assertTrue(result["valid"])
+        self.assertIsNone(observed["judge_key"])
+        self.assertEqual(observed["agent_key"], "worker-secret")
+        self.assertEqual(observed["annotator_disabled"], "1")
+
     def test_off_is_side_effect_free_and_filters_nothing(self) -> None:
         opener = mock.Mock(side_effect=AssertionError("network must not run"))
         result = judge_candidates(
@@ -459,6 +515,9 @@ class CandidateJudgeTest(unittest.TestCase):
         )
         self.assertNotIn(" annotator=", prompt.splitlines()[0])
         self.assertIn("Native Evidence Annotation is disabled", prompt)
+        self.assertIn("host controller owns selection, promotion", prompt)
+        self.assertNotIn("- Promotion rule:", prompt)
+        self.assertIn("do not call selection or promotion tools", prompt)
 
     def test_native_selection_hook_is_compatible_with_old_runtime_signature(self) -> None:
         class Record:

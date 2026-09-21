@@ -41,6 +41,7 @@ from bench_goal_plus.candidate_judge import (  # noqa: E402
     judge_candidates,
     normalize_endpoint,
     normalize_mode,
+    scrub_controller_judge_environment,
 )
 from bench_goal_plus.upstreams import (  # noqa: E402
     external_goal_plus_source,
@@ -1147,19 +1148,27 @@ def evaluate_with_controller_runtime(
     mode: str,
     controller_runtime: Path,
     upstream_root: Path | None = None,
+    *,
+    candidate_judge_mode: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate without materializing mutable runtime files in a Goal workspace."""
-    previous = os.environ.get("GOAL_PLUS_VERIFIER_TMPDIR")
-    os.environ["GOAL_PLUS_VERIFIER_TMPDIR"] = str(controller_runtime)
-    try:
-        if upstream_root is None:
-            return evaluate(workspace, mode)
-        return evaluate(workspace, mode, upstream_root)
-    finally:
-        if previous is None:
-            os.environ.pop("GOAL_PLUS_VERIFIER_TMPDIR", None)
-        else:
-            os.environ["GOAL_PLUS_VERIFIER_TMPDIR"] = previous
+    judge_mode = normalize_mode(
+        candidate_judge_mode
+        if candidate_judge_mode is not None
+        else os.environ.get(JUDGE_ENV)
+    )
+    with scrub_controller_judge_environment(judge_mode):
+        previous = os.environ.get("GOAL_PLUS_VERIFIER_TMPDIR")
+        os.environ["GOAL_PLUS_VERIFIER_TMPDIR"] = str(controller_runtime)
+        try:
+            if upstream_root is None:
+                return evaluate(workspace, mode)
+            return evaluate(workspace, mode, upstream_root)
+        finally:
+            if previous is None:
+                os.environ.pop("GOAL_PLUS_VERIFIER_TMPDIR", None)
+            else:
+                os.environ["GOAL_PLUS_VERIFIER_TMPDIR"] = previous
 
 
 def controller_only_official_evaluation(manifest: dict[str, Any]) -> bool:
@@ -1531,6 +1540,7 @@ def finalize_posthoc_official_selection(
     closeout: dict[str, Any],
     contract: dict[str, Any],
     worker_shutdown_verified: bool,
+    candidate_judge_mode: str = MODE_OFF,
 ) -> dict[str, Any]:
     """Score hidden committed snapshots posthoc and publish the best result."""
     if worker_shutdown_verified is not True:
@@ -1692,6 +1702,7 @@ def finalize_posthoc_official_selection(
                                     "final",
                                     attempt_root / "scores" / snapshot_sha256,
                                     benchmark_root,
+                                    candidate_judge_mode=candidate_judge_mode,
                                 )
                                 metric_value = _posthoc_metric_value(
                                     evaluation, contract
@@ -2300,6 +2311,7 @@ def execute_goal_plus(
         "public",
         run_dir / "controller-runtime/seed",
         benchmark_root,
+        candidate_judge_mode=judge_mode,
     )
     write_json(run_dir / "seed-eval.json", seed)
     setup_calls = seed["budget"]["total_claimed"]
@@ -2464,9 +2476,12 @@ def execute_goal_plus(
         "timing": "after_agent_closeout_before_promotion",
     }
     try:
-        with controller_subprocess_environment(
-            runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
-            verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
+        with (
+            scrub_controller_judge_environment(judge_mode),
+            controller_subprocess_environment(
+                runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
+                verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
+            ),
         ):
             closeout = finalize_goal_plus_search(
                 workspace,
@@ -2514,6 +2529,7 @@ def execute_goal_plus(
             "final",
             run_dir / "controller-runtime/final",
             benchmark_root,
+            candidate_judge_mode=judge_mode,
         )
         write_json(run_dir / "final-eval.json", final)
         copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
@@ -2529,6 +2545,7 @@ def execute_goal_plus(
                     closeout=closeout,
                     contract=posthoc_selection,
                     worker_shutdown_verified=True,
+                    candidate_judge_mode=judge_mode,
                 )
             except Exception as exc:
                 posthoc_result = {
@@ -2936,9 +2953,12 @@ def repair_closeout(args: argparse.Namespace) -> int:
         workspace, manifest["budget"]["hard_kill_grace_seconds"]
     )
     try:
-        with controller_subprocess_environment(
-            runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
-            verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
+        with (
+            scrub_controller_judge_environment(judge_mode),
+            controller_subprocess_environment(
+                runtime_bin_dir=Path(manifest["environment"]["runtime_bin"]),
+                verifier_tmpdir=run_dir / "controller-runtime/goal-plus",
+            ),
         ):
             closeout = finalize_goal_plus_search(
                 workspace,
@@ -2984,6 +3004,7 @@ def repair_closeout(args: argparse.Namespace) -> int:
                 "final",
                 run_dir / "controller-runtime/final",
                 benchmark_root,
+                candidate_judge_mode=judge_mode,
             )
             write_json(final_path, final)
             copy_artifact(workspace / ARTIFACT_NAME, run_dir / ARTIFACT_NAME)
@@ -2998,6 +3019,7 @@ def repair_closeout(args: argparse.Namespace) -> int:
                     closeout=closeout,
                     contract=posthoc_selection,
                     worker_shutdown_verified=True,
+                    candidate_judge_mode=judge_mode,
                 )
             except Exception as exc:
                 posthoc_result = {

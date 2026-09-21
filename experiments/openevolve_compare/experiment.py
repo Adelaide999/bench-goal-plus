@@ -652,8 +652,8 @@ def render_goal(
         "stop a worker. "
     ) + (
         "Return control for the controller-owned closeout.\n"
-        if evaluation_mode == "blind" else
-        "Finish selection/publication, the Goal and both reports.\n"
+        if evaluation_mode == "blind" or candidate_judge_mode != MODE_OFF
+        else "Finish selection/publication, the Goal and both reports.\n"
     )
     common_prompt = (
         render_controller_only_task_prompt(
@@ -690,12 +690,14 @@ def render_goal(
             "as expected; selection, promotion, and final verification still run afterward.\n"
         )
     candidate_judge_text = (
-        "- The controller invokes the optional "
+        "- The host controller invokes the optional "
         f"`{candidate_judge_mode}` candidate judge once per Search run after hard/process verification "
         "on hard-best ties only. It receives bounded public summaries, cannot provide "
         "worker feedback or a continue-search signal, and does not replace promotion "
         "or official evaluation. Native Evidence Annotation is disabled in this mode. "
-        "Do not call selection or promotion tools for this step.\n"
+        "Close all worker sessions and leave durable verifier evidence, but do not call "
+        "selection or promotion tools or complete the final Goal audit; the host controller "
+        "performs those closeout steps.\n"
         if candidate_judge_mode != MODE_OFF
         else ""
     )
@@ -765,13 +767,29 @@ def render_goal(
             "inside the reserved closeout window before invoking the official evaluator.\n"
             f"{candidate_judge_text}"
         )
+    ownership_text = (
+        "The host controller owns selection, promotion, and final reporting while the "
+        "candidate judge is enabled.\n\n"
+        if candidate_judge_mode != MODE_OFF
+        else "Goal Plus also owns selection, promotion, and final reporting.\n\n"
+    )
+    promotion_text = (
+        ""
+        if candidate_judge_mode != MODE_OFF
+        else (
+            f"- Promotion rule: select the valid verifier-backed candidate with the best "
+            f"`{metric_name}`, promote it, complete the full goal audit, and write the "
+            "final Goal Plus report.\n"
+        )
+    )
     return (
         f"{goal_plus_command}\n\n"
         f"{common_prompt.rstrip()}\n\n"
         "# Goal Plus configuration\n\n"
         "Use the current workspace and construct the verifier-backed Goal Plus search from "
-        "the configuration below. Goal Plus owns intake, triage, SearchSpec freezing, candidate "
-        "workspaces, selection, promotion, and final reporting.\n\n"
+        "the configuration below. Goal Plus owns intake, triage, SearchSpec freezing, and "
+        "candidate workspaces. "
+        f"{ownership_text}"
         "- Honor every leading typed command field in the SearchSpec.\n"
         "- Set `strategy.inner_agent=\"autoresearch\"`.\n"
         + '- Set `strategy.orchestration_mode="parallel_loops"`; set `strategy.selection.ranking_keys=["hard_score"]` and `ranking_tolerance=[0.0]`. Do not use `metric_name` as a ranking key.\n'
@@ -809,9 +827,7 @@ def render_goal(
         f"- Outer budget: {wall_seconds} seconds total, with about {exploration_seconds} "
         f"seconds for exploration and {closeout_seconds} seconds reserved for completion. "
         "Treat `GOAL_PLUS_OUTER_DEADLINE_AT` as the authoritative upper deadline.\n"
-        f"- Promotion rule: select the valid verifier-backed candidate with the best "
-        f"`{metric_name}`, promote it, complete the full goal audit, and write the "
-        "final Goal Plus report.\n"
+        f"{promotion_text}"
         f"{candidate_judge_text}"
         + (
             "- The controller runs official hidden grading after Search closeout; "

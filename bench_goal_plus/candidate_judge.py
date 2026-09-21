@@ -42,6 +42,34 @@ LLM_EVALUATIONS_ENV = "GOAL_PLUS_LLM_VERIFIER_EVALUATIONS"
 LLM_PIVOTS_ENV = "GOAL_PLUS_LLM_VERIFIER_PIVOTS"
 ANNOTATOR_DISABLED_ENV = "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED"
 
+# These values are controller-only.  Keep this list in one place so benchmark
+# adapters and Goal Plus subprocess boundaries apply the same credential fence.
+JUDGE_SENSITIVE_ENV_NAMES = frozenset(
+    {
+        JUDGE_ENV,
+        JEV_API_KEY_ENV,
+        JEV_ENDPOINT_ENV,
+        JEV_MODEL_ENV,
+        JUDGE_TIMEOUT_ENV,
+        LLM_MODEL_ENV,
+        LLM_API_KEY_ENV,
+        LLM_BASE_URL_ENV,
+        LLM_EVALUATIONS_ENV,
+        LLM_PIVOTS_ENV,
+        OPENAI_API_KEY_ENV,
+        OPENAI_BASE_URL_ENV,
+        DEEPSEEK_API_KEY_ENV,
+        VERTEX_API_KEY_ENV,
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API",
+    }
+)
+
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 JEV_MODEL = "typesafe/jev-1.13"
 
@@ -56,6 +84,32 @@ DEFAULT_CRITERIA = {
     "compatibility": "preserves the existing interfaces and surrounding behavior",
 }
 MAX_TEXT = 8_000
+
+
+@contextmanager
+def scrub_controller_judge_environment(mode: Any) -> Any:
+    """Temporarily fence judge credentials from controller-owned subprocesses."""
+
+    if normalize_mode(mode) == MODE_OFF:
+        yield
+        return
+    previous = {name: os.environ.get(name) for name in JUDGE_SENSITIVE_ENV_NAMES}
+    for name in JUDGE_SENSITIVE_ENV_NAMES:
+        os.environ.pop(name, None)
+    annotator_previous = os.environ.get(ANNOTATOR_DISABLED_ENV)
+    os.environ[ANNOTATOR_DISABLED_ENV] = "1"
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        if annotator_previous is None:
+            os.environ.pop(ANNOTATOR_DISABLED_ENV, None)
+        else:
+            os.environ[ANNOTATOR_DISABLED_ENV] = annotator_previous
 
 
 @dataclass(frozen=True)
@@ -632,6 +686,7 @@ __all__ = [
     "LLM_MODEL_ENV",
     "LLM_PIVOTS_ENV",
     "ANNOTATOR_DISABLED_ENV",
+    "JUDGE_SENSITIVE_ENV_NAMES",
     "normalize_endpoint",
     "JudgeResult",
     "MODE_JEV",
@@ -640,4 +695,5 @@ __all__ = [
     "SUPPORTED_MODES",
     "judge_candidates",
     "normalize_mode",
+    "scrub_controller_judge_environment",
 ]
