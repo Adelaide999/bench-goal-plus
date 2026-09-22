@@ -31,6 +31,12 @@ def _candidates() -> list[dict[str, object]]:
             "hard_score": 1.0,
             "summary": "focused fix",
             "trajectory": "focused fix",
+            "artifact_diff": "diff --git a/main.py b/main.py\n+focused fix\n",
+            "changed_files": ["main.py"],
+            "iteration": 1,
+            "settlement_id": "s001",
+            "git_head": "a" * 40,
+            "artifact_hash": "h001",
         },
         {
             "candidate_id": "c002",
@@ -38,6 +44,12 @@ def _candidates() -> list[dict[str, object]]:
             "hard_score": 1.0,
             "summary": "larger fix",
             "trajectory": "larger fix",
+            "artifact_diff": "diff --git a/main.py b/main.py\n+larger fix\n",
+            "changed_files": ["main.py"],
+            "iteration": 1,
+            "settlement_id": "s002",
+            "git_head": "b" * 40,
+            "artifact_hash": "h002",
         },
         {
             "candidate_id": "bad",
@@ -310,7 +322,11 @@ class CandidateJudgeTest(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIsNone(result["selected_candidate_id"])
 
-    def test_llm_verifier_index_and_comparison_count_are_mapped(self) -> None:
+    @mock.patch(
+        "bench_goal_plus.candidate_judge._lav_provenance",
+        return_value={"source_commit": "test"},
+    )
+    def test_llm_verifier_index_and_comparison_count_are_mapped(self, _provenance) -> None:
         module = types.ModuleType("llm_verifier")
 
         class Result:
@@ -319,6 +335,7 @@ class CandidateJudgeTest(unittest.TestCase):
             n_comparisons = 3
 
         module.select = mock.Mock(return_value=Result())  # type: ignore[attr-defined]
+        module.DEFAULT_MODEL = "test-model"  # type: ignore[attr-defined]
         with mock.patch.dict(
             sys.modules, {"llm_verifier": module}
         ), mock.patch.dict(
@@ -336,12 +353,17 @@ class CandidateJudgeTest(unittest.TestCase):
         self.assertEqual(result["status"], "selected")
         self.assertEqual(result["selected_candidate_id"], "c002")
         self.assertEqual(result["comparisons"], 3)
-        self.assertEqual(result["calls"], 1)
+        self.assertEqual(result["selector_invocations"], 1)
+        self.assertIsNone(result["provider_calls"])
         module.select.assert_called_once()
         self.assertEqual(module.select.call_args.kwargs["criteria"], DEFAULT_CRITERIA)
         self.assertEqual(module.select.call_args.kwargs["on_error"], "raise")
 
-    def test_llm_verifier_accepts_deepseek_backend_without_openai_url(self) -> None:
+    @mock.patch(
+        "bench_goal_plus.candidate_judge._lav_provenance",
+        return_value={"source_commit": "test"},
+    )
+    def test_llm_verifier_accepts_deepseek_backend_without_openai_url(self, _provenance) -> None:
         module = types.ModuleType("llm_verifier")
 
         class Result:
@@ -357,6 +379,7 @@ class CandidateJudgeTest(unittest.TestCase):
             return Result()
 
         module.select = select  # type: ignore[attr-defined]
+        module.DEFAULT_MODEL = "test-model"  # type: ignore[attr-defined]
         with mock.patch.dict(sys.modules, {"llm_verifier": module}):
             result = judge_candidates(
                 "task",
@@ -367,7 +390,11 @@ class CandidateJudgeTest(unittest.TestCase):
         self.assertEqual(result["selected_candidate_id"], "c001")
         self.assertEqual(observed, {"key": "deepseek-key", "base": None})
 
-    def test_llm_verifier_prefers_explicit_base_url_when_native_keys_coexist(self) -> None:
+    @mock.patch(
+        "bench_goal_plus.candidate_judge._lav_provenance",
+        return_value={"source_commit": "test"},
+    )
+    def test_llm_verifier_prefers_explicit_base_url_when_native_keys_coexist(self, _provenance) -> None:
         module = types.ModuleType("llm_verifier")
 
         class Result:
@@ -384,6 +411,7 @@ class CandidateJudgeTest(unittest.TestCase):
             return Result()
 
         module.select = select  # type: ignore[attr-defined]
+        module.DEFAULT_MODEL = "test-model"  # type: ignore[attr-defined]
         with mock.patch.dict(sys.modules, {"llm_verifier": module}):
             result = judge_candidates(
                 "task",
@@ -520,111 +548,46 @@ class CandidateJudgeTest(unittest.TestCase):
         self.assertNotIn("- Promotion rule:", prompt)
         self.assertIn("do not call selection or promotion tools", prompt)
 
-    def test_native_selection_hook_is_compatible_with_old_runtime_signature(self) -> None:
-        class Record:
-            candidate_id = "c001"
-
+    def test_selection_requires_stable_controller_hook(self) -> None:
         class Runtime:
-            def _selection_options(self, run, records, direction):
-                del run, records, direction
-                return [(1.0, Record(), 1, "a" * 40)]
-
-        class Tools:
-            def __init__(self) -> None:
-                self.runtime = Runtime()
-
-            def search_select(self, run_id: str) -> dict[str, object]:
-                options = self.runtime._selection_options(None, [], "maximize")
-                return {
-                    "selected_candidate_id": options[0][1].candidate_id,
-                    "selected_iteration": options[0][2],
-                    "selected_git_head": options[0][3],
-                }
-
-        result = openevolve_compare._select_with_candidate(
-            Tools(), "run", "c001", iteration=1, git_head="a" * 40
-        )
-        self.assertEqual(result["selected_candidate_id"], "c001")
-
-    def test_native_selection_hook_supports_current_nested_selection(self) -> None:
-        class Record:
-            candidate_id = "c001"
-
-        class Iteration:
-            iteration = 2
-            git_head = "b" * 40
-
-        class Option:
-            record = Record()
-            iteration = Iteration()
-
-        class Selection:
-            def _selection_options(self, run, records, frozen):
-                del run, records, frozen
-                return [Option()]
-
-        class Runtime:
-            selection = Selection()
+            pass
 
         class Tools:
             runtime = Runtime()
 
-            def search_select(self, run_id: str) -> dict[str, object]:
-                options = self.runtime.selection._selection_options(None, [], None)
-                return {
-                    "selected_candidate_id": options[0].record.candidate_id,
-                    "selected_iteration": options[0].iteration.iteration,
-                    "selected_git_head": options[0].iteration.git_head,
-                }
-
-        result = openevolve_compare._select_with_candidate(
-            Tools(), "run", "c001", iteration=2, git_head="b" * 40
-        )
-        self.assertEqual(result["selected_candidate_id"], "c001")
-
-    def test_native_selection_tool_supports_current_goal_plus_name(self) -> None:
-        class Record:
-            candidate_id = "c001"
-
-        class Iteration:
-            iteration = 1
-            git_head = "c" * 40
-
-        class Option:
-            record = Record()
-            iteration = Iteration()
-
-        class Selection:
-            def _selection_options(self, run, records, frozen):
-                del run, records, frozen
-                return [Option()]
-
-        class Runtime:
-            selection = Selection()
-
-        class Tools:
-            runtime = Runtime()
-
-            def goal_plus_search_select(self, run_id: str) -> dict[str, object]:
-                options = self.runtime.selection._selection_options(None, [], None)
-                return {
-                    "selected_candidate_id": options[0].record.candidate_id,
-                    "selected_iteration": options[0].iteration.iteration,
-                    "selected_git_head": options[0].iteration.git_head,
-                }
-
-        result = openevolve_compare._select_with_candidate(
-            Tools(), "run", "c001", iteration=1, git_head="c" * 40
-        )
-        self.assertEqual(result["selected_candidate_id"], "c001")
+        with self.assertRaisesRegex(RuntimeError, "controller_exact_selection"):
+            openevolve_compare._select_with_candidate(
+                Tools(),
+                "run",
+                "c001",
+                iteration=1,
+                settlement_id="s001",
+                git_head="a" * 40,
+                artifact_hash="h001",
+                receipt_sha256="r" * 64,
+            )
 
     def test_candidate_inputs_use_global_best_public_iteration(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            first = root / "c001"
-            second = root / "c002"
-            first.mkdir()
-            second.mkdir()
+            run_dir = root / "run-1"
+            candidates_dir = run_dir / "candidates"
+            first = candidates_dir / "c001"
+            second = candidates_dir / "c002"
+            first.mkdir(parents=True)
+            second.mkdir(parents=True)
+            (run_dir / "run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-1",
+                        "source_artifact_ref": {
+                            "kind": "git_commit",
+                            "provider": "git_worktree",
+                            "id": "0" * 40,
+                        },
+                    }
+                )
+            )
 
             def write(
                 path: Path,
@@ -640,6 +603,11 @@ class CandidateJudgeTest(unittest.TestCase):
                         "git_head": f"{index:040d}",
                         "settlement_id": f"settlement-{candidate_id}-{index}",
                         "artifact_hash": f"artifact-{candidate_id}-{index}",
+                        "artifact_ref": {
+                            "kind": "git_commit",
+                            "provider": "git_worktree",
+                            "id": f"{index:040d}",
+                        },
                         "git_artifact_clean": True,
                         "touched_denied_files": False,
                         "changed_outside_allowed": False,
@@ -647,15 +615,28 @@ class CandidateJudgeTest(unittest.TestCase):
                     }
                     for index, score in enumerate(scores, start=1)
                 ]
-                (path / "candidate.json").write_text(
-                    json.dumps({"candidate_id": candidate_id, "iterations": iterations})
-                )
+                (path / "candidate.json").write_text(json.dumps({
+                    "candidate_id": candidate_id,
+                    "iterations": iterations,
+                    "task": {"workspace_provider": "git_worktree"},
+                }))
 
             write(first, "c001", [1.0, 0.5])
             write(second, "c002", [1.0], disposition="superseded")
-            result = openevolve_compare._candidate_judge_inputs(
-                [first / "candidate.json", second / "candidate.json"]
-            )
+            with mock.patch.object(
+                openevolve_compare,
+                "_candidate_artifact_diff",
+                side_effect=lambda *_args: {
+                    "artifact_diff": "diff --git a/main.py b/main.py\n",
+                    "artifact_diff_sha256": "d" * 64,
+                    "base_artifact_id": "0" * 40,
+                    "changed_files": ["main.py"],
+                },
+            ):
+                result = openevolve_compare._candidate_judge_inputs(
+                    run_dir / "run.json",
+                    [first / "candidate.json", second / "candidate.json"],
+                )
 
         self.assertEqual(
             [item["candidate_id"] for item in result], ["c001", "c002"]

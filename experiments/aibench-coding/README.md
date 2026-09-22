@@ -67,6 +67,13 @@ archived for each method. For `K>1`, the report exposes selected-result success
 but deliberately leaves pass@K/pass^K unset because unselected trajectories are
 not sent to the hidden grader.
 
+The managed CodingBench source is tracked by branch and fingerprint. The
+openEuler PR #5 tree and the registered coding-benchmark fork have the same
+`benchmarks/coding` tree; the adapter does not rewrite task prompts or inject
+hidden requirements. Upstream task metadata such as `review_status` and
+`validity_issues` is copied into `task.json` and evidence so an unpublished or
+ambiguous case remains auditable instead of being made easier by the controller.
+
 ## Optional final candidate judge
 
 This plug-in is wired into the AIBench native `benchmark_compare` controller path;
@@ -91,12 +98,23 @@ key already present in the controller. Use a separate judge key when strict
 controller/worker credential separation is required. The
 controller runtime must provide the optional `llm_verifier` package; otherwise
 the enabled run is recorded as incomplete rather than silently falling back.
-The judge runs once per Search run on candidates tied for the best hard/process score, records a bounded selection
-receipt, and cannot send feedback to workers or request another search round.
+Install the audited package in the controller environment from commit
+`8db8a114355a9d7fdf9a8d1d5c87f6aeebd18770`; the plug-in verifies its version
+and package-source hashes before making a provider call.
+The judge runs once per Search run on candidates tied for the best hard/process
+score. Its input contains the controller-generated immutable Git diff and the
+bounded public verifier result (`process_passed`, return code and test counts),
+never hidden-grader output or an Agent assertion. The receipt binds the exact
+candidate pool, iteration, settlement, artifact hash and input digest; a stale
+or failed receipt makes the cell incomplete rather than falling back. It cannot
+send feedback to workers or request another search round.
 Native Goal Plus Evidence Annotation is disabled while either judge mode is on;
 the judge is the only optional quality selector in that run.
 `off` performs no network call. Judge-specific credentials are never written to
 the manifest and are removed before worker launch; the Agent's own provider
-credential remains available to that Agent. The receipt's `calls` field counts the
-single controller invocation; the verifier's internal pairwise requests are
-reported separately as `comparisons` when available.
+credential remains available to that Agent. `llm-as-a-verifier` is pinned to the
+audited upstream source commit and uses a fresh per-invocation cache so its PPT
+ring and pivot phases aggregate the same scores. The receipt distinguishes
+`selector_invocations`, `comparisons`, and unknown `provider_calls`; Jev choice
+probabilities and LLM-as-a-verifier PPT scores are labeled with different
+semantics and are not compared numerically.

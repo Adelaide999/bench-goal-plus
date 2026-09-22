@@ -33,6 +33,7 @@ from bench_goal_plus.candidate_judge import (  # noqa: E402
     JEV_MODEL,
     JEV_MODEL_ENV,
     JUDGE_ENV,
+    LLM_CACHE_DIR_ENV,
     LLM_BASE_URL_ENV,
     LLM_MODEL_ENV,
     MODE_JEV,
@@ -117,6 +118,7 @@ DEFAULT_SOFT_CLOSEOUT_SECONDS = 60
 DEFAULT_HARD_KILL_GRACE_SECONDS = 30
 DEFAULT_WORKER_RUNTIME_SECONDS = 120
 CONTROLLER_ONLY_CLOSEOUT_ENV = "BENCH_GOAL_PLUS_CONTROLLER_ONLY_CLOSEOUT"
+GOAL_PLUS_CONTROLLER_ONLY_CLOSEOUT_ENV = "GOAL_PLUS_CONTROLLER_ONLY_CLOSEOUT"
 GOAL_PLUS_EXTERNAL_EVIDENCE_DIR_ENV = "GOAL_PLUS_EXTERNAL_EVIDENCE_DIR"
 GOAL_PLUS_GLOBAL_EVIDENCE_MODE_ENV = "GOAL_PLUS_GLOBAL_EVIDENCE_MODE"
 GOAL_PLUS_SUPPLEMENTAL_EVALUATION_ENABLED_ENV = (
@@ -137,7 +139,10 @@ ANNOTATOR_CONFIG_ENV = (
 
 
 def _candidate_judge_callback(
-    environment: dict[str, str], *, mode_override: str | None = None
+    environment: dict[str, str],
+    *,
+    mode_override: str | None = None,
+    cache_dir: Path | None = None,
 ) -> tuple[str, Any | None]:
     mode = normalize_mode(
         mode_override
@@ -147,6 +152,8 @@ def _candidate_judge_callback(
     if mode == MODE_OFF:
         return mode, None
     judge_environment = dict(environment)
+    if cache_dir is not None:
+        judge_environment[LLM_CACHE_DIR_ENV] = str(cache_dir)
 
     def callback(problem: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
         return judge_candidates(
@@ -172,6 +179,7 @@ def _hide_candidate_judge_from_workers(
         "GOAL_PLUS_LLM_VERIFIER_BASE_URL",
         "GOAL_PLUS_LLM_VERIFIER_EVALUATIONS",
         "GOAL_PLUS_LLM_VERIFIER_PIVOTS",
+        LLM_CACHE_DIR_ENV,
         ANNOTATOR_DISABLED_ENV,
         "DEEPSEEK_API_KEY",
         "VERTEX_API_KEY",
@@ -1375,6 +1383,14 @@ def score_order_key(evaluation: dict[str, Any]) -> float:
     return value if DIRECTION == "minimize" else -value
 
 
+def _optional_primary_score(evaluation: dict[str, Any]) -> float | None:
+    """Return a numeric seed score when the adapter exposed one."""
+    try:
+        return primary_score(evaluation)
+    except (KeyError, TypeError, ValueError, RuntimeError):
+        return None
+
+
 def copy_artifact(source: Path, destination: Path) -> None:
     """Copy one adapter artifact while preserving file or directory shape."""
     if source.is_dir():
@@ -2273,7 +2289,9 @@ def execute_goal_plus(
                 "Pi provider key must not reuse the controller-only Jev key"
             )
     judge_mode, judge_callback = _candidate_judge_callback(
-        environment, mode_override=judge_mode
+        environment,
+        mode_override=judge_mode,
+        cache_dir=run_dir / "controller-runtime/candidate-judge-cache",
     )
     if judge_mode != MODE_OFF:
         preserve = {pi_provider_config(args)[2]} if is_pi else {"OPENAI_API_KEY"}
@@ -2296,6 +2314,10 @@ def execute_goal_plus(
         environment[CONTROLLER_ONLY_CLOSEOUT_ENV] = "1"
     else:
         environment.pop(CONTROLLER_ONLY_CLOSEOUT_ENV, None)
+    if judge_mode != MODE_OFF or (controller_only and EVALUATION_MODE == "blind"):
+        environment[GOAL_PLUS_CONTROLLER_ONLY_CLOSEOUT_ENV] = "1"
+    else:
+        environment.pop(GOAL_PLUS_CONTROLLER_ONLY_CLOSEOUT_ENV, None)
     if controller_only:
         environment.pop(GOAL_PLUS_EXTERNAL_EVIDENCE_DIR_ENV, None)
         environment[GOAL_PLUS_GLOBAL_EVIDENCE_MODE_ENV] = "manual"
@@ -2489,6 +2511,7 @@ def execute_goal_plus(
                 ),
                 candidate_judge=judge_callback,
                 candidate_judge_mode=judge_mode,
+                baseline_public_score=_optional_primary_score(seed),
             )
     except Exception as exc:
         closeout = {
@@ -2944,7 +2967,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
         if prepared_judge.get("model"):
             judge_environment[LLM_MODEL_ENV] = str(prepared_judge["model"])
     _, judge_callback = _candidate_judge_callback(
-        judge_environment, mode_override=judge_mode
+        judge_environment,
+        mode_override=judge_mode,
+        cache_dir=run_dir / "controller-runtime/candidate-judge-cache",
     )
     control = dict(manifest.get("execution") or {})
     control["candidate_session_cleanup_repair"] = close_candidate_sessions(
@@ -2963,6 +2988,11 @@ def repair_closeout(args: argparse.Namespace) -> int:
                 deterministic_public_gate=controller_only and EVALUATION_MODE == "blind",
                 candidate_judge=judge_callback,
                 candidate_judge_mode=judge_mode,
+                baseline_public_score=(
+                    _optional_primary_score(load_json(run_dir / "seed-eval.json"))
+                    if (run_dir / "seed-eval.json").is_file()
+                    else None
+                ),
             )
     except Exception as exc:
         if not controller_only:
