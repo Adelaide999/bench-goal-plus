@@ -417,7 +417,9 @@ def _llm_backend(environment: Mapping[str, str]) -> tuple[str, str, str] | None:
     dedicated_base_url = environment.get(LLM_BASE_URL_ENV)
     if dedicated_base_url:
         base_url = normalize_endpoint(dedicated_base_url)
-        key = dedicated_key or environment.get(OPENAI_API_KEY_ENV)
+        # Never borrow the Agent's OPENAI_API_KEY: Codex deliberately keeps it
+        # in its worker environment, while this verifier is controller-only.
+        key = dedicated_key
         return ("openai", key, base_url) if key else None
     if dedicated_key:
         return None

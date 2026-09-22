@@ -348,6 +348,7 @@ class CandidateJudgeTest(unittest.TestCase):
                 environment={
                     "OPENAI_API_KEY": "judge-key",
                     "GOAL_PLUS_LLM_VERIFIER_BASE_URL": "https://judge.example/v1",
+                    "GOAL_PLUS_LLM_VERIFIER_API_KEY": "llm-key",
                 },
             )
         self.assertEqual(result["status"], "selected")
@@ -421,17 +422,32 @@ class CandidateJudgeTest(unittest.TestCase):
                     "OPENAI_API_KEY": "openai-key",
                     "OPENAI_BASE_URL": "https://judge.example/v1",
                     "DEEPSEEK_API_KEY": "deepseek-key",
+                    "GOAL_PLUS_LLM_VERIFIER_API_KEY": "llm-key",
+                    "GOAL_PLUS_LLM_VERIFIER_BASE_URL": "https://judge.example/v1",
                 },
             )
         self.assertEqual(result["selected_candidate_id"], "c001")
         self.assertEqual(
             observed,
             {
-                "key": "openai-key",
+                "key": "llm-key",
                 "base": "https://judge.example/v1",
                 "deepseek": None,
             },
         )
+
+    def test_llm_verifier_does_not_borrow_agent_openai_key(self) -> None:
+        result = judge_candidates(
+            "task",
+            _candidates(),
+            mode="llm-as-a-verifier",
+            environment={
+                "OPENAI_API_KEY": "agent-key",
+                "GOAL_PLUS_LLM_VERIFIER_BASE_URL": "https://judge.example/v1",
+            },
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertIn("GOAL_PLUS_LLM_VERIFIER_API_KEY", result["error"])
 
     def test_mode_aliases(self) -> None:
         self.assertEqual(normalize_mode("llm_verifier"), "llm-as-a-verifier")
