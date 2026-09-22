@@ -45,9 +45,13 @@ python3 scripts/bench.py plan --benchmark aibench-coding --profile smoke \
 
 `setup`/`doctor` requires Linux, Bubblewrap, the exact managed source branch,
 the locked aibench grading runtime, selected Agent binaries, and inherited
-OpenAI-compatible provider variables. Runs are foreground-only and
+provider variables. Pi profiles support OpenAI-compatible Responses/Completions
+and Anthropic-compatible Messages; Codex profiles require OpenAI Responses. Runs are foreground-only and
 non-resumable. `finish` consumes terminal evidence without re-running the
 official grader.
+Judge-enabled Goal Plus runs additionally require the managed runtime capabilities
+`goal_plus.controller_exact_selection.v1` and `goal_plus.controller_owned_closeout.v1`;
+older runtimes are rejected before worker launch.
 
 The `goal-plus-pi-glm53flash-smoke` profile uses `zai/glm-5.3-flash`, low,
 Completions, T=900, K=1, C=1, R=1, and inherited `ZAI_BASE_URL`/`ZAI_API_KEY`.

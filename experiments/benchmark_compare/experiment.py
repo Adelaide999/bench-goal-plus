@@ -54,6 +54,9 @@ from bench_goal_plus.goal_plus_command import (  # noqa: E402
     goal_plus_command_config,
     goal_plus_entrypoint,
 )
+from bench_goal_plus.goal_plus_installation import (  # noqa: E402
+    require_goal_plus_runtime_capabilities,
+)
 from bench_runtime_paths import (  # noqa: E402
     configure_temp_environment,
 )
@@ -857,6 +860,12 @@ def prepare(args: argparse.Namespace) -> int:
             append_unique_lines(workspace / ".gitignore", [".gp/", ".pi-log/"])
             agent_harness = "pi"
             worker_model = f"{args.pi_provider_id}/{args.model}"
+        if _requires_controller_runtime_capabilities(
+            args.method,
+            candidate_judge["mode"],
+            CONTROLLER_ONLY_OFFICIAL_EVALUATION,
+        ):
+            require_goal_plus_runtime_capabilities(run_dir)
         task_text = (workspace / "TASK.md").read_text()
         goal_prompt = render_goal(
             task_text=task_text,
@@ -1192,6 +1201,16 @@ def controller_only_official_evaluation(manifest: dict[str, Any]) -> bool:
             "prepared official evaluation contract does not match the adapter"
         )
     return prepared
+
+
+def _requires_controller_runtime_capabilities(
+    method: str, judge_mode: str, controller_only: bool
+) -> bool:
+    """Guard the launch paths that rely on controller-owned selection/closeout."""
+    return method in {"goal-plus-codex", "goal-plus-pi"} and (
+        judge_mode != MODE_OFF
+        or (controller_only and EVALUATION_MODE == "blind")
+    )
 
 
 def goal_plus_early_stop_contract(
@@ -2800,6 +2819,15 @@ def execute(args: argparse.Namespace) -> int:
         module_name=manifest.get("benchmark_adapter_module"),
     )
     validate_controller_only_method(manifest["method"])
+    prepared_judge_mode = normalize_mode(
+        (manifest.get("candidate_judge") or {"mode": MODE_OFF}).get("mode")
+    )
+    if _requires_controller_runtime_capabilities(
+        manifest["method"],
+        prepared_judge_mode,
+        controller_only_official_evaluation(manifest),
+    ):
+        require_goal_plus_runtime_capabilities(run_dir)
     if manifest["status"] != "prepared":
         raise RuntimeError(f"run is not prepared: {manifest['status']}")
     if args.model != manifest["model"]:
@@ -2939,6 +2967,15 @@ def repair_closeout(args: argparse.Namespace) -> int:
     validate_controller_only_method(manifest["method"])
     if manifest["method"] not in {"goal-plus-codex", "goal-plus-pi"}:
         raise ValueError("closeout is only valid for Goal Plus runs")
+    prepared_judge_mode = normalize_mode(
+        (manifest.get("candidate_judge") or {"mode": MODE_OFF}).get("mode")
+    )
+    if _requires_controller_runtime_capabilities(
+        manifest["method"],
+        prepared_judge_mode,
+        controller_only_official_evaluation(manifest),
+    ):
+        require_goal_plus_runtime_capabilities(run_dir)
     benchmark_root_text = (manifest.get("environment") or {}).get("benchmark_root")
     benchmark_root = Path(benchmark_root_text) if benchmark_root_text else None
     workspace = Path(manifest["workspace"])

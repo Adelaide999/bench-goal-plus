@@ -18,6 +18,7 @@ from experiments.aibench_coding.cli import build_parser
 from experiments.aibench_coding.config import (
     AIBenchContractError,
     load_profile,
+    pi_api,
     resolve_profile,
     split_model,
 )
@@ -368,6 +369,15 @@ class AIBenchCodingContractTest(unittest.TestCase):
             self.assertTrue(result["preflight_failed"])
             self.assertEqual(benchmark_compare.CONTROLLER_ONLY_CLOSEOUT_ENV in environment, mode == "blind")
 
+    def test_controller_runtime_capability_gate_matches_closeout_paths(self) -> None:
+        required = benchmark_compare._requires_controller_runtime_capabilities
+        with mock.patch.object(benchmark_compare, "EVALUATION_MODE", "visible"):
+            self.assertTrue(required("goal-plus-codex", "jev", True))
+            self.assertFalse(required("goal-plus-pi", "off", True))
+            self.assertFalse(required("plain-pi", "jev", True))
+        with mock.patch.object(benchmark_compare, "EVALUATION_MODE", "blind"):
+            self.assertTrue(required("goal-plus-pi", "off", True))
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(
             prefix="aibench-coding-test-", dir=ensure_temp_root("tests")
@@ -454,6 +464,19 @@ class AIBenchCodingContractTest(unittest.TestCase):
         }
         with self.assertRaisesRegex(AIBenchContractError, "openai-compatible"):
             resolve_profile(oauth)
+
+    def test_pi_provider_protocol_is_preserved(self) -> None:
+        profile = self._zai_profile(["goal-plus-pi"])
+        resolved = resolve_profile(profile)
+        self.assertEqual(pi_api(resolved), "anthropic-messages")
+
+    def test_codex_rejects_anthropic_provider(self) -> None:
+        profile = self._zai_profile(["goal-plus-codex"])
+        with self.assertRaisesRegex(
+            AIBenchContractError,
+            "Codex methods require openai-compatible Responses",
+        ):
+            resolve_profile(profile)
 
     def test_cli_accepts_native_runner_override_contract(self) -> None:
         args = build_parser().parse_args(
