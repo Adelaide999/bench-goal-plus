@@ -294,7 +294,7 @@ class CandidateJudgeTest(unittest.TestCase):
             _candidates(),
             mode="jev",
             environment={
-                "GOAL_PLUS_JEV_API_KEY_ENV": "DECISIONS_API_KEY",
+                "GOAL_PLUS_DECISIONS_API_KEY_ENV": "DECISIONS_API_KEY",
                 "DECISIONS_API_KEY": "provider-key",
                 "GOAL_PLUS_JEV_ENDPOINT": "https://judge.example/decisions",
             },
