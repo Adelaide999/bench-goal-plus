@@ -33,6 +33,7 @@ from bench_goal_plus.candidate_judge import (  # noqa: E402
     JEV_MODEL,
     JEV_MODEL_ENV,
     JUDGE_ENV,
+    JUDGE_WORKER_ENV_NAMES,
     LLM_CACHE_DIR_ENV,
     LLM_BASE_URL_ENV,
     LLM_MODEL_ENV,
@@ -171,25 +172,7 @@ def _hide_candidate_judge_from_workers(
 ) -> None:
     """Keep controller-only judge credentials and switches out of workers."""
     preserved = preserve or set()
-    for name in (
-        JUDGE_ENV,
-        "OPENROUTER_API_KEY",
-        JEV_ENDPOINT_ENV,
-        JEV_MODEL_ENV,
-        "GOAL_PLUS_JUDGE_TIMEOUT_SECONDS",
-        "GOAL_PLUS_LLM_VERIFIER_MODEL",
-        "GOAL_PLUS_LLM_VERIFIER_API_KEY",
-        "GOAL_PLUS_LLM_VERIFIER_BASE_URL",
-        "GOAL_PLUS_LLM_VERIFIER_EVALUATIONS",
-        "GOAL_PLUS_LLM_VERIFIER_PIVOTS",
-        LLM_CACHE_DIR_ENV,
-        ANNOTATOR_DISABLED_ENV,
-        "DEEPSEEK_API_KEY",
-        "VERTEX_API_KEY",
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        *ANNOTATOR_CONFIG_ENV,
-    ):
+    for name in JUDGE_WORKER_ENV_NAMES:
         if name not in preserved:
             environment.pop(name, None)
 

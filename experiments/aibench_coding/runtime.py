@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from bench_artifacts import sanitize_id, utc_now
+from bench_goal_plus.candidate_judge import JUDGE_CONTROLLER_ENV_NAMES
 from bench_goal_plus.upstreams import external_goal_plus_source, registered_upstream_branch
 from bench_runtime_paths import configure_temp_environment, ensure_temp_root
 from experiments.benchmark_compare import experiment as standalone
@@ -51,25 +52,8 @@ _NODE_VERSION = re.compile(r"v?(\d+)(?:\.|$)")
 # These values configure the controller-side optional candidate judge.  They
 # are passed to the standalone controller only for Goal Plus cells; the
 # controller removes them before it starts any worker process.
-_CANDIDATE_JUDGE_CONTROLLER_ENV = (
-    "GOAL_PLUS_JUDGE",
-    "OPENROUTER_API_KEY",
-    "GOAL_PLUS_JEV_ENDPOINT",
-    "GOAL_PLUS_JEV_MODEL",
-    "GOAL_PLUS_JUDGE_TIMEOUT_SECONDS",
-    "GOAL_PLUS_LLM_VERIFIER_MODEL",
-    "GOAL_PLUS_LLM_VERIFIER_API_KEY",
-    "GOAL_PLUS_LLM_VERIFIER_BASE_URL",
-    "GOAL_PLUS_LLM_VERIFIER_EVALUATIONS",
-    "GOAL_PLUS_LLM_VERIFIER_PIVOTS",
-    "GOAL_PLUS_LLM_VERIFIER_CACHE_DIR",
-    "GOAL_PLUS_CONTROLLER_ONLY_CLOSEOUT",
-    "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED",
-    "OPENAI_BASE_URL",
-    "OPENAI_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "VERTEX_API_KEY",
-)
+# Kept as a tuple for the existing environment allow-list contract and tests.
+_CANDIDATE_JUDGE_CONTROLLER_ENV = tuple(sorted(JUDGE_CONTROLLER_ENV_NAMES))
 
 
 def _capture(command: list[str], *, cwd: Path | None = None) -> tuple[bool, str]:

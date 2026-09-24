@@ -47,8 +47,19 @@ LLM_CACHE_DIR_ENV = "GOAL_PLUS_LLM_VERIFIER_CACHE_DIR"
 CONTROLLER_CLOSEOUT_ENV = "GOAL_PLUS_CONTROLLER_ONLY_CLOSEOUT"
 ANNOTATOR_DISABLED_ENV = "GOAL_PLUS_EVIDENCE_ANNOTATOR_DISABLED"
 
-# These values are controller-only.  Keep this list in one place so benchmark
-# adapters and Goal Plus subprocess boundaries apply the same credential fence.
+# These values are controller-only. Keep the sets here so benchmark adapters
+# and Goal Plus subprocess boundaries apply the same credential fence.
+ANNOTATOR_CONFIG_ENV_NAMES = frozenset(
+    {
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV",
+        "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API",
+    }
+)
 JUDGE_SENSITIVE_ENV_NAMES = frozenset(
     {
         JUDGE_ENV,
@@ -67,15 +78,14 @@ JUDGE_SENSITIVE_ENV_NAMES = frozenset(
         OPENAI_BASE_URL_ENV,
         DEEPSEEK_API_KEY_ENV,
         VERTEX_API_KEY_ENV,
-        "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL",
-        "GOAL_PLUS_EVIDENCE_ANNOTATOR_REASONING_EFFORT",
-        "GOAL_PLUS_EVIDENCE_ANNOTATOR_BASE_URL",
-        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_ID",
-        "GOAL_PLUS_EVIDENCE_ANNOTATOR_PROVIDER_NAME",
-        "GOAL_PLUS_EVIDENCE_ANNOTATOR_API_KEY_ENV",
-        "GOAL_PLUS_EVIDENCE_ANNOTATOR_WIRE_API",
     }
-)
+) | ANNOTATOR_CONFIG_ENV_NAMES
+# The controller receives judge settings and the closeout switch, but not the
+# native annotator configuration that the worker lane owns.
+JUDGE_CONTROLLER_ENV_NAMES = (
+    JUDGE_SENSITIVE_ENV_NAMES - ANNOTATOR_CONFIG_ENV_NAMES
+) | frozenset({ANNOTATOR_DISABLED_ENV})
+JUDGE_WORKER_ENV_NAMES = JUDGE_SENSITIVE_ENV_NAMES | frozenset({ANNOTATOR_DISABLED_ENV})
 
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 JEV_MODEL = "typesafe/jev-1.13"
@@ -996,7 +1006,10 @@ __all__ = [
     "LAV_SCORE_SEMANTICS",
     "LAV_SOURCE_COMMIT",
     "ANNOTATOR_DISABLED_ENV",
+    "ANNOTATOR_CONFIG_ENV_NAMES",
     "JUDGE_SENSITIVE_ENV_NAMES",
+    "JUDGE_CONTROLLER_ENV_NAMES",
+    "JUDGE_WORKER_ENV_NAMES",
     "normalize_endpoint",
     "JudgeResult",
     "MODE_JEV",
