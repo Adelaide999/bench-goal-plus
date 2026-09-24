@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -61,6 +62,45 @@ def _candidates() -> list[dict[str, object]]:
 
 
 class CandidateJudgeTest(unittest.TestCase):
+    def test_pi_main_tool_fences_controller_owned_closeout_aliases(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "experiments/benchmark_compare/main-bin/goal-plus-pi-tool"
+        )
+        environment = os.environ.copy()
+        environment[benchmark_compare.CONTROLLER_ONLY_CLOSEOUT_ENV] = "1"
+        for tool in (
+            "goal_plus_record_search_result",
+            "goal_plus_search_promote",
+            "goal_plus_search_select",
+            "record_search_result",
+            "search_promote",
+            "search_select",
+        ):
+            with self.subTest(tool=tool):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(script),
+                        "--root",
+                        ".gp",
+                        "--args-json",
+                        "{}",
+                        tool,
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn("reserved for the host controller", completed.stderr)
+
+    def test_controller_closeout_allows_blocked_goal_when_judge_enabled(self) -> None:
+        allows = openevolve_compare._controller_closeout_allows_goal_status
+        self.assertTrue(allows("blocked", controller_owned_closeout=True))
+        self.assertFalse(allows("blocked", controller_owned_closeout=False))
+
     def test_controller_subprocess_fence_restores_judge_secrets(self) -> None:
         values = {
             "OPENROUTER_API_KEY": "judge-secret",

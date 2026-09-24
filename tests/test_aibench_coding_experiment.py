@@ -369,6 +369,46 @@ class AIBenchCodingContractTest(unittest.TestCase):
             self.assertTrue(result["preflight_failed"])
             self.assertEqual(benchmark_compare.CONTROLLER_ONLY_CLOSEOUT_ENV in environment, mode == "blind")
 
+    def test_candidate_judge_reserves_pi_closeout_in_visible_mode(self) -> None:
+        manifest = {
+            "workspace": str(self.root),
+            "budget": {},
+            "method": "goal-plus-pi",
+            "candidate_judge": {
+                "mode": "jev",
+                "endpoint": "https://openrouter.ai/api/alpha/decisions",
+                "model": "typesafe/jev-1.13",
+            },
+            "task": {"controller_only_official_evaluation": True},
+        }
+        environment = {
+            "GOAL_PLUS_JUDGE": "jev",
+            "GOAL_PLUS_JEV_MODEL": "typesafe/jev-1.13",
+            "OPENROUTER_API_KEY": "judge-secret",
+        }
+        with (
+            mock.patch.object(benchmark_compare, "EVALUATION_MODE", "visible"),
+            mock.patch.object(
+                benchmark_compare, "CONTROLLER_ONLY_OFFICIAL_EVALUATION", True
+            ),
+            mock.patch.object(benchmark_compare, "GOAL_PLUS_EARLY_STOP_CONTRACT", None),
+            mock.patch.object(
+                benchmark_compare, "GOAL_PLUS_POSTHOC_SELECTION_CONTRACT", None
+            ),
+            mock.patch.object(
+                benchmark_compare,
+                "evaluate_with_controller_runtime",
+                return_value={"valid": False, "budget": {"total_claimed": 0}},
+            ),
+        ):
+            result = benchmark_compare.execute_goal_plus(
+                manifest, self.root, SimpleNamespace(), environment
+            )
+        self.assertTrue(result["preflight_failed"])
+        self.assertEqual(
+            environment[benchmark_compare.CONTROLLER_ONLY_CLOSEOUT_ENV], "1"
+        )
+
     def test_controller_runtime_capability_gate_matches_closeout_paths(self) -> None:
         required = benchmark_compare._requires_controller_runtime_capabilities
         with mock.patch.object(benchmark_compare, "EVALUATION_MODE", "visible"):

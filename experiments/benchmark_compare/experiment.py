@@ -2329,7 +2329,10 @@ def execute_goal_plus(
                 *ANNOTATOR_CONFIG_ENV,
             }
         )
-    if is_pi and controller_only and EVALUATION_MODE == "blind":
+    if is_pi and (
+        judge_mode != MODE_OFF
+        or (controller_only and EVALUATION_MODE == "blind")
+    ):
         environment[CONTROLLER_ONLY_CLOSEOUT_ENV] = "1"
     else:
         environment.pop(CONTROLLER_ONLY_CLOSEOUT_ENV, None)

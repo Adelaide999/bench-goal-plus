@@ -2620,12 +2620,12 @@ def _validate_existing_public_gate_selection(
 
 
 def _controller_closeout_allows_goal_status(
-    status: str, *, deterministic_public_gate: bool
+    status: str, *, controller_owned_closeout: bool
 ) -> bool:
-    """Blind closeout still owns select/promote after the stop hook forces blocked."""
+    """Controller-owned closeout may resume a Goal left blocked by the agent."""
     if status in {"active", "complete"}:
         return True
-    return deterministic_public_gate and status == "blocked"
+    return controller_owned_closeout and status == "blocked"
 
 
 def _controller_closeout_resume_blocked_goal(goal_runtime: Any, goal: Any) -> Any:
@@ -2687,6 +2687,9 @@ def finalize_goal_plus_search(
         "duration_seconds": None,
         "runs": [],
     }
+    controller_owned_closeout = (
+        deterministic_public_gate or candidate_judge is not None
+    )
     try:
         goal_paths = sorted((root / "goal-plus").glob("gp_*/goal.json"))
         if not goal_paths:
@@ -2696,10 +2699,10 @@ def finalize_goal_plus_search(
             goal = goal_runtime.status(goal_path.parent.name)
             if not _controller_closeout_allows_goal_status(
                 str(goal.status),
-                deterministic_public_gate=deterministic_public_gate,
+                controller_owned_closeout=controller_owned_closeout,
             ):
                 raise RuntimeError(f"Goal {goal.goal_plus_id} requires host resume: {goal.status}")
-            if deterministic_public_gate and str(goal.status) == "blocked":
+            if controller_owned_closeout and str(goal.status) == "blocked":
                 goal = _controller_closeout_resume_blocked_goal(goal_runtime, goal)
             if goal.linked_search is not None and goal.linked_search.run_id:
                 goals_by_run.setdefault(goal.linked_search.run_id, []).append(
@@ -3000,7 +3003,7 @@ def finalize_goal_plus_search(
                 if goal.status != "complete":
                     if not _controller_closeout_allows_goal_status(
                         str(goal.status),
-                        deterministic_public_gate=deterministic_public_gate,
+                        controller_owned_closeout=controller_owned_closeout,
                     ):
                         raise RuntimeError(f"Goal {goal_plus_id} requires host resume: {goal.status}")
                     goal_runtime.set_status(
