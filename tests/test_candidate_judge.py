@@ -245,7 +245,7 @@ class CandidateJudgeTest(unittest.TestCase):
                 return None
 
             def read(self) -> bytes:
-                return b'{"answers":{"best_candidate":{"choice":"c001"}}}'
+                return b'{"code":0,"data":{"answers":{"best_candidate":{"choice":"c001"}}}}'
 
         def opener(request: object, timeout: int) -> Response:
             del timeout

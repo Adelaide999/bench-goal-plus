@@ -617,6 +617,22 @@ def _jev(
             provider="jev",
             model=model,
         )
+    # Direct Jev deployments wrap the same Decisions response in a
+    # {code, message, data} envelope; OpenRouter returns answers at the top
+    # level. Normalize the successful envelope before parsing the choice.
+    if isinstance(payload, dict) and "code" in payload:
+        code = payload.get("code")
+        if code not in (None, 0, "0"):
+            return JudgeResult(
+                MODE_JEV,
+                "error",
+                selector_invocations=1,
+                provider_calls=1,
+                error=f"Decisions API error {code}",
+                provider="jev",
+                model=model,
+            )
+        payload = payload.get("data")
     answers = payload.get("answers") if isinstance(payload, dict) else None
     if not isinstance(answers, dict):
         return JudgeResult(
