@@ -32,7 +32,10 @@ from typing import Any, Mapping, Sequence
 JUDGE_ENV = "GOAL_PLUS_JUDGE"
 JEV_DEFAULT_API_KEY_ENV = "OPENROUTER_API_KEY"
 JEV_API_KEY_ENV = JEV_DEFAULT_API_KEY_ENV  # Backward-compatible alias.
-JEV_API_KEY_ENV_CONFIG = "GOAL_PLUS_JEV_API_KEY_ENV"
+# Decisions is the wire protocol; keep the configurable credential name
+# provider-neutral while accepting the pre-release Jev spelling.
+DECISIONS_API_KEY_ENV_CONFIG = "GOAL_PLUS_DECISIONS_API_KEY_ENV"
+JEV_API_KEY_ENV_CONFIG = "GOAL_PLUS_JEV_API_KEY_ENV"  # Legacy alias.
 JEV_ENDPOINT_ENV = "GOAL_PLUS_JEV_ENDPOINT"
 JEV_MODEL_ENV = "GOAL_PLUS_JEV_MODEL"
 JUDGE_TIMEOUT_ENV = "GOAL_PLUS_JUDGE_TIMEOUT_SECONDS"
@@ -66,6 +69,7 @@ JUDGE_SENSITIVE_ENV_NAMES = frozenset(
     {
         JUDGE_ENV,
         JEV_API_KEY_ENV,
+        DECISIONS_API_KEY_ENV_CONFIG,
         JEV_API_KEY_ENV_CONFIG,
         JEV_ENDPOINT_ENV,
         JEV_MODEL_ENV,
@@ -97,7 +101,11 @@ def jev_api_key_env(environment: Mapping[str, str] | None = None) -> str:
     """Return the configured environment variable name for the Jev key."""
 
     source = environment if environment is not None else os.environ
-    name = str(source.get(JEV_API_KEY_ENV_CONFIG) or "").strip()
+    name = str(
+        source.get(DECISIONS_API_KEY_ENV_CONFIG)
+        or source.get(JEV_API_KEY_ENV_CONFIG)
+        or ""
+    ).strip()
     name = name or JEV_DEFAULT_API_KEY_ENV
     if not _ENV_NAME.fullmatch(name):
         raise ValueError(f"invalid Jev API key environment variable name: {name!r}")
@@ -1051,6 +1059,7 @@ __all__ = [
     "JEV_SCORE_SEMANTICS",
     "JUDGE_ENV",
     "JEV_DEFAULT_API_KEY_ENV",
+    "DECISIONS_API_KEY_ENV_CONFIG",
     "JEV_API_KEY_ENV",
     "JEV_API_KEY_ENV_CONFIG",
     "JEV_ENDPOINT_ENV",

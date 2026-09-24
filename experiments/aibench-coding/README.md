@@ -95,8 +95,9 @@ methods fail before launch when it is enabled.
 
 `jev` uses a Decisions-API-compatible endpoint. By default it targets
 OpenRouter with `OPENROUTER_API_KEY`; set `GOAL_PLUS_JEV_ENDPOINT` and
-`GOAL_PLUS_JEV_API_KEY_ENV` to use another provider's endpoint and key
-environment variable. `GOAL_PLUS_JEV_MODEL` and
+`GOAL_PLUS_DECISIONS_API_KEY_ENV` to use another provider's endpoint and key
+environment variable. The older `GOAL_PLUS_JEV_API_KEY_ENV` spelling remains
+accepted for compatibility. `GOAL_PLUS_JEV_MODEL` and
 `GOAL_PLUS_JUDGE_TIMEOUT_SECONDS` remain optional. The key value is never
 written to the campaign manifest.
 `llm-as-a-verifier` loads the optional `llm_verifier` package and uses its
