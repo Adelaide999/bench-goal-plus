@@ -30,7 +30,9 @@ from typing import Any, Mapping, Sequence
 
 
 JUDGE_ENV = "GOAL_PLUS_JUDGE"
-JEV_API_KEY_ENV = "OPENROUTER_API_KEY"
+JEV_DEFAULT_API_KEY_ENV = "OPENROUTER_API_KEY"
+JEV_API_KEY_ENV = JEV_DEFAULT_API_KEY_ENV  # Backward-compatible alias.
+JEV_API_KEY_ENV_CONFIG = "GOAL_PLUS_JEV_API_KEY_ENV"
 JEV_ENDPOINT_ENV = "GOAL_PLUS_JEV_ENDPOINT"
 JEV_MODEL_ENV = "GOAL_PLUS_JEV_MODEL"
 JUDGE_TIMEOUT_ENV = "GOAL_PLUS_JUDGE_TIMEOUT_SECONDS"
@@ -64,6 +66,7 @@ JUDGE_SENSITIVE_ENV_NAMES = frozenset(
     {
         JUDGE_ENV,
         JEV_API_KEY_ENV,
+        JEV_API_KEY_ENV_CONFIG,
         JEV_ENDPOINT_ENV,
         JEV_MODEL_ENV,
         JUDGE_TIMEOUT_ENV,
@@ -86,6 +89,31 @@ JUDGE_CONTROLLER_ENV_NAMES = (
     JUDGE_SENSITIVE_ENV_NAMES - ANNOTATOR_CONFIG_ENV_NAMES
 ) | frozenset({ANNOTATOR_DISABLED_ENV})
 JUDGE_WORKER_ENV_NAMES = JUDGE_SENSITIVE_ENV_NAMES | frozenset({ANNOTATOR_DISABLED_ENV})
+
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def jev_api_key_env(environment: Mapping[str, str] | None = None) -> str:
+    """Return the configured environment variable name for the Jev key."""
+
+    source = environment if environment is not None else os.environ
+    name = str(source.get(JEV_API_KEY_ENV_CONFIG) or "").strip()
+    name = name or JEV_DEFAULT_API_KEY_ENV
+    if not _ENV_NAME.fullmatch(name):
+        raise ValueError(f"invalid Jev API key environment variable name: {name!r}")
+    return name
+
+
+def judge_controller_env_names(
+    environment: Mapping[str, str] | None = None,
+) -> frozenset[str]:
+    return frozenset(JUDGE_CONTROLLER_ENV_NAMES) | {jev_api_key_env(environment)}
+
+
+def judge_worker_env_names(
+    environment: Mapping[str, str] | None = None,
+) -> frozenset[str]:
+    return frozenset(JUDGE_WORKER_ENV_NAMES) | {jev_api_key_env(environment)}
 
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 JEV_MODEL = "typesafe/jev-1.13"
@@ -147,8 +175,9 @@ def scrub_controller_judge_environment(mode: Any) -> Any:
     if normalize_mode(mode) == MODE_OFF:
         yield
         return
-    previous = {name: os.environ.get(name) for name in JUDGE_SENSITIVE_ENV_NAMES}
-    for name in JUDGE_SENSITIVE_ENV_NAMES:
+    sensitive_names = frozenset(JUDGE_SENSITIVE_ENV_NAMES) | {jev_api_key_env(os.environ)}
+    previous = {name: os.environ.get(name) for name in sensitive_names}
+    for name in sensitive_names:
         os.environ.pop(name, None)
     annotator_previous = os.environ.get(ANNOTATOR_DISABLED_ENV)
     os.environ[ANNOTATOR_DISABLED_ENV] = "1"
@@ -460,16 +489,25 @@ def _jev(
     records: list[str],
     opener: Any = urllib.request.urlopen,
 ) -> JudgeResult:
-    # Empty inherited variables are common on shared hosts.  Treat them as
-    # unset so the request never reaches OpenRouter with an empty credential or
-    # model name.
-    key = str(environment.get(JEV_API_KEY_ENV) or "").strip()
+    # Empty inherited variables are common on shared hosts. Treat them as
+    # unset so the request never reaches a Decisions API with an empty
+    # credential or model name.
+    try:
+        key_env = jev_api_key_env(environment)
+    except ValueError as error:
+        return JudgeResult(
+            MODE_JEV,
+            "error",
+            error=_safe_error(error),
+            provider="jev",
+        )
+    key = str(environment.get(key_env) or "").strip()
     model = str(environment.get(JEV_MODEL_ENV) or JEV_MODEL).strip() or JEV_MODEL
     if not key:
         return JudgeResult(
             MODE_JEV,
             "error",
-            error=f"missing {JEV_API_KEY_ENV}",
+            error=f"missing {key_env}",
             provider="jev",
             model=model,
         )
@@ -506,20 +544,23 @@ def _jev(
         "questions": questions,
     }
     try:
-        endpoint = normalize_endpoint(
-            environment.get(JEV_ENDPOINT_ENV), JEV_ENDPOINT
-        )
+        endpoint = normalize_endpoint(environment.get(JEV_ENDPOINT_ENV), JEV_ENDPOINT)
+        endpoint_host = (urllib.parse.urlparse(endpoint).hostname or "").lower()
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        if endpoint_host == "openrouter.ai" or endpoint_host.endswith(".openrouter.ai"):
+            headers.update(
+                {
+                    "HTTP-Referer": "https://github.com/ck0123/bench-goal-plus",
+                    "X-Title": "bench-goal-plus candidate judge",
+                }
+            )
         request = urllib.request.Request(
             endpoint,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-                # Both headers are optional, but the referer is useful for
-                # OpenRouter attribution and matches its documented examples.
-                "HTTP-Referer": "https://github.com/ck0123/bench-goal-plus",
-                "X-Title": "bench-goal-plus candidate judge",
-            },
+            headers=headers,
             method="POST",
         )
     except ValueError as error:
@@ -545,7 +586,7 @@ def _jev(
             "error",
             selector_invocations=1,
             provider_calls=1,
-            error=f"OpenRouter HTTP {error.code}",
+            error=f"Decisions API HTTP {error.code}",
             provider="jev",
             model=model,
         )
@@ -562,7 +603,11 @@ def _jev(
     if isinstance(payload, dict) and isinstance(payload.get("error"), Mapping):
         provider_error = payload["error"]
         code = provider_error.get("code")
-        detail = f"OpenRouter error {code}" if code is not None else "OpenRouter returned an error"
+        detail = (
+            f"Decisions API error {code}"
+            if code is not None
+            else "Decisions API returned an error"
+        )
         return JudgeResult(
             MODE_JEV,
             "error",
@@ -989,7 +1034,9 @@ __all__ = [
     "GROUND_TRUTH_NOTE",
     "JEV_SCORE_SEMANTICS",
     "JUDGE_ENV",
+    "JEV_DEFAULT_API_KEY_ENV",
     "JEV_API_KEY_ENV",
+    "JEV_API_KEY_ENV_CONFIG",
     "JEV_ENDPOINT_ENV",
     "JEV_MODEL_ENV",
     "JUDGE_TIMEOUT_ENV",
@@ -1010,6 +1057,9 @@ __all__ = [
     "JUDGE_SENSITIVE_ENV_NAMES",
     "JUDGE_CONTROLLER_ENV_NAMES",
     "JUDGE_WORKER_ENV_NAMES",
+    "jev_api_key_env",
+    "judge_controller_env_names",
+    "judge_worker_env_names",
     "normalize_endpoint",
     "JudgeResult",
     "MODE_JEV",

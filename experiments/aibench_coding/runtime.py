@@ -15,7 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from bench_artifacts import sanitize_id, utc_now
-from bench_goal_plus.candidate_judge import JUDGE_CONTROLLER_ENV_NAMES
+from bench_goal_plus.candidate_judge import (
+    JUDGE_CONTROLLER_ENV_NAMES,
+    judge_controller_env_names,
+)
 from bench_goal_plus.upstreams import external_goal_plus_source, registered_upstream_branch
 from bench_runtime_paths import configure_temp_environment, ensure_temp_root
 from experiments.benchmark_compare import experiment as standalone
@@ -492,7 +495,7 @@ def _agent_environment(
         *provider_env_names,
     }
     if method in GOAL_PLUS_METHODS:
-        allowed.update(_CANDIDATE_JUDGE_CONTROLLER_ENV)
+        allowed.update(judge_controller_env_names(os.environ))
     environment = {name: os.environ[name] for name in allowed if name in os.environ}
     environment = dict(configure_temp_environment(environment))
     real_codex = shutil.which("codex")

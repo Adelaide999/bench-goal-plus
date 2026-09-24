@@ -599,6 +599,8 @@ class AIBenchCodingContractTest(unittest.TestCase):
             "ZAI_API_KEY": "agent-key",
             "GOAL_PLUS_JUDGE": "jev",
             "OPENROUTER_API_KEY": "judge-key",
+            "GOAL_PLUS_JEV_API_KEY_ENV": "DECISIONS_API_KEY",
+            "DECISIONS_API_KEY": "provider-judge-key",
             "GOAL_PLUS_JEV_ENDPOINT": "https://judge.example/decisions",
             "GOAL_PLUS_JEV_MODEL": "typesafe/jev-1.13",
             "GOAL_PLUS_JUDGE_TIMEOUT_SECONDS": "15",
@@ -625,6 +627,11 @@ class AIBenchCodingContractTest(unittest.TestCase):
                 self.assertEqual(goal_environment.get(name), value)
                 self.assertNotIn(name, plain_environment)
 
+        self.assertEqual(goal_environment.get("GOAL_PLUS_JEV_API_KEY_ENV"), "DECISIONS_API_KEY")
+        self.assertEqual(goal_environment.get("DECISIONS_API_KEY"), "provider-judge-key")
+        self.assertNotIn("GOAL_PLUS_JEV_API_KEY_ENV", plain_environment)
+        self.assertNotIn("DECISIONS_API_KEY", plain_environment)
+
         worker_environment = dict(goal_environment)
         worker_environment.update(
             {
@@ -635,6 +642,8 @@ class AIBenchCodingContractTest(unittest.TestCase):
         benchmark_compare._hide_candidate_judge_from_workers(worker_environment)
         for name in runtime._CANDIDATE_JUDGE_CONTROLLER_ENV:
             self.assertNotIn(name, worker_environment)
+        self.assertNotIn("GOAL_PLUS_JEV_API_KEY_ENV", worker_environment)
+        self.assertNotIn("DECISIONS_API_KEY", worker_environment)
         self.assertNotIn(
             "GOAL_PLUS_EVIDENCE_ANNOTATOR_MODEL", worker_environment
         )

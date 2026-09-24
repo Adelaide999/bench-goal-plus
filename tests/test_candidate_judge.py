@@ -270,6 +270,50 @@ class CandidateJudgeTest(unittest.TestCase):
             },
         )
 
+    def test_jev_uses_configured_key_environment_and_generic_endpoint(self) -> None:
+        observed: dict[str, object] = {}
+
+        class Response:
+            def __enter__(self) -> "Response":
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return b'{"answers":{"best_candidate":{"choice":"c001"}}}'
+
+        def opener(request: object, timeout: int) -> Response:
+            del timeout
+            observed["authorization"] = request.headers.get("Authorization")  # type: ignore[attr-defined]
+            observed["referer"] = request.headers.get("HTTP-Referer")  # type: ignore[attr-defined]
+            return Response()
+
+        result = judge_candidates(
+            "task",
+            _candidates(),
+            mode="jev",
+            environment={
+                "GOAL_PLUS_JEV_API_KEY_ENV": "DECISIONS_API_KEY",
+                "DECISIONS_API_KEY": "provider-key",
+                "GOAL_PLUS_JEV_ENDPOINT": "https://judge.example/decisions",
+            },
+            opener=opener,
+        )
+        self.assertEqual(result["status"], "selected")
+        self.assertEqual(observed["authorization"], "Bearer provider-key")
+        self.assertIsNone(observed["referer"])
+
+    def test_jev_rejects_invalid_key_environment_name(self) -> None:
+        result = judge_candidates(
+            "task",
+            _candidates(),
+            mode="jev",
+            environment={"GOAL_PLUS_JEV_API_KEY_ENV": "not-a-valid-name"},
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertIn("invalid Jev API key environment", result["error"])
+
     def test_jev_blank_model_falls_back_to_default(self) -> None:
         observed: dict[str, object] = {}
 
@@ -317,7 +361,7 @@ class CandidateJudgeTest(unittest.TestCase):
             opener=lambda *_args, **_kwargs: Response(),
         )
         self.assertEqual(result["status"], "error")
-        self.assertIn("OpenRouter error 402", result["error"])
+        self.assertIn("Decisions API error 402", result["error"])
         self.assertNotIn("credits unavailable", result["error"])
 
     def test_jev_http_error_does_not_persist_response_body(self) -> None:
@@ -338,7 +382,7 @@ class CandidateJudgeTest(unittest.TestCase):
             opener=opener,
         )
         self.assertEqual(result["status"], "error")
-        self.assertEqual(result["error"], "OpenRouter HTTP 413")
+        self.assertEqual(result["error"], "Decisions API HTTP 413")
         self.assertNotIn("should-not-leak", result["error"])
 
     def test_jev_unknown_choice_is_not_accepted(self) -> None:
@@ -509,11 +553,13 @@ class CandidateJudgeTest(unittest.TestCase):
                 "GOAL_PLUS_JUDGE": "jev",
                 "GOAL_PLUS_JEV_ENDPOINT": "https://judge.example/decisions",
                 "GOAL_PLUS_JEV_MODEL": "typesafe/jev-1.13",
+                "GOAL_PLUS_JEV_API_KEY_ENV": "DECISIONS_API_KEY",
                 "OPENROUTER_API_KEY": "must-not-be-recorded",
             }
         )
         self.assertEqual(contract["mode"], "jev")
         self.assertEqual(contract["endpoint"], "https://judge.example/decisions")
+        self.assertEqual(contract["api_key_env"], "DECISIONS_API_KEY")
         self.assertNotIn("OPENROUTER_API_KEY", contract)
         self.assertEqual(contract["native_annotation"], "disabled")
 

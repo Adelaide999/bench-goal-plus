@@ -30,10 +30,13 @@ from bench_goal_plus.candidate_judge import (  # noqa: E402
     ANNOTATOR_DISABLED_ENV,
     JEV_ENDPOINT,
     JEV_ENDPOINT_ENV,
+    JEV_DEFAULT_API_KEY_ENV,
+    JEV_API_KEY_ENV_CONFIG,
     JEV_MODEL,
     JEV_MODEL_ENV,
     JUDGE_ENV,
-    JUDGE_WORKER_ENV_NAMES,
+    judge_worker_env_names,
+    jev_api_key_env,
     LLM_CACHE_DIR_ENV,
     LLM_BASE_URL_ENV,
     LLM_MODEL_ENV,
@@ -172,7 +175,7 @@ def _hide_candidate_judge_from_workers(
 ) -> None:
     """Keep controller-only judge credentials and switches out of workers."""
     preserved = preserve or set()
-    for name in JUDGE_WORKER_ENV_NAMES:
+    for name in judge_worker_env_names(environment):
         if name not in preserved:
             environment.pop(name, None)
 
@@ -182,9 +185,11 @@ def _candidate_judge_contract(environment: Mapping[str, str]) -> dict[str, Any]:
     if mode == MODE_OFF:
         endpoint = ""
         model = ""
+        api_key_env = ""
     elif mode == MODE_JEV:
         endpoint = normalize_endpoint(environment.get(JEV_ENDPOINT_ENV), JEV_ENDPOINT)
         model = str(environment.get(JEV_MODEL_ENV) or JEV_MODEL).strip() or JEV_MODEL
+        api_key_env = jev_api_key_env(environment)
     else:
         dedicated_base = environment.get(LLM_BASE_URL_ENV)
         if dedicated_base:
@@ -194,10 +199,12 @@ def _candidate_judge_contract(environment: Mapping[str, str]) -> dict[str, Any]:
         else:
             endpoint = ""
         model = str(environment.get(LLM_MODEL_ENV) or "").strip()
+        api_key_env = ""
     return {
         "mode": mode,
         "endpoint": endpoint,
         "model": model,
+        "api_key_env": api_key_env,
         "selection_scope": "hard-best-ties-only",
         "timing": "after_agent_closeout_before_promotion",
         "worker_feedback": False,
@@ -213,17 +220,23 @@ def _bind_prepared_candidate_judge(
         "mode": normalize_mode(prepared.get("mode")),
         "endpoint": str(prepared.get("endpoint") or ""),
         "model": str(prepared.get("model") or ""),
+        "api_key_env": str(
+            prepared.get("api_key_env") or JEV_DEFAULT_API_KEY_ENV
+        )
+        if normalize_mode(prepared.get("mode")) == MODE_JEV
+        else "",
     }
     runtime = _candidate_judge_contract(environment)
     if any(runtime[key] != expected[key] for key in expected):
         raise RuntimeError(
-            "candidate judge mode, endpoint, or model differs from the prepared manifest; "
+            "candidate judge mode, endpoint, model, or key environment differs from the prepared manifest; "
             "re-run prepare"
         )
     environment[JUDGE_ENV] = expected["mode"]
     if expected["mode"] == MODE_JEV:
         environment[JEV_ENDPOINT_ENV] = expected["endpoint"]
         environment[JEV_MODEL_ENV] = expected["model"]
+        environment[JEV_API_KEY_ENV_CONFIG] = expected["api_key_env"]
     elif expected["mode"] == MODE_LLM:
         if expected["endpoint"]:
             environment[LLM_BASE_URL_ENV] = expected["endpoint"]
@@ -712,7 +725,7 @@ def prepare(args: argparse.Namespace) -> int:
     if (
         candidate_judge["mode"] == MODE_JEV
         and args.method == "goal-plus-pi"
-        and args.pi_api_key_env == "OPENROUTER_API_KEY"
+        and args.pi_api_key_env == candidate_judge["api_key_env"]
     ):
         raise ValueError("Pi provider key must not reuse the controller-only Jev key")
     environment = load_json(args.environment_manifest)
@@ -2286,7 +2299,9 @@ def execute_goal_plus(
     judge_mode = _bind_prepared_candidate_judge(prepared_judge, environment)["mode"]
     if judge_mode == MODE_JEV and is_pi:
         agent_key_env = pi_provider_config(args)[2]
-        if agent_key_env == "OPENROUTER_API_KEY":
+        if agent_key_env == prepared_judge.get(
+            "api_key_env", JEV_DEFAULT_API_KEY_ENV
+        ):
             raise RuntimeError(
                 "Pi provider key must not reuse the controller-only Jev key"
             )
@@ -2846,8 +2861,14 @@ def execute(args: argparse.Namespace) -> int:
         raise RuntimeError(f"{credential_env} is required with --api-base")
     environment = configure_temp_environment(os.environ.copy())
     if manifest["method"] in {"goal-plus-codex", "goal-plus-pi"}:
+        prepared_judge = manifest.get("candidate_judge") or {"mode": MODE_OFF}
+        if normalize_mode(prepared_judge.get("mode")) == MODE_JEV:
+            environment.setdefault(
+                JEV_API_KEY_ENV_CONFIG,
+                str(prepared_judge.get("api_key_env") or JEV_DEFAULT_API_KEY_ENV),
+            )
         _bind_prepared_candidate_judge(
-            manifest.get("candidate_judge") or {"mode": MODE_OFF}, environment
+            prepared_judge, environment
         )
     bin_dir = Path(manifest["environment"]["runtime_bin"])
     environment["PATH"] = str(bin_dir) + os.pathsep + environment.get("PATH", "")
@@ -2983,6 +3004,9 @@ def repair_closeout(args: argparse.Namespace) -> int:
         )
         judge_environment[JEV_MODEL_ENV] = str(
             prepared_judge.get("model") or JEV_MODEL
+        )
+        judge_environment[JEV_API_KEY_ENV_CONFIG] = str(
+            prepared_judge.get("api_key_env") or JEV_DEFAULT_API_KEY_ENV
         )
     elif judge_mode == MODE_LLM:
         if prepared_judge.get("endpoint"):

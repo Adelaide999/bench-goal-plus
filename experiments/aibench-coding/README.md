@@ -93,8 +93,12 @@ export GOAL_PLUS_JUDGE=off                 # default
 The switch is accepted only by `goal-plus-codex` and `goal-plus-pi`; plain
 methods fail before launch when it is enabled.
 
-`jev` uses `OPENROUTER_API_KEY` (optionally `GOAL_PLUS_JEV_ENDPOINT` and
-`GOAL_PLUS_JEV_MODEL`); `GOAL_PLUS_JUDGE_TIMEOUT_SECONDS` bounds the request.
+`jev` uses a Decisions-API-compatible endpoint. By default it targets
+OpenRouter with `OPENROUTER_API_KEY`; set `GOAL_PLUS_JEV_ENDPOINT` and
+`GOAL_PLUS_JEV_API_KEY_ENV` to use another provider's endpoint and key
+environment variable. `GOAL_PLUS_JEV_MODEL` and
+`GOAL_PLUS_JUDGE_TIMEOUT_SECONDS` remain optional. The key value is never
+written to the campaign manifest.
 `llm-as-a-verifier` loads the optional `llm_verifier` package and uses its
 dedicated `GOAL_PLUS_LLM_VERIFIER_*` settings (a dedicated key must be paired
 with `GOAL_PLUS_LLM_VERIFIER_BASE_URL`), or an OpenAI-compatible/native backend
